@@ -85,20 +85,16 @@ lifecycle.message_ready:
   provider_message_reference: {type: integer, range: {min: 1, max: 2147483647}}
 `)
 	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), `lifecycle-input:
-  execution_type: system_node
-  subscribes_to: [lifecycle.message]
-  produces: [lifecycle.message_ready]
-  event_handlers:
-    lifecycle.message:
-      emit:
-        event: lifecycle.message_ready
-        fields:
-          operator_account: policy.operator_account
-          text: payload.text
-          external_account: payload.external_account
-          conversation_reference: payload.conversation_reference
-          conversation_scope: "direct"
-          provider_message_reference: payload.provider_message_reference
+  lifecycle.message:
+    emit:
+      event: lifecycle.message_ready
+      fields:
+        operator_account: policy.operator_account
+        text: payload.text
+        external_account: payload.external_account
+        conversation_reference: payload.conversation_reference
+        conversation_scope: "direct"
+        provider_message_reference: payload.provider_message_reference
 `)
 }
 

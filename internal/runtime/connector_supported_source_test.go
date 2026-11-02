@@ -148,75 +148,63 @@ func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nod
 func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	return boundedStandingConnectorSource(t, "telegram", baseURL, "[inbound.telegram.text_message]", `telegram-responder:
-  execution_type: system_node
-  subscribes_to: [inbound.telegram.text_message]
-  event_handlers:
-    inbound.telegram.text_message:
-      guard: {check: instance.id != ""}
-      activity:
-        id: telegram_send_message
-        tool: telegram.send_message
-        input:
-          chat_id: payload.conversation_reference
-          text: payload.text
+  inbound.telegram.text_message:
+    guard: instance.id != ""
+    activity:
+      id: telegram_send_message
+      tool: telegram.send_message
+      input:
+        chat_id: payload.conversation_reference
+        text: payload.text
 `)
 }
 
 func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	return boundedStandingConnectorSource(t, "slack", baseURL, "[inbound.telegram.text_message]", `slack-responder:
-  execution_type: system_node
-  subscribes_to: [inbound.telegram.text_message]
-  event_handlers:
-    inbound.telegram.text_message:
-      guard: {check: instance.id != ""}
-      activity:
-        id: slack_post_message
-        tool: slack.post_message
-        input:
-          channel: "C123"
-          text: payload.text
+  inbound.telegram.text_message:
+    guard: instance.id != ""
+    activity:
+      id: slack_post_message
+      tool: slack.post_message
+      input:
+        channel: "C123"
+        text: payload.text
 `)
 }
 
 func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	return boundedStandingConnectorSource(t, "notion", baseURL, "[inbound.telegram.text_message]", `notion-responder:
-  execution_type: system_node
-  subscribes_to: [inbound.telegram.text_message]
-  event_handlers:
-    inbound.telegram.text_message:
-      guard: {check: instance.id != ""}
-      activity:
-        id: notion_append_block_children
-        tool: notion.append_block_children
-        input:
-          block_id: "block-123"
-          children:
-            - object: "block"
-              type: "paragraph"
-              paragraph:
-                rich_text:
-                  - type: "text"
-                    text: {content: "hello from swarm"}
+  inbound.telegram.text_message:
+    guard: instance.id != ""
+    activity:
+      id: notion_append_block_children
+      tool: notion.append_block_children
+      input:
+        block_id: "block-123"
+        children:
+          - object: "block"
+            type: "paragraph"
+            paragraph:
+              rich_text:
+                - type: "text"
+                  text: {content: "hello from swarm"}
 `)
 }
 
 func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	return boundedStandingConnectorSource(t, "microsoft_graph", baseURL, "[inbound.telegram.text_message]", `microsoft-graph-responder:
-  execution_type: system_node
-  subscribes_to: [inbound.telegram.text_message]
-  event_handlers:
-    inbound.telegram.text_message:
-      guard: {check: instance.id != ""}
-      activity:
-        id: microsoft_graph_send_mail
-        tool: microsoft_graph.send_mail
-        input:
-          user_id: "user@example.com"
-          to_recipients: [{emailAddress: {address: "recipient@example.com"}}]
-          subject: payload.text
-          content: payload.text
+  inbound.telegram.text_message:
+    guard: instance.id != ""
+    activity:
+      id: microsoft_graph_send_mail
+      tool: microsoft_graph.send_mail
+      input:
+        user_id: "user@example.com"
+        to_recipients: [{emailAddress: {address: "recipient@example.com"}}]
+        subject: payload.text
+        content: payload.text
 `)
 }

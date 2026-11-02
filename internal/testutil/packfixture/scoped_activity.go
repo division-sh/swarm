@@ -15,11 +15,8 @@ func ScopedActivityMembers() map[string][]byte {
 		members[prefix+"schema.yaml"] = []byte("stages: []\n")
 		members[prefix+"events.yaml"] = []byte("send.requested:\n")
 		members[prefix+"nodes.yaml"] = []byte(`sender:
-  execution_type: system_node
-  subscribes_to: [send.requested]
-  event_handlers:
-    send.requested:
-      activity: {id: send, tool: shared, input: {}}
+  send.requested:
+    activity: {id: send, tool: shared, input: {}}
 `)
 		if flow == "inherited" {
 			continue

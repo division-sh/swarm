@@ -73,18 +73,10 @@ func TestScalar2556PredicateConsumers(t *testing.T) {
 			}
 			return handler.OnComplete[0].Condition, nil
 		}},
-		{"guard.check", func(s string) (string, error) {
+		{"guard", func(s string) (string, error) {
 			var guard GuardSpec
-			err := decodeNodeTestYAML([]byte("check: "+s+"\n"), &guard)
+			err := decodeNodeTestYAML([]byte(s+"\n"), &guard)
 			return guard.Check, err
-		}},
-		{"guard.checks.check", func(s string) (string, error) {
-			var guard GuardSpec
-			err := decodeNodeTestYAML([]byte("checks:\n  - check: "+s+"\n"), &guard)
-			if err != nil {
-				return "", err
-			}
-			return guard.Checks[0].Check, nil
 		}},
 		{"query.filter", func(s string) (string, error) {
 			var query QuerySpec
@@ -180,7 +172,7 @@ func TestScalar2556AliasesMergesAndOrdinaryLiteralField(t *testing.T) {
 		for _, merged := range []bool{false, true} {
 			source := "anchor: &scalar " + scalar + "\nvalue: *scalar\n"
 			if merged {
-				source = "node:\n  execution_type: system_node\n  event_handlers:\n    work:\n      _note: &fields\n        value: " + strings.ReplaceAll(scalar, "\n", "\n        ") + "\n      emit:\n        event: done\n        fields:\n          <<: *fields\n"
+				source = "node:\n  work:\n    _note: &fields\n      value: " + strings.ReplaceAll(scalar, "\n", "\n      ") + "\n    emit:\n      event: done\n      fields:\n        <<: *fields\n"
 			}
 			var got ExpressionValue
 			if merged {

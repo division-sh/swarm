@@ -414,17 +414,14 @@ func requireOfflinePairedWhatsAppServiceRoundTrip(t *testing.T, opts cliapp.Serv
 	}
 	writeStandingCandidateFile(t, filepath.Join(source, "nodes.yaml"), string(nodes)+`
 service-probe:
-  execution_type: system_node
-  subscribes_to: [outbound.requested]
-  event_handlers:
-    outbound.requested:
-      activity:
-        id: service_probe
-        tool: whatsapp.send_text
-        input:
-          account: policy.operator_account
-          destination: payload.destination
-          text: payload.text
+  outbound.requested:
+    activity:
+      id: service_probe
+      tool: whatsapp.send_text
+      input:
+        account: policy.operator_account
+        destination: payload.destination
+        text: payload.text
 `)
 	process := startServeRuntimeTestProcess(t, opts)
 	process.waitForReadyLine()

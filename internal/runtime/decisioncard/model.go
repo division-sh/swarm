@@ -546,7 +546,7 @@ func New(card Card) (Card, error) {
 	card.Status = StatusPending
 	card.Snapshot.Decision = decisionID
 	if strings.TrimSpace(card.Snapshot.Title) == "" {
-		card.Snapshot.Title = humanize(decisionID)
+		card.Snapshot.Title = runtimecontracts.HumanizeWorkflowKey(decisionID)
 	}
 	if card.Snapshot.Context.Kind() == semanticvalue.KindNull {
 		card.Snapshot.Context = semanticvalue.EmptyObject()
@@ -685,12 +685,4 @@ func DecodeSnapshot(raw []byte) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	return snapshotFromSemanticValue(value)
-}
-
-func humanize(value string) string {
-	value = strings.TrimSpace(strings.ReplaceAll(value, "_", " "))
-	if value == "" {
-		return "Decision"
-	}
-	return strings.ToUpper(value[:1]) + value[1:]
 }

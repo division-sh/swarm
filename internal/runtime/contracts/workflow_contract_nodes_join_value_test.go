@@ -9,12 +9,10 @@ import (
 
 func TestProjectNodeJoinValuePreservesFanOutMode(t *testing.T) {
 	snapshot, err := yamlsource.Load([]byte(`worker:
-  event_handlers:
-    task.ready:
-      join:
-        id: collected
-        members: {from_fan_out: true}
-        on_complete: {emit: task.collected}
+  task.ready:
+    join:
+      members: {from_fan_out: true}
+      on_complete: {emit: task.collected}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -30,19 +28,19 @@ func TestProjectNodeJoinValuePreservesFanOutMode(t *testing.T) {
 }
 
 func TestProjectNodeJoinValueRejectsArrivalFieldsInFanOutMode(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      join: {id: collected, stage: waiting, members: {from_fan_out: true}, on_complete: {emit: task.collected}}\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  task.ready:\n    join: {stage: waiting, members: {from_fan_out: true}, on_complete: {emit: task.collected}}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
-	if err == nil || !strings.Contains(err.Error(), "forbids arrival-only fields") || !strings.Contains(err.Error(), "nodes.yaml:4:") {
+	if err == nil || !strings.Contains(err.Error(), "forbids arrival-only fields") || !strings.Contains(err.Error(), "nodes.yaml:3:") {
 		t.Fatalf("expected source-located fan-out shape rejection, got %v", err)
 	}
 }
 
 func TestW4DeliveryJoinForbiddenFieldPresence(t *testing.T) {
-	const base = "id: delivered\nmembers: {from_fan_out: true}\non_complete: {emit: batch.completed}\n"
-	for _, field := range []string{"stage", "window", "output", "complete_when", "remaining", "timeout", "deadline", "on_deadline", "until", "members.from", "members.by", "members.count"} {
+	const base = "members: {from_fan_out: true}\non_complete: {emit: batch.completed}\n"
+	for _, field := range []string{"id", "stage", "window", "output", "complete_when", "remaining", "timeout", "deadline", "on_deadline", "until", "members.from", "members.by", "members.count"} {
 		t.Run(field, func(t *testing.T) {
 			for _, shape := range nodePresenceShapes("waiting", "[waiting]", "{from: entity.batch, by: payload.batch}") {
 				t.Run(shape.name, func(t *testing.T) {
@@ -57,7 +55,7 @@ func TestW4DeliveryJoinForbiddenFieldPresence(t *testing.T) {
 					var join JoinSpec
 					err := decodeNodeTestYAML([]byte(body), &join)
 					if shape.name == "missing" {
-						if err != nil || !join.IsFanOutDeliveryBarrier() || join.ID != "delivered" || join.OnComplete.Emit.Event != "batch.completed" {
+						if err != nil || !join.IsFanOutDeliveryBarrier() || join.OnComplete.Emit.Event != "batch.completed" {
 							t.Fatalf("valid delivery join lost its typed facts: %#v, %v", join, err)
 						}
 					} else if err == nil {

@@ -1,12 +1,9 @@
 customer-reply:
-  execution_type: system_node
-  subscribes_to: [inbound.whatsapp.message]
-  event_handlers:
-    inbound.whatsapp.message:
-      activity:
-        id: customer_reply
-        tool: whatsapp.send_text
-        input:
-          account: policy.operator_account
-          destination: payload.conversation_reference
-          text: payload.text
+  inbound.whatsapp.message:
+    activity:
+      id: customer_reply
+      tool: whatsapp.send_text
+      input:
+        account: policy.operator_account
+        destination: payload.conversation_reference
+        text: payload.text

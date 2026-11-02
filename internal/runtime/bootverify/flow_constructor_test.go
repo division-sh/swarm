@@ -78,12 +78,12 @@ func TestFlowConstructorEligibilityUsesAssignmentChecker(t *testing.T) {
 		name, payload, handler string
 		eligible               bool
 	}{
-		{"supplied initial read", "  brief: text\n", "      guard: {check: state.brief != ''}\n", true},
-		{"optional is not guaranteed", "  brief: text?\n", "      guard: {check: state.brief != ''}\n", false},
-		{"missing initial read", "", "      guard: {check: state.brief != ''}\n", false},
-		{"guard cannot borrow later write", "", "      guard: {check: state.brief != ''}\n      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}]\n", false},
+		{"supplied initial read", "  brief: text\n", "      guard: state.brief != ''\n", true},
+		{"optional is not guaranteed", "  brief: text?\n", "      guard: state.brief != ''\n", false},
+		{"missing initial read", "", "      guard: state.brief != ''\n", false},
+		{"guard cannot borrow later write", "", "      guard: state.brief != ''\n      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}]\n", false},
 		{"read after definite write", "", "      data_accumulation:\n        writes: [{target_field: brief, value: 'supplied'}, {target_field: copy, value: state.brief}]\n", true},
-		{"explicit optional presence", "  brief: text?\n", "      guard:\n        check: >-\n          !has(state.brief) || state.brief != \"\"\n", true},
+		{"explicit optional presence", "  brief: text?\n", "      guard: >-\n        !has(state.brief) || state.brief != \"\"\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := constructorReaderFixture(t, "brief: text\ncopy: text\n", tc.payload, tc.handler)
@@ -196,8 +196,8 @@ func TestFlowConstructorVerificationConsumesContract(t *testing.T) {
 		name, fields, payload, handler string
 		valid                          bool
 	}{
-		{"supplied initial read", "brief: text\n", "  brief: text\n", "      guard: {check: state.brief != ''}\n", true},
-		{"no eligible input", "brief: text\n", "", "      guard: {check: state.brief != ''}\n", false},
+		{"supplied initial read", "brief: text\n", "  brief: text\n", "      guard: state.brief != ''\n", true},
+		{"no eligible input", "brief: text\n", "", "      guard: state.brief != ''\n", false},
 		{"internal collision", "count: 0\n", "  count: integer\n", "", false},
 		{"incompatible supply", "brief: text\n", "  brief: integer\n", "", false},
 	} {

@@ -17,7 +17,7 @@ func TestStandingFlowConstructorEligibility(t *testing.T) {
 	}{
 		{name: "keyless root", eligible: true},
 		{name: "keyed root", schema: "instance: tenant\n", fields: "  tenant: text\n"},
-		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: {check: state.brief != ''}\n"},
+		{name: "unassigned initial read", fields: "  brief: text\n", handler: "      guard: state.brief != ''\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -28,7 +28,7 @@ func TestStandingFlowConstructorEligibility(t *testing.T) {
 			}
 			if tc.handler != "" {
 				writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work:\n")
-				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "reader:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n"+tc.handler)
+				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "reader:\n  work:\n"+tc.handler)
 			}
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, contracts.DefaultPlatformSpecFile(repo))

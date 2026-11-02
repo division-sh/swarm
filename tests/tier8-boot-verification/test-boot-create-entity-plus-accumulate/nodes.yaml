@@ -1,11 +1,7 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [task.started]
-  produces: []
-  event_handlers:
-    task.started:
-      create_entity: true
-      accumulate:
-        into: items
-        from: payload
-      advances_to: done
+  task.started:
+    create_entity: true
+    accumulate:
+      into: items
+      from: payload
+    advances_to: done

@@ -64,7 +64,7 @@ func TestLoopAdmissionDelegatesEmptyTargetOnlyToJoinOutcomes(t *testing.T) {
 	handler := bundle.Nodes["controller"].EventHandlers["draft.ready"]
 	count := 1
 	handler.Join = &runtimecontracts.JoinSpec{
-		ID: "review", Stage: "drafting", OnCompleteFound: true, OnDeadlineFound: true,
+		Stage: "drafting", OnCompleteFound: true, OnDeadlineFound: true,
 		Members: runtimecontracts.JoinMembersSpec{Count: &count, By: "payload.revision_id"}, Output: "payload.revision_id",
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: handler.AdvancesTo, Emit: handler.Emit},
 		Deadline:   &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},

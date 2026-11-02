@@ -80,7 +80,7 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		agents = "reviewer-agent:\n  role: reviewer\n  intent: {inline: 'Review completed tasks.'}\n  subscriptions: [task.done]\n"
 	case EventMetadataAuthorityTaskProducerTimer:
 		taskDoneSwarm = "    producer: reminder\n"
-		timerBlock = "  timers:\n    - id: reminder\n      owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
+		timerBlock = "  timers:\n    - owner: worker\n      event: task.done\n      delay: 1m\n      start_on: event:task.start\n"
 	case EventMetadataAuthorityExternalProof:
 		taskDoneSwarm = "    source: platform timer\n    producer: mailbox_human\n    consumer: external\n"
 	default:
@@ -98,7 +98,7 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		events += "  # internally produced completion\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", events)
-	writeClosedVariantFile(t, root, "nodes.yaml", "worker:\n  execution_type: system_node\n"+timerBlock+"  event_handlers:\n    task.start:\n      emit:\n        event: task.done\nobserver:\n  execution_type: system_node\n  event_handlers:\n    task.done: {}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "worker:\n"+timerBlock+"  task.start:\n    emit:\n      event: task.done\nobserver:\n  task.done: {}\n")
 	return root
 }
 
@@ -234,16 +234,15 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	if timerHandlerKey == "" {
 		timerHandlerKey = "timer.reminder"
 	}
-	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
+	timerBlock := "    - owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
 		timerBlock += "      cancel_on: " + settings.cancelOn + "\n"
 	}
-	timerHandler, timerSubscription := "", ""
+	timerHandler := ""
 	if !settings.omitTimerHandler {
-		timerHandler = "    " + timerHandlerKey + ":\n      advances_to: done\n"
-		timerSubscription = "    - timer.reminder\n"
+		timerHandler = "  " + timerHandlerKey + ":\n    advances_to: done\n"
 	}
-	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n"+timerSubscription+"  timers:\n"+timerBlock+"  event_handlers:\n    ticket.opened:\n      advances_to: active\n    ticket.closed:\n      advances_to: done\n"+timerHandler)
+	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  timers:\n"+timerBlock+"  ticket.opened:\n    advances_to: active\n  ticket.closed:\n    advances_to: done\n"+timerHandler)
 	return root
 }
 
@@ -325,34 +324,34 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	if settings.includeGlobalDonePath || settings.includeGlobalReviewPath {
 		waiting = "  waiting:\n    timers:\n"
 		if settings.includeGlobalDonePath {
-			waiting += "      - {id: global_done, after: 1h, advances_to: done}\n"
+			waiting += "      - {after: 1h, advances_to: done}\n"
 		}
 		if settings.includeGlobalReviewPath {
-			waiting += "      - {id: global_review, after: 1h, advances_to: review}\n"
+			waiting += "      - {after: 1h, advances_to: review}\n"
 		}
 	}
 	writeClosedVariantFile(t, root, "support/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages:\n"+waiting+"  active: {}\n  review: "+reviewMetadata+"\n  done: {final: true}\npins:\n  inputs: ["+pinList+"]\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "timer.reminder:\n")
-	timerBlock := "    - id: reminder\n      owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
+	timerBlock := "    - owner: support-node\n      event: timer.reminder\n      delay: 1m\n      start_on: " + settings.startOn + "\n"
 	if settings.cancelOn != "" {
 		timerBlock += "      cancel_on: " + settings.cancelOn + "\n"
 	}
 	handlers := ""
 	if settings.includeEventStartReviewBranch {
-		handlers += "    ticket.opened:\n      rules:\n        - when: |-\n                  true\n          advances_to: active\n        - when: |-\n                  true\n          advances_to: review\n"
+		handlers += "  ticket.opened:\n    rules:\n      - when: |-\n                true\n        advances_to: active\n      - when: |-\n                true\n        advances_to: review\n"
 	} else {
-		handlers += "    ticket.opened:\n      advances_to: active\n"
+		handlers += "  ticket.opened:\n    advances_to: active\n"
 	}
 	if settings.includeClosePath {
-		handlers += "    ticket.closed:\n      advances_to: done\n"
+		handlers += "  ticket.closed:\n    advances_to: done\n"
 	}
 	if settings.includeTimerFireHandler {
-		handlers += "    timer.reminder:\n      advances_to: done\n"
+		handlers += "  timer.reminder:\n    advances_to: done\n"
 	} else {
-		handlers += "    timer.reminder: {}\n"
+		handlers += "  timer.reminder: {}\n"
 	}
-	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  execution_type: system_node\n  timers:\n"+timerBlock+"  event_handlers:\n"+handlers)
+	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  timers:\n"+timerBlock+handlers)
 	return root
 }
 
@@ -368,7 +367,7 @@ func CopyVerifyStateSchemaFloat(t testing.TB) string {
 	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\nstages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - task.assigned\n")
 	removeClosedVariantFiles(t, root, "child/state.yaml")
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
-	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
+	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  task.assigned:\n    advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
 	return root
 }
 
@@ -401,7 +400,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	removeClosedVariantFiles(t, root, "child/state.yaml")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
-	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  task.assigned:\n    advances_to: done\n")
 	writeClosedVariantFile(t, root, "child/prompts/worker.md", "Handle the task.\n")
 	return root
 }

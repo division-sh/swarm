@@ -108,7 +108,7 @@ func TestWorkflowNodeProjectionPreservesLocalExactHandler(t *testing.T) {
 
 func workflowNodeExactSubscriptionSource(authored string) semanticview.Source {
 	node := runtimecontracts.SystemNodeContract{
-		SubscribesTo:  []string{authored},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}},
 	}
 	flow := runtimecontracts.FlowContractView{
@@ -204,7 +204,7 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
-				Produces: []string{"scan.completed"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.requested": {
 						Emit: runtimecontracts.EmitSpec{Event: "scan.completed"},
@@ -675,7 +675,7 @@ func testWorkflowNodeConnectedInputSource(t testing.TB, producerMode string) sem
 		Path: "receiver", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"receiver-node": {
-				SubscribesTo: []string{"deploy.requested"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"deploy.requested": {},
 				},
@@ -852,7 +852,7 @@ func workflowNodeDirectTemplateDeliverySource(t testing.TB) semanticview.Source 
 		Path: "account_case",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"account-case-worker": {
-				SubscribesTo: []string{"account.ready"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"account.ready": {},
 				},

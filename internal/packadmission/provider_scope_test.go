@@ -211,6 +211,33 @@ func TestS1ProviderSourceDoesNotPromoteVisibilityToHolderOwnership(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	projection := Projection{providerSource: source}
+	for _, tc := range []struct {
+		flow, event string
+		declared    bool
+	}{
+		{".", "inbound.team-bot.text_message", true},
+		{".", "inbound.team-bot.*", true},
+		{".", "inbound.missing.raw", false},
+		{".", "", false},
+		{".", "/inbound.team-bot.raw", false},
+		{".", "***", false},
+		{"child", "inbound.team-bot.text_message", false},
+		{"child/deep", "inbound.team_bot.text_message", false},
+		{"sibling", "inbound.team-bot.raw", true},
+		{"sibling", "inbound.team_bot.raw", false},
+	} {
+		if got := projection.DeclaresFlowProviderTriggerEvent(rooted, tc.flow, tc.event); got != tc.declared {
+			t.Fatalf("provider declaration %s/%s = %t, want %t", tc.flow, tc.event, got, tc.declared)
+		}
+	}
+	if (Projection{}).DeclaresFlowProviderTriggerEvent(rooted, ".", "inbound.team-bot.raw") {
+		t.Fatal("zero projection admitted a provider declaration")
+	}
+	foreign, _ := capturedProviderSource(t, scopedProviderMembers())
+	if projection.DeclaresFlowProviderTriggerEvent(foreign, ".", "inbound.team-bot.raw") {
+		t.Fatal("equal provider bytes on another source borrowed declaration authority")
+	}
 	deep, _ := source.Scope("child/deep")
 	if len(deep.Providers()) != 2 || len(deep.HeldProviders()) != 0 {
 		t.Fatal("inherited visibility fabricated holder membership")

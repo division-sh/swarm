@@ -105,7 +105,7 @@ func TestParentLocalConstructionSelectionUsesRecordedAncestry(t *testing.T) {
 				"schema.yaml":                "stages: []\n",
 				"parent/manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 				"parent/schema.yaml":         "stages: []\nconnect:\n  - event: work.done\n    from: child\n    to: .\n",
-				"parent/nodes.yaml":          "collector:\n  execution_type: system_node\n  event_handlers:\n    work.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+				"parent/nodes.yaml":          "collector:\n  work.done:\n    guard: _entity.id != \"\"\n",
 				"parent/child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				"parent/child/schema.yaml":   "stages: []\npins:\n  outputs: [work.done]\n",
 				"parent/child/events.yaml":   "work.done:\n",

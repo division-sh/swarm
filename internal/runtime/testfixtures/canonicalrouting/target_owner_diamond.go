@@ -35,12 +35,8 @@ connect:
 `,
 		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
-  execution_type: system_node
-  event_handlers:
-    branch.done:
-      guard:
-        id: root_owner
-        check: instance.id != ""
+  branch.done:
+    guard: instance.id != ""
 `,
 		"branch/schema.yaml": `# fixture: branch
 instance: branch_id
@@ -61,12 +57,8 @@ connect:
 		"branch/state.yaml":  "branch_id: string\n",
 		"branch/events.yaml": "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"branch/nodes.yaml": `branch-worker:
-  execution_type: system_node
-  event_handlers:
-    branch.start:
-      guard:
-        id: branch_owner
-        check: instance.id != ""
+  branch.start:
+    guard: instance.id != ""
 `,
 
 		"branch/worker/result-static/schema.yaml": `# fixture: static-result
@@ -75,12 +67,8 @@ pins:
     - work.ready
 `,
 		"branch/worker/result-static/nodes.yaml": `static-result-node:
-  execution_type: system_node
-  event_handlers:
-    work.ready:
-      guard:
-        id: inherited_owner
-        check: instance.id != ""
+  work.ready:
+    guard: instance.id != ""
 `,
 		"branch/worker/result/schema.yaml": `# fixture: singleton-result
 pins:
@@ -88,9 +76,7 @@ pins:
     - work.ready
 `,
 		"branch/worker/result/nodes.yaml": `singleton-result-node:
-  execution_type: system_node
-  event_handlers:
-    work.ready: {}
+  work.ready: {}
 `,
 		"decoy/schema.yaml": `# fixture: decoy
 pins:
@@ -105,12 +91,8 @@ pins:
 `,
 		"unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/nodes.yaml": `hostile-node:
-  execution_type: system_node
-  event_handlers:
-    work.ready:
-      guard:
-        id: hostile_owner
-        check: instance.id != ""
+  work.ready:
+    guard: instance.id != ""
 `,
 	}
 	for name, body := range files {

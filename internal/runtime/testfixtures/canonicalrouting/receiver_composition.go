@@ -15,7 +15,7 @@ func CopyWorkflowStateDiagnostic(t testing.TB, stage string) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: workflow-state-diagnostic\nstages:\n  '"+stage+"': {}\n  done: {final: true}\npins:\n  inputs: [work.completed]\n")
 	writeClosedVariantFile(t, root, "state.yaml", "note: \"diagnostic\"\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.completed:\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "controller:\n  work.completed:\n    advances_to: done\n")
 	return root
 }
 
@@ -46,14 +46,12 @@ connect:
 `,
 		"events.yaml": "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n" + seedSchema,
 		"nodes.yaml": `controller:
-  execution_type: system_node
-  subscribes_to: [work.requested` + func() string {
+` + func() string {
 			if existing {
 				return ", work.seeded"
 			}
 			return ""
 		}() + `]
-  event_handlers:
 ` + seedHandler + "    work.requested:\n" + `      advances_to: done
       emit:
         event: work.completed
@@ -65,10 +63,7 @@ pins:
     - work.completed
 `,
 		"sink/nodes.yaml": `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed: {}
+  work.completed: {}
 `,
 	}
 	for name, content := range files {
@@ -94,15 +89,12 @@ pins:
 `,
 		"sink/state.yaml": "result: text\n",
 		"sink/nodes.yaml": `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      data_accumulation:
-        writes:
-          - target_field: result
-            value: payload.result
-      advances_to: done
+  work.completed:
+    data_accumulation:
+      writes:
+        - target_field: result
+          value: payload.result
+    advances_to: done
 `,
 	}
 	for name, content := range files {
@@ -128,7 +120,7 @@ func CopyReceiverMixedPolicies(t testing.TB, optionalFirst bool) string {
 	writeClosedVariantFile(t, root, optionalScope+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "# fixture: "+optionalScope+"\npins:\n  inputs: [work.completed]\n")
 	removeClosedVariantFiles(t, root, optionalScope+"/state.yaml")
-	writeClosedVariantFile(t, root, optionalScope+"/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
+	writeClosedVariantFile(t, root, optionalScope+"/nodes.yaml", "collector:\n  work.completed: {}\n")
 	return root
 }
 
@@ -150,20 +142,15 @@ pins:
 		"events.yaml": "work.seeded:\n  seed: boolean\nwork.requested:\n  seed: boolean\n",
 		"state.yaml":  "marker: text\n",
 		"nodes.yaml": `controller:
-  execution_type: system_node
-  subscribes_to:
-    - work.seeded
-    - work.requested
-  event_handlers:
-    work.seeded:
-      advances_to: active
-    work.requested:
-      data_accumulation:
-        writes:
-          - target_field: marker
-            value: |-
-              'must-not-write'
-      advances_to: done
+  work.seeded:
+    advances_to: active
+  work.requested:
+    data_accumulation:
+      writes:
+        - target_field: marker
+          value: |-
+            'must-not-write'
+    advances_to: done
 `,
 	}
 	for name, content := range files {
@@ -190,13 +177,10 @@ connect:
   - {event: child.finished, from: ., to: tail}
 `,
 		"sink/nodes.yaml": `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      emit:
-        event: child.finished
-        fields: {result: payload.result}
+  work.completed:
+    emit:
+      event: child.finished
+      fields: {result: payload.result}
 `,
 		"sink/tail/schema.yaml": `# fixture: tail
 stages:
@@ -208,14 +192,11 @@ pins:
 `,
 		"sink/tail/state.yaml": "result: text\n",
 		"sink/tail/nodes.yaml": `collector:
-  execution_type: system_node
-  subscribes_to: [child.finished]
-  event_handlers:
-    child.finished:
-      data_accumulation:
-        writes:
-          - {target_field: result, value: payload.result}
-      advances_to: done
+  child.finished:
+    data_accumulation:
+      writes:
+        - {target_field: result, value: payload.result}
+    advances_to: done
 `,
 	}
 	for name, content := range files {
@@ -244,22 +225,16 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "sink/state.yaml", "result: text\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      emit:
-        event: child.finished
-        fields: {result: payload.result}
+  work.completed:
+    emit:
+      event: child.finished
+      fields: {result: payload.result}
 local:
-  execution_type: system_node
-  subscribes_to: [child.finished]
-  event_handlers:
-    child.finished:
-      data_accumulation:
-        writes:
-          - {target_field: result, value: payload.result}
-      advances_to: done
+  child.finished:
+    data_accumulation:
+      writes:
+        - {target_field: result, value: payload.result}
+    advances_to: done
 `)
 	return root
 }
@@ -273,12 +248,10 @@ func CopyReceiverEntitylessRootExport(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-export\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.finished\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nchild.finished:\n  result: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  execution_type: system_node
-  event_handlers:
-    work.requested:
-      emit:
-        event: child.finished
-        fields: {result: "emitted"}
+  work.requested:
+    emit:
+      event: child.finished
+      fields: {result: "emitted"}
 `)
 	return root
 }
@@ -289,12 +262,10 @@ func CopyReceiverEntitylessUnrouted(t testing.TB) string {
 	writeClosedVariantFile(t, root, "sink/events.yaml", "child.finished:\n  result: text\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n    - work.completed\n  outputs:\n    - child.finished\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
-  execution_type: system_node
-  event_handlers:
-    work.completed:
-      emit:
-        event: child.finished
-        fields: {result: payload.result}
+  work.completed:
+    emit:
+      event: child.finished
+      fields: {result: payload.result}
 `)
 	return root
 }
@@ -322,14 +293,11 @@ pins:
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.closed, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.closed:\n  seed: boolean\nwork.seeded:\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
-  execution_type: system_node
-  subscribes_to: [child.seeded, work.completed, child.closed]
-  event_handlers:
-    child.seeded:
-      advances_to: active
-    work.completed: {}
-    child.closed:
-      advances_to: done
+  child.seeded:
+    advances_to: active
+  work.completed: {}
+  child.closed:
+    advances_to: done
 `)
 	writeClosedVariantFile(t, root, "sink/agents.yaml", `observer:
   role: observer
@@ -360,13 +328,10 @@ connect:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.requested:\n", "fork.seeded:\nwork.requested:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      emit:
-        event: work.completed
-        fields: {result: "emitted"}
+  work.requested:
+    emit:
+      event: work.completed
+      fields: {result: "emitted"}
 `)
 	removeClosedVariantFiles(t, root, "state.yaml", "sink/state.yaml")
 	return root

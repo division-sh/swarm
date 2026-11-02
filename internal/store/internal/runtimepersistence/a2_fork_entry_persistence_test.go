@@ -112,7 +112,7 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					ref, err := timeridentity.NewJoinRef(node, "result", "active", "join")
+					ref, err := timeridentity.NewJoinRef(node, "result", "active")
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -1233,7 +1233,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		"review/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"review/state.yaml":    "instance_key: text\n",
 		"review/events.yaml":   "task.started:\n",
-		"review/nodes.yaml":    "target-node:\n  execution_type: system_node\n  event_handlers:\n    task.started: {}\n",
+		"review/nodes.yaml":    "target-node:\n  task.started: {}\n",
 	})
 	source := semanticview.Wrap(bundle)
 	var observations []runtimepipeline.FlowInstanceObservation

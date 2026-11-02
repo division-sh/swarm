@@ -199,7 +199,7 @@ func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generati
 	if err != nil || !enters {
 		t.Fatalf("join schedule construction entry: enters=%v err=%v", enters, err)
 	}
-	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "shared")
+	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

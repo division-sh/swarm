@@ -43,9 +43,6 @@ type sessionBusinessWorkflowModule struct {
 
 func (m sessionBusinessWorkflowModule) SemanticSource() semanticview.Source    { return m.source }
 func (m sessionBusinessWorkflowModule) WorkflowNodes() []pipeline.WorkflowNode { return m.nodes }
-func (m sessionBusinessWorkflowModule) GuardRegistry() pipeline.GuardRegistry {
-	return pipeline.NewContractGuardRegistry(m.source)
-}
 
 type sessionBusinessPublicationStore interface {
 	sessionPublicationStore

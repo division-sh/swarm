@@ -23,17 +23,17 @@ func ApplyArrivalJoinNegativeMutation(t testing.TB, root string, mutation Arriva
 	nodes := filepath.Join(root, "portfolio", "period", "nodes.yaml")
 	switch mutation {
 	case ArrivalJoinMissingContributor:
-		applyClosedReplacement(t, nodes, "          by: payload.operating_id\n", "")
+		applyClosedReplacement(t, nodes, "        by: payload.operating_id\n", "")
 	case ArrivalJoinUnknownContributor:
-		applyClosedReplacement(t, nodes, "          by: payload.operating_id\n", "          by: payload.unknown_member\n")
+		applyClosedReplacement(t, nodes, "        by: payload.operating_id\n", "        by: payload.unknown_member\n")
 	case ArrivalJoinScalarMembers:
-		applyClosedReplacement(t, nodes, "          from: state.expected_operating_ids\n", "          from: state.period_id\n")
+		applyClosedReplacement(t, nodes, "        from: state.expected_operating_ids\n", "        from: state.period_id\n")
 	case ArrivalJoinRetiredWindow:
-		applyClosedReplacement(t, nodes, "        output: payload.revenue\n", "        window: {from: state.period_id}\n        output: payload.revenue\n")
+		applyClosedReplacement(t, nodes, "      output: payload.revenue\n", "      window: {from: state.period_id}\n      output: payload.revenue\n")
 	case ArrivalJoinRetiredTimeout:
-		applyClosedReplacement(t, nodes, "        deadline:\n          after: 5m\n          from: stage_entry\n        on_deadline:\n          advances_to: failed\n", "        timeout: {after: 5m, advances_to: failed}\n")
+		applyClosedReplacement(t, nodes, "      deadline:\n        after: 5m\n        from: stage_entry\n      on_deadline:\n        advances_to: failed\n", "      timeout: {after: 5m, advances_to: failed}\n")
 	case ArrivalJoinWithAccumulate:
-		applyClosedReplacement(t, nodes, "    period.reported:\n      join:\n", "    period.reported:\n      accumulate: {into: operating_reports, from: payload, key: payload.operating_id}\n      join:\n")
+		applyClosedReplacement(t, nodes, "  period.reported:\n    join:\n", "  period.reported:\n    accumulate: {into: operating_reports, from: payload, key: payload.operating_id}\n    join:\n")
 	default:
 		t.Fatalf("unsupported arrival join negative mutation %d", mutation)
 	}

@@ -1,14 +1,10 @@
 spawner:
-  execution_type: system_node
-  subscribes_to: [spawn.requested]
-  produces: [spawn.done]
-  event_handlers:
-    spawn.requested:
-      advances_to: spawned
-      emit:
-        event: spawn.done
-        fields:
-          worker_id: payload.instance_id
-          name: payload.name
-          priority: payload.priority
-          owner: payload.owner
+  spawn.requested:
+    advances_to: spawned
+    emit:
+      event: spawn.done
+      fields:
+        worker_id: payload.instance_id
+        name: payload.name
+        priority: payload.priority
+        owner: payload.owner

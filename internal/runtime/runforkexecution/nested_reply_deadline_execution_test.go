@@ -136,7 +136,7 @@ func nodeReplyRuntimeWithAgentOptions(t *testing.T, ctx context.Context, selecte
 		Credentials:            agents.Credentials,
 		ProviderTriggerCatalog: catalog,
 		ProviderCredentials:    agents.ProviderCredentials,
-		WorkflowModule:         selectedContractWorkflowModule{source: loaded.Source, nodes: nodes, guardRegistry: pipeline.NewContractGuardRegistry(loaded.Source)}}
+		WorkflowModule:         selectedContractWorkflowModule{source: loaded.Source, nodes: nodes}}
 	var gateway *httptest.Server
 	if semanticview.SourceDeclaresAgents(loaded.Source) {
 		if loaded.RuntimeProjection == nil {

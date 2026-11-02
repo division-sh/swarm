@@ -674,7 +674,7 @@ func TestEventBusSelectedTargetEvidenceFailsClosedOrPreservesExactOwner(t *testi
 			store := newTargetRouteMemoryStore()
 			node := testFlowNode(t, "review", "target-node")
 			source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
-				"review", "target-node", eventType, map[string]any{"guard": map[string]string{"id": "selected_owner", "check": `_entity.id != ""`}}, false,
+				"review", "target-node", eventType, map[string]any{"guard": `_entity.id != ""`}, false,
 			))
 			for _, target := range test.owners {
 				identity := StoredFlowInstanceIdentityFixture(source, target.FlowID, path.Base(target.FlowInstance), busInternalTestRunID, target.EntityID)
@@ -1025,7 +1025,7 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
 	source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
-		"worker", "target-node", "work.started", map[string]any{"guard": map[string]string{"id": "selected_owner", "check": `_entity.id != ""`}}, false,
+		"worker", "target-node", "work.started", map[string]any{"guard": `_entity.id != ""`}, false,
 	))
 	instance := StoredFlowInstanceIdentityFixture(source, "worker", "inst-1", busInternalTestRunID, target.EntityID)
 	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, instance, "inst-1")
@@ -1154,9 +1154,7 @@ func materializedTargetBundle(t *testing.T, flowID, nodeID, eventType string) *r
 func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType string, handler map[string]any, finalStage bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	nodes, err := yaml.Marshal(map[string]any{nodeID: map[string]any{
-		"execution_type": "system_node",
-		"subscribes_to":  []string{eventType},
-		"event_handlers": map[string]any{eventType: handler},
+		eventType: handler,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1346,7 +1344,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.node_only]\n",
 		"events.yaml":   "custom.node_only:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only]\n  event_handlers:\n    custom.node_only: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.node_only: {}\n",
 	}))
 	runID := uuid.NewString()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1378,7 +1376,7 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\n",
 		"events.yaml":   "custom.node_only_tx:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only_tx]\n  event_handlers:\n    custom.node_only_tx: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.node_only_tx: {}\n",
 	}))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1411,7 +1409,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\n",
 		"events.yaml":   "custom.node_only_outbox:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only_outbox]\n  event_handlers:\n    custom.node_only_outbox: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.node_only_outbox: {}\n",
 	}))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1446,7 +1444,7 @@ func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *tes
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\n",
 		"events.yaml":   "custom.node_only_sweep:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only_sweep]\n  event_handlers:\n    custom.node_only_sweep: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.node_only_sweep: {}\n",
 	}))
 	eventID := uuid.NewString()
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: "root"}
@@ -1487,7 +1485,7 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.mixed_node_agent]\n",
 		"events.yaml":   "custom.mixed_node_agent:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  event_handlers:\n    custom.mixed_node_agent: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.mixed_node_agent: {}\n",
 	}))
 	runID := agentidentitytest.RootRuntime(t, "agent-missing", "eventbus-target-test").RunID
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1525,11 +1523,11 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		"child-a/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"child-a/events.yaml":   "output.done:\n",
 		"child-a/state.yaml":    "instance_key: text\n",
-		"child-a/nodes.yaml":    "child-a-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"child-a/nodes.yaml":    "child-a-listener:\n  output.done: {}\n",
 		"child-b/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"child-b/events.yaml":   "output.done:\n",
 		"child-b/state.yaml":    "instance_key: text\n",
-		"child-b/nodes.yaml":    "child-b-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
+		"child-b/nodes.yaml":    "child-b-listener:\n  output.done: {}\n",
 	}))
 	runID := uuid.NewString()
 	for _, flow := range []string{"child-a", "child-b"} {
@@ -1610,7 +1608,7 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 		"worker/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"worker/events.yaml":   "work.assign:\n",
 		"worker/state.yaml":    "instance_key: text\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+		"worker/nodes.yaml":    "task-handler:\n  work.assign: {}\n",
 	}))
 	for key, entityID := range map[string]string{"w-001": workerOneID, "w-002": workerTwoID} {
 		installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", key, busInternalTestRunID, entityID), key)
@@ -1674,7 +1672,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 		"worker/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"worker/events.yaml":   "work.assign:\n",
 		"worker/state.yaml":    "instance_key: text\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
+		"worker/nodes.yaml":    "task-handler:\n  work.assign: {}\n",
 	}))
 	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "worker", "w-001", busInternalTestRunID, workerID), "w-001")
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -2053,7 +2051,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"validation/schema.yaml":   "stages: []\n",
 		"validation/events.yaml":   "thing.reviewed:\n",
-		"validation/nodes.yaml":    "entity-writer:\n  execution_type: system_node\n  subscribes_to: [thing.reviewed]\n  event_handlers:\n    thing.reviewed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"validation/nodes.yaml":    "entity-writer:\n  thing.reviewed:\n    guard: _entity.id != \"\"\n",
 	}))
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
 	installMixedStaticConstructionFixture(t, store, source, []runtimepipeline.DeliveryTargetOwnerCandidate{{
@@ -2124,7 +2122,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"validation/schema.yaml":   "stages: []\n",
 		"validation/events.yaml":   "thing.reviewed:\n",
-		"validation/nodes.yaml":    "entity-writer:\n  execution_type: system_node\n  subscribes_to: [thing.reviewed]\n  event_handlers:\n    thing.reviewed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"validation/nodes.yaml":    "entity-writer:\n  thing.reviewed:\n    guard: _entity.id != \"\"\n",
 	}))
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: entityID})
 	installMixedStaticConstructionFixture(t, store, source, []runtimepipeline.DeliveryTargetOwnerCandidate{{
@@ -2191,7 +2189,7 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"child/schema.yaml":   "stages: []\n",
 		"child/events.yaml":   "child.start:\n",
-		"child/nodes.yaml":    "child-intake:\n  execution_type: system_node\n  subscribes_to: [child.start]\n  event_handlers:\n    child.start:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"child/nodes.yaml":    "child-intake:\n  child.start:\n    guard: _entity.id != \"\"\n",
 	})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -2246,23 +2244,15 @@ func TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients(t
 		"component-scaffold/schema.yaml":   "stages: []\n",
 		"component-scaffold/events.yaml":   "opco.repo_scaffold_requested:\n",
 		"component-scaffold/nodes.yaml": `component-node:
-  execution_type: system_node
-  event_handlers:
-    opco.repo_scaffold_requested:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  opco.repo_scaffold_requested:
+    guard: _entity.id != ""
 `,
 		"repo-scaffold/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"repo-scaffold/schema.yaml":   "stages: []\n",
 		"repo-scaffold/events.yaml":   "opco.repo_scaffold_requested:\n",
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
-  execution_type: system_node
-  event_handlers:
-    opco.repo_scaffold_requested:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  opco.repo_scaffold_requested:
+    guard: _entity.id != ""
 `,
 	})
 	source := semanticview.Wrap(bundle)
@@ -2319,12 +2309,8 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		"child/grandchild/schema.yaml":   "stages: []\n",
 		"child/grandchild/events.yaml":   "micro.start:\n",
 		"child/grandchild/nodes.yaml": `grandchild-worker:
-  execution_type: system_node
-  event_handlers:
-    micro.start:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  micro.start:
+    guard: _entity.id != ""
 `,
 	})
 	source := semanticview.Wrap(bundle)
@@ -2619,7 +2605,7 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 				files[flowID+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 				files[flowID+"/schema.yaml"] = "stages: []\npins:\n  inputs: [thing.created]\n"
 				files[flowID+"/events.yaml"] = "thing.created:\n"
-				files[flowID+"/nodes.yaml"] = nodeID + ":\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n"
+				files[flowID+"/nodes.yaml"] = nodeID + ":\n  thing.created:\n    guard: _entity.id != \"\"\n"
 			}
 			source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 			endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
@@ -2685,13 +2671,8 @@ func duplicateIDScopedRootInputAuthorityFixture(t *testing.T) (semanticview.Sour
 		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [thing.created]\n"
 		files[id+"/events.yaml"] = "thing.created:\n"
 		files[id+"/nodes.yaml"] = `shared-writer:
-  execution_type: system_node
-  subscribes_to: [thing.created]
-  event_handlers:
-    thing.created:
-      guard:
-        id: selected_owner
-        check: _entity.id != ""
+  thing.created:
+    guard: _entity.id != ""
 `
 	}
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
@@ -3307,13 +3288,8 @@ platform_version: '*'
   entity_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  event_handlers:
-    opco.spinup_requested:
-      guard:
-        id: selected_owner
-        check: instance.id != ""
+  opco.spinup_requested:
+    guard: instance.id != ""
 `,
 	}
 }
@@ -3331,7 +3307,7 @@ func routedRootInputFlowNodeBundle(t *testing.T, rootInput bool) *runtimecontrac
 		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"validation/schema.yaml":   "stages: []\npins:\n  inputs: [thing.created]\n",
 		"validation/events.yaml":   "thing.created:\n",
-		"validation/nodes.yaml":    "entity-writer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"validation/nodes.yaml":    "entity-writer:\n  thing.created:\n    guard: _entity.id != \"\"\n",
 	})
 }
 
@@ -3342,13 +3318,8 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 		"schema.yaml":   "stages: []\npins:\n  inputs:\n    - thing.created\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
-  execution_type: system_node
-  subscribes_to: [thing.created]
-  event_handlers:
-    thing.created:
-      guard:
-        id: selected_owner
-        check: instance.id != ""
+  thing.created:
+    guard: instance.id != ""
 `,
 	})
 }
@@ -3363,11 +3334,8 @@ func routedNodeTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 		"operating/state.yaml":    "instance_key: text\n",
 		"operating/events.yaml":   "opco.product_initialization_requested:\n",
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      guard: {id: selected_owner, check: instance.id != ""}
+  opco.product_initialization_requested:
+    guard: instance.id != ""
 `,
 	})
 }
@@ -3382,13 +3350,10 @@ func routedCallbackTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContra
 		"repo-scaffold/state.yaml":    "instance_key: text\n",
 		"repo-scaffold/events.yaml":   "repo_scaffold.repo_commit_succeeded:\nrepo_scaffold.repo_commit_failed:\n",
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
-  execution_type: system_node
-  subscribes_to: [repo_scaffold.repo_commit_succeeded, repo_scaffold.repo_commit_failed]
-  event_handlers:
-    repo_scaffold.repo_commit_succeeded:
-      guard: {id: selected_owner, check: instance.id != ""}
-    repo_scaffold.repo_commit_failed:
-      guard: {id: selected_owner, check: instance.id != ""}
+  repo_scaffold.repo_commit_succeeded:
+    guard: instance.id != ""
+  repo_scaffold.repo_commit_failed:
+    guard: instance.id != ""
 `,
 	})
 }

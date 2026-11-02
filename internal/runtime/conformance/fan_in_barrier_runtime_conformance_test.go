@@ -844,7 +844,6 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	}
 	module := conformanceLoadedWorkflowModule{
 		source: source, nodes: nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
@@ -1120,7 +1119,7 @@ func loadFanInBarrierActivation(t *testing.T, ctx context.Context, instance runt
 	if instance.Fields["period_id"] != periodID {
 		t.Fatalf("portfolio business period = %#v, want %q", instance.Fields["period_id"], periodID)
 	}
-	activation, ok := findConformanceJoinActivation(t, ctx, instance, conformanceNode(t, "portfolio/period", "portfolio-collector"), "period.reported", "awaiting", "awaiting")
+	activation, ok := findConformanceJoinActivation(t, ctx, instance, conformanceNode(t, "portfolio/period", "portfolio-collector"), "period.reported", "awaiting")
 	if !ok {
 		t.Fatalf("load portfolio barrier activation for %q: arm missing", periodID)
 	}

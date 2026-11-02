@@ -212,7 +212,7 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 		t.Fatal(err)
 	}
 	node := mustPersistenceNode(flowID, "join-node")
-	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "native-commit")
+	ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting")
 	if err != nil {
 		t.Fatal(err)
 	}

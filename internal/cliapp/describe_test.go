@@ -483,7 +483,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		if edge.Source == "handler.join.on_complete" && edge.NodeID == supportNodeID && edge.EventType == "ticket.closed" && edge.To == "review" {
 			foundJoinComplete = true
 		}
-		if edge.Source == "handler.join.on_deadline" && edge.NodeID == supportNodeID && edge.EventType == "platform.join_timeout" && edge.TimerID == "active" && edge.After == "1h" && edge.To == "timed_out" {
+		if edge.Source == "handler.join.on_deadline" && edge.NodeID == supportNodeID && edge.EventType == "platform.join_timeout" && edge.TimerID == "ticket.closed" && edge.After == "1h" && edge.To == "timed_out" {
 			foundJoinTimeout = true
 		}
 		if edge.Source == "timer" && edge.TimerID == "support.active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
@@ -530,7 +530,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"review [final]",
 		fmt.Sprintf("handler.advances_to %s on ticket.opened", supportNodeID),
 		fmt.Sprintf("handler.join.on_complete %s on ticket.closed", supportNodeID),
-		fmt.Sprintf("handler.join.on_deadline %s on platform.join_timeout after 1h timer active", supportNodeID),
+		fmt.Sprintf("handler.join.on_deadline %s on platform.join_timeout after 1h timer ticket.closed", supportNodeID),
 		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
 		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
 		"active after 72h advances_to timed_out (timer support.active.timed_out)",
@@ -638,7 +638,7 @@ func TestVerifyCommandRejectsTypeInvalidJoinCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: join.missing > 1\n              line_item_index: 0", 1)
+	updated := strings.Replace(string(nodes), "      on_complete:\n        advances_to: review", "      on_complete:\n        advances_to: review\n        emit:\n          event: line_item.requested\n          fields:\n            line_item_id: join.missing > 1\n            line_item_index: 0", 1)
 	if updated == string(nodes) {
 		t.Fatal("join fixture mutation did not match")
 	}
@@ -690,7 +690,7 @@ types:
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := strings.Replace(string(nodes), "        on_complete:\n          advances_to: review", "        on_complete:\n          advances_to: review\n          emit:\n            event: line_item.requested\n            fields:\n              line_item_id: join.results.exists(r, r > 1)\n              line_item_index: 0", 1)
+	updated := strings.Replace(string(nodes), "      on_complete:\n        advances_to: review", "      on_complete:\n        advances_to: review\n        emit:\n          event: line_item.requested\n          fields:\n            line_item_id: join.results.exists(r, r > 1)\n            line_item_index: 0", 1)
 	if updated == string(nodes) {
 		t.Fatal("join fixture mutation did not match")
 	}
@@ -718,7 +718,7 @@ func TestVerifyCommandRejectsRetiredJoinGrammar(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			updated := strings.Replace(string(contents), "      join:\n        stage: active", "      join:\n        "+field+": null\n        stage: active", 1)
+			updated := strings.Replace(string(contents), "    join:\n      stage: active", "    join:\n      "+field+": null\n      stage: active", 1)
 			if updated == string(contents) {
 				t.Fatal("retired join fixture mutation did not match")
 			}
@@ -742,8 +742,8 @@ func TestVerifyCommandRejectsCountJoinWithoutBoundedClosure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			updated := strings.Replace(string(contents), "          from: state.expected_line_item_ids", fmt.Sprintf("          count: %d", count), 1)
-			updated = strings.Replace(updated, "        deadline:\n          after: 1h\n          from: stage_entry\n        on_deadline:\n          advances_to: timed_out\n", "", 1)
+			updated := strings.Replace(string(contents), "        from: state.expected_line_item_ids", fmt.Sprintf("        count: %d", count), 1)
+			updated = strings.Replace(updated, "      deadline:\n        after: 1h\n        from: stage_entry\n      on_deadline:\n        advances_to: timed_out\n", "", 1)
 			if strings.Contains(updated, "deadline:") || !strings.Contains(updated, fmt.Sprintf("count: %d", count)) {
 				t.Fatal("unbounded count mutation did not match the admitted fixture")
 			}

@@ -31,32 +31,27 @@ func issue642SustainedTimerSource(t *testing.T) string {
 	root := issue642RecurringTimerSource(t)
 	for name, body := range map[string]string{
 		"nodes.yaml": `test-node:
-  execution_type: system_node
-  subscribes_to: [timer.scheduled, timer.check, timer.finished]
-  produces: [timer.armed, timer.finished]
   timers:
-    - id: check_timer
-      event: timer.check
+    - event: timer.check
       delay: 1s
       start_on: event:timer.scheduled
       cancel_on: event:timer.finished
       recurring: true
-  event_handlers:
-    timer.scheduled:
-      advances_to: waiting
-      emit: {event: timer.armed}
-    timer.check:
-      rules:
-        - when: state.tick_count == 1
-          advances_to: waiting
-          emit: {event: timer.finished}
-        - advances_to: waiting
-      data_accumulation:
-        writes:
-          - target_field: tick_count
-            value: state.tick_count + 1
-    timer.finished:
-      advances_to: checked
+  timer.scheduled:
+    advances_to: waiting
+    emit: {event: timer.armed}
+  timer.check:
+    rules:
+      - when: state.tick_count == 1
+        advances_to: waiting
+        emit: {event: timer.finished}
+      - advances_to: waiting
+    data_accumulation:
+      writes:
+        - target_field: tick_count
+          value: state.tick_count + 1
+  timer.finished:
+    advances_to: checked
 `,
 		"state.yaml":  "tick_count: 0\n",
 		"events.yaml": "timer.scheduled:\ntimer.check:\ntimer.armed:\ntimer.finished:\n",

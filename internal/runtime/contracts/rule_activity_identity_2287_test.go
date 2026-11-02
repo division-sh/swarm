@@ -53,12 +53,14 @@ func TestRuleActivityPinnedNamesPreserveEveryInventoriedBinding(t *testing.T) {
 
 func TestRuleActivityAdmissionRequiresExplicitID(t *testing.T) {
 	for _, tc := range []struct{ fragment, diagnostic string }{
-		{"tool: send", "rule activity.id is required"},
-		{"id: null, tool: send", "must be a scalar id, got null"},
-		{"id: '', tool: send", "rule activity.id is required"},
-		{"id: '  ', tool: send", "rule activity.id is required"},
-		{"id: [], tool: send", "must be a scalar id, got empty_sequence"},
-		{"id: {}, tool: send", "must be a scalar id, got empty_mapping"},
+		{"tool: send", "activity.id is required"},
+		{"id: null, tool: send", "must be non-empty text"},
+		{"id: '', tool: send", "must be non-empty text"},
+		{"id: '  ', tool: send", "must be non-empty text"},
+		{"id: [], tool: send", "must be non-empty text"},
+		{"id: {}, tool: send", "must be non-empty text"},
+		{"id: 42, tool: send", "must be non-empty text"},
+		{"id: true, tool: send", "must be non-empty text"},
 	} {
 		var handler SystemNodeEventHandler
 		err := decodeNodeTestYAML([]byte("rules: [{activity: {"+tc.fragment+"}}]"), &handler)
@@ -88,13 +90,14 @@ func TestActivitySiteContextCannotBeInferredFromLabelOrIndex(t *testing.T) {
 		{Node: node, HandlerEventKey: "source.requested", Kind: ActivitySiteHandler, RuleIndex: 0, Spec: ActivitySpec{ID: "explicit", Tool: "read"}},
 		{Node: node, HandlerEventKey: "source.requested", Kind: ActivitySiteRule, RuleIndex: -1, Spec: ActivitySpec{ID: "explicit", Tool: "read"}},
 		{Node: node, HandlerEventKey: "source.requested", Kind: ActivitySiteRule, RuleIndex: 0, Spec: ActivitySpec{Tool: "read"}},
+		{Node: node, HandlerEventKey: "source.requested", Kind: ActivitySiteHandler, RuleIndex: -1, Spec: ActivitySpec{Tool: "read"}},
 	} {
 		got, err := ActivityResultEventsForSite(site)
 		if err == nil || got != (ActivityResultEvents{}) {
 			t.Fatalf("invalid site manufactured result names: %#v, %#v, %v", site, got, err)
 		}
 	}
-	site := ActivitySite{Node: node, HandlerEventKey: "source.requested", Kind: ActivitySiteHandler, RuleIndex: -1, Spec: ActivitySpec{Tool: "source_scrape"}}
+	site := ActivitySite{Node: node, HandlerEventKey: "source.requested", Kind: ActivitySiteHandler, RuleIndex: -1, Spec: ActivitySpec{ID: "scanner_source_requested_source_scrape", Tool: "source_scrape"}}
 	got, err := ActivityResultEventsForSite(site)
 	want := ActivityResultEvents{
 		ActivityID:   "scanner_source_requested_source_scrape",
@@ -102,7 +105,7 @@ func TestActivitySiteContextCannotBeInferredFromLabelOrIndex(t *testing.T) {
 		RevisionRequested: "scanner_source_requested_source_scrape.revision_requested", Rejected: "scanner_source_requested_source_scrape.rejected",
 	}
 	if err != nil || got != want {
-		t.Fatalf("handler default changed: %#v, %v", got, err)
+		t.Fatalf("materialized handler identity changed: %#v, %v", got, err)
 	}
 }
 

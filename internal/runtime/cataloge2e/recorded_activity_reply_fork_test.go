@@ -178,15 +178,15 @@ func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBac
 		if err != nil {
 			t.Fatal(err)
 		}
-		body = []byte(strings.Replace(string(body), "    compute.failed:\n      guard: {id: exact_activity, check: payload.activity_id == 'compute'}", `    compute.failed:
-      guard: {id: exact_activity, check: payload.activity_id == 'compute'}
-      advances_to: done
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.activity_id
-          request_id: payload.activity_id
-          result: payload.failure.detail.code`, 1))
+		body = []byte(strings.Replace(string(body), "  compute.failed:\n    guard: payload.activity_id == 'compute'", `  compute.failed:
+    guard: payload.activity_id == 'compute'
+    advances_to: done
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.activity_id
+        request_id: payload.activity_id
+        result: payload.failure.detail.code`, 1))
 		if err := os.WriteFile(path, body, 0600); err != nil {
 			t.Fatal(err)
 		}

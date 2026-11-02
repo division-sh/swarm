@@ -152,7 +152,7 @@ func TestStreamAccumulatorDerivesNoIntrinsicTimeoutSubscriptionOrTransition(t *t
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{
 			"collector": {
-				SubscribesTo: []string{"item.arrived"},
+
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"item.arrived": {
 						Accumulate: &AccumulateSpec{Into: "items", From: "payload"},
@@ -243,6 +243,19 @@ func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T
 	}
 	if !foundTransition {
 		t.Fatalf("missing timed transition edge: %#v", topology.Edges)
+	}
+	rows := bundle.RootSchema.StageDeclarations.Entries[0].Timers
+	rows[0].After = "72h"
+	rows[0], rows[1] = rows[1], rows[0]
+	if err := populateWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	stable := map[string]string{}
+	for _, timer := range bundle.WorkflowTimers() {
+		stable[timer.ID] = timer.Delay
+	}
+	if len(stable) != 2 || stable["awaiting_review.review.sla_escalated"] != "72h" || stable["awaiting_review.expired"] != "{{marginal_park_days}}d" {
+		t.Fatalf("after edit or row reorder changed the derived timer identities: %#v", stable)
 	}
 }
 

@@ -1,15 +1,7 @@
 relay:
-  execution_type: system_node
-  subscribes_to: [work.begin]
-  produces: [grandchild/task.start]
-  event_handlers:
-    work.begin:
-      emit: grandchild/task.start
+  work.begin:
+    emit: grandchild/task.start
 
 listener:
-  execution_type: system_node
-  subscribes_to: [task.done]
-  produces: []
-  event_handlers:
-    task.done:
-      advances_to: completed
+  task.done:
+    advances_to: completed

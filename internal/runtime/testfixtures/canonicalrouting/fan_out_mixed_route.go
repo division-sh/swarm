@@ -37,10 +37,7 @@ pins:
     - mixed.one
 `,
 		"one/nodes.yaml": `one-node:
-  execution_type: system_node
-  subscribes_to: [mixed.one]
-  event_handlers:
-    mixed.one: {}
+  mixed.one: {}
 `,
 		"multi-a/schema.yaml": `# fixture: multi-a
 stages:
@@ -50,10 +47,7 @@ pins:
     - mixed.multi
 `,
 		"multi-a/nodes.yaml": `multi-a-node:
-  execution_type: system_node
-  subscribes_to: [mixed.multi]
-  event_handlers:
-    mixed.multi: {}
+  mixed.multi: {}
 `,
 		"multi-b/schema.yaml": `# fixture: multi-b
 stages:
@@ -63,10 +57,7 @@ pins:
     - mixed.multi
 `,
 		"multi-b/nodes.yaml": `multi-b-node:
-  execution_type: system_node
-  subscribes_to: [mixed.multi]
-  event_handlers:
-    mixed.multi: {}
+  mixed.multi: {}
 `,
 		"child/schema.yaml": `# fixture: child
 stages:
@@ -76,10 +67,7 @@ pins:
     - mixed.multi
 `,
 		"child/nodes.yaml": `child-node:
-  execution_type: system_node
-  subscribes_to: [mixed.multi]
-  event_handlers:
-    mixed.multi: {}
+  mixed.multi: {}
 `,
 	}
 	for label, body := range files {

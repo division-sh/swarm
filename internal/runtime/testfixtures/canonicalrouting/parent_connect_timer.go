@@ -11,7 +11,7 @@ func CopyParentConnectTimer(t testing.TB) string {
 stages:
   waiting:
     timers:
-      - {id: work_ready, after: 40ms, emit: work.ready}
+      - {after: 40ms, emit: work.ready}
 pins:
   inputs:
     - work.requested

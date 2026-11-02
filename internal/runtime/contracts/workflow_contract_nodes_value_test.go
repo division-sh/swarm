@@ -50,7 +50,7 @@ func TestNodeValueFieldsRejectDuplicateEffectiveAliasKeys(t *testing.T) {
 }
 
 func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
-	source, err := yamlsource.Load([]byte("node:\n  timers:\n    - {id: retry, delay: 1m, recurring: true}\n"))
+	source, err := yamlsource.Load([]byte("node:\n  timers:\n    - {event: retry, delay: 1m, recurring: true}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestProjectNodeTimerValuePreservesNestedCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if timer.ID != "retry" || timer.Delay != "1m" || !timer.Recurring {
+	if timer.Event != "retry" || timer.Delay != "1m" || !timer.Recurring {
 		t.Fatalf("wrong timer projection: %#v", timer)
 	}
 	retired, err := yamlsource.Load([]byte("node:\n  timers:\n    - {delay_seconds: 7}\n"))

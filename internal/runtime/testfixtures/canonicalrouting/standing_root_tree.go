@@ -14,7 +14,7 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 	root := t.TempDir()
 	const pins = "pins:\n  inputs:\n    - inbound.telegram.raw\n    - inbound.telegram.text_message\n    - inbound.telegram.callback_action\n"
 	const outputs = "  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
-	const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram.raw, inbound.telegram.text_message, inbound.telegram.callback_action]\n  event_handlers:\n    inbound.telegram.raw:\n      guard: {id: admit, check: true}\n    inbound.telegram.text_message:\n      guard: {id: admit, check: true}\n    inbound.telegram.callback_action:\n      guard: {id: admit, check: true}\n"
+	const nodes = "observer:\n  inbound.telegram.raw:\n    guard: true\n  inbound.telegram.text_message:\n    guard: true\n  inbound.telegram.callback_action:\n    guard: true\n"
 	files := map[string]string{
 		"alpha-receiver/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"alpha-receiver/manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
@@ -31,7 +31,7 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 	}
 	for _, alias := range []string{"alpha", "beta"} {
 		files[alias+"-receiver/schema.yaml"] = "# fixture: " + alias + "-receiver\npins:\n  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
-		files[alias+"-receiver/nodes.yaml"] = strings.Replace(strings.Replace(nodes, "subscribes_to: [inbound.telegram.raw, ", "subscribes_to: [", 1), "    inbound.telegram.raw:\n      guard: {id: admit, check: true}\n", "", 1)
+		files[alias+"-receiver/nodes.yaml"] = strings.Replace(nodes, "  inbound.telegram.raw:\n    guard: true\n", "", 1)
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)

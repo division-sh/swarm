@@ -410,7 +410,7 @@ func targetOwnerArcFixture(
 			test.sourcePath + "/events.yaml":     "work.ready:\n",
 			test.receiverPath + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			test.receiverPath + "/schema.yaml":   "stages: []\npins:\n  inputs: [work.ready]\n",
-			test.receiverPath + "/nodes.yaml":    "arc-receiver:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready: {}\n",
+			test.receiverPath + "/nodes.yaml":    "arc-receiver:\n  work.ready: {}\n",
 		}
 		for _, endpoint := range []string{test.sourcePath, test.receiverPath} {
 			for parent := connectRoutePlanFixtureParent(endpoint); parent != "."; parent = connectRoutePlanFixtureParent(parent) {
@@ -615,9 +615,9 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		files["fanout/"+receiver+"/schema.yaml"] = "stages: []\npins:\n  inputs: [work.ready]\n"
 		handler := "{}\n"
 		if receiver == "existing" || receiver == "poison" {
-			handler = "\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n"
+			handler = "\n    guard: _entity.id != \"\"\n"
 		}
-		files["fanout/"+receiver+"/nodes.yaml"] = receiver + "-node:\n  execution_type: system_node\n  event_handlers:\n    work.ready: " + handler
+		files["fanout/"+receiver+"/nodes.yaml"] = receiver + "-node:\n  work.ready: " + handler
 	}
 	legalSchema := files["schema.yaml"]
 	files["schema.yaml"] += "  - {event: work.ready, from: producer, to: fanout/poison}\n"

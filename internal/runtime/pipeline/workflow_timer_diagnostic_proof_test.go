@@ -120,7 +120,7 @@ func VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest(t *testin
 				"schema.yaml":   "stages:\n  ready: {}\n  done: {final: true}\n",
 
 				"events.yaml": "work.ready:\n",
-				"nodes.yaml":  "router:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready: {advances_to: done}\n",
+				"nodes.yaml":  "router:\n  work.ready: {advances_to: done}\n",
 			})
 			f := factory(t, backend, bundle)
 			ctx, pc := f.Context, f.Coordinator

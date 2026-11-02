@@ -7,9 +7,9 @@ routing topology: routing-topology/v1
     resolution: mode=select-or-create target=target field=conversation_reference source_kind=payload source=payload.conversation_reference derived_from="instance.conversation_reference + carries.conversation_reference.from"
   - [typed_pubsub] telegram-chat/telegram.reply_requested: telegram-chat.phrase-bot -> telegram-chat.telegram-responder
     typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] telegram-chat/telegram.reply_requested: telegram-chat.phrase-bot -> telegram-chat.telegram-responder
-    typed pub/sub: match=exact boundary=same_flow
   - [typed_pubsub] telegram-chat/inbound.telegram.text_message: telegram-chat.inbound.telegram.text_message -> telegram-chat.phrase-bot
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] telegram-chat/telegram.reply_requested: telegram-chat.phrase-bot -> telegram-chat.telegram-responder
     typed pub/sub: match=exact boundary=same_flow
   boundary exposures:
     - inbound.telegram.text_message: ..external -> output ..inbound.telegram.text_message

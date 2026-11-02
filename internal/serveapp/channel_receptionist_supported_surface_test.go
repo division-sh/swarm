@@ -178,13 +178,10 @@ func runChannelDynamicHolderLivePickup(t *testing.T, backend servedparity.Backen
 	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "account.assigned:\n  operator_account: text\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: {active: {}}\npins:\n  inputs: [inbound.telegram.text_message, account.assigned]\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `assign-account:
-  execution_type: system_node
-  subscribes_to: [account.assigned]
-  event_handlers:
-    account.assigned:
-      data_accumulation:
-        source_event: account.assigned
-        writes: [{target_field: operator_account, value: payload.operator_account}]
+  account.assigned:
+    data_accumulation:
+      source_event: account.assigned
+      writes: [{target_field: operator_account, value: payload.operator_account}]
 `)
 	registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079")
 	hash := servedEventPublishFixtureBundleHash(t, root)

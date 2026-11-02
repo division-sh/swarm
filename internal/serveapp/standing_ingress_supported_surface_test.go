@@ -1188,6 +1188,6 @@ func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "events.yaml"), "service.tick:\n")
-	writeStandingCandidateFile(t, filepath.Join(flowDir, "nodes.yaml"), "hold:\n  execution_type: system_node\n  subscribes_to: [service.tick]\n  event_handlers:\n    service.tick:\n      guard: {id: hold, check: true}\n")
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "nodes.yaml"), "hold:\n  service.tick:\n    guard: true\n")
 	return root
 }

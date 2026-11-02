@@ -109,24 +109,9 @@ func (t Transition) ValidateHandlerEvidence(handler contracts.SystemNodeEventHan
 	return t.validateSelectedHandlerRule(handler)
 }
 
-func (t Transition) validateGuardTermination(handler contracts.SystemNodeEventHandler) error {
-	failure, err := handler.Guard.FailureSpec()
-	if err != nil || failure.Action != contracts.GuardFailureActionKill {
-		return fmt.Errorf("guard termination requires the executed handler's kill disposition")
-	}
-	var labels []string
-	for _, check := range handler.Guard.EffectiveChecks() {
-		label := check.EffectiveIdentity()
-		if label != "" {
-			labels = append(labels, label)
-		}
-	}
-	if len(t.guards) == 0 || len(t.guards) > len(labels) || !slices.Equal(t.guards, labels[:len(t.guards)]) || t.guardName != t.guards[len(t.guards)-1] {
-		return fmt.Errorf("guard termination evidence disagrees with the executed handler's guard checks")
-	}
-	return nil
+func (t Transition) validateGuardTermination(_ contracts.SystemNodeEventHandler) error {
+	return fmt.Errorf("scalar guards reject; termination requires a selected terminate: true rule")
 }
-
 func (t Transition) validateAdvanceCarrier(handler contracts.SystemNodeEventHandler) error {
 	edge := t.compiled.Edge()
 	if edge.AdvanceCarrier != "" {

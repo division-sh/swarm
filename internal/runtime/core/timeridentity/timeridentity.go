@@ -223,7 +223,6 @@ type TimerHandle struct {
 type JoinRef struct {
 	node         runtimeidentity.ExecutableNode
 	handlerEvent string
-	joinID       string
 	mode         JoinRefMode
 	arrival      JoinArrivalRef
 	fanOut       FanOutDeliveryRef
@@ -527,18 +526,17 @@ func parseTimerHandleMap(handleMap map[string]any) (TimerHandle, bool) {
 	}
 }
 
-func NewJoinRef(node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID string) (JoinRef, error) {
+func NewJoinRef(node runtimeidentity.ExecutableNode, handlerEvent, stage string) (JoinRef, error) {
 	ref := JoinRef{
 		node:         node,
 		handlerEvent: strings.TrimSpace(handlerEvent),
-		joinID:       strings.TrimSpace(joinID),
 		mode:         JoinRefModeArrival,
 		arrival: JoinArrivalRef{
 			stage: strings.TrimSpace(stage),
 		},
 	}
 	if !ref.Valid() {
-		return JoinRef{}, fmt.Errorf("join declaration reference requires node, handler event, stage, and join identity")
+		return JoinRef{}, fmt.Errorf("join declaration reference requires node, handler event, and stage")
 	}
 	return ref, nil
 }
@@ -563,14 +561,13 @@ func (r JoinRef) BindStageEntry(entry StageEntryRef, generation attemptgeneratio
 // triggering delivery and the execution generation is known.
 func NewFanOutDeliveryJoinRef(
 	node runtimeidentity.ExecutableNode,
-	handlerEvent, joinID string,
+	handlerEvent string,
 	declaration runtimeidentity.DeclarationIdentity,
 	bundleHash, semanticDigest string,
 ) (JoinRef, error) {
 	ref := JoinRef{
 		node:         node,
 		handlerEvent: strings.TrimSpace(handlerEvent),
-		joinID:       strings.TrimSpace(joinID),
 		mode:         JoinRefModeFanOutDelivery,
 		fanOut: FanOutDeliveryRef{
 			declaration:    declaration,
@@ -579,7 +576,7 @@ func NewFanOutDeliveryJoinRef(
 		},
 	}
 	if !ref.Valid() {
-		return JoinRef{}, fmt.Errorf("fan-out delivery join reference requires exact node, handler, join, bundle, declaration, and semantic identity")
+		return JoinRef{}, fmt.Errorf("fan-out delivery join reference requires exact node, handler, bundle, declaration, and semantic identity")
 	}
 	return ref, nil
 }
@@ -599,7 +596,6 @@ func (r JoinRef) BindFanOutIntent(triggeringDeliveryID string, generation attemp
 
 func (r JoinRef) Normalize() JoinRef {
 	r.handlerEvent = strings.TrimSpace(r.handlerEvent)
-	r.joinID = strings.TrimSpace(r.joinID)
 	r.mode = JoinRefMode(strings.TrimSpace(string(r.mode)))
 	r.arrival.stage = strings.TrimSpace(r.arrival.stage)
 	r.fanOut.bundleHash = strings.TrimSpace(r.fanOut.bundleHash)
@@ -611,7 +607,7 @@ func (r JoinRef) Normalize() JoinRef {
 
 func (r JoinRef) Valid() bool {
 	r = r.Normalize()
-	if !r.node.Valid() || r.handlerEvent == "" || r.joinID == "" ||
+	if !r.node.Valid() || r.handlerEvent == "" ||
 		(r.generation != (attemptgeneration.Generation{}) && !r.generation.Valid()) {
 		return false
 	}
@@ -634,7 +630,6 @@ func (r JoinRef) NodeID() string                       { return r.Node().NodeID(
 func (r JoinRef) HandlerEvent() string                 { return r.Normalize().handlerEvent }
 func (r JoinRef) Mode() JoinRefMode                    { return r.Normalize().mode }
 func (r JoinRef) Stage() string                        { return r.Normalize().arrival.stage }
-func (r JoinRef) JoinID() string                       { return r.Normalize().joinID }
 func (r JoinRef) StageEntry() StageEntryRef            { return r.arrival.entry }
 func (r JoinRef) Generation() attemptgeneration.Generation {
 	return r.Normalize().generation
@@ -701,7 +696,7 @@ func (r JoinRef) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	parts := []string{string(r.mode), r.node.Key(), r.handlerEvent, r.joinID}
+	parts := []string{string(r.mode), r.node.Key(), r.handlerEvent}
 	switch r.mode {
 	case JoinRefModeArrival:
 		parts = append(parts, r.arrival.stage, r.arrival.entry.Key())
@@ -730,7 +725,6 @@ func (r JoinRef) PayloadValue() map[string]any {
 			"node_id":   r.node.NodeID(),
 		},
 		"handler_event": r.handlerEvent,
-		"join_id":       r.joinID,
 	}
 	switch r.mode {
 	case JoinRefModeArrival:
@@ -829,13 +823,13 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	var ref JoinRef
 	switch mode {
 	case JoinRefModeArrival:
-		if !onlyKeys(raw, "mode", "node", "handler_event", "stage", "join_id", "stage_entry", attemptgeneration.PayloadKey) {
+		if !onlyKeys(raw, "mode", "node", "handler_event", "stage", "stage_entry", attemptgeneration.PayloadKey) {
 			return JoinRef{}, false
 		}
 		if _, present := raw["fan_out"]; present {
 			return JoinRef{}, false
 		}
-		ref, err = NewJoinRef(node, asExactString(raw["handler_event"]), asExactString(raw["stage"]), asExactString(raw["join_id"]))
+		ref, err = NewJoinRef(node, asExactString(raw["handler_event"]), asExactString(raw["stage"]))
 		if value, present := raw["stage_entry"]; present && err == nil {
 			entry, entryErr := StageEntryRefFromValue(value)
 			if entryErr != nil {
@@ -846,7 +840,7 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 			return JoinRef{}, false
 		}
 	case JoinRefModeFanOutDelivery:
-		if !onlyKeys(raw, "mode", "node", "handler_event", "join_id", "fan_out", attemptgeneration.PayloadKey) {
+		if !onlyKeys(raw, "mode", "node", "handler_event", "fan_out", attemptgeneration.PayloadKey) {
 			return JoinRef{}, false
 		}
 		fanOut, ok := stringAnyMap(raw["fan_out"])
@@ -864,7 +858,6 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 		ref, err = NewFanOutDeliveryJoinRef(
 			node,
 			asExactString(raw["handler_event"]),
-			asExactString(raw["join_id"]),
 			declaration,
 			asExactString(fanOut["bundle_hash"]),
 			asExactString(fanOut["semantic_digest"]),

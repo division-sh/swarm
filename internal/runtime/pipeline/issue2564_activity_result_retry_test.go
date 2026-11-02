@@ -58,7 +58,7 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 				_ = json.NewEncoder(w).Encode(map[string]any{"title": "M25 external"})
 			}))
 			t.Cleanup(server.Close)
-			site := contracts.ActivitySite{Node: externalPipelineNode(t, ".", "scanner"), HandlerEventKey: "source.requested", Kind: contracts.ActivitySiteHandler, RuleIndex: -1, Spec: contracts.ActivitySpec{Tool: "source_scrape"}}
+			site := contracts.ActivitySite{Node: externalPipelineNode(t, ".", "scanner"), HandlerEventKey: "source.requested", Kind: contracts.ActivitySiteHandler, RuleIndex: -1, Spec: contracts.ActivitySpec{ID: "scanner_source_requested_source_scrape", Tool: "source_scrape"}}
 			if ruleActivity {
 				site.Kind, site.RuleIndex = contracts.ActivitySiteRule, 0
 				site.Spec.ID = "scanner_source_requested_source_scrape"
@@ -352,9 +352,9 @@ func issue2564M25AssertReceipt(t *testing.T, selected gateRecoveryStoreCase, run
 
 func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bool) *contracts.WorkflowContractBundle {
 	t.Helper()
-	activity := "activity:\n        tool: source_scrape\n        input: {url: payload.url}"
+	activity := "activity:\n      id: scanner_source_requested_source_scrape\n      tool: source_scrape\n      input: {url: payload.url}"
 	if ruleActivity {
-		activity = "rules:\n        - when: payload.url != ''\n          activity:\n            id: scanner_source_requested_source_scrape\n            tool: source_scrape\n            input: {url: payload.url}"
+		activity = "rules:\n      - when: payload.url != ''\n        activity:\n          id: scanner_source_requested_source_scrape\n          tool: source_scrape\n          input: {url: payload.url}"
 	}
 	return loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
@@ -362,27 +362,21 @@ func issue2564M25Bundle(t *testing.T, serverURL, success string, ruleActivity bo
 		"state.yaml":    "local: 0\nfolded: 0\nreceived: 0\ntitle: text\n",
 		"events.yaml":   "source.requested: {url: text}\n",
 		"nodes.yaml": fmt.Sprintf(`scanner:
-  execution_type: system_node
-  subscribes_to: [source.requested]
-  event_handlers:
-    source.requested:
-      %s
+  source.requested:
+    %s
 consumer:
-  execution_type: system_node
-  subscribes_to: [%s]
-  event_handlers:
-    %s:
-      rules:
-        - when: payload.result.title == 'M25 external'
-          data_accumulation:
-            writes:
-              - {target_field: title, value: payload.result.title}
-              - {target_field: folded, value: state.local + 1}
-              - {target_field: received, value: state.received + 1}
-        - data_accumulation:
-            writes:
-              - {target_field: title, value: 'unexpected result'}
-`, activity, success, success),
+  %s:
+    rules:
+      - when: payload.result.title == 'M25 external'
+        data_accumulation:
+          writes:
+            - {target_field: title, value: payload.result.title}
+            - {target_field: folded, value: state.local + 1}
+            - {target_field: received, value: state.received + 1}
+      - data_accumulation:
+          writes:
+            - {target_field: title, value: 'unexpected result'}
+`, activity, success),
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   handler_type: http
   http:

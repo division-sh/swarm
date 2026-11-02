@@ -109,7 +109,7 @@ func nativeMutationLoggingFixtureForTest(t *testing.T, backend string, open pipe
 		"state.yaml":    "status: text\nbusiness_status: text\nverticals: map[text]Vertical\ntags: [text]\n",
 		"types.yaml":    "types:\n  Job:\n    id: text\n    title: text\n  Vertical:\n    status: text\n    active_jobs: [Job]\n",
 		"events.yaml":   "flow.transitioned:\n",
-		"nodes.yaml":    "lifecycle-owner:\n  execution_type: system_node\n  event_handlers:\n    flow.transitioned: {advances_to: done}\n",
+		"nodes.yaml":    "lifecycle-owner:\n  flow.transitioned: {advances_to: done}\n",
 	})
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, ".")); err != nil {

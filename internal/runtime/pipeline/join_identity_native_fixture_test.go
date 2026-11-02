@@ -40,7 +40,7 @@ func nativeWorkflowJoinLoopBundleForTest(t *testing.T, mode string) *runtimecont
 	files := workflowJoinLifecycleFixtureFiles(false, mode)
 	for _, prefix := range []string{"", "orders/"} {
 		files[prefix+"events.yaml"] = strings.Replace(files[prefix+"events.yaml"], "manual.abort:\n", "manual.abort:\n  revision_id: text\n", 1)
-		files[prefix+"nodes.yaml"] = strings.Replace(files[prefix+"nodes.yaml"], "    manual.abort:\n      advances_to: dispatching", "    manual.abort:\n      loop: {admit: revision, from: awaiting}\n      advances_to: dispatching", 1)
+		files[prefix+"nodes.yaml"] = strings.Replace(files[prefix+"nodes.yaml"], "  manual.abort:\n    advances_to: dispatching", "  manual.abort:\n    loop: {admit: revision, from: awaiting}\n    advances_to: dispatching", 1)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -97,8 +97,7 @@ func (h *nativeExactWorkflowJoinHarness) installCoordinator() {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	guards := NewContractGuardRegistry(h.source)
-	h.pc = h.fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: h.source, workflowNodes: nodes, guardRegistry: guards}, GenericSchedules: h.schedules})
+	h.pc = h.fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: h.source, workflowNodes: nodes}, GenericSchedules: h.schedules})
 	h.store = h.pc.workflowStore
 	if h.mutations == nil {
 		h.mutations = &nativePipelineLifecycleMutationObservationForTest{}

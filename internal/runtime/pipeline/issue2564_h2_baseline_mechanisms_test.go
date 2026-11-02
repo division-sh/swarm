@@ -184,22 +184,19 @@ func VerifyIssue2564H2BaselineMechanismsForTest(t *testing.T, factory WorkflowTi
 			t.Run(backend+"/"+mechanism, func(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
 					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-					"schema.yaml":   "stages:\n  s1:\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {final: true}\n",
+					"schema.yaml":   "stages:\n  s1:\n    timers: [{after: 1s, advances_to: s2}]\n  s2:\n    timers: [{after: 1s, advances_to: s1}]\n  closed: {final: true}\n",
 					"state.yaml":    "count: integer\nc1: integer\nc2: integer\n",
 					"events.yaml":   "hub.bump: {n: integer}\n",
 					"nodes.yaml": `hub-node:
-  execution_type: system_node
-  subscribes_to: [hub.bump]
-  event_handlers:
-    hub.bump:
-      data_accumulation:
-        writes: [{target_field: count, value: state.count + 1}]
-      rules:
-        - when: instance.stage == 's1'
-          data_accumulation:
-            writes: [{target_field: c1, value: state.c1 + 1}]
-        - data_accumulation:
-            writes: [{target_field: c2, value: state.c2 + 1}]
+  hub.bump:
+    data_accumulation:
+      writes: [{target_field: count, value: state.count + 1}]
+    rules:
+      - when: instance.stage == 's1'
+        data_accumulation:
+          writes: [{target_field: c1, value: state.c1 + 1}]
+      - data_accumulation:
+          writes: [{target_field: c2, value: state.c2 + 1}]
 `,
 				})
 				fixture := factory(t, backend, bundle)

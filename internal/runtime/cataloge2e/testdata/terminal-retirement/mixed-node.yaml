@@ -1,6 +1,3 @@
 inspect-node:
-  execution_type: system_node
-  subscribes_to: [worker.ready]
-  event_handlers:
-    worker.ready:
-      advances_to: complete
+  worker.ready:
+    advances_to: complete

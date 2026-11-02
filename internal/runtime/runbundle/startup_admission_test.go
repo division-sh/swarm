@@ -160,8 +160,8 @@ func testUpgradeRetainedInstances(t *testing.T) {
 		bundle := &contracts.WorkflowContractBundle{
 			RootSchema: &contracts.FlowSchemaDocument{Name: "upgrade", StageDeclarations: contracts.FlowStageDeclarations{
 				Declared: true, Entries: []contracts.FlowStageDeclaration{{ID: stage, Gate: &contracts.FlowStageGateDeclaration{
-					Decision: "review", Title: "Review", Outcomes: map[string]contracts.FlowStageGateOutcomeDeclaration{
-						"approve": {Label: "Approve", AdvancesTo: stage},
+					Decision: "review", Outcomes: map[string]contracts.FlowStageGateOutcomeDeclaration{
+						"approve": {AdvancesTo: stage},
 					},
 				}}},
 			}},

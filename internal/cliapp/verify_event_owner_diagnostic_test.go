@@ -20,7 +20,7 @@ func TestVerifyMultipleEventOwnersTeachingError(t *testing.T) {
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: {waiting: {}, done: {final: true}}\n",
 		"events.yaml":   "work.requested:\n",
-		"nodes.yaml":    "alpha:\n  event_handlers:\n    work.requested:\n      advances_to: done\nbeta:\n  event_handlers:\n    work.requested:\n      advances_to: done\n",
+		"nodes.yaml":    "alpha:\n  work.requested:\n    advances_to: done\nbeta:\n  work.requested:\n    advances_to: done\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -53,8 +53,8 @@ func TestVerifyMultipleEventOwnersTeachingError(t *testing.T) {
 			}
 			for _, want := range []string{
 				"multiple authoritative system node owners",
-				`node "alpha" (scope "."): handler "work.requested" at nodes.yaml:4:7`,
-				`node "beta" (scope "."): handler "work.requested" at nodes.yaml:8:7`,
+				`node "alpha" (scope "."): handler "work.requested" at nodes.yaml:3:5`,
+				`node "beta" (scope "."): handler "work.requested" at nodes.yaml:6:5`,
 				"one router node", "ordered rules:",
 			} {
 				if !strings.Contains(message, want) {

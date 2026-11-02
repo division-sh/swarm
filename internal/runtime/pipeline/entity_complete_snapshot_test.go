@@ -19,14 +19,11 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
 		"state.yaml":    "revision_count: integer?\n",
 		"events.yaml":   "work.clear:\n",
 		"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.clear]
-  event_handlers:
-    work.clear:
-      data_accumulation:
-        writes:
-          - op: clear
-            target: state.revision_count
+  work.clear:
+    data_accumulation:
+      writes:
+        - op: clear
+          target: state.revision_count
 `,
 	})
 	fixture := open(t, source)
@@ -91,19 +88,16 @@ func VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest(t *testing
 		"state.yaml":    "kill_reason: text?\nobserved_absence: boolean?\n",
 		"events.yaml":   "work.ready:\nwork.emitted:\n  observed_absence: boolean\n",
 		"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.ready]
-  event_handlers:
-    work.ready:
-      data_accumulation:
-        writes:
-          - target_field: observed_absence
-            value: |-
-                     !has(state.kill_reason)
-      emit:
-        event: work.emitted
-        fields:
-          observed_absence: state.observed_absence
+  work.ready:
+    data_accumulation:
+      writes:
+        - target_field: observed_absence
+          value: |-
+                   !has(state.kill_reason)
+    emit:
+      event: work.emitted
+      fields:
+        observed_absence: state.observed_absence
 `,
 	})
 	fixture := open(t, source)

@@ -16,19 +16,17 @@ import (
 // EntityAssignmentPoint identifies an executed reader, including its selected
 // outcome and its position inside an ordered mutation list.
 type EntityAssignmentPoint struct {
-	Step               Step
-	RuleKind           c.HandlerAdvanceCarrierKind
-	RuleIndex          int
-	RuleRef            identity.DeclarationIdentity
-	Condition          bool
-	WriteIndex         int
-	HasWriteIndex      bool
-	FanOut             bool
-	FanOutAfterWrites  bool
-	RuleCompute        bool
-	GuardCheckIndex    int
-	HasGuardCheckIndex bool
-	PolicyCompute      bool
+	Step              Step
+	RuleKind          c.HandlerAdvanceCarrierKind
+	RuleIndex         int
+	RuleRef           identity.DeclarationIdentity
+	Condition         bool
+	WriteIndex        int
+	HasWriteIndex     bool
+	FanOut            bool
+	FanOutAfterWrites bool
+	RuleCompute       bool
+	PolicyCompute     bool
 }
 
 type entityAssignmentOutcome struct {
@@ -305,18 +303,6 @@ func (a *EntityAssignmentAnalysis) UnassignedReads(node identity.ExecutableNode,
 	stages := a.handlerStages(node, event)
 	missing := map[string]struct{}{}
 	for _, stage := range stages {
-		if point.HasGuardCheckIndex {
-			reachable := true
-			for index, check := range handler.Guard.EffectiveChecks() {
-				if index >= point.GuardCheckIndex {
-					break
-				}
-				reachable = reachable && workflowexpr.ConditionCanHoldAtStage(check.Check, stage, true)
-			}
-			if !reachable {
-				continue
-			}
-		}
 		facts := a.beforeReadInStages(node, event, handler, point, []string{stage})
 		for _, path := range workflowexpr.RequiredEntityReferencesAtStage(expression, EntityAssignmentPresencePaths(facts), stage) {
 			missing[path] = struct{}{}
@@ -404,7 +390,7 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		return point == nil || point.Step != step || !point.FanOut
 	}
 	for _, step := range OrderedSteps {
-		if point != nil && point.Step == step && !point.HasWriteIndex && !point.FanOut && !point.RuleCompute && !point.HasGuardCheckIndex && !point.PolicyCompute {
+		if point != nil && point.Step == step && !point.HasWriteIndex && !point.FanOut && !point.RuleCompute && !point.PolicyCompute {
 			if outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == step {
 				if point.Condition {
 					for _, condition := range outcome.conditions[:len(outcome.conditions)-1] {
@@ -422,11 +408,8 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 				assign(handler.Query.StoreAs)
 			}
 		case StepGuard:
-			for index, check := range handler.Guard.EffectiveChecks() {
-				if point != nil && point.HasGuardCheckIndex && point.GuardCheckIndex == index {
-					return facts
-				}
-				assume(check.Check, true)
+			if handler.Guard != nil {
+				assume(handler.Guard.Check, true)
 			}
 		case StepFilter:
 			if handler.Filter != nil {
@@ -565,12 +548,7 @@ func handlerRuleUnconditional(rule c.HandlerRuleEntry) bool {
 }
 
 func entityAssignmentGuardAllows(handler c.SystemNodeEventHandler, stage string) bool {
-	for _, check := range handler.Guard.EffectiveChecks() {
-		if !workflowexpr.ConditionCanHoldAtStage(check.Check, stage, true) {
-			return false
-		}
-	}
-	return true
+	return handler.Guard == nil || workflowexpr.ConditionCanHoldAtStage(handler.Guard.Check, stage, true)
 }
 
 func entityAssignmentOutcomeAllows(outcome entityAssignmentOutcome, stage string) bool {

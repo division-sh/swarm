@@ -1,18 +1,15 @@
 gather:
-  execution_type: system_node
-  subscribes_to: [batch.opened, item.reported]
-  event_handlers:
-    batch.opened:
-      data_accumulation:
-        writes:
-          - {source_field: batch_id, target_field: batch_id}
-          - {source_field: expected_item_ids, target_field: expected_item_ids}
-      advances_to: awaiting
-    item.reported:
-      join:
-        stage: awaiting
-        members: {from: state.expected_item_ids, by: payload.item_id}
-        output: payload.value
-        on_complete: {advances_to: complete}
-        deadline: {after: 5m, from: stage_entry}
-        on_deadline: {advances_to: failed}
+  batch.opened:
+    data_accumulation:
+      writes:
+        - {source_field: batch_id, target_field: batch_id}
+        - {source_field: expected_item_ids, target_field: expected_item_ids}
+    advances_to: awaiting
+  item.reported:
+    join:
+      stage: awaiting
+      members: {from: state.expected_item_ids, by: payload.item_id}
+      output: payload.value
+      on_complete: {advances_to: complete}
+      deadline: {after: 5m, from: stage_entry}
+      on_deadline: {advances_to: failed}

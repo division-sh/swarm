@@ -17,7 +17,7 @@ func TestImportedActivitySchemaClassificationConsumesEffectiveSource(t *testing.
 					Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "send_review"},
 				}},
 			}
-			nodes := map[string]runtimecontracts.SystemNodeContract{"sender": {ExecutionType: "system_node", EventHandlers: handlers}}
+			nodes := map[string]runtimecontracts.SystemNodeContract{"sender": {EventHandlers: handlers}}
 			bundle := &runtimecontracts.WorkflowContractBundle{Nodes: nodes}
 			base := semanticviewtest.WrapRootAgents(bundle)
 			if flow != "." {

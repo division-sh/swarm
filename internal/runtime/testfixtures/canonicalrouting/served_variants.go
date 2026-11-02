@@ -22,36 +22,30 @@ stages:
   waiting: {}
   done: {final: true}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    item.received:
-      advances_to: processed
-      emit:
-        event: item.processed
-        fields:
-          item_id: payload.item_id
-`, `    item.received:
-      rules:
-        - when: payload.item_id != 'emit'
-          advances_to: waiting
-        - when: payload.item_id == 'emit'
-          emit:
-            event: item.processed
-            fields:
-              item_id: payload.item_id
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `  item.received:
+    advances_to: processed
+    emit:
+      event: item.processed
+      fields:
+        item_id: payload.item_id
+`, `  item.received:
+    rules:
+      - when: payload.item_id != 'emit'
+        advances_to: waiting
+      - when: payload.item_id == 'emit'
+        emit:
+          event: item.processed
+          fields:
+            item_id: payload.item_id
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `item-observer:
-  execution_type: system_node
-  subscribes_to: [item.processed]
-  event_handlers:
-    item.processed:
-      advances_to: done
+  item.processed:
+    advances_to: done
 `, `item-observer:
-  execution_type: system_node
-  subscribes_to: [item.processed]
-  event_handlers:
-    item.processed:
-      rules:
-        - when: has(payload.item_id) && payload.item_id == 'review'
-          advances_to: done
+  item.processed:
+    rules:
+      - when: has(payload.item_id) && payload.item_id == 'review'
+        advances_to: done
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.received\n", "    - item.received\n    - item.processed\n")
 	return root
@@ -70,7 +64,6 @@ func CopyRootIngressServedDecisionControl(t testing.TB) string {
   awaiting_review:
     gate:
       decision: launch_review
-      title: Launch review
       context:
         environment: "'staging'"
       outcomes:
@@ -124,7 +117,7 @@ pins:
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - external.observed\n", "    - external.observed\n    - fork.source_message\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed]\n", "outputs: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
 	removeClosedVariantFiles(t, root, "fork-source/state.yaml")
-	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    fork.source_message:\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  fork.source_message:\n    advances_to: active\n  item.processed:\n    advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed:\n", "external.observed:\nfork.source_message:\n  note: text\n")
 	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
   role: researcher
@@ -171,7 +164,7 @@ pins:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
 	removeClosedVariantFiles(t, root, "hold/state.yaml")
-	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    item.agent_hold:\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  item.agent_hold:\n    advances_to: active\n  item.processed:\n    advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
 	writeClosedVariantFile(t, root, "hold/agents.yaml", `load-agent:
   role: load_agent
@@ -238,24 +231,21 @@ opco.product_initialization_requested:
 `)
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.create_requested, opco.product_initialization_requested, opco.product_review_requested]
-  event_handlers:
-    opco.create_requested: {}
-    opco.product_initialization_requested:
-      data_accumulation:
-        source_event: opco.product_initialization_requested
-        writes:
-          - source_field: product_id
-            target_field: product_id
-      advances_to: waiting
-    opco.product_review_requested:
-      data_accumulation:
-        source_event: opco.product_review_requested
-        writes:
-          - source_field: note
-            target_field: note
-      advances_to: ready
+  opco.create_requested: {}
+  opco.product_initialization_requested:
+    data_accumulation:
+      source_event: opco.product_initialization_requested
+      writes:
+        - source_field: product_id
+          target_field: product_id
+    advances_to: waiting
+  opco.product_review_requested:
+    data_accumulation:
+      source_event: opco.product_review_requested
+      writes:
+        - source_field: note
+          target_field: note
+    advances_to: ready
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `    - opco.spinup_requested
   outputs:
@@ -309,28 +299,21 @@ component_scaffold.spawn_requested:
 `)
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
-  execution_type: system_node
-  subscribes_to: [opco.create_requested, opco.product_initialization_requested]
-  produces: [component_scaffold.spawn_requested]
-  event_handlers:
-    opco.create_requested: {}
-    opco.product_initialization_requested:
-      data_accumulation:
-        source_event: opco.product_initialization_requested
-        writes:
-          - source_field: product_id
-            target_field: product_id
-      emit:
-        event: component_scaffold.spawn_requested
-        fields:
-          product_id: payload.product_id
-      advances_to: spawning
+  opco.create_requested: {}
+  opco.product_initialization_requested:
+    data_accumulation:
+      source_event: opco.product_initialization_requested
+      writes:
+        - source_field: product_id
+          target_field: product_id
+    emit:
+      event: component_scaffold.spawn_requested
+      fields:
+        product_id: payload.product_id
+    advances_to: spawning
 component-scaffold:
-  execution_type: system_node
-  subscribes_to: [component_scaffold.spawn_requested]
-  event_handlers:
-    component_scaffold.spawn_requested:
-      advances_to: ready
+  component_scaffold.spawn_requested:
+    advances_to: ready
 `)
 	return root
 }
@@ -377,30 +360,23 @@ opco.create_requested:
   instance_id: text
   product_id: text
 `)
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    item.processed:\n      advances_to: done\n", `    item.processed:
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  item.processed:\n    advances_to: done\n", `    item.processed:
       advances_to: done
 portfolio-bootstrap:
-  execution_type: system_node
-  subscribes_to: [opco.bootstrap_requested]
-  event_handlers:
-    opco.bootstrap_requested:
-      data_accumulation:
-        source_event: opco.bootstrap_requested
-        writes:
-          - source_field: owner
-            target_field: owner
-      advances_to: waiting
+  opco.bootstrap_requested:
+    data_accumulation:
+      source_event: opco.bootstrap_requested
+      writes:
+        - source_field: owner
+          target_field: owner
+    advances_to: waiting
 portfolio-node:
-  execution_type: system_node
-  subscribes_to: [opco.spinup_requested]
-  produces: [opco.create_requested]
-  event_handlers:
-    opco.spinup_requested:
-      emit:
-        event: opco.create_requested
-        fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
-      advances_to: done
+  opco.spinup_requested:
+    emit:
+      event: opco.create_requested
+      fields:
+        instance_id: payload.instance_id
+        product_id: payload.product_id
+    advances_to: done
 `)
 }

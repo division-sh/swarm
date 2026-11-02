@@ -1,14 +1,10 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: []
-  event_handlers:
-    item.received:
-      rules:
-        - when: payload.kind == 'a'
-          data_accumulation:
-            writes:
-              - value
+  item.received:
+    rules:
+      - when: payload.kind == 'a'
+        data_accumulation:
+          writes:
+            - value
   state_schema:
     fields:
       value: integer

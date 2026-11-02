@@ -48,8 +48,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		Joins:                  nil,
 		Loops:                  deriveWorkflowLoopPlans(bundle, nil),
 		Gates:                  deriveWorkflowGatePlans(bundle),
-		Guards:                 deriveWorkflowGuardEntries(bundle),
-		GuardByID:              map[string]GuardActionEntry{},
 		FlowNamespace:          map[string]string{},
 		FlowPrefix:             map[string]string{},
 		FlowRules:              map[string]string{},
@@ -80,7 +78,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	if err := loadDurableDataDeclarations(bundle); err != nil {
 		return err
 	}
-	semantics.Guards = appendPlatformBuiltinGuardEntries(semantics.Guards, bundle.Platform.BuiltinHooks.Guards)
 	semantics.RootAgentFacts = bundle.RootRequiredAgentFacts()
 	if bundle.RootSchema != nil {
 		var err error
@@ -95,11 +92,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		semantics.flowOutputEventPins["."], err = compileFlowOutputPins(bundle, ".", ".", rootSchemaFile, bundle.RootSchema.Pins.Outputs.EventPins)
 		if err != nil {
 			return fmt.Errorf("compile root output pins: %w", err)
-		}
-	}
-	for _, entry := range semantics.Guards {
-		if id := strings.TrimSpace(entry.ID); id != "" {
-			semantics.GuardByID[id] = entry
 		}
 	}
 	for flowID, schema := range bundle.effectiveChildFlowSchemas() {
@@ -382,46 +374,6 @@ func entityContractsToLegacyEntitySchema(entities EntityContractsDocument) Entit
 	})
 	return EntitySchema{Groups: groups}
 }
-func deriveWorkflowGuardEntries(bundle *WorkflowContractBundle) []GuardActionEntry {
-	if bundle == nil {
-		return nil
-	}
-	seen := map[string]GuardActionEntry{}
-	for _, record := range bundle.ScopedNodeRecords() {
-		node := record.Entry
-		for _, eventType := range sortedContractKeys(node.EventHandlers) {
-			handler := node.EventHandlers[eventType]
-			if handler.Guard == nil {
-				continue
-			}
-			id := strings.TrimSpace(handler.Guard.ID)
-			if id == "" {
-				continue
-			}
-			seen[id] = GuardActionEntry{
-				ID:        id,
-				Check:     strings.TrimSpace(handler.Guard.Check),
-				PolicyRef: strings.TrimSpace(handler.Guard.PolicyRef),
-			}
-		}
-	}
-	return sortedGuardActionEntries(seen)
-}
-func sortedGuardActionEntries(entries map[string]GuardActionEntry) []GuardActionEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(entries))
-	for id := range entries {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	out := make([]GuardActionEntry, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, entries[id])
-	}
-	return out
-}
 func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
 	if bundle == nil {
 		return nil
@@ -429,7 +381,7 @@ func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTime
 	out := make([]WorkflowTimerContract, 0, 8)
 	indexByID := map[string]int{}
 	addTimer := func(timer WorkflowTimerContract) {
-		timer = normalizeWorkflowSemanticTimer(bundle, timer)
+		timer = normalizeWorkflowSemanticTimer(timer)
 		key := timer.SemanticKey()
 		if key == "" {
 			return
@@ -486,7 +438,7 @@ func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCo
 				if eventType == "" {
 					eventType = WorkflowStageTimerInternalEvent
 				}
-				timerID := stageWorkflowTimerSemanticID(schema.FlowID, row.ID)
+				timerID := stageWorkflowTimerSemanticID(schema.FlowID, row.derivedID(stageID))
 				out = append(out, WorkflowTimerContract{
 					ID:         timerID,
 					Stage:      stageID,
@@ -531,20 +483,18 @@ func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCon
 		}
 		for _, timer := range node.Timers {
 			timer.Node = nodeRef
+			timer.ID = nodeID + "." + strings.TrimSpace(timer.Event)
 			timer.FlowID = ""
 			timer.StageOwned = false
 			if strings.TrimSpace(timer.Owner) == "" {
 				timer.Owner = nodeID
-			}
-			if strings.TrimSpace(timer.Event) == "" {
-				timer.Event = inferWorkflowTimerEvent(bundle, node, timer)
 			}
 			out = append(out, timer)
 		}
 	}
 	return out
 }
-func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer WorkflowTimerContract) WorkflowTimerContract {
+func normalizeWorkflowSemanticTimer(timer WorkflowTimerContract) WorkflowTimerContract {
 	timer.ID = strings.TrimSpace(timer.ID)
 	timer.Stage = strings.TrimSpace(timer.Stage)
 	timer.Event = strings.TrimSpace(timer.Event)
@@ -560,11 +510,6 @@ func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer Workfl
 	timer.Delay = strings.TrimSpace(timer.Delay)
 	timer.StartOn = strings.TrimSpace(timer.StartOn)
 	timer.CancelOn = strings.TrimSpace(timer.CancelOn)
-	if timer.Event == "" && timer.Node.Valid() {
-		if record, ok := bundle.ExecutableNode(timer.Node); ok {
-			timer.Event = inferWorkflowTimerEvent(bundle, record.Entry, timer)
-		}
-	}
 	return timer
 }
 func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) WorkflowTimerContract {
@@ -607,83 +552,6 @@ func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) Workfl
 	}
 	existing.Recurring = existing.Recurring || incoming.Recurring
 	return existing
-}
-func inferWorkflowTimerEvent(bundle *WorkflowContractBundle, node SystemNodeContract, timer WorkflowTimerContract) string {
-	if eventType := strings.TrimSpace(timer.Event); eventType != "" {
-		return eventType
-	}
-	timerID := strings.TrimSpace(timer.ID)
-	if timerID == "" {
-		return ""
-	}
-	candidates := []string{timerID}
-	if !strings.HasPrefix(timerID, "timer.") {
-		candidates = append([]string{"timer." + timerID}, candidates...)
-	}
-	for _, candidate := range candidates {
-		if _, ok := node.EventHandlers[candidate]; ok {
-			return candidate
-		}
-	}
-	for _, candidate := range candidates {
-		if workflowTimerEventDefined(bundle, candidate) {
-			return candidate
-		}
-	}
-	for _, subscribed := range EffectiveSystemNodeSubscriptions(node) {
-		subscribed = strings.TrimSpace(subscribed)
-		if subscribed == "" {
-			continue
-		}
-		for _, candidate := range candidates {
-			if subscribed == candidate {
-				return candidate
-			}
-		}
-	}
-	return ""
-}
-func workflowTimerEventDefined(bundle *WorkflowContractBundle, eventType string) bool {
-	eventType = strings.TrimSpace(eventType)
-	if bundle == nil || eventType == "" {
-		return false
-	}
-	for scopedKey := range bundle.scopedEvents {
-		if strings.HasSuffix(scopedKey, "::"+eventType) {
-			return true
-		}
-	}
-	if _, ok := bundle.Events[eventType]; ok {
-		return true
-	}
-	return false
-}
-func appendPlatformBuiltinGuardEntries(existing []GuardActionEntry, builtins []struct {
-	ID string `yaml:"id"`
-}) []GuardActionEntry {
-	out := append([]GuardActionEntry{}, existing...)
-	seen := make(map[string]struct{}, len(out))
-	for _, entry := range out {
-		if id := strings.TrimSpace(entry.ID); id != "" {
-			seen[id] = struct{}{}
-		}
-	}
-	for _, builtin := range builtins {
-		id := strings.TrimSpace(builtin.ID)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, GuardActionEntry{
-			ID:              id,
-			Category:        "platform",
-			PlatformBuiltin: id,
-		})
-	}
-	return out
 }
 func rootSchemaInitialStage(root *FlowSchemaDocument) string {
 	if root == nil {

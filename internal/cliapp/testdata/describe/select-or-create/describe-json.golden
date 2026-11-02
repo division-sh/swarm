@@ -154,24 +154,7 @@
     ],
     "consumers": [
       {
-        "id": "endpoint-9020afb6832e4e3c",
-        "direction": "consumer",
-        "kind": "node_handler",
-        "flow_id": "producer",
-        "flow_path": "producer",
-        "event": {
-          "authored": "account.requested",
-          "local": "account.requested",
-          "canonical": "producer/account.requested"
-        },
-        "node_id": "producer-node",
-        "handler_event": "account.requested",
-        "source_file": "producer/nodes.yaml",
-        "source_line": 1,
-        "source_location": "event_handlers.account.requested"
-      },
-      {
-        "id": "endpoint-b1261409d75e2f37",
+        "id": "endpoint-11da17bdaadb1061",
         "direction": "consumer",
         "kind": "node_handler",
         "flow_id": "account",
@@ -185,7 +168,24 @@
         "handler_event": "account.ready",
         "source_file": "account/nodes.yaml",
         "source_line": 1,
-        "source_location": "event_handlers.account.ready"
+        "source_location": "[\"account.ready\"]"
+      },
+      {
+        "id": "endpoint-9e0305557d6d90a1",
+        "direction": "consumer",
+        "kind": "node_handler",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "producer/account.requested"
+        },
+        "node_id": "producer-node",
+        "handler_event": "account.requested",
+        "source_file": "producer/nodes.yaml",
+        "source_line": 1,
+        "source_location": "[\"account.requested\"]"
       }
     ],
     "input_pins": [
@@ -413,52 +413,7 @@
         "requires_runtime_resolution": true
       },
       {
-        "id": "route-8fdf2ccce2d98540",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "account.requested",
-          "local": "account.requested",
-          "canonical": "producer/account.requested"
-        },
-        "producer": {
-          "id": "endpoint-146c807cf716b5e7",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "producer",
-          "flow_path": "producer",
-          "event": {
-            "authored": "account.requested",
-            "local": "account.requested",
-            "canonical": "producer/account.requested"
-          },
-          "pin_name": "account.requested",
-          "source_location": "pins.inputs.account.requested"
-        },
-        "consumer": {
-          "id": "endpoint-9020afb6832e4e3c",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": "producer",
-          "flow_path": "producer",
-          "event": {
-            "authored": "account.requested",
-            "local": "account.requested",
-            "canonical": "producer/account.requested"
-          },
-          "node_id": "producer-node",
-          "handler_event": "account.requested",
-          "source_file": "producer/nodes.yaml",
-          "source_line": 1,
-          "source_location": "event_handlers.account.requested"
-        },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-d91742c5ef967383",
+        "id": "route-913ee71de394103f",
         "scope": "typed_pubsub",
         "event": {
           "authored": "account.ready",
@@ -480,7 +435,7 @@
           "source_location": "pins.inputs.account.ready"
         },
         "consumer": {
-          "id": "endpoint-b1261409d75e2f37",
+          "id": "endpoint-11da17bdaadb1061",
           "direction": "consumer",
           "kind": "node_handler",
           "flow_id": "account",
@@ -494,7 +449,52 @@
           "handler_event": "account.ready",
           "source_file": "account/nodes.yaml",
           "source_line": 1,
-          "source_location": "event_handlers.account.ready"
+          "source_location": "[\"account.ready\"]"
+        },
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
+        },
+        "requires_runtime_resolution": false
+      },
+      {
+        "id": "route-ad90af2aeb210bbd",
+        "scope": "typed_pubsub",
+        "event": {
+          "authored": "account.requested",
+          "local": "account.requested",
+          "canonical": "producer/account.requested"
+        },
+        "producer": {
+          "id": "endpoint-146c807cf716b5e7",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "producer",
+          "flow_path": "producer",
+          "event": {
+            "authored": "account.requested",
+            "local": "account.requested",
+            "canonical": "producer/account.requested"
+          },
+          "pin_name": "account.requested",
+          "source_location": "pins.inputs.account.requested"
+        },
+        "consumer": {
+          "id": "endpoint-9e0305557d6d90a1",
+          "direction": "consumer",
+          "kind": "node_handler",
+          "flow_id": "producer",
+          "flow_path": "producer",
+          "event": {
+            "authored": "account.requested",
+            "local": "account.requested",
+            "canonical": "producer/account.requested"
+          },
+          "node_id": "producer-node",
+          "handler_event": "account.requested",
+          "source_file": "producer/nodes.yaml",
+          "source_line": 1,
+          "source_location": "[\"account.requested\"]"
         },
         "typed_pubsub": {
           "match": "exact",

@@ -7,12 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-var guardOnFailFieldOptions = map[string]struct{}{"escalate": {}}
-
-var guardOnFailEscalateFieldOptions = map[string]struct{}{
-	"event": {}, "from": {}, "fields": {},
-}
-
 var fanOutFieldOptions = map[string]struct{}{
 	"items_from": {}, "as": {}, "identity": {}, "max_items": {}, "emit": {},
 }
@@ -123,51 +117,26 @@ func nodeValueStringSequence(value yamlsource.Value, owner string) ([]string, er
 	return out, nil
 }
 
-func projectNodeScalarFields(fields map[string]yamlsource.Value, node *SystemNodeContract) error {
-	if err := nodeValueTexts(fields, map[string]*string{
-		"description": &node.Description, "execution_type": &node.ExecutionType,
-		"state_table": &node.StateTable,
-	}, false); err != nil {
-		return err
-	}
-	for _, entry := range []struct {
-		key    string
-		target *[]string
-	}{
-		{"subscribes_to", &node.SubscribesTo},
-		{"produces", &node.Produces},
-	} {
-		value, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		items, err := nodeValueStringSequence(value, entry.key)
-		if err != nil {
-			return err
-		}
-		*entry.target = items
-	}
-	_, node.ProducesDeclared = fields["produces"]
-	return nil
-}
-
 var nodeTimerFields = map[string]struct{}{
-	"id": {}, "stage": {}, "event": {}, "owner": {}, "action": {},
+	"stage": {}, "event": {}, "owner": {}, "action": {},
 	"cancellation": {}, "delay": {}, "start_on": {}, "cancel_on": {}, "recurring": {},
 }
 
 func projectNodeTimerValue(value yamlsource.Value) (WorkflowTimerContract, error) {
 	fields, err := nodeValueFields(value, "timer", nodeTimerFields)
 	if err != nil {
-		return WorkflowTimerContract{}, err
+		return WorkflowTimerContract{}, fmt.Errorf("DIALECT-TIMER: %w; timer identity derives from its node and event", err)
+	}
+	if _, present := fields["event"]; !present {
+		return WorkflowTimerContract{}, fmt.Errorf("DIALECT-TIMER: timer at %s requires event; identity derives from its node and event", value.Location())
 	}
 	var timer WorkflowTimerContract
 	if err := nodeValueTexts(fields, map[string]*string{
-		"id": &timer.ID, "stage": &timer.Stage, "event": &timer.Event,
+		"stage": &timer.Stage, "event": &timer.Event,
 		"owner": &timer.Owner, "action": &timer.Action,
 		"cancellation": &timer.Cancellation, "delay": &timer.Delay,
 		"start_on": &timer.StartOn, "cancel_on": &timer.CancelOn,
-	}, false); err != nil {
+	}, false, "event"); err != nil {
 		return WorkflowTimerContract{}, err
 	}
 	if value, present := fields["recurring"]; present {

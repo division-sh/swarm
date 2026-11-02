@@ -122,7 +122,6 @@ func canonicalPreviewWorkflowModuleForTest(module *previewWorkflowModule) *previ
 	sort.Strings(nodeIDs)
 	rooted := handlerTestWorkflowModuleWithBundle(module.bundle, module.bundle.Semantics.Name, nodeIDs...).(*previewWorkflowModule)
 	rooted.workflowNodes = module.workflowNodes
-	rooted.guardRegistry = module.guardRegistry
 	return rooted
 }
 
@@ -150,7 +149,7 @@ func handlerEngineProjectNodeModule(t *testing.T) *previewWorkflowModule {
 		"schema.yaml":   "stages:\n  queued: {}\n",
 		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
 		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"nodes.yaml":    "node-a:\n  {}\n",
 	})}
 	return module
 }
@@ -382,7 +381,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages:\n  ready: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("node-a:\n  execution_type: system_node\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("node-a:\n  {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
@@ -466,7 +465,7 @@ func VerifyExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEm
 		"scoring/events.yaml": "custom.emitted:\n  label: text\n",
 		"scoring/nodes.yaml": `
 node-a:
-  execution_type: system_node
+  {}
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -675,7 +674,7 @@ func handlerDataAccumulationModule(t *testing.T) *previewWorkflowModule {
 		"schema.yaml":   "stages:\n  queued: {}\n",
 		"state.yaml":    "revision_count: integer\nkill_reason: text\nkill_reason_missing: boolean\n",
 		"events.yaml":   "validation.spec_requested:\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"nodes.yaml":    "node-a:\n  {}\n",
 	})}
 }
 
@@ -835,7 +834,7 @@ kill_reason: text
 		"validation/events.yaml": "candidate.discovered:\nentity.created:\n  revision_count: integer\n",
 		"validation/nodes.yaml": `
 node-a:
-  execution_type: system_node
+  {}
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -929,7 +928,7 @@ request.accepted:
 `,
 		"validation/nodes.yaml": `
 node-a:
-  execution_type: system_node
+  {}
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1002,7 +1001,7 @@ func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChil
 		"review/events.yaml": "candidate.ready:\nreview.created:\n  status: text\n",
 		"review/nodes.yaml": `
 node-a:
-  execution_type: system_node
+  {}
 `,
 	})
 	bundle, ok := semanticview.Bundle(source)
@@ -1059,7 +1058,7 @@ func VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntit
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  event_handlers:\n    finish:\n      advances_to: done\n    custom.trigger: {}\n",
+				"nodes.yaml":    "node-a:\n  finish:\n    advances_to: done\n  custom.trigger: {}\n",
 				"events.yaml":   "finish:\ncustom.trigger:\n",
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
@@ -1224,7 +1223,7 @@ func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  queued: {}\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"nodes.yaml":    "node-a: {}\n",
 		"events.yaml":   "rule.emitted:\nhandler.succeeded:\n",
 	})
 }
@@ -1234,7 +1233,7 @@ func rulesEmitTemplateContractBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  queued: {}\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"nodes.yaml":    "node-a: {}\n",
 		"events.yaml":   "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",
 	})
 }
@@ -1455,10 +1454,7 @@ func VerifyExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelopeF
 	}, handlerTestWorkflowModuleWithBundle(declarativeEmitContractSourceForTest(t, "guard.failed:\n"), ".", "node-a"), entityID, map[string]any{"legacy_entity": "should-not-pass"})
 
 	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{
-			Check:  "payload.score >= 70.0",
-			OnFail: "escalate:guard.failed",
-		},
+		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: "!(payload.score >= 70.0)", Emit: runtimecontracts.EmitSpec{Event: "guard.failed"}}},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress(
 			"",
@@ -1515,19 +1511,13 @@ func VerifyExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloa
 	}, handlerTestWorkflowModuleWithBundle(declarativeEmitContractSourceForTest(t, "guard.failed:\n  score: float\n  reason: text\n"), ".", "node-a"), entityID, map[string]any{"legacy_entity": "should-not-pass"})
 
 	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{
-			Check: "payload.score >= 70.0",
-			OnFailSpec: runtimecontracts.GuardFailureSpec{
-				Action: runtimecontracts.GuardFailureActionEscalate,
-				Escalation: runtimecontracts.EmitSpec{
-					Event: "guard.failed",
-					Fields: map[string]runtimecontracts.ExpressionValue{
-						"score":  runtimecontracts.CELExpression("payload.score"),
-						"reason": runtimecontracts.CELExpression(`"score_below_threshold"`),
-					},
-				},
+		Rules: []runtimecontracts.HandlerRuleEntry{{Condition: "!(payload.score >= 70.0)", Emit: runtimecontracts.EmitSpec{
+			Event: "guard.failed",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"score":  runtimecontracts.CELExpression("payload.score"),
+				"reason": runtimecontracts.CELExpression(`"score_below_threshold"`),
 			},
-		},
+		}}},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress(
 			"",

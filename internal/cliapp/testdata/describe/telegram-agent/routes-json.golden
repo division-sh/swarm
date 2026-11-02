@@ -79,7 +79,7 @@
   ],
   "consumers": [
     {
-      "id": "endpoint-0b26dc17d9ebf69e",
+      "id": "endpoint-18c7357ad6fa8cb2",
       "direction": "consumer",
       "kind": "node_handler",
       "flow_id": "telegram-chat",
@@ -93,7 +93,7 @@
       "handler_event": "telegram.reply_requested",
       "source_file": "telegram-chat/nodes.yaml",
       "source_line": 1,
-      "source_location": "event_handlers.telegram.reply_requested"
+      "source_location": "[\"telegram.reply_requested\"]"
     },
     {
       "id": "endpoint-2e22598188781c48",
@@ -281,52 +281,7 @@
       "requires_runtime_resolution": true
     },
     {
-      "id": "route-5696f501d9010ba4",
-      "scope": "typed_pubsub",
-      "event": {
-        "authored": "telegram.reply_requested",
-        "local": "telegram.reply_requested",
-        "canonical": "telegram-chat/telegram.reply_requested"
-      },
-      "producer": {
-        "id": "endpoint-c3c0776dd9a85de4",
-        "direction": "producer",
-        "kind": "required_agent_role",
-        "flow_id": "telegram-chat",
-        "flow_path": "telegram-chat",
-        "event": {
-          "authored": "telegram.reply_requested",
-          "local": "telegram.reply_requested",
-          "canonical": "telegram-chat/telegram.reply_requested"
-        },
-        "role": "phrase-bot",
-        "source_location": "required_agents.emits"
-      },
-      "consumer": {
-        "id": "endpoint-0b26dc17d9ebf69e",
-        "direction": "consumer",
-        "kind": "node_handler",
-        "flow_id": "telegram-chat",
-        "flow_path": "telegram-chat",
-        "event": {
-          "authored": "telegram.reply_requested",
-          "local": "telegram.reply_requested",
-          "canonical": "telegram-chat/telegram.reply_requested"
-        },
-        "node_id": "telegram-responder",
-        "handler_event": "telegram.reply_requested",
-        "source_file": "telegram-chat/nodes.yaml",
-        "source_line": 1,
-        "source_location": "event_handlers.telegram.reply_requested"
-      },
-      "typed_pubsub": {
-        "match": "exact",
-        "boundary": "same_flow"
-      },
-      "requires_runtime_resolution": false
-    },
-    {
-      "id": "route-74cebad681f052d2",
+      "id": "route-9f7f631c22a2a8d1",
       "scope": "typed_pubsub",
       "event": {
         "authored": "telegram.reply_requested",
@@ -351,7 +306,7 @@
         "source_location": "emit_events"
       },
       "consumer": {
-        "id": "endpoint-0b26dc17d9ebf69e",
+        "id": "endpoint-18c7357ad6fa8cb2",
         "direction": "consumer",
         "kind": "node_handler",
         "flow_id": "telegram-chat",
@@ -365,7 +320,7 @@
         "handler_event": "telegram.reply_requested",
         "source_file": "telegram-chat/nodes.yaml",
         "source_line": 1,
-        "source_location": "event_handlers.telegram.reply_requested"
+        "source_location": "[\"telegram.reply_requested\"]"
       },
       "typed_pubsub": {
         "match": "exact",
@@ -411,6 +366,51 @@
         "source_file": "telegram-chat/agents.yaml",
         "source_line": 1,
         "source_location": "subscriptions"
+      },
+      "typed_pubsub": {
+        "match": "exact",
+        "boundary": "same_flow"
+      },
+      "requires_runtime_resolution": false
+    },
+    {
+      "id": "route-cc57f001d5ce047d",
+      "scope": "typed_pubsub",
+      "event": {
+        "authored": "telegram.reply_requested",
+        "local": "telegram.reply_requested",
+        "canonical": "telegram-chat/telegram.reply_requested"
+      },
+      "producer": {
+        "id": "endpoint-c3c0776dd9a85de4",
+        "direction": "producer",
+        "kind": "required_agent_role",
+        "flow_id": "telegram-chat",
+        "flow_path": "telegram-chat",
+        "event": {
+          "authored": "telegram.reply_requested",
+          "local": "telegram.reply_requested",
+          "canonical": "telegram-chat/telegram.reply_requested"
+        },
+        "role": "phrase-bot",
+        "source_location": "required_agents.emits"
+      },
+      "consumer": {
+        "id": "endpoint-18c7357ad6fa8cb2",
+        "direction": "consumer",
+        "kind": "node_handler",
+        "flow_id": "telegram-chat",
+        "flow_path": "telegram-chat",
+        "event": {
+          "authored": "telegram.reply_requested",
+          "local": "telegram.reply_requested",
+          "canonical": "telegram-chat/telegram.reply_requested"
+        },
+        "node_id": "telegram-responder",
+        "handler_event": "telegram.reply_requested",
+        "source_file": "telegram-chat/nodes.yaml",
+        "source_line": 1,
+        "source_location": "[\"telegram.reply_requested\"]"
       },
       "typed_pubsub": {
         "match": "exact",

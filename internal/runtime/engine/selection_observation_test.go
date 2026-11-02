@@ -51,7 +51,7 @@ func TestExecutorSelectionObservationBeforeEvaluation(t *testing.T) {
 			case "source_stage":
 				req.State.CurrentState = "missing-stage"
 			case "guard_evaluation":
-				req.Handler.Guard = &contracts.GuardSpec{Check: "dependency", OnFail: "reject"}
+				req.Handler.Guard = &contracts.GuardSpec{Check: "dependency"}
 				exec.evaluator = stubEvaluator{errs: map[string]error{"dependency": fault}}
 			}
 			// Request rejection is deliberately before the fixture's authored-ID

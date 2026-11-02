@@ -53,7 +53,7 @@ func TestA2IndependentRetainedJoinProducerAdmitsMembershipAndDeadline(t *testing
 			node := identitytest.RootNode(t, "controller")
 			handler := bundle.Nodes["controller"].EventHandlers["review.requested"]
 			plan, found := semanticview.WorkflowJoinPlanForHandler(semanticview.Wrap(bundle), node, "review.requested")
-			if !found || plan.Spec.ID != "reviews" || plan.Spec.Stage != "working" || plan.Spec.Members.From != "state.members" || plan.Spec.Members.By != "payload.token" || plan.Spec.Output != "payload.token" {
+			if !found || !plan.Node.Equal(node) || plan.HandlerEvent != "review.requested" || plan.Spec.Stage != "working" || plan.Spec.Members.From != "state.members" || plan.Spec.Members.By != "payload.token" || plan.Spec.Output != "payload.token" {
 				t.Fatalf("generated join lost exact membership/output/declaration: %#v", plan)
 			}
 			if plan.Spec.Deadline == nil || plan.Spec.Deadline.After != "1h" || plan.Spec.Deadline.From != contracts.JoinDeadlineFromStageEntry || plan.Spec.OnDeadline.AdvancesTo != "reviewing" || plan.Spec.OnComplete.AdvancesTo != "reviewing" {

@@ -671,7 +671,7 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 		}
 	}
 	if withConsumer {
-		const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram.raw]\n  event_handlers:\n    inbound.telegram.raw: {}\n"
+		const nodes = "observer:\n  inbound.telegram.raw: {}\n"
 		if err := os.WriteFile(filepath.Join(flow, "nodes.yaml"), []byte(nodes), 0o600); err != nil {
 			t.Fatal(err)
 		}

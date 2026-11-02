@@ -40,10 +40,10 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	writeClosedVariantFile(t, root, "events.yaml", eventsYAML+DeploymentFixtureCloseDeclaration)
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-output-singleton-connect\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [root.ready, fixture.close.requested]\n  outputs:\n    - root.ready\n    - fixture.close.requested\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n")
 	removeClosedVariantFiles(t, root, "state.yaml")
-	writeClosedVariantFile(t, root, "nodes.yaml", "close-fixture:\n  execution_type: system_node\n  event_handlers:\n    fixture.close.requested: {advances_to: done}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "close-fixture:\n  fixture.close.requested: {advances_to: done}\n")
 	writeClosedVariantFile(t, root, "consumer/schema.yaml", "# fixture: consumer\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [root.ready, fixture.close.requested]\n")
 	removeClosedVariantFiles(t, root, "consumer/state.yaml")
-	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    root.ready: {}\n    fixture.close.requested: {advances_to: done}\n")
+	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  root.ready: {}\n  fixture.close.requested: {advances_to: done}\n")
 	switch route {
 	case "singleton":
 	case "dynamic":
@@ -56,7 +56,7 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 			t.Fatal(err)
 		}
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "connect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n", "")
-		writeClosedVariantFile(t, root, "nodes.yaml", "root-collector:\n  execution_type: system_node\n  subscribes_to: [root.ready, fixture.close.requested]\n  event_handlers:\n    root.ready: {}\n    fixture.close.requested: {advances_to: done}\n")
+		writeClosedVariantFile(t, root, "nodes.yaml", "root-collector:\n  root.ready: {}\n  fixture.close.requested: {advances_to: done}\n")
 	default:
 		t.Fatalf("unknown selected deployment route %q", route)
 	}
@@ -73,9 +73,7 @@ func CopySelectedOperationPinnedResource(t testing.TB) string {
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "events.yaml"),
 		DeploymentFixtureCloseDeclaration, DeploymentFixtureCloseDeclaration+"fixture.seed.requested:\n")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "nodes.yaml"),
-		"  subscribes_to: [root.ready, fixture.close.requested]\n", "  subscribes_to: [root.ready, fixture.seed.requested, fixture.close.requested]\n")
-	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "nodes.yaml"),
-		"  event_handlers:\n", "  event_handlers:\n    fixture.seed.requested: {}\n")
+		"  root.ready: {}\n", "  fixture.seed.requested: {}\n  root.ready: {}\n")
 	return root
 }
 
@@ -94,13 +92,11 @@ func CopySelectedDeploymentResourceFiniteSingleton(t testing.TB) string {
 		"  inputs: [root.ready]\n  outputs: [fixture.close.requested]\n")
 	writeClosedVariantFile(t, root, "consumer/events.yaml", DeploymentFixtureCloseDeclaration)
 	writeClosedVariantFile(t, root, "consumer/nodes.yaml", `consumer-node:
-  execution_type: system_node
-  event_handlers:
-    root.ready:
-      advances_to: done
-      emit:
-        event: fixture.close.requested
-        fields: {account_id: payload.account_id}
+  root.ready:
+    advances_to: done
+    emit:
+      event: fixture.close.requested
+      fields: {account_id: payload.account_id}
 `)
 	return root
 }

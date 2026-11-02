@@ -44,7 +44,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			finish := "finish-controller:\n  execution_type: system_node\n  subscribes_to: [proof.finished]\n  event_handlers:\n    proof.finished:\n      advances_to: done\n"
+			finish := "finish-controller:\n  proof.finished:\n    advances_to: done\n"
 			if err := os.WriteFile(nodesPath, append(nodes, []byte(finish)...), 0o600); err != nil {
 				t.Fatal(err)
 			}

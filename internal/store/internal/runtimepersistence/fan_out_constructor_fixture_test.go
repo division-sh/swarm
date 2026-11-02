@@ -23,7 +23,7 @@ func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigAct
 		files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 		files[flow+"/schema.yaml"] = "# fixture: " + flow + "\nstages:\n  pending: {}\n"
 		files[flow+"/events.yaml"] = "items.child:\n  ordinal: integer\n"
-		files[flow+"/nodes.yaml"] = "completion:\n  execution_type: system_node\n  event_handlers:\n    items.child: {}\n"
+		files[flow+"/nodes.yaml"] = "completion:\n  items.child: {}\n"
 	}
 	return newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 }
