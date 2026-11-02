@@ -2755,7 +2755,7 @@ contract_formats:
         an actor, but a no-current startup MCP tools/list probe MUST be compared against the concrete startup turn context
         and MUST NOT require generated current-entity tools to appear without a valid current entity.'
       generated_reads:
-        read_entity: 'read_{entity_type}() is the sole generated read for the actor''s flow-owned entity contract. It accepts
+        read_entity: 'read_state() is the sole generated read for the actor''s flow-owned state contract. It accepts
           no arguments and returns its complete declared fields, without the entity envelope or implicit row metadata.'
         missing_values: 'Whole-entity reads omit unassigned fields; explicit zero, false and empty values remain values.
           There is no generated per-field read tool.'
