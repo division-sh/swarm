@@ -79,17 +79,20 @@ func (c *Conversation) recoverInterruptedProviderCall(ctx context.Context, previ
 	if err := json.Unmarshal(recovery.Journal.Call.Messages, &messages); err != nil || len(messages) == 0 {
 		return nil, true, fmt.Errorf("provider resume conversation input is invalid")
 	}
-	role, content, err := recovery.Frame.ProviderInput()
+	if c.seed == nil {
+		return nil, true, fmt.Errorf("provider resume session contract is missing")
+	}
+	if c.causalEvent == nil || recovery.Frame.Turn.Event.ID != c.causalEvent.ID() {
+		return nil, true, fmt.Errorf("provider resume causal event differs from its delivery")
+	}
+	message, err := renderManagedMessage(recovery.Frame, *c.seed, *c.causalEvent)
 	last := messages[len(messages)-1]
-	if err != nil || last.Role != role || last.Content != content || len(last.ToolCalls) != 0 {
+	if err != nil || last.Role != message.Role || last.Content != message.Content || len(last.ToolCalls) != 0 {
 		return nil, true, fmt.Errorf("provider resume input differs from its frozen frame")
 	}
 	c.Session.Messages = append([]Message(nil), messages[:len(messages)-1]...)
 	c.Session.TurnCount = recovery.Journal.Call.TurnCount
 	c.Messages, c.TurnCount = append([]Message(nil), c.Session.Messages...), c.Session.TurnCount
-	if c.causalEvent == nil || recovery.Frame.Turn.Event.ID != c.causalEvent.ID() {
-		return nil, true, fmt.Errorf("provider resume causal event differs from its delivery")
-	}
 	draft := agentframe.TurnDraft{Kind: recovery.Frame.Turn.Kind, Event: *c.causalEvent,
 		ParentFrameID: recovery.Frame.Turn.ParentFrameID}
 	if draft.Kind == agentframe.TurnToolContinuation {

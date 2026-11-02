@@ -2,10 +2,15 @@ package manager
 
 import (
 	"fmt"
+	"slices"
+	"sort"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/google/cel-go/cel"
 )
 
 func admitAgentConfigSubscriptions(source semanticview.Source, cfg *runtimeactors.AgentConfig, localEvents map[string]struct{}) (semanticview.FlowOwnedAgentSubscriptionAdmission, error) {
@@ -24,7 +29,98 @@ func admitAgentConfigSubscriptions(source semanticview.Source, cfg *runtimeactor
 		return semanticview.FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent subscription admission failed: %w", err)
 	}
 	cfg.Subscriptions = admission.PersistedSubscriptions()
+	if err := prepareAgentContent(source, cfg); err != nil {
+		return semanticview.FlowOwnedAgentSubscriptionAdmission{}, err
+	}
 	return admission, nil
+}
+
+func prepareAgentContent(source semanticview.Source, cfg *runtimeactors.AgentConfig) error {
+	cfg.ContentPrograms = nil
+	if cfg.Content == "" {
+		return nil
+	}
+	if source == nil {
+		return fmt.Errorf("agent content requires its admitted source")
+	}
+	declared := false
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		if declaration.OwnerFlowID != cfg.FlowID || declaration.Entry.ResolvedIntent != cfg.Intent {
+			continue
+		}
+		if declaration.Entry.Content != cfg.Content {
+			return fmt.Errorf("agent %s content differs from its captured declaration", cfg.ID)
+		}
+		declared = true
+	}
+	if !declared {
+		return fmt.Errorf("agent %s content requires its captured declaration", cfg.ID)
+	}
+	scope, found := source.FlowScopeByID(cfg.FlowID)
+	if !found {
+		return fmt.Errorf("agent content requires its exact declaring flow")
+	}
+	keys := append([]string(nil), scope.InputEvents...)
+	for key := range scope.Events {
+		keys = append(keys, key)
+	}
+	localEvents := localEventSet(keys)
+	for _, subscription := range cfg.Subscriptions {
+		admission := semanticview.ClassifyAuthoredSubscription(source, semanticview.AuthoredSubscriptionRequest{
+			ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent, ConsumerID: cfg.ID,
+			FlowID: cfg.FlowID, FlowPath: cfg.CanonicalFlowPath(), LocalEvents: localEvents, Authored: subscription,
+		})
+		if !admission.Admitted() {
+			return fmt.Errorf("agent %s content subscription: %s", cfg.ID, admission.Message())
+		}
+		if !admission.Pattern() {
+			keys = append(keys, admission.LocalEvent())
+		}
+	}
+	sort.Strings(keys)
+	keys = slices.Compact(keys)
+	programs := make(map[string]cel.Program, len(keys))
+	for _, key := range keys {
+		if len(cfg.Subscriptions) > 0 && !agentContentSubscriptionMatches(source, cfg, key, localEvents) {
+			continue
+		}
+		schema := semanticview.ResolveEventSchema(source, cfg.FlowID, key)
+		if !schema.HasSchema || !schema.HasStructural {
+			return fmt.Errorf("agent %s content for %s requires its admitted input schema", cfg.ID, key)
+		}
+		program, err := workflowexpr.PrepareAgentContentExpression(cfg.Content, &schema.StructuralType)
+		if err != nil {
+			return fmt.Errorf("agent %s content for %s: %w", cfg.ID, key, err)
+		}
+		local := eventidentity.LocalizeForFlow(cfg.CanonicalFlowPath(), keys, key)
+		programs[local] = program
+	}
+	if len(programs) == 0 {
+		return fmt.Errorf("agent %s content requires a declared input schema", cfg.ID)
+	}
+	cfg.ContentPrograms = programs
+	return nil
+}
+
+func agentContentSubscriptionMatches(source semanticview.Source, cfg *runtimeactors.AgentConfig, event string, localEvents map[string]struct{}) bool {
+	for _, subscription := range cfg.Subscriptions {
+		admission := semanticview.ClassifyAuthoredSubscription(source, semanticview.AuthoredSubscriptionRequest{
+			ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent, ConsumerID: cfg.ID,
+			FlowID: cfg.FlowID, FlowPath: cfg.CanonicalFlowPath(), LocalEvents: localEvents, Authored: subscription,
+		})
+		if admission.Matches(event) {
+			return true
+		}
+	}
+	return false
+}
+
+func localEventSet(keys []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		out[key] = struct{}{}
+	}
+	return out
 }
 
 func admittedSubscriptionEventTypes(admission semanticview.FlowOwnedAgentSubscriptionAdmission) []events.EventType {

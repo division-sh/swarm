@@ -13960,6 +13960,9 @@
       "AgentExecutionFrameInspection": {
         "additionalProperties": false,
         "properties": {
+          "provider_rendering": {
+            "$ref": "#/components/schemas/AgentFramePresenceString"
+          },
           "scope": {
             "enum": [
               "static",
@@ -14007,6 +14010,9 @@
               },
               "bundle_hash": {
                 "pattern": "^bundle-v2:sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "content_projection": {
                 "type": "string"
               },
               "criteria": {
@@ -16783,6 +16789,49 @@
         "properties": {
           "frame": {
             "$ref": "#/components/schemas/AgentExecutionFrameFacts"
+          },
+          "provider_rendering": {
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "oneOf": [
+                  {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "source": {
+                "const": "recorded_provider_request",
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "unresolved",
+                  "recorded"
+                ],
+                "type": "string"
+              },
+              "tools": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "status",
+              "source"
+            ],
+            "type": "object"
           },
           "session": {
             "$ref": "#/components/schemas/ConversationSummary"

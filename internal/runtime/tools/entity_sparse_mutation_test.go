@@ -511,7 +511,10 @@ writer:
 			if err != nil {
 				t.Fatal(err)
 			}
-			fields = whole.(map[string]any)["fields"].(map[string]any)
+			fields, ok = whole.(map[string]any)
+			if !ok {
+				t.Fatalf("declared field read = %T, want field map", whole)
+			}
 			if _, present := fields["label"]; present {
 				t.Fatalf("read fabricated label: %#v", fields)
 			}
@@ -520,7 +523,7 @@ writer:
 			}
 			assertSparseToolContinuation(t, whole, fields)
 			if _, err := exec.Execute(ctx, "read_state_label", map[string]any{}); err == nil {
-				t.Fatal("unassigned typed field read returned a fabricated value")
+				t.Fatal("retired per-field read remained callable")
 			}
 			for _, tc := range []struct {
 				name  string
@@ -695,9 +698,7 @@ func assertSparseToolContinuation(t *testing.T, result any, wantFields map[strin
 		t.Fatal(err)
 	}
 	var batch []struct {
-		Result struct {
-			Fields map[string]any `json:"fields"`
-		} `json:"result"`
+		Result map[string]any `json:"result"`
 	}
 	if err := json.Unmarshal(decoded.ToolResult(), &batch); err != nil || len(batch) != 1 {
 		t.Fatalf("decode canonical tool result: %v", err)
@@ -705,7 +706,7 @@ func assertSparseToolContinuation(t *testing.T, result any, wantFields map[strin
 	// Compare serialized JSON because the persistence reader and execution
 	// normalizer intentionally use different in-memory integer representations.
 	want, _ := json.Marshal(wantFields)
-	got, _ := json.Marshal(batch[0].Result.Fields)
+	got, _ := json.Marshal(batch[0].Result)
 	if string(got) != string(want) {
 		t.Fatalf("tool continuation changed field presence: got=%s want=%s", got, want)
 	}

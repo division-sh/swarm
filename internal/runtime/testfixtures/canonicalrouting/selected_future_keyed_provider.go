@@ -131,11 +131,11 @@ work.assigned:
 def handle(input):
     usage = {"input_tokens": 1, "output_tokens": 1}
     if input["round"] == 1:
-        frame = {}
+        payload = {}
         for message in input["messages"]:
             if message["role"] == "user":
-                frame = json.loads(message["content"])
-        work_id = frame["event"]["payload"]["work_id"]
+                payload = json.loads(message["content"])
+        work_id = payload["work_id"]
         return {
             "calls": [{
                 "name": "emit_work_finished",

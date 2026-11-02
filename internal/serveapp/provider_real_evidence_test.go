@@ -63,7 +63,7 @@ func TestProviderDeepSeekRealModelEvidence(t *testing.T) {
 	}
 }
 
-func realModelSelection(env func(string) string, source func() (string, bool)) (map[string]bool, string) {
+func realModelSelection(env func(string) string, source func() (string, bool), allowedCells ...string) (map[string]bool, string) {
 	if env("CI") != "" || env("GITHUB_ACTIONS") != "" {
 		return nil, "real-model evidence never runs in CI"
 	}
@@ -78,9 +78,12 @@ func realModelSelection(env func(string) string, source func() (string, bool)) (
 		return nil, "reviewer SHA must be an exact lowercase commit"
 	}
 	selected := map[string]bool{}
+	if len(allowedCells) == 0 {
+		allowedCells = realModelCells
+	}
 	for _, cell := range strings.Split(cells, ",") {
 		known := false
-		for _, allowed := range realModelCells {
+		for _, allowed := range allowedCells {
 			known = known || cell == allowed
 		}
 		if !known || selected[cell] {
@@ -140,6 +143,17 @@ func TestProviderRealModelEvidenceSelection(t *testing.T) {
 		}, func() (string, bool) { t.Fatal("invalid transport reached source or credentials"); return "", false })
 		if reason == "" {
 			t.Fatal("unknown transport was admitted")
+		}
+	})
+	t.Run("explicit_cell_scope", func(t *testing.T) {
+		env := map[string]string{realModelSHAEnv: sha, realModelCellsEnv: "argument_free"}
+		read := func(key string) string { return env[key] }
+		source := func() (string, bool) { return sha, true }
+		if _, reason := realModelSelection(read, source); reason == "" {
+			t.Fatal("another journey's cells entered the default selection")
+		}
+		if selected, reason := realModelSelection(read, source, "argument_free"); reason != "" || !selected["argument_free"] {
+			t.Fatal("explicit journey scope was not admitted")
 		}
 	})
 	t.Run("observation_is_allowlisted", func(t *testing.T) {

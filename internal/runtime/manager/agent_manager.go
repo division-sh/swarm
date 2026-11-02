@@ -700,7 +700,13 @@ func bindCanonicalAgentPrompt(source semanticview.Source, cfg *models.AgentConfi
 		return err
 	}
 	if !cfg.Prompt.Empty() {
-		return cfg.ValidateIntentCarrier()
+		if err := cfg.ValidateIntentCarrier(); err != nil {
+			return err
+		}
+		if cfg.Content != "" && len(cfg.ContentPrograms) == 0 {
+			return prepareAgentContent(source, cfg)
+		}
+		return nil
 	}
 	if source == nil {
 		return fmt.Errorf("agent %s cannot reconstruct its derived prompt without a semantic source", strings.TrimSpace(cfg.ID))
@@ -719,12 +725,18 @@ func bindCanonicalAgentPrompt(source semanticview.Source, cfg *models.AgentConfi
 	if matched == nil {
 		return fmt.Errorf("agent %s resolved intent does not match a canonical declaration", strings.TrimSpace(cfg.ID))
 	}
+	if cfg.Content != matched.Entry.Content {
+		return fmt.Errorf("agent %s content differs from its captured declaration", cfg.ID)
+	}
 	bundle, _ := semanticview.Bundle(source)
 	prompt, err := runtimecontracts.AssembleAgentPrompt(bundle, matched.OwnerFlowID, matched.Entry, cfg.Criteria)
 	if err != nil {
 		return fmt.Errorf("agent %s reconstruct derived prompt: %w", strings.TrimSpace(cfg.ID), err)
 	}
 	cfg.Prompt = prompt
+	if err := prepareAgentContent(source, cfg); err != nil {
+		return err
+	}
 	return cfg.ValidateIntentCarrier()
 }
 

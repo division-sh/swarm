@@ -72,11 +72,11 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		}
 		writeClosedVariantFile(t, root, filepath.Join(flow, "nodes.yaml"), nodes)
 		writeClosedVariantFile(t, root, filepath.Join(flow, "agents.yaml"), "writer:\n  role: "+role+"\n  intent: {inline: 'Emit the exact scoped result in the required value field.'}\n  model: regular\n  subscriptions: [work.started]\n  emit_events: [work.result"+extraEmit+"]\n  mock:\n    kind: python\n    module: mocks/writer.py\n")
-		bad := "    if input[\"round\"] == 1 and frame[\"event\"][\"payload\"][\"case_id\"] == \"hostile\":\n        return {\"calls\": [{\"name\": \"emit_foreign_only\", \"arguments\": {}}], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n"
+		bad := "    if input[\"round\"] == 1 and payload[\"case_id\"] == \"hostile\":\n        return {\"calls\": [{\"name\": \"emit_foreign_only\", \"arguments\": {}}], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n"
 		if sibling {
 			bad = ""
 		}
-		writeClosedVariantFile(t, root, filepath.Join(flow, "mocks/writer.py"), "import json\n\ndef handle(input):\n    frame = {}\n    for message in input[\"messages\"]:\n        if message[\"role\"] == \"user\":\n            frame = json.loads(message[\"content\"])\n"+bad+fmt.Sprintf("    if input[\"round\"] == 1:\n        return {\"calls\": [{\"name\": \"emit_work_result\", \"arguments\": {\"value\": %s}}], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n    return {\"text\": \"Complete\", \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n", value))
+		writeClosedVariantFile(t, root, filepath.Join(flow, "mocks/writer.py"), "import json\n\ndef handle(input):\n    payload = {}\n    for message in input[\"messages\"]:\n        if message[\"role\"] == \"user\":\n            payload = json.loads(message[\"content\"])\n"+bad+fmt.Sprintf("    if input[\"round\"] == 1:\n        return {\"calls\": [{\"name\": \"emit_work_result\", \"arguments\": {\"value\": %s}}], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n    return {\"text\": \"Complete\", \"usage\": {\"input_tokens\": 1, \"output_tokens\": 1}}\n", value))
 
 	}
 	rootSchema := "# fixture: managed-driver\npins:\n  inputs:\n    - work.requested\n    - sibling.requested\n    - sibling.ack\n  outputs:\n    - work.requested\n    - sibling.requested\n    - sibling.ack\n    - work.ack\nconnect:\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n"

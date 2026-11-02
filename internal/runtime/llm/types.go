@@ -45,9 +45,10 @@ func DescriptionWithUsage(description, usage string) string {
 }
 
 type Message struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Role           string     `json:"role"`
+	Content        string     `json:"content"`
+	RuntimeContext string     `json:"runtime_context,omitempty"`
+	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type providerToolResult struct {
@@ -55,14 +56,14 @@ type providerToolResult struct {
 	Payload string
 }
 
-// providerToolResults preserves native tool-call linkage while delivering the
-// canonical continuation-frame projection as the provider-visible result.
+// Old stored continuation envelopes retain their original rendering. New
+// batches carry the provider copy alongside the complete internal receipt.
 func providerToolResults(content string) []providerToolResult {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil
 	}
-	if entries, err := agentframe.DecodeProviderToolResults(content); err == nil {
+	if entries, err := agentframe.DecodeProviderToolResults(content); err == nil && strings.HasPrefix(content, "{") {
 		results := make([]providerToolResult, 0, len(entries))
 		for _, entry := range entries {
 			results = append(results, providerToolResult{CallID: entry.CallID, Payload: content})
@@ -80,7 +81,11 @@ func providerToolResults(content string) []providerToolResult {
 		if err != nil {
 			continue
 		}
-		results = append(results, providerToolResult{CallID: strings.TrimSpace(callID), Payload: string(payload)})
+		rendered := string(payload)
+		if text, ok := entry[providerResultContentKey].(string); ok {
+			rendered = text
+		}
+		results = append(results, providerToolResult{CallID: strings.TrimSpace(callID), Payload: rendered})
 	}
 	return results
 }
@@ -238,6 +243,7 @@ type ForkChatSessionRuntime interface {
 // Its payload is sealed so callers cannot substitute transport-local messages.
 type ManagedCall struct {
 	frame             agentframe.Frame
+	rendered          *Message
 	toolRound         *runtimeeffects.CompletionContinuationSnapshot
 	selectedToolRound *Response
 	resume            *runtimeeffects.ProviderCallRecovery
@@ -259,6 +265,9 @@ func (c ManagedCall) ProviderMessage(ctx context.Context, session *Session) (Mes
 }
 
 func (c ManagedCall) providerMessage() (Message, error) {
+	if c.rendered != nil {
+		return *c.rendered, nil
+	}
 	role, content, err := c.frame.ProviderInput()
 	if err != nil {
 		return Message{}, err

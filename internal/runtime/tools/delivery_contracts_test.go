@@ -1,6 +1,7 @@
 package tools_test
 
 import (
+	"strings"
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -44,6 +45,15 @@ metadata: metadata
 	for _, def := range defs {
 		schema, _ := def.Schema.(map[string]any)
 		defByName[def.Name] = schema
+		if def.Name == "read_state" {
+			want := "Read the fields of this state"
+			if got := llm.DeliveredToolDescription(def); got != want {
+				t.Fatalf("model read description=%q want=%q", got, want)
+			}
+		}
+		if strings.Contains(llm.DeliveredToolDescription(def), "ask_human") {
+			t.Fatalf("%s description names ungranted ask_human", def.Name)
+		}
 	}
 
 	for _, legacy := range []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"} {
@@ -66,20 +76,17 @@ metadata: metadata
 
 	readSchema := defByName["read_state"]
 	if readSchema == nil {
-		t.Fatalf("expected read_review_subject definition, got %v", toolDefinitionNames(defs))
+		t.Fatalf("expected read_state definition, got %v", toolDefinitionNames(defs))
 	}
 	props, _ := readSchema["properties"].(map[string]any)
 	if len(props) != 0 {
-		t.Fatalf("read_review_subject should not accept selector/entity_id input, got schema %#v", readSchema)
+		t.Fatalf("read_state should not accept selector/entity_id input, got schema %#v", readSchema)
 	}
 
-	metadataSchema := defByName["read_state_metadata"]
-	if metadataSchema == nil {
-		t.Fatalf("expected read_review_subject_metadata definition, got %v", toolDefinitionNames(defs))
-	}
-	metadataProps, _ := metadataSchema["properties"].(map[string]any)
-	if len(metadataProps) != 0 {
-		t.Fatalf("read_review_subject_metadata should not accept selector/entity_id input, got schema %#v", metadataSchema)
+	for name := range defByName {
+		if strings.HasPrefix(name, "read_state_") {
+			t.Fatalf("per-field read remained visible: %s", name)
+		}
 	}
 }
 

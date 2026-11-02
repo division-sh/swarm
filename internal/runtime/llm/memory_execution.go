@@ -21,14 +21,14 @@ func ensurePlatformSessionID(id string) string {
 }
 
 func requireManagedAcquiredBase(ctx context.Context, session *Session, previousTurnCount int, managed *managedProviderCall) error {
-	if managed == nil || !session.Memory.Enabled {
+	if managed == nil {
 		return nil
 	}
 	surface, ok := managedcapabilities.FromContext(ctx)
-	if !ok || surface.Authority.SessionID != session.ID || session.TurnCount != previousTurnCount || !managed.frame.MatchesSurface(surface) {
+	if !ok || (session.Memory.Enabled && (surface.Authority.SessionID != session.ID || session.TurnCount != previousTurnCount || !managed.frame.MatchesSurface(surface))) {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_completion_acquired_base_changed", "llm-completion-authority", "continue_session", map[string]any{"session_id": session.ID, "surface_session_id": surface.Authority.SessionID, "previous_turn_count": previousTurnCount, "acquired_turn_count": session.TurnCount, "frame_matches_surface": managed.frame.MatchesSurface(surface)})
 	}
-	return nil
+	return prepareEnvironmentFrame(session, surface)
 }
 
 func memoryConversationRecord(session *Session) (ConversationRecord, bool, error) {

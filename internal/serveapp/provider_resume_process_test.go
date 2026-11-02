@@ -37,15 +37,23 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 		TestOwnedMockLifecycleProcessEntry(t)
 		return
 	}
-	for _, profile := range []string{"openai_compatible", "openai_responses", "anthropic"} {
+	for _, scenario := range []string{"openai_compatible", "openai_responses", "anthropic", "projected_initial"} {
+		profile := scenario
+		projected := scenario == "projected_initial"
+		if projected {
+			profile = "openai_compatible"
+		}
 		for _, backend := range []string{"sqlite", "postgres"} {
 			for _, exhaust := range []bool{false, true} {
 				for _, memory := range []bool{true, false} {
 					for _, selected := range []bool{false, true} {
+						if projected && (exhaust || !memory || selected) {
+							continue
+						}
 						if (selected || exhaust) && profile != "openai_compatible" {
 							continue
 						}
-						t.Run(fmt.Sprintf("%s/%s/exhausted_%t/memory_%t/selected_%t", profile, backend, exhaust, memory, selected), func(t *testing.T) {
+						t.Run(fmt.Sprintf("%s/%s/exhausted_%t/memory_%t/selected_%t", scenario, backend, exhaust, memory, selected), func(t *testing.T) {
 							isolateCLIAPIConfigEnv(t)
 							unsetStoreSelectorEnv(t)
 							var toolCalls atomic.Int32
@@ -67,6 +75,14 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 							}))
 							t.Cleanup(tool.Close)
 							source := writeProviderResumeSource(t, tool.URL+"/marker", memory)
+							if projected {
+								path := filepath.Join(source, "hold", "agents.yaml")
+								raw, err := os.ReadFile(path)
+								if err != nil || strings.Count(string(raw), "  model: resume-model\n") != 1 {
+									t.Fatalf("exact resume agent declaration missing: %v", err)
+								}
+								writeWorkflowValidationFixtureFile(t, path, strings.Replace(string(raw), "  model: resume-model\n", "  model: resume-model\n  content: payload.note\n", 1))
+							}
 							interrupted := make(chan llmapi.Request, 1)
 							release := make(chan struct{})
 							var releaseOnce sync.Once
@@ -76,11 +92,14 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 							unblockRetry := func() { retryReleaseOnce.Do(func() { close(retryRelease) }) }
 							path := map[string]string{"anthropic": "/v1/messages", "openai_compatible": "/v1/chat/completions", "openai_responses": "/v1/responses"}[profile]
 							wantCalls, wantTools := 3, int32(1)
+							if projected {
+								wantCalls, wantTools = 2, 0
+							}
 							if selected {
 								wantCalls, wantTools = 5, 2
 							}
 							settledBeforeResume := wantTools
-							if !exhaust {
+							if !exhaust && !projected {
 								wantCalls++
 								wantTools++
 							}
@@ -88,6 +107,24 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 								reply := llmapi.Reply{ID: fmt.Sprintf("provider-resume-%d", request.Number), Model: "resume-model",
 									TextID: fmt.Sprintf("text-%d", request.Number), InputTokens: 8, OutputTokens: 2, TotalTokens: 10}
 								step := request.Number
+								if projected {
+									var wire struct {
+										Messages []struct{ Role, Content string }
+									}
+									if err := json.Unmarshal(request.Body, &wire); err != nil || len(wire.Messages) == 0 || wire.Messages[len(wire.Messages)-1].Role != "user" || wire.Messages[len(wire.Messages)-1].Content != "one interrupted tool round" {
+										return llmapi.Reply{}, fmt.Errorf("initial request lost its exact authored projection")
+									}
+									if step == 1 {
+										interrupted <- request
+										<-release
+										return llmapi.Reply{StatusCode: http.StatusServiceUnavailable}, nil
+									}
+									if step != 2 {
+										return llmapi.Reply{}, fmt.Errorf("unexpected projected provider redispatch %d", request.Number)
+									}
+									reply.Text = "continued exact projected input"
+									return reply, nil
+								}
 								if selected {
 									if step == 2 {
 										reply.Text = "source completed"
@@ -215,6 +252,9 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 								var conversations operatorread.OperatorConversationListResult
 								requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": business.RunID, "agent_id": "load-agent", "flow_instance": "hold"}, &conversations)
 								wantTurns := 3
+								if projected {
+									wantTurns = 1
+								}
 								if exhaust {
 									wantTurns = 1
 								}
@@ -334,7 +374,7 @@ func requireProviderResumeDelivery(t *testing.T, endpoint, eventID string, provi
 				if len(requests) != wantCalls || toolCalls.Load() != wantTools || (len(original.Body) != 0 && !bytes.Equal(requests[original.Number].Body, original.Body)) {
 					t.Fatalf("resume replayed work or changed interrupted request: provider_calls=%d settled_tool_calls=%d", len(requests), toolCalls.Load())
 				}
-				if !strings.Contains(string(requests[wantCalls-1].Body), "settled-marker-1") {
+				if wantTools > 0 && !strings.Contains(string(requests[wantCalls-1].Body), "settled-marker-1") {
 					t.Fatal("resume lost the settled tool result")
 				}
 				return

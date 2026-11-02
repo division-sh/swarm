@@ -401,7 +401,7 @@ func renderCriteriaParamValue(value any) string {
 	}
 }
 
-const runtimeEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nSource: /opt/swarm/source (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
+const runtimeEnvironmentPostamble = "[swarm:environment]\nWorkspace: /workspace (read-write)\nReference data: /data (read-only)\nSource: /opt/swarm/source (read-only)\nUse relative paths for files in the workspace."
 
 // EnvironmentContext is an opaque generated fact so authored prompt content
 // cannot impersonate or suppress the platform-owned environment section.
@@ -422,8 +422,15 @@ func (e EnvironmentContext) validate() error {
 	return nil
 }
 
-// ProviderPrompt is the one provider-visible rendering of resolved intent,
-// selected contract criteria, and generated environment context.
+func (e EnvironmentContext) Text() (string, error) {
+	if err := e.validate(); err != nil {
+		return "", err
+	}
+	return e.text, nil
+}
+
+// ProviderPrompt renders resolved intent and selected contract criteria.
+// Generated environment facts have their own conversation frame.
 type ProviderPrompt struct {
 	intentIdentity   string
 	criteria         []string
@@ -440,7 +447,7 @@ func AssembleProviderPrompt(intent Resolved, criteria []string, prompt DerivedPr
 	if err := environment.validate(); err != nil {
 		return ProviderPrompt{}, err
 	}
-	text := carrier + "\n\n" + environment.text
+	text := carrier
 	return ProviderPrompt{
 		intentIdentity:   intent.Identity,
 		criteria:         append([]string(nil), criteria...),

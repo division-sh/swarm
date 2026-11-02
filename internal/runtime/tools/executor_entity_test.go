@@ -359,14 +359,17 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 	names := roleScopedToolDefinitionMap(defs)
 	for _, name := range []string{
 		"read_state",
-		"read_state_status",
-		"read_state_business_brief",
 		"save_state_business_brief",
 		"update_state_business_brief_summary",
 		"update_state_business_brief_confidence",
 	} {
 		if _, ok := names[name]; !ok {
 			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
+	for name := range names {
+		if strings.HasPrefix(name, "read_state_") {
+			t.Fatalf("retired per-field tool remained visible: %s", name)
 		}
 	}
 	for _, name := range []string{"save_state_status", "update_state_status_value"} {
@@ -483,7 +486,7 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 	))
 
 	validNames := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(validCtx, actor))
-	for _, name := range []string{"read_state", "read_state_status", "save_state_business_brief", "update_state_business_brief_summary"} {
+	for _, name := range []string{"read_state", "save_state_business_brief", "update_state_business_brief_summary"} {
 		if _, ok := validNames[name]; !ok {
 			t.Fatalf("valid current entity filtered %s from %#v", name, sortedRoleScopedToolNames(validNames))
 		}
@@ -555,13 +558,16 @@ func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *
 		t.Run(fmt.Sprintf("entityless=%t", event.EntityID() == ""), func(t *testing.T) {
 			turn := runtimebus.WithInboundEvent(ctx, event)
 			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, currentActor))
-			for _, name := range []string{"read_state", "read_state_status"} {
+			for _, name := range []string{"read_state"} {
 				if _, visible := definitions[name]; !visible {
 					t.Fatalf("receiver projection dropped an eligible triggering entity: tool=%s actor_entity=%q event_entity=%q source=%+v", name, currentActor.EffectiveEntityID(), event.EntityID(), event.SourceRoute())
 				}
 			}
-			value, err := exec.Execute(turn, "read_state_status", map[string]any{})
-			if err != nil || value != "open" {
+			value, err := exec.Execute(turn, "read_state", map[string]any{})
+			if err != nil {
+				t.Fatalf("callable read failed for its exact triggering entity: %v", err)
+			}
+			if value.(map[string]any)["status"] != "open" {
 				t.Fatalf("callable read lost its exact triggering entity: value=%v err=%v", value, err)
 			}
 		})
@@ -775,19 +781,24 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if err != nil {
 		t.Fatalf("read_state with hostile bookkeeping: %v", err)
 	}
-	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
-		t.Fatalf("role-scoped read exposed platform bookkeeping: %#v", whole)
+	for _, field := range []string{"bookkeeping", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "revision"} {
+		if _, exists := whole.(map[string]any)[field]; exists {
+			t.Fatalf("role-scoped read exposed platform field %s: %#v", field, whole)
+		}
 	}
-	got, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{})
-	if err != nil {
-		t.Fatalf("read_state_business_brief: %v", err)
+	if brief, ok := whole.(map[string]any)["business_brief"].(map[string]any); !ok || brief["summary"] != "after" {
+		t.Fatalf("whole read lost declared current fields: %#v", whole)
 	}
+	got := whole.(map[string]any)["business_brief"]
 	brief, ok := got.(map[string]any)
 	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
 		t.Fatalf("read current business_brief = %#v, want updated current entity", got)
 	}
 	if got := persistedEntityField(t, ctx, siblingID, "business_brief"); strings.Contains(got, "after") {
 		t.Fatalf("generated save touched sibling entity: %s", got)
+	}
+	if _, err := exec.Execute(currentCtx, "read_state_business_brief", map[string]any{}); err == nil {
+		t.Fatal("retired per-field read remained callable")
 	}
 
 	if _, err := exec.Execute(currentCtx, "read_state", map[string]any{"entity_id": siblingID}); err == nil {
@@ -868,22 +879,13 @@ func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T)
 	if !ok {
 		t.Fatalf("whole read = %T, want map", whole)
 	}
-	fields, _ := wholeMap["fields"].(map[string]any)
-	mvp, _ := fields["mvp_spec"].(map[string]any)
+	mvp, _ := wholeMap["mvp_spec"].(map[string]any)
 	if asString(mvp["problem_statement"]) != specProblem {
 		t.Fatalf("whole read mvp_spec.problem_statement length = %d, want %d", len(asString(mvp["problem_statement"])), len(specProblem))
 	}
 
-	field, err := exec.Execute(currentCtx, "read_state_mvp_spec", map[string]any{})
-	if err != nil {
-		t.Fatalf("read_state_mvp_spec: %v", err)
-	}
-	fieldMap, ok := field.(map[string]any)
-	if !ok {
-		t.Fatalf("field read = %T, want map", field)
-	}
-	if asString(fieldMap["technical_approach"]) != specApproach {
-		t.Fatalf("field read technical_approach length = %d, want %d", len(asString(fieldMap["technical_approach"])), len(specApproach))
+	if asString(mvp["technical_approach"]) != specApproach {
+		t.Fatalf("whole read technical_approach length = %d, want %d", len(asString(mvp["technical_approach"])), len(specApproach))
 	}
 }
 

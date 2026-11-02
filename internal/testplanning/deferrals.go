@@ -39,7 +39,9 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestResetContainerIntentRealDocker":                             "opt-in real Docker proof",
 	},
 	"internal/serveapp": {
+		"TestGeneratedToolSurfaceDeepSeekEvidence":                        "reviewer-selected synthetic paid schema/description evidence; private host only, never CI credit",
 		"TestProviderDeepSeekRealModelEvidence":                           "reviewer-selected paid evidence on a private test host only; advisory, never CI credit",
+		"TestProviderTurnRenderingDeepSeekEvidence":                       "reviewer-selected paid rendering evidence on a private test host only; advisory, never CI credit",
 		"TestIssue2564H2ServeProcessHelper":                               "subprocess entry point, not a standalone proof",
 		"TestIssue642FutureProviderRecoveryProcessHelper":                 "subprocess entry point, not a standalone proof",
 		"TestSelectedForkDockerGatewayTransportBothStores":                "opt-in real Docker selected-fork transport proof; both-store execution is qualified separately",

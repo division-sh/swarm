@@ -578,7 +578,7 @@ func openAICompatibleChatCompletionsURL(baseURL string) string {
 
 func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
 	role := strings.ToLower(strings.TrimSpace(m.Role))
-	content := strings.TrimSpace(m.Content)
+	content := m.Content
 	switch role {
 	case "assistant":
 		msg := openAICompatibleMessage{Role: "assistant", Content: content}
@@ -597,6 +597,8 @@ func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
 			return nil
 		}
 		return []openAICompatibleMessage{{Role: "system", Content: content}}
+	case "user":
+		return []openAICompatibleMessage{{Role: "user", Content: content}}
 	default:
 		if content == "" {
 			return nil

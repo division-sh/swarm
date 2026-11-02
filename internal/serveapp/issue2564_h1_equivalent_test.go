@@ -130,8 +130,9 @@ func issue2564H1StartServed(t *testing.T, backend, root string, provider *issue2
 
 type issue2564H1Request struct {
 	Messages []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role       string `json:"role"`
+		Content    string `json:"content"`
+		ToolCallID string `json:"tool_call_id"`
 	} `json:"messages"`
 	Tools []struct {
 		Function struct {
@@ -233,12 +234,11 @@ func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if round > 0 {
-		var results []any
-		for i := len(request.Messages) - 1; i >= 0; i-- {
-			if results = issue2564H1ToolResults(request.Messages[i].Content); results != nil {
-				break
-			}
+		start := len(request.Messages)
+		for start > 0 && request.Messages[start-1].Role == "tool" {
+			start--
 		}
+		results := request.Messages[start:]
 		first := (round-1)*issue2564H1Batch + 1
 		last := min(first+issue2564H1Batch-1, issue2564H1Fields)
 		if len(results) != last-first+1 {
@@ -247,12 +247,15 @@ func (p *issue2564H1Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		for i, raw := range results {
 			field := fmt.Sprintf("%s%02d", side, first+i)
-			entry, _ := raw.(map[string]any)
-			result, _ := entry["result"].(map[string]any)
+			var result map[string]any
+			if err := json.Unmarshal([]byte(raw.Content), &result); err != nil {
+				p.refuse(w, fmt.Errorf("invalid H1 result %s/%s: %w", key, field, err))
+				return
+			}
 			entity, _ := result["entity_id"].(string)
 			revision, _ := result["revision"].(float64)
-			if entry["name"] != "save_state_"+field || entry["ok"] != true || result["field"] != field || entity == "" || revision < 1 || revision != float64(int(revision)) {
-				p.refuse(w, fmt.Errorf("unacknowledged H1 scalar %s/%s: %#v", key, field, entry))
+			if raw.ToolCallID != hub+"-"+field || result["field"] != field || entity == "" || revision < 1 || revision != float64(int(revision)) {
+				p.refuse(w, fmt.Errorf("unacknowledged H1 scalar %s/%s: %#v", key, field, result))
 				return
 			}
 			p.mu.Lock()
@@ -672,37 +675,6 @@ func issue2564H1AssertBumpHistory(t *testing.T, rt issue2564ServedFixture, runID
 			t.Fatalf("H1 retained count chain for %s has %d steps, want100", entity, len(chain))
 		}
 	}
-}
-
-// Same canonical-continuation parsing as the read-only H3 helper, scoped here
-// so this exact source can execute on the unmodified baseline production tree.
-func issue2564H1ToolResults(value any) []any {
-	switch v := value.(type) {
-	case map[string]any:
-		if v["kind"] == "tool_continuation" {
-			results, _ := v["tool_result"].([]any)
-			return results
-		}
-		for _, child := range v {
-			if found := issue2564H1ToolResults(child); found != nil {
-				return found
-			}
-		}
-	case []any:
-		for i := len(v) - 1; i >= 0; i-- {
-			if found := issue2564H1ToolResults(v[i]); found != nil {
-				return found
-			}
-		}
-	case string:
-		var decoded any
-		if json.Unmarshal([]byte(strings.TrimPrefix(v, "Tool result:\n")), &decoded) == nil {
-			if _, isString := decoded.(string); !isString {
-				return issue2564H1ToolResults(decoded)
-			}
-		}
-	}
-	return nil
 }
 
 func issue2564H1SchemaProperty(value any, name string) bool {

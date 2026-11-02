@@ -16,9 +16,10 @@ func CopyMailboxNoticeCompletion(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\nnotice.requested:\n  seed: boolean\n")
 	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [notice.requested, observer.requested,")
-	applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), `        if frame["event"]["type"].endswith("observer.requested"):`, `        if frame["event"]["type"].endswith("notice.requested"):
+	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), `(event.type).endsWith("observer.requested") ? "request"`, `(event.type).endsWith("notice.requested") ? "notice" : (event.type).endsWith("observer.requested") ? "request"`)
+	applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), `        if frame["task"] == "request":`, `        if frame["task"] == "notice":
             return {"calls": [{"name": "notify_human", "arguments": {"summary": "Observed notice", "context": {"proof": "mailbox-completion"}}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
-        if frame["event"]["type"].endswith("observer.requested"):`)
+        if frame["task"] == "request":`)
 	return root
 }
 
@@ -70,6 +71,8 @@ pins:
   model: regular
   permissions: [ask_human]
   subscriptions: [observer.requested, human_task.approved, human_task.rejected, human_task.deferred, human_task.expired]
+  content: |-
+    {"task": (event.type).endsWith("observer.requested") ? "request" : "outcome", "payload": payload}
   mock:
     kind: python
     module: mocks/observer.py
@@ -79,7 +82,7 @@ pins:
 def handle(input):
     if input["round"] == 1:
         frame = json.loads(input["messages"][-1]["content"])
-        if frame["event"]["type"].endswith("observer.requested"):
+        if frame["task"] == "request":
             return {"calls": [{"name": "ask_human", "arguments": {"scope": "flow", "category": "review", "description": "Review the observed work."}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
     return {"text": "Observed.", "usage": {"input_tokens": 1, "output_tokens": 1}}
 `)
@@ -107,7 +110,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "    observer.requested: {}\n", "    observer.requested:\n      emit:\n        event: observer.started\n        fields: {seed: payload.seed, deadline_at: payload.deadline_at}\n")
 		writeClosedVariantFile(t, root, "observers/events.yaml", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [observer.started,")
-		applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), "endswith(\"observer.requested\")", "endswith(\"observer.started\")")
+		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "endsWith(\"observer.requested\")", "endsWith(\"observer.started\")")
 	case "root":
 		for _, name := range []string{"nodes.yaml"} {
 			parent, err := os.ReadFile(filepath.Join(root, name))
@@ -169,6 +172,6 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\n  deadline_at: text\n")
 	}
 
-	applyClosedReplacement(t, filepath.Join(root, agentRoot, "mocks/observer.py"), `"description": "Review the observed work."`, `"description": "Review the observed work.", "deadline_at": frame["event"]["payload"]["deadline_at"]`)
+	applyClosedReplacement(t, filepath.Join(root, agentRoot, "mocks/observer.py"), `"description": "Review the observed work."`, `"description": "Review the observed work.", "deadline_at": frame["payload"]["deadline_at"]`)
 	return root
 }

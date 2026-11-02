@@ -20,7 +20,6 @@ type roleScopedEntityToolKind string
 
 const (
 	roleScopedEntityToolReadWhole  roleScopedEntityToolKind = "read_whole"
-	roleScopedEntityToolReadField  roleScopedEntityToolKind = "read_field"
 	roleScopedEntityToolSaveField  roleScopedEntityToolKind = "save_field"
 	roleScopedEntityToolUpdatePath roleScopedEntityToolKind = "update_path"
 )
@@ -90,10 +89,6 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
 		entry.OutputSchema = roleScopedEntityWholeReadOutputSchema(contract)
-	case roleScopedEntityToolReadField:
-		if decl, err := entityruntime.FieldDecl(contract, spec.Field); err == nil {
-			entry.OutputSchema = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, false, map[string]struct{}{})
-		}
 	case roleScopedEntityToolSaveField, roleScopedEntityToolUpdatePath:
 		typeRef := ""
 		refinements := runtimecontracts.SchemaRefinements{}
@@ -169,40 +164,17 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 		}
 		fieldProps[field] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
 	}
-	properties := map[string]any{
-		"entity_id":     map[string]any{"type": "string"},
-		"flow_instance": map[string]any{"type": "string"},
-		"entity_type":   map[string]any{"type": "string"},
-		"current_state": map[string]any{},
-		"fields":        ObjectSchema(fieldProps),
-	}
-	required := []string{"entity_id", "flow_instance", "entity_type", "current_state", "fields"}
-	schema := ObjectSchema(properties, required...)
-	// Keep required null distinct from omission using the existing closed
-	// object alternatives, without adding a tool-schema union interpreter.
-	branches := make([]any, 0, 2)
-	for _, stageType := range []string{"string", "null"} {
-		branch := make(map[string]any, len(properties))
-		for name, property := range properties {
-			branch[name] = property
-		}
-		branch["current_state"] = map[string]any{"type": stageType}
-		branches = append(branches, ObjectSchema(branch, required...))
-	}
-	schema["oneOf"] = branches
-	return schema
+	return ObjectSchema(fieldProps)
 }
 
 func roleScopedEntityToolDescription(spec roleScopedEntityToolSpec) string {
 	switch spec.Kind {
 	case roleScopedEntityToolReadWhole:
-		return "Read this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted."
-	case roleScopedEntityToolReadField:
-		return fmt.Sprintf("Read %s from this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field)
+		return fmt.Sprintf("Read the fields of this %s", spec.EntityType)
 	case roleScopedEntityToolSaveField:
-		return fmt.Sprintf("Save %s on this flow's state. Omitted op or set replaces the whole value; append preserves duplicate list elements; update replaces an existing zero-based list index in fresh current state; set with key replaces a typed map entry. Only schema-declared operations are accepted. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field)
+		return fmt.Sprintf("Save %s on this %s", spec.Field, spec.EntityType)
 	case roleScopedEntityToolUpdatePath:
-		return fmt.Sprintf("Update %s.%s on this flow's state. The target instance is resolved from the trigger event; no entity_id is accepted.", spec.Field, spec.Subpath)
+		return fmt.Sprintf("Update %s.%s on this %s", spec.Field, spec.Subpath, spec.EntityType)
 	default:
 		return "Role-scoped entity tool."
 	}
@@ -218,17 +190,6 @@ func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.
 			Kind:       roleScopedEntityToolReadWhole,
 			EntityType: contract.EntityType,
 		},
-	}
-	for _, field := range entityruntime.FieldNames(contract) {
-		fieldName := roleScopedToolNamePart(field)
-		if fieldName == "" {
-			continue
-		}
-		out["read_"+entityName+"_"+fieldName] = roleScopedEntityToolSpec{
-			Kind:       roleScopedEntityToolReadField,
-			EntityType: contract.EntityType,
-			Field:      field,
-		}
 	}
 	for _, field := range roleScopedWritableFields(source, actor, contract) {
 		fieldName := roleScopedToolNamePart(field)
@@ -461,20 +422,8 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 		if err != nil {
 			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
 		}
-		return materialized, nil
-	case roleScopedEntityToolReadField:
-		materialized, err := materializeEntityStateRow(source, row)
-		if err != nil {
-			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
-		}
 		fields, _ := materialized["fields"].(map[string]any)
-		value, present := fields[spec.Field]
-		if !present {
-			return nil, failures.NewDetail("not_found", "tool-executor", "role_scoped_entity_tool.field", map[string]any{
-				"entity_id": entityID, "field": spec.Field, "reason": "unassigned",
-			})
-		}
-		return value, nil
+		return entityruntime.DeclaredValues(contract, fields), nil
 	case roleScopedEntityToolSaveField:
 		value, ok := payload["value"]
 		if !ok {

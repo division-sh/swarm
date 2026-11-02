@@ -455,8 +455,8 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 }
 
 func toAnthropicMessage(m Message) (anthropicMessage, bool) {
-	content := strings.TrimSpace(m.Content)
-	if content == "" {
+	content := m.Content
+	if content == "" && m.Role != "user" {
 		return anthropicMessage{}, false
 	}
 	role := strings.ToLower(strings.TrimSpace(m.Role))
@@ -465,6 +465,13 @@ func toAnthropicMessage(m Message) (anthropicMessage, bool) {
 		return anthropicMessage{Role: "assistant", Content: content}, true
 	case "tool":
 		// Tool results are normalized as user observations for stateless API calls.
+		if results := providerToolResults(content); len(results) != 0 && strings.HasPrefix(strings.TrimSpace(content), "[") {
+			var out []string
+			for _, result := range results {
+				out = append(out, result.Payload)
+			}
+			return anthropicMessage{Role: "user", Content: strings.Join(out, "\n")}, true
+		}
 		return anthropicMessage{Role: "user", Content: "Tool result:\n" + content}, true
 	default:
 		return anthropicMessage{Role: "user", Content: content}, true

@@ -132,20 +132,21 @@ func snapshotEvaluationValue(value any, seen map[evaluationSnapshotVisit]bool) (
 }
 
 type ValueExpressionOptions struct {
-	DeclaredPolicy   map[string]any
-	KnownPresence    []string
-	AllowBareItem    bool
-	ItemAlias        string
-	AllowJoin        bool
-	RequireBool      bool
-	JoinResultType   runtimecontracts.CatalogTypeReference
-	JoinContext      JoinContext
-	EntityType       *runtimecontracts.ResolvedCatalogType
-	PayloadType      *runtimecontracts.ResolvedCatalogType
-	ItemType         *runtimecontracts.ResolvedCatalogType
-	ResultType       *runtimecontracts.ResolvedCatalogType
-	ResultOptional   bool
-	AllowAccumulated bool
+	AllowAgentEventContext bool
+	DeclaredPolicy         map[string]any
+	KnownPresence          []string
+	AllowBareItem          bool
+	ItemAlias              string
+	AllowJoin              bool
+	RequireBool            bool
+	JoinResultType         runtimecontracts.CatalogTypeReference
+	JoinContext            JoinContext
+	EntityType             *runtimecontracts.ResolvedCatalogType
+	PayloadType            *runtimecontracts.ResolvedCatalogType
+	ItemType               *runtimecontracts.ResolvedCatalogType
+	ResultType             *runtimecontracts.ResolvedCatalogType
+	ResultOptional         bool
+	AllowAccumulated       bool
 }
 
 // ValueResult preserves CEL optional absence without introducing null into the
@@ -204,7 +205,7 @@ func prepareCheckedValueExpression(expression string, opts ValueExpressionOption
 	if !opts.AllowJoin && ExpressionReferencesRoot(expression, "join") {
 		return nil, nil, fmt.Errorf("join.* is only available inside join completion and deadline outcomes")
 	}
-	if err := ValidateEventReferences(expression); err != nil {
+	if err := validateEventReferences(expression, opts.AllowAgentEventContext); err != nil {
 		return nil, nil, err
 	}
 	if err := requireStructuralExpressionRoots(expression, opts); err != nil {
@@ -862,7 +863,11 @@ func skipBracketExpression(expression string, start int) int {
 }
 
 func ValidateEventReferences(expression string) error {
-	invalid := InvalidEventReferences(expression)
+	return validateEventReferences(expression, false)
+}
+
+func validateEventReferences(expression string, allowAgentContext bool) error {
+	invalid := invalidEventReferences(expression, allowAgentContext)
 	if len(invalid) == 0 {
 		return nil
 	}
@@ -870,10 +875,17 @@ func ValidateEventReferences(expression string) error {
 }
 
 func InvalidEventReferences(expression string) []string {
+	return invalidEventReferences(expression, false)
+}
+
+func invalidEventReferences(expression string, allowAgentContext bool) []string {
 	refs, invalid := scanEventReferences(expression)
 	out := make([]string, 0, len(refs)+len(invalid))
 	out = append(out, invalid...)
 	for _, ref := range refs {
+		if allowAgentContext && (ref == "at" || ref == "producer") {
+			continue
+		}
 		if err := events.ValidateEventContextReference(ref); err != nil {
 			out = append(out, err.Error())
 		}

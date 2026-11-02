@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -81,17 +80,13 @@ func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*c
 			if json.Unmarshal(message.Content, &text) != nil {
 				continue
 			}
-			if strings.HasPrefix(text, "Tool result:\n") {
+			if text == "ok" {
 				_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Work finished."}]}`))
 				return
 			}
-			var frame struct {
-				Event struct {
-					Payload map[string]any `json:"payload"`
-				} `json:"event"`
-			}
-			if json.Unmarshal([]byte(text), &frame) == nil && frame.Event.Payload != nil {
-				payload = frame.Event.Payload
+			var input map[string]any
+			if json.Unmarshal([]byte(text), &input) == nil && input["work_id"] != nil {
+				payload = input
 			}
 		}
 		for _, tool := range turn.Tools {

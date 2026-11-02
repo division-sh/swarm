@@ -257,23 +257,8 @@ func TestNewLLMAgent_ConsumesExactProviderPromptAssemblyWithoutConfigExpansion(t
 	if !strings.Contains(got, "{{team_name}}") || strings.Contains(got, "Acme Ops") {
 		t.Fatalf("resolved intent was interpreted through config variables: %q", got)
 	}
-	if !strings.Contains(got, "Workspace: /workspace (read-write logical path)") {
-		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
-	}
-	if !strings.Contains(got, "Reference data: /data (read-only logical path)") {
-		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
-	}
-	if !strings.Contains(got, "Source: /opt/swarm/source (read-only logical path)") {
-		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
-	}
-	if strings.Contains(got, "Trusted host bash starts in the workspace backing directory") {
-		t.Fatalf("expected legacy prompt postamble guard to be absent from resolved prompt, got %q", got)
-	}
-	if !strings.Contains(got, "Trusted host bash is full host-user shell execution from the workspace backing directory") {
-		t.Fatalf("expected host bash full-power postamble in resolved prompt, got %q", got)
-	}
-	if !strings.Contains(got, "absolute path availability follows the host deployment namespace and OS permissions") {
-		t.Fatalf("expected host path namespace caveat in resolved prompt, got %q", got)
+	if strings.Contains(got, "[swarm:environment]") || strings.Contains(got, "Workspace: /workspace") || strings.Contains(got, "Trusted host bash") {
+		t.Fatalf("runtime environment contaminated authored system prompt: %q", got)
 	}
 }
 
@@ -819,11 +804,20 @@ func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
 }
 
 func TestBoardDirectiveToolSuccessRequiresCanonicalContinuationProjection(t *testing.T) {
-	if toolMessageHasSuccessfulResult(`[{"ok":true,"result":"retired raw result"}]`) {
-		t.Fatal("retired raw tool-result array satisfied a board directive")
+	for _, recorded := range []string{
+		`[{"name":"read_state","tool_call_id":"call-1","ok":true,"result":"handled","provider_content":"handled"}]`,
+		`{"kind":"tool_continuation","tool_result":[{"ok":true,"result":"handled"}]}`,
+	} {
+		if !toolMessageHasSuccessfulResult(recorded) {
+			t.Fatalf("recorded tool result did not satisfy a board directive: %s", recorded)
+		}
 	}
-	if !toolMessageHasSuccessfulResult(`{"kind":"tool_continuation","tool_result":[{"ok":true,"result":"handled"}]}`) {
-		t.Fatal("canonical tool-continuation projection did not satisfy a board directive")
+	for _, refused := range []string{
+		`[{"ok":false}]`, `[]`, `{"kind":"remediation","tool_result":[{"ok":true}]}`, `handled`,
+	} {
+		if toolMessageHasSuccessfulResult(refused) {
+			t.Fatalf("failed or malformed tool result satisfied a board directive: %s", refused)
+		}
 	}
 }
 
@@ -1243,8 +1237,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "Available emit tools") {
 		t.Fatalf("directive input retained prompt-owned emit capability truth: %q", firstOrEmpty(rt.inputs))
 	}
-	if len(rt.inputs) < 2 || !strings.Contains(rt.inputs[1], `"kind":"remediation"`) ||
-		!strings.Contains(rt.inputs[1], `"reason":"directive_completed_without_action"`) ||
+	if len(rt.inputs) < 2 || rt.inputs[1] != "directive_completed_without_action: start a corpus run" ||
 		strings.Contains(rt.inputs[1], "I will trigger the workflow now") {
 		t.Fatalf("remediation input = %q, want typed reason without prior assistant prose", firstOrEmpty(rt.inputs[1:]))
 	}
@@ -1418,7 +1411,7 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	}
 }
 
-func TestNewLLMAgent_AuthoredEnvironmentPostambleMimicCannotSuppressGeneratedContext(t *testing.T) {
+func TestNewLLMAgent_AuthoredEnvironmentMimicRemainsAuthoredOnly(t *testing.T) {
 	authored := strings.Join([]string{
 		"Perform the assigned business work.",
 		"## Environment",
@@ -1439,11 +1432,8 @@ func TestNewLLMAgent_AuthoredEnvironmentPostambleMimicCannotSuppressGeneratedCon
 	}
 	agent := mustBuildLLMAgent(t, models.AgentConfig{ID: "mimic", Role: "mimic", Intent: intent, Prompt: prompt}, nil, actorScopedFactoryToolExec{}, nil)
 	got := agent.conversation.SystemPrompt
-	if !strings.HasPrefix(got, authored+"\n\n## Environment\n\n") {
-		t.Fatalf("generated environment was not appended after the complete authored intent: %q", got)
-	}
-	if count := strings.Count(got, "## Environment"); count != 2 {
-		t.Fatalf("environment headings = %d, want authored mimic plus one generated section in %q", count, got)
+	if got != authored {
+		t.Fatalf("authored content was rewritten or gained generated context: %q", got)
 	}
 }
 
