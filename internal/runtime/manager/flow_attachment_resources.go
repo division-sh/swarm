@@ -324,7 +324,11 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		if am.testBeforeDynamicFlowAgentReadiness != nil {
 			am.testBeforeDynamicFlowAgentReadiness()
 		}
-		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		acceptedReadiness, err := am.acceptedReadinessRegistration(ctx, identity)
+		if err != nil {
+			return err
+		}
+		readiness, err := am.lifecycle.executableReadinessForAccepted(ctx, identity, acceptedReadiness)
 		if err != nil {
 			return fmt.Errorf("declared agent %s executable readiness: %w", identity.Description(), err)
 		}

@@ -991,11 +991,11 @@ func (p *preparedAgentRoute) Discard() error {
 	return route.retireAndWait(cleanupCtx, eb.store)
 }
 
-func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) AgentRoutePreparation {
+func (eb *EventBus) PrepareAgentRoute(ctx context.Context, token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) AgentRoutePreparation {
 	if eb == nil || eb.workOwner == nil || !token.Valid() || !admission.ValidForAgent(token.AgentID) {
 		return nil
 	}
-	lifecycleCtx, err := eb.admitSourceArtifactFact(context.Background())
+	lifecycleCtx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return nil
 	}
@@ -1009,7 +1009,7 @@ func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admis
 	ch := make(chan *LocalDelivery, 128)
 	route := newAgentRouteHandle(eb, token, ch, owner)
 	return &preparedAgentRoute{
-		bus: eb, lifecycleCtx: lifecycleCtx, token: token,
+		bus: eb, lifecycleCtx: context.WithoutCancel(lifecycleCtx), token: token,
 		eventTypes: eventTypes, route: route, ch: ch,
 	}
 }
@@ -1017,7 +1017,7 @@ func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admis
 // ReplaceAgentRoute remains the direct exact-generation operation for callers
 // that have no separate durable lifecycle transition.
 func (eb *EventBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *LocalDelivery {
-	prepared := eb.PrepareAgentRoute(token, admission)
+	prepared := eb.PrepareAgentRoute(context.Background(), token, admission)
 	if prepared == nil || prepared.Publish() != nil {
 		return nil
 	}

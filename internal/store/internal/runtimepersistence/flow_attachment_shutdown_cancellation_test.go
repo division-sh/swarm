@@ -168,11 +168,13 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 		}
 	}
 	shutdown := make(chan error, 1)
-	go func() { shutdown <- f.manager.ShutdownWithOptions(manager.ShutdownOptions{Grace: 5 * time.Second}) }()
+	go func() {
+		shutdown <- f.manager.ShutdownWithOptions(manager.ShutdownOptions{Grace: 100 * time.Millisecond})
+	}()
 	select {
 	case <-progressCtx.Done():
 	case <-ctx.Done():
-		t.Fatal("shutdown did not cancel its admitted progress occurrence")
+		t.Fatal("grace expiry did not cancel its admitted progress occurrence")
 	}
 	release()
 	var observed attachmentShutdownProgressObservation
@@ -224,8 +226,8 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 			t.Fatal("shutdown retained cancelled attachment agents")
 		}
 		assertConstructorRows(t, f, backend, 1)
-		if err != nil {
-			t.Fatalf("cleanly abandoned shutdown progress became terminal failure: %v", err)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("cancelled progress did not retain its grace-expiry outcome: %v", err)
 		}
 	case <-ctx.Done():
 		t.Fatal("shutdown did not join its cancelled readiness attempt")

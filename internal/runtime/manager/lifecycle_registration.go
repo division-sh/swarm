@@ -27,7 +27,7 @@ func registrationProcessBinding(store AgentLifecyclePersistence) (ProcessExecuti
 	return owner.ProcessExecutionBinding()
 }
 
-func (c *agentLifecycleCoordinator) resumeAgentRegistrationLocked(ctx context.Context, rec PersistedAgent, revision string, pending *agentRegistration, readinessOwner **agentLifecycleCell) (bool, error) {
+func (c *agentLifecycleCoordinator) resumeAgentRegistrationLocked(ctx context.Context, rec PersistedAgent, revision string, pending *agentRegistration, readinessOwner **agentLifecycleCell, acceptedReadiness bool) (bool, error) {
 	identity := pending.request.Identity
 	if c.outcomeReader == nil {
 		return true, errors.New("agent registration requires its immutable outcome owner")
@@ -43,7 +43,8 @@ func (c *agentLifecycleCoordinator) resumeAgentRegistrationLocked(ctx context.Co
 		delete(c.registrations, identity)
 		return false, nil
 	}
-	if revision != pending.request.ConfigRevision || !rec.Topology.Equal(pending.request.Topology) || c.phase != pending.phase || c.runGeneration != pending.run {
+	grace := pending.phase == runtimeLifecycleRunning && c.registrationWithinShutdownGrace(ctx, acceptedReadiness)
+	if revision != pending.request.ConfigRevision || !rec.Topology.Equal(pending.request.Topology) || c.phase != pending.phase && !grace || c.runGeneration != pending.run {
 		return true, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_unacknowledged_request_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_identity": identity})
 	}
 	store := c.persistence()

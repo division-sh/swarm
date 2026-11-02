@@ -1404,6 +1404,7 @@ func (b *flowActivationTestBus) Unsubscribe(agentID string) {
 func (*flowActivationTestBus) Store() runtimebus.EventStore { return nil }
 func (*flowActivationTestBus) ResetInMemoryState() error    { return nil }
 func (*flowActivationTestBus) PrepareAgentRoute(
+	context.Context,
 	runtimeeffects.LifecycleToken,
 	semanticview.FlowOwnedAgentSubscriptionAdmission,
 ) runtimebus.AgentRoutePreparation {

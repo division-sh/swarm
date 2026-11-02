@@ -224,11 +224,13 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 			t.Fatal("timer acquisition did not reach the shutdown cut")
 		}
 		shutdown := make(chan error, 1)
-		go func() { shutdown <- f.manager.ShutdownWithOptions(manager.ShutdownOptions{Grace: 5 * time.Second}) }()
+		go func() {
+			shutdown <- f.manager.ShutdownWithOptions(manager.ShutdownOptions{Grace: 100 * time.Millisecond})
+		}()
 		select {
 		case <-admittedCtx.Done():
 		case <-time.After(5 * time.Second):
-			t.Fatal("shutdown did not cancel its accepted readiness owner")
+			t.Fatal("grace expiry did not cancel its accepted readiness owner")
 		}
 		releaseShutdown()
 		select {
@@ -239,8 +241,8 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 		}
 		select {
 		case err = <-shutdown:
-			if err != nil {
-				t.Fatalf("owned timer admission refusal became terminal: %v", err)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("cancelled timer acquisition did not retain its grace-expiry outcome: %v", err)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("shutdown did not join exact timer and native attempt settlement")

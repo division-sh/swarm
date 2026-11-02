@@ -879,6 +879,7 @@ func (*sqliteFlowActivationBus) Store() runtimebus.EventStore { return nil }
 func (*sqliteFlowActivationBus) ResetInMemoryState() error { return nil }
 
 func (b *sqliteFlowActivationBus) PrepareAgentRoute(
+	_ context.Context,
 	token runtimeeffects.LifecycleToken,
 	_ semanticview.FlowOwnedAgentSubscriptionAdmission,
 ) runtimebus.AgentRoutePreparation {

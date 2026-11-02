@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -40,10 +39,15 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 		open func(*testing.T) gateRecoveryStoreCase
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		for _, scenario := range []struct {
-			missing  string
-			shutdown bool
-		}{{"source", false}, {"sibling", false}, {"source", true}, {"sibling", true}} {
-			t.Run(fmt.Sprintf("%s/missing_%s/shutdown_%t", backend.name, scenario.missing, scenario.shutdown), func(t *testing.T) {
+			missing     string
+			shutdown    bool
+			withinGrace bool
+		}{{"source", false, false}, {"sibling", false, false}, {"source", true, false}, {"sibling", true, false}, {"source", true, true}, {"sibling", true, true}} {
+			name := fmt.Sprintf("%s/missing_%s/shutdown_%t", backend.name, scenario.missing, scenario.shutdown)
+			if scenario.withinGrace {
+				name += "/within_grace"
+			}
+			t.Run(name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
 				ctx, cancel := context.WithTimeout(withLiveGateExecution(correlation.WithRunID(context.Background(), runID)), 10*time.Second)
@@ -187,7 +191,7 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 					t.Fatalf("unrelated actor borrowed installing census: %v", err)
 				}
 				if scenario.shutdown {
-					provePartialAttachmentShutdownRestart(t, ctx, selected, source, pc, bus, am, grant, releaseProcess, committed, route, event, unhold, finished)
+					provePartialAttachmentShutdownRestart(t, ctx, selected, source, pc, bus, am, grant, releaseProcess, committed, route, event, unhold, finished, scenario.withinGrace)
 					return
 				}
 				stopContinuation := provePartialAttachmentContinuation(t, ctx, selected, bus, am, route, unhold, finished)
@@ -571,10 +575,18 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 	return am, grant, releaseProcess
 }
 
-func provePartialAttachmentShutdownRestart(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source, pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus, am *manager.AgentManager, grant startupownership.LiveGenerationGrant, releaseProcess func(), committed pipeline.CommittedFlowInstanceActivation, route events.DeliveryRoute, event events.Event, release func(), finished <-chan error) {
+func provePartialAttachmentShutdownRestart(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source, pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus, am *manager.AgentManager, grant startupownership.LiveGenerationGrant, releaseProcess func(), committed pipeline.CommittedFlowInstanceActivation, route events.DeliveryRoute, event events.Event, release func(), finished <-chan error, withinGrace bool) {
 	t.Helper()
+	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+	if err := pipelineExternalTestWorkOwnerForSource(t, fact).Fence(); err != nil {
+		t.Fatal(err)
+	}
 	shutdown := make(chan error, 1)
-	go func() { shutdown <- am.Shutdown() }()
+	grace := 100 * time.Millisecond
+	if withinGrace {
+		grace = 5 * time.Second
+	}
+	go func() { shutdown <- am.ShutdownWithOptions(manager.ShutdownOptions{Grace: grace}) }()
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	for am.IsRunning() {
@@ -587,25 +599,40 @@ func provePartialAttachmentShutdownRestart(t *testing.T, ctx context.Context, se
 	if err := am.FinalizeCommittedAgentReadiness(ctx, event, []events.DeliveryRoute{route}); err == nil || errors.Is(err, runtimebus.ErrCommittedAgentRouteTransition) {
 		t.Fatalf("shutdown installation still lent a topology wake: %v", err)
 	}
+	// The Manager's deadline starts before its phase changes above. Keep the
+	// candidate held beyond that deadline, then require the expiry result below.
+	if !withinGrace {
+		select {
+		case <-time.After(grace):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
 	release()
 	select {
 	case err := <-finished:
-		if err == nil {
-			t.Fatal("shutdown crossed partial installation as success")
+		if withinGrace {
+			t.Logf("retained registration caller: %v", err)
+		} else if err == nil {
+			t.Fatalf("partial installation outcome: within_grace=%t err=%v", withinGrace, err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
 	select {
 	case err := <-shutdown:
-		if err == nil || !failures.OnlyBranches(err, func(branch error) bool { return errors.Is(branch, context.Canceled) }) {
-			t.Fatalf("partial shutdown must retain only its owned cancellation: %v", err)
+		if withinGrace && err != nil || !withinGrace && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("partial shutdown must retain its grace-expiry outcome: %v", err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
 	row, found, err := pc.LoadDynamicFlowRuntimeReadiness(ctx, event.RunID(), committed.Plan.Identity.Route())
-	if err != nil || !found || row.AttemptState != "aborted" || row.Phase != pipeline.FlowAttachmentPlanned {
+	wantState, wantPhase := "aborted", pipeline.FlowAttachmentPlanned
+	if withinGrace {
+		wantState, wantPhase = "retired", pipeline.FlowAttachmentReady
+	}
+	if err != nil || !found || row.AttemptState != wantState || row.Phase != wantPhase {
 		t.Fatalf("partial shutdown did not settle exact failed attempt: %+v found=%t err=%v", row, found, err)
 	}
 	if err := am.FinalizeCommittedAgentReadiness(ctx, event, []events.DeliveryRoute{route}); err == nil || errors.Is(err, runtimebus.ErrCommittedAgentRouteTransition) {
@@ -619,32 +646,33 @@ func provePartialAttachmentShutdownRestart(t *testing.T, ctx context.Context, se
 		t.Fatal(err)
 	}
 	releaseProcess()
-	deadline, _ := ctx.Deadline()
-	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
-	nextContext, cancel := context.WithDeadline(withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), event.RunID())), deadline)
-	defer cancel()
-	ctx, original := newPartialAttachmentOriginal(t, nextContext, selected)
-	bus, err = newScopedTestEventBus(t, selected.events, partialAttachmentBusOptions(ctx, source, fact))
-	if err != nil {
-		t.Fatal(err)
-	}
-	pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source}})
-	bus.SetInterceptors(pc)
-	next, nextGrant, _ := newPartialAttachmentManager(t, ctx, selected, original, source, pc, bus, func(cfg actors.AgentConfig) (manager.Agent, error) { return &partialAttachmentAgent{config: cfg}, nil })
-	if err := next.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
-		t.Fatalf("native restart did not converge accepted construction: %v", err)
-	}
-	after, found, err := pc.LoadDynamicFlowRuntimeReadiness(ctx, event.RunID(), committed.Plan.Identity.Route())
-	if err != nil || !found || after.AttemptOrdinal != row.AttemptOrdinal+1 || after.Phase != pipeline.FlowAttachmentReady || after.PlanHash != row.PlanHash {
-		t.Fatalf("restart changed construction or reused aborted attachment: %+v found=%t err=%v", after, found, err)
-	}
-	if err := next.FinalizeCommittedAgentReadiness(ctx, event, []events.DeliveryRoute{route}); err != nil {
-		t.Fatalf("recovered exact actor remained absent: %v", err)
-	}
-	if err := next.Shutdown(); err != nil {
-		t.Fatal(err)
-	}
-	if err := nextGrant.Retire(ctx); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("restart", func(t *testing.T) {
+		deadline, _ := ctx.Deadline()
+		nextContext, cancel := context.WithDeadline(withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), event.RunID())), deadline)
+		defer cancel()
+		ctx, original := newPartialAttachmentOriginal(t, nextContext, selected)
+		bus, err = newScopedTestEventBus(t, selected.events, partialAttachmentBusOptions(ctx, source, fact))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source}})
+		bus.SetInterceptors(pc)
+		next, nextGrant, _ := newPartialAttachmentManager(t, ctx, selected, original, source, pc, bus, func(cfg actors.AgentConfig) (manager.Agent, error) { return &partialAttachmentAgent{config: cfg}, nil })
+		if err := next.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+			t.Fatalf("native restart did not converge accepted construction: %v", err)
+		}
+		after, found, err := pc.LoadDynamicFlowRuntimeReadiness(ctx, event.RunID(), committed.Plan.Identity.Route())
+		if err != nil || !found || after.AttemptOrdinal != row.AttemptOrdinal+1 || after.Phase != pipeline.FlowAttachmentReady || after.PlanHash != row.PlanHash {
+			t.Fatalf("restart changed construction or reused aborted attachment: %+v found=%t err=%v", after, found, err)
+		}
+		if err := next.FinalizeCommittedAgentReadiness(ctx, event, []events.DeliveryRoute{route}); err != nil {
+			t.Fatalf("recovered exact actor remained absent: %v", err)
+		}
+		if err := next.Shutdown(); err != nil {
+			t.Fatal(err)
+		}
+		if err := nextGrant.Retire(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

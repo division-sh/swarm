@@ -1640,6 +1640,18 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	}
 
 	runCtx, runMode, runtimeRunning := am.lifecycle.runSnapshot()
+	acceptedReadiness, err := am.acceptedReadinessRegistration(parent, identity)
+	if err != nil {
+		return replaceExecutionResult{}, err
+	}
+	if trigger == "start" && !runtimeRunning && acceptedReadiness {
+		am.lifecycle.mu.Lock()
+		runtimeRunning = am.lifecycle.registrationWithinShutdownGrace(parent, true)
+		am.lifecycle.mu.Unlock()
+		if runtimeRunning {
+			runCtx = parent
+		}
+	}
 	routeBus := am.lifecycle.routes
 	if runtimeRunning {
 		if routeBus == nil {
@@ -1665,9 +1677,12 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		if runMode == AgentRunModeAuthoritativeDeliveryOnly {
 			routeAdmission = routeAdmission.CarrierOnly()
 		}
-		preparedRoute = routeBus.PrepareAgentRoute(proposedToken, routeAdmission)
+		preparedRoute = routeBus.PrepareAgentRoute(parent, proposedToken, routeAdmission)
 		if preparedRoute == nil {
 			_ = loopWorkLease.Done()
+			if err := parent.Err(); err != nil {
+				return replaceExecutionResult{}, err
+			}
 			return replaceExecutionResult{}, errors.New("failed to prepare generation-owned agent route")
 		}
 	}
@@ -1693,6 +1708,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		topology,
 		cell,
 		proposedToken,
+		acceptedReadiness,
 	)
 	if err != nil {
 		return replaceExecutionResult{}, errors.Join(err, cleanupPrepared())

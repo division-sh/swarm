@@ -497,8 +497,12 @@ func (am *AgentManager) registerExecutableAgentLifecycle(
 	if err != nil {
 		return executableAgentReadiness{}, err
 	}
+	acceptedReadiness, err := am.acceptedReadinessRegistration(ctx, identity)
+	if err != nil {
+		return executableAgentReadiness{}, err
+	}
 	var transitionCell *agentLifecycleCell
-	if err := am.lifecycle.registerExecutionCandidate(ctx, rec, persist, func() (Agent, error) { return am.buildAgent(rec.Config) }, admission, topology, &transitionCell); err != nil {
+	if err := am.lifecycle.registerExecutionCandidate(ctx, rec, persist, func() (Agent, error) { return am.buildAgent(rec.Config) }, admission, topology, &transitionCell, acceptedReadiness); err != nil {
 		return executableAgentReadiness{}, err
 	}
 	defer am.completeCommittedRouteTransition(transitionCell)
@@ -523,8 +527,12 @@ func (am *AgentManager) ensureExecutableAgentLifecycle(ctx context.Context, iden
 	if err := identity.Validate(); err != nil {
 		return executableAgentReadiness{}, err
 	}
+	acceptedReadiness, err := am.acceptedReadinessRegistration(ctx, identity)
+	if err != nil {
+		return executableAgentReadiness{}, err
+	}
 	for attempt := 0; attempt < 2; attempt++ {
-		readiness, readinessErr := am.lifecycle.executableReadinessByIdentity(identity)
+		readiness, readinessErr := am.lifecycle.executableReadinessForAccepted(ctx, identity, acceptedReadiness)
 		if readinessErr == nil {
 			return readiness, nil
 		}
@@ -536,7 +544,7 @@ func (am *AgentManager) ensureExecutableAgentLifecycle(ctx context.Context, iden
 		if _, err := am.replaceExecutionIdentityConfigWithTopology(transitionCtx, identity, "start", "", nil, am.semanticSource, nil, nil); err != nil {
 			return executableAgentReadiness{}, err
 		}
-		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		readiness, err := am.lifecycle.executableReadinessForAccepted(ctx, identity, acceptedReadiness)
 		if err == nil {
 			return readiness, nil
 		}

@@ -241,8 +241,81 @@ func TestRuntimeAndManagerLeasesRetainExactProcessOwner(t *testing.T) {
 	if got, ok := ProcessFromContext(managerLease.Context()); !ok || got != process {
 		t.Fatalf("manager process owner = %p/%t, want exact owner %p", got, ok, process)
 	}
+	standing, err := manager.BeginStanding(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignRuntime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "foreign-route-owner", BundleHash: "bundle-process-owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignManager, err := NewManagerRunOccurrence(context.Background(), foreignRuntime, ManagerRunIdentity{Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignWork, err := foreignManager.Begin(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(runtimeOwner.Fence(), manager.Fence()); err != nil {
+		t.Fatal(err)
+	}
+	routeIdentity := RouteIdentity{RuntimeEpoch: 1, Agent: agentidentitytest.RootRuntime(t, "retained-registration", "runtime-process-owner"), Generation: 1}
+	cancelled, cancel := context.WithCancel(managerLease.Context())
+	cancel()
+	for _, ctx := range []context.Context{context.Background(), standing.Context(), foreignWork.Context(), cancelled} {
+		if _, err := runtimeOwner.NewRoute(ctx, routeIdentity); !errors.Is(err, ErrAdmissionFenced) {
+			t.Fatalf("fresh/standing/foreign/cancelled route crossed runtime fence: %v", err)
+		}
+	}
+	route, err := runtimeOwner.NewRoute(managerLease.Context(), routeIdentity)
+	if err != nil {
+		t.Fatalf("exact retained registration lost route custody: %v", err)
+	}
+	selected, err := process.NewSelectedFork(context.Background(), SelectedForkIdentity{ExecutionID: "selected-registration", RunID: uuid.NewString(), Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectedManager, err := NewManagerRunOccurrence(context.Background(), selected, ManagerRunIdentity{Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectedWork, err := selectedManager.Begin(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(selected.Fence(), selectedManager.Fence()); err != nil {
+		t.Fatal(err)
+	}
+	for _, ctx := range []context.Context{context.Background(), standing.Context(), foreignWork.Context(), cancelled, managerLease.Context()} {
+		if _, err := selected.NewRoute(ctx, routeIdentity); !errors.Is(err, ErrAdmissionFenced) {
+			t.Fatalf("foreign or unaccepted registration crossed selected fence: %v", err)
+		}
+	}
+	selectedRoute, err := selected.NewRoute(selectedWork.Context(), routeIdentity)
+	if err != nil {
+		t.Fatalf("exact retained selected registration lost route custody: %v", err)
+	}
+	if err := errors.Join(selectedRoute.RetireAndWait(context.Background()), selectedWork.Done()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.NewRoute(context.WithoutCancel(selectedWork.Context()), routeIdentity); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("settled registration lent selected custody: %v", err)
+	}
+	if err := errors.Join(selectedManager.RetireAndWait(context.Background()), selected.RetireAndWait(context.Background())); err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(route.RetireAndWait(context.Background()), standing.Done(), foreignWork.Done(), foreignManager.RetireAndWait(context.Background())); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foreignRuntime.RetireAndWait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if err := managerLease.Done(); err != nil {
 		t.Fatalf("settle manager work: %v", err)
+	}
+	if _, err := runtimeOwner.NewRoute(context.WithoutCancel(managerLease.Context()), routeIdentity); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("settled registration lent route custody: %v", err)
 	}
 	if err := manager.RetireAndWait(context.Background()); err != nil {
 		t.Fatalf("retire manager run: %v", err)

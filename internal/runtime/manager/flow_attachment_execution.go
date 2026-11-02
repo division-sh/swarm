@@ -68,14 +68,22 @@ func (a *dynamicFlowRuntimeReadinessAttempt) wait(ctx context.Context) error {
 
 type readinessRetirementWaitersKey struct{}
 
+func readinessAttemptFromContext(ctx context.Context) *dynamicFlowRuntimeReadinessAttempt {
+	if ctx == nil {
+		return nil
+	}
+	attempt, _ := ctx.Value(readinessRetirementWaitersKey{}).(*dynamicFlowRuntimeReadinessAttempt)
+	return attempt
+}
+
 // Only the owned readiness attempt installs this dependency. The lifecycle
 // owner releases its callers after capturing, not predicting, a joined predecessor.
 func releaseReadinessRetirementWaiters(ctx context.Context, retirement *agentRetirement) {
 	if retirement == nil || (retirement.done == nil && retirement.settled == nil && retirement.leases == nil && !retirement.token.Valid()) {
 		return
 	}
-	attempt, ok := ctx.Value(readinessRetirementWaitersKey{}).(*dynamicFlowRuntimeReadinessAttempt)
-	if !ok {
+	attempt := readinessAttemptFromContext(ctx)
+	if attempt == nil {
 		return
 	}
 	select {
