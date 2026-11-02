@@ -441,7 +441,9 @@ func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origi
 	result := waitConnectorPublicResult(t, process, runID, "send_slack_webhook.succeeded", 1, append(secrets, "redacted-slack-token"))
 	requireConnectorCall(t, slack.SideEffects, "POST", "/api/chat.postMessage", "Bearer after-401-token", map[string]any{"channel": "C-INBOUND", "text": "signed-slack-delivery"})
 	var published []goldenEvent
-	if err := pollRelease(t.Context(), 15*time.Second, func(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 		events, err := listGoldenEvents(ctx, process.rpc, runID)
 		published = nil
 		for _, event := range events {
