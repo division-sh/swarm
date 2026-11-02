@@ -1709,7 +1709,7 @@ func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 			continue
 		}
 		description, _ := tool["description"].(string)
-		if description != "Send a worker/agent.completed event" {
+		if description != "Send a agent.completed event" {
 			return "", fmt.Errorf("MCP flow emit description = %q, want exact actor/flow-scoped definition", description)
 		}
 		wantSchema := map[string]any{
