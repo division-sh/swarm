@@ -237,5 +237,5 @@ func (r connectRoutePlanResolver) materializeKeylessConnect(ctx context.Context,
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
 	}
 	instance := selection.Identity()
-	return pinrouting.ConnectRoutePlanMaterialization{Target: plan.ReceiverRoute(instance.InstancePath, instance.EntityID)}, connectInstanceSelection{FlowInstanceSelection: selection, receiver: plan.ReceiverEndpoint(), identity: instance}, nil
+	return pinrouting.ConnectRoutePlanMaterialization{Target: plan.ReceiverRoute(instance.InstancePath, instance.EntityID)}, connectInstanceSelection{FlowInstanceSelection: selection, receiver: plan.ReceiverEndpoint()}, nil
 }

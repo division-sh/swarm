@@ -92,7 +92,7 @@ func TestA9MissingCreationPlannerCannotBorrowReceiptAuthority(t *testing.T) {
 	owner := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, ""), constructionIndexObservation(t, source, busInternalTestRunID, producer, "")}}}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("no-creation-planner"), "producer/account.ready", "test", "", []byte(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	materialized, decision, handled, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, plan, map[string]string{"payload.account_id": "acct-1"})
-	if err == nil || !handled || !materialized.Failure.Empty() || decision.Activation != nil || decision.identity != (flowidentity.Instance{}) {
+	if err == nil || !handled || !materialized.Failure.Empty() || decision.Activation != nil || decision.Identity() != (flowidentity.Instance{}) {
 		t.Fatalf("receipt authority authorized new construction: %+v %+v handled=%t err=%v", materialized, decision, handled, err)
 	}
 }
@@ -238,14 +238,14 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		ctx := withConnectRoutePlanPreview(constructionIndexContext(t, source))
 		values := map[string]string{"payload.parent_key": parentKey, "payload.leaf_key": "same"}
 		_, selection, _, err := owner.Materialize(ctx, event, parentPlan, values)
-		if err != nil || selection.identity != parents[parentKey] {
+		if err != nil || selection.Identity() != parents[parentKey] {
 			t.Fatalf("parent edge selected another key: %+v err=%v", selection, err)
 		}
-		if err := selectConnectionConstruction(ctx, selection.identity); err != nil {
+		if err := selectConnectionConstruction(ctx, selection.Identity()); err != nil {
 			t.Fatal(err)
 		}
 		materialized, leaf, _, err := owner.Materialize(ctx, event, leafPlan, values)
-		if err != nil || !materialized.Failure.Empty() || leaf.identity != leaves[parentKey] {
+		if err != nil || !materialized.Failure.Empty() || leaf.Identity() != leaves[parentKey] {
 			t.Fatalf("leaf edge lost selected parent: %+v %+v err=%v", materialized, leaf, err)
 		}
 	}

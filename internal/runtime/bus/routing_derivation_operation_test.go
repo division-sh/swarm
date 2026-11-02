@@ -152,7 +152,6 @@ func TestPreparedConstructionBindsCompiledPubsubWithoutRouteMembership(t *testin
 		constructed := ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID)
 		at := time.Unix(1700000000, 0).UTC()
 		decision := connectInstanceSelection{
-			identity: constructed,
 			FlowInstanceSelection: runtimepipeline.FlowInstanceSelection{Activation: &runtimepipeline.FlowInstanceActivationPlan{
 				Identity: constructed,
 				Instance: runtimepipeline.WorkflowInstance{StorageRef: constructed.InstancePath, InstanceID: constructed.InstanceID},

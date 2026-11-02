@@ -480,8 +480,9 @@ func (p RoutePlan) InternalRecipientIDs() []string {
 }
 
 func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest) []RoutePlanLiveRecipient {
-	persisted := make(map[string]struct{}, len(manifest.PersistedRecipients))
-	for _, recipient := range uniqueStrings(manifest.PersistedRecipients) {
+	persistedIDs := deliveryRecipientIDs(persistedDeliveryRecipientCandidates(manifest.LiveRecipients))
+	persisted := make(map[string]struct{}, len(persistedIDs))
+	for _, recipient := range persistedIDs {
 		persisted[recipient] = struct{}{}
 	}
 	candidates := normalizeDeliveryRecipientCandidates(manifest.LiveRecipients)

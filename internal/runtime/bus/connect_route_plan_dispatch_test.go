@@ -2636,7 +2636,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 		t.Fatal(err)
 	}
 	request := runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, ConstructorInput: string(plan.ReceiverLocalEvent()), ResolvedKey: "acct-1", TriggerEvent: evt, Bookkeeping: map[string]any{"last_source_event": evt.ID()}}
-	decision := connectInstanceSelection{identity: instance, KeyMaterial: keys, receiver: plan.ReceiverEndpoint()}
+	decision := connectInstanceSelection{KeyMaterial: keys, receiver: plan.ReceiverEndpoint()}
 	for _, typ := range []reflect.Type{reflect.TypeOf(connectInstanceSelection{}), reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{})} {
 		if typ == reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{}) {
 			if _, retained := typ.FieldByName("Fields"); retained {

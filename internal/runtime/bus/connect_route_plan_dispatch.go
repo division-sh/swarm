@@ -352,16 +352,16 @@ func (r connectRoutePlanResolver) matchConnectPlan(ctx context.Context, evt even
 		}
 	}
 	if !decision.Empty() {
-		if err := selectConnectionConstruction(ctx, decision.identity); err != nil {
+		if err := selectConnectionConstruction(ctx, decision.Identity()); err != nil {
 			return false, err
 		}
 	}
 	if decision.Activation != nil {
-		if route := decision.Route(); route.Valid() {
+		if route := decision.Identity().Route(); route.Valid() {
 			createdRoutes[route] = struct{}{}
 		}
 	}
-	_, routeCreatedInPlan := createdRoutes[decision.Route()]
+	_, routeCreatedInPlan := createdRoutes[decision.Identity().Route()]
 	routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, evt.RunID(), plan, materialized, decision, routeCreatedInPlan)
 	if err != nil {
 		return false, err
@@ -884,7 +884,7 @@ func plannedCreateAgentCarrierIdentity(
 		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity names %q", subscriber.Recipient.ID(), identity.AgentID())
 	}
 	if routeCreatedInPlan {
-		route := decision.Route()
+		route := decision.Identity().Route()
 		if !route.Valid() {
 			return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q has no canonical flow route", subscriber.Recipient.ID())
 		}
