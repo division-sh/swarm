@@ -340,7 +340,7 @@ func (p *receptionistAnthropicDouble) ServeHTTP(w http.ResponseWriter, request *
 	}
 	var body struct {
 		Messages []struct {
-			Content string `json:"content"`
+			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
 	}
 	if err := json.NewDecoder(request.Body).Decode(&body); err != nil || len(body.Messages) == 0 {
@@ -348,7 +348,12 @@ func (p *receptionistAnthropicDouble) ServeHTTP(w http.ResponseWriter, request *
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	content := body.Messages[len(body.Messages)-1].Content
+	var content string
+	if err := json.Unmarshal(body.Messages[len(body.Messages)-1].Content, &content); err != nil {
+		p.t.Errorf("invalid current managed provider input: %v", err)
+		http.Error(w, "invalid current input", http.StatusBadRequest)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if content == "ok" {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -369,7 +374,12 @@ func (p *receptionistAnthropicDouble) ServeHTTP(w http.ResponseWriter, request *
 	chatID, text := turn.Conversation, turn.Text
 	joined := ""
 	for _, message := range body.Messages {
-		joined += message.Content + "\n"
+		var text string
+		if err := json.Unmarshal(message.Content, &text); err == nil {
+			joined += text + "\n"
+		} else {
+			joined += string(message.Content) + "\n"
+		}
 	}
 	p.mu.Lock()
 	for chat, texts := range p.history {
