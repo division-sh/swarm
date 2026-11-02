@@ -867,7 +867,6 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	}
 	workflowOwner := selectedContractTestWorkflowModule{
 		source: loaded.Source, nodes: nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(loaded.Source),
 	}
 	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  workflowOwner,
@@ -954,7 +953,6 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 type selectedContractTestWorkflowModule struct {
 	source semanticview.Source
 	nodes  []runtimepipeline.WorkflowNode
-	guards runtimepipeline.GuardRegistry
 }
 
 func (m selectedContractTestWorkflowModule) SemanticSource() semanticview.Source {
@@ -963,10 +961,6 @@ func (m selectedContractTestWorkflowModule) SemanticSource() semanticview.Source
 
 func (m selectedContractTestWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
-}
-
-func (m selectedContractTestWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {

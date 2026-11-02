@@ -386,10 +386,7 @@ pins:
 amount: 0
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/nodes.yaml", `legacy-writer:
-  execution_type: system_node
-  subscribes_to: [legacy.seen]
-  event_handlers:
-    legacy.seen:
+  legacy.seen:
 `+handler+`      data_accumulation:
         writes:
           - source_field: legacy_id
@@ -413,14 +410,11 @@ pins:
     - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
-  execution_type: system_node
-  subscribes_to: [subject.created]
-  event_handlers:
-    subject.created:
-      data_accumulation:
-        writes:
-          - source_field: display_name
-            target_field: display_name
+  subject.created:
+    data_accumulation:
+      writes:
+        - source_field: display_name
+          target_field: display_name
 `)
 }
 
@@ -486,7 +480,7 @@ func ApplyOverlay(t testing.TB, root, relativePath, additions string) {
 		t.Fatalf("mapping additions for %s must contain one YAML document", path)
 	}
 	additionRoot := additionDoc.Content[0]
-	if yamlNodeContainsAuthoredRouting(additionRoot) {
+	if yamlNodeContainsAuthoredRouting(path, additionRoot) {
 		t.Fatalf("overlay for %s contains routing declarations; consume a canonical route or use an explicit negative mutation", path)
 	}
 	additionsByKey := requireYAMLMapping(t, path, additionRoot)
@@ -501,17 +495,17 @@ func ApplyOverlay(t testing.TB, root, relativePath, additions string) {
 
 func rejectRoutingOverlay(t testing.TB, path, source string) {
 	t.Helper()
-	if err := routingOverlayError(source); err != nil {
+	if err := routingOverlayError(path, source); err != nil {
 		t.Fatalf("overlay for %s: %v", path, err)
 	}
 }
 
-func routingOverlayError(source string) error {
+func routingOverlayError(path, source string) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(strings.TrimLeft(source, "\n")), &doc); err != nil {
 		return fmt.Errorf("parse YAML: %w", err)
 	}
-	if len(doc.Content) == 1 && yamlNodeContainsAuthoredRouting(doc.Content[0]) {
+	if len(doc.Content) == 1 && yamlNodeContainsAuthoredRouting(path, doc.Content[0]) {
 		return fmt.Errorf("contains routing declarations; consume a canonical route or use an explicit negative mutation")
 	}
 	return nil
@@ -570,7 +564,10 @@ func yamlScalar(node *yaml.Node) string {
 	return strings.TrimSpace(node.Value)
 }
 
-func yamlNodeContainsAuthoredRouting(node *yaml.Node) bool {
+func yamlNodeContainsAuthoredRouting(path string, node *yaml.Node) bool {
+	if filepath.Base(path) == "nodes.yaml" && node != nil && node.Kind == yaml.MappingNode && len(node.Content) != 0 {
+		return true
+	}
 	return yamlNodeContainsAuthoredRoutingAt(node, "")
 }
 

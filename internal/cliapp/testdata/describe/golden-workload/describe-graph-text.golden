@@ -25,42 +25,42 @@ flows:
     singleton coordinator: primary_entity=state contained_fields=1
 routing topology: routing-topology/v1
   source authority: projection_only_existing_contract_owners
-  - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
-    typed pub/sub: match=exact boundary=same_flow
   - [typed_pubsub] candidate/candidate.work.requested: candidate.candidate-intake -> candidate.candidate-worker
-    typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] scout/scout.completed: scout.scout-worker -> scout.scout-completion
-    typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] scout.completed: ..scout.completed -> ..scout-collector
     typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] candidate/candidate.completed: candidate.candidate-completion -> ..candidate.completed
     connect: candidate.candidate.completed -> .candidate.completed (schema.yaml:<line>)
     resolution: mode=static target=target
+  - [typed_pubsub] scout/scout.completed: scout.scout-worker -> scout.scout-completion
+    typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] scout.requested: ..search-intake -> scout.scout.requested
     connect: .scout.requested -> scout.scout.requested (schema.yaml:<line>)
     resolution: mode=static target=target
-  - [typed_pubsub] scout/scout.completed: scout.scout-worker -> scout.scout-completion
+  - [typed_pubsub] candidate.completed: ..candidate.completed -> ..candidate-collector
     typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] candidate/candidate.requested: candidate.candidate.requested -> candidate.candidate-intake
+  - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
     typed pub/sub: match=exact boundary=same_flow
   - [typed_pubsub] search.requested: ..search.requested -> ..search-intake
     typed pub/sub: match=exact boundary=same_flow
-  - [typed_pubsub] candidate.completed: ..candidate.completed -> ..candidate-collector
+  - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
     typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] scout/scout.completed: scout.scout-worker -> ..scout.completed
     connect: scout.scout.completed -> .scout.completed (schema.yaml:<line>)
     resolution: mode=static target=target
+  - [typed_pubsub] scout/scout.completed: scout.scout-worker -> scout.scout-completion
+    typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] candidate.requested: ..scout-collector -> candidate.candidate.requested
     connect: .candidate.requested -> candidate.candidate.requested (schema.yaml:<line>)
     resolution: mode=select-or-create target=target field=candidate_id source_kind=payload source=payload.candidate_id derived_from="instance.candidate_id + carries.candidate_id.from"
-  - [typed_pubsub] scout/scout.requested: scout.scout.requested -> scout.scout-intake
-    typed pub/sub: match=exact boundary=same_flow
   - [typed_pubsub] scout/scout.work.requested: scout.scout-intake -> scout.scout-worker
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] scout/scout.requested: scout.scout.requested -> scout.scout-intake
     typed pub/sub: match=exact boundary=same_flow
   - [inter_flow_connect] scout/scout.completed: scout.scout-worker -> ..scout.completed
     connect: scout.scout.completed -> .scout.completed (schema.yaml:<line>)
     resolution: mode=static target=target
-  - [typed_pubsub] candidate/candidate.analyzed: candidate.candidate-worker -> candidate.candidate-completion
+  - [typed_pubsub] scout.completed: ..scout.completed -> ..scout-collector
+    typed pub/sub: match=exact boundary=same_flow
+  - [typed_pubsub] candidate/candidate.requested: candidate.candidate.requested -> candidate.candidate-intake
     typed pub/sub: match=exact boundary=same_flow
   boundary exposures:
     - candidate/candidate.completed: candidate.candidate-completion -> output candidate.candidate.completed
@@ -79,14 +79,14 @@ stage graph:
     edges:
       - collecting -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
       - collecting -> complete (handler.join.on_complete Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg on candidate.completed)
-      - collecting -> failed (handler.join.on_deadline Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg on platform.join_timeout after 2m timer collecting)
+      - collecting -> failed (handler.join.on_deadline Lg.Y2FuZGlkYXRlLWNvbGxlY3Rvcg on platform.join_timeout after 2m timer candidate.completed)
       - collecting -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)
       - pending -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
       - pending -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)
       - scouting -> collecting (handler.advances_to Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
       - scouting -> scouting (handler.advances_to Lg.c2VhcmNoLWludGFrZQ on search.requested)
     joins:
-      - collecting stage collecting members state.candidate_ids by payload.candidate_id output payload.summary deadline 2m from stage_entry (candidate-collector on candidate.completed)
+      - candidate-collector:candidate.completed stage collecting members state.candidate_ids by payload.candidate_id output payload.summary deadline 2m from stage_entry (candidate-collector on candidate.completed)
     fan_out:
       - pending,scouting,collecting ->xN candidate.requested items_from payload.candidate_ids as candidate_id identity candidate_id max_items 10 (handler.fan_out Lg.c2NvdXQtY29sbGVjdG9y on scout.completed)
   flow candidate (candidate):

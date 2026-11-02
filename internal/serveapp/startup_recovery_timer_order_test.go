@@ -147,19 +147,15 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
 					writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   warming:
     timers:
-      - id: warmup
-        after: 1ns
+      - after: 1ns
         advances_to: review
   review:
     gate:
       decision: lifecycle_ready
-      title: Confirm lifecycle readiness
       outcomes:
         approve:
-          label: Continue
           advances_to: serving
         reject:
-          label: Retire
           advances_to: retired
   serving: {}
   retired:

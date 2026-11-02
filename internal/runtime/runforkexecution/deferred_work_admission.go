@@ -157,7 +157,7 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 				return nil, fmt.Errorf("selected contract fan_out declaration: %w", identityErr)
 			}
 			selectedJoin, err := timeridentity.NewFanOutDeliveryJoinRef(
-				sourceJoin.Node(), sourceJoin.HandlerEvent(), sourceJoin.JoinID(),
+				sourceJoin.Node(), sourceJoin.HandlerEvent(),
 				fanOutDeclaration,
 				selectedRef.BundleHash, selectedRef.SemanticDigest,
 			)
@@ -169,7 +169,7 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 				return nil, err
 			}
 			if _, ok := semanticview.WorkflowJoinPlanForRef(source, selectedJoin.Declaration()); !ok {
-				return nil, fmt.Errorf("selected contract changed fan_out delivery join declaration %s/%s", sourceJoin.NodeID(), sourceJoin.JoinID())
+				return nil, fmt.Errorf("selected contract changed fan_out delivery join declaration %s/%s", sourceJoin.NodeID(), sourceJoin.HandlerEvent())
 			}
 		}
 		if _, duplicate := seen[selectedRef.ElementRef]; duplicate {

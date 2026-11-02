@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -31,6 +32,35 @@ func (p Projection) EffectivePackInventoryDigest() string {
 		return ""
 	}
 	return p.Inventory.Digest()
+}
+
+func (p Projection) DeclaresFlowProviderTriggerEvent(rooted sourceartifact.RootedSource, flowID, eventName string) bool {
+	if !eventidentity.IsCanonicalName(eventName) && !eventidentity.IsCanonicalPattern(eventName) {
+		return false
+	}
+	if !p.providerSource.Valid() || p.providerSource.rooted.Artifact() != rooted.Artifact() || !p.providerSource.rooted.Admission().Equal(rooted.Admission()) {
+		return false
+	}
+	scope, err := p.providerSource.Scope(flowID)
+	if err != nil {
+		return false
+	}
+	if len(scope.ConsumedTriggerProviders([]string{eventName})) != 0 {
+		return true
+	}
+	for _, provider := range scope.HeldProviders() {
+		catalog, present := provider.TriggerCatalog()
+		if !present {
+			continue
+		}
+		entry, _ := catalog.EntryByProvider(provider.Provider().Key())
+		for _, output := range entry.Manifest.OutputManifest() {
+			if eventidentity.MatchPattern(eventName, output.Event) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p Projection) PackSourceValues() map[string]yamlsource.Value {

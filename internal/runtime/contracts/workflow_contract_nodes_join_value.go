@@ -10,14 +10,14 @@ import (
 func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 	fields, err := nodeValueFields(value, "join", joinFieldOptions)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DIALECT-JOIN: %w; join identity derives from its node and handler event", err)
 	}
-	if err := joinTextScalarFields(fields, "id", "stage", "output", "until"); err != nil {
+	if err := joinTextScalarFields(fields, "stage", "output", "until"); err != nil {
 		return nil, err
 	}
 	out := &JoinSpec{}
 	if err := nodeValueTexts(fields, map[string]*string{
-		"id": &out.ID, "stage": &out.Stage, "output": &out.Output,
+		"stage": &out.Stage, "output": &out.Output,
 		"until": &out.Until,
 	}, true); err != nil {
 		return nil, err
@@ -28,12 +28,6 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 	_, out.deadlineFound = fields["deadline"]
 	_, out.onDeadlineFound = fields["on_deadline"]
 	_, out.untilFound = fields["until"]
-	if out.ID == "" {
-		out.ID = out.Stage
-	}
-	if out.ID != "" && !joinIDPattern.MatchString(out.ID) {
-		return nil, fmt.Errorf("join.id %q at %s must be a simple stable identifier", out.ID, value.Location())
-	}
 	if members, present := fields["members"]; present {
 		out.Members, err = projectNodeJoinMembersValue(members)
 		if err != nil {

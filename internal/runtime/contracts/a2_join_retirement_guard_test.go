@@ -224,7 +224,7 @@ func a2NegativeGeneratorSpecimen(path, scope, source string) bool {
 	case path == "internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go" && scope == "RetiredFanInCoordinatorSchema":
 		digest = "e00b8889ed9240770f480bd1f82a708a1b32b4261c1f75d98b58d7adc2c72535"
 	case path == "internal/runtime/testfixtures/canonicalrouting/arrival_join_guard_sources.go" && scope == "ArrivalJoinRetirementGuardCases":
-		digest = "08e97be9242a1251a056a50fe4e4c166519f0705bb2a87cbe620a373ce2cb8bf"
+		digest = "b25e8236e2f24f65bcd0c7fdf69d5bdc9663c8c6d4de4ea6800de032d63040e6"
 	default:
 		return false
 	}
@@ -385,7 +385,10 @@ func a2RetiredYAMLViolations(path, raw string) ([]string, error) {
 			}
 		}
 		for _, declaration := range root {
-			for _, handler := range a2YAMLFields(a2YAMLFields(declaration)["event_handlers"]) {
+			for key, handler := range a2YAMLFields(declaration) {
+				if _, reserved := systemNodeContractFields[key]; reserved {
+					continue
+				}
 				a2CheckYAMLHandler(handler, report)
 			}
 		}
@@ -615,7 +618,7 @@ func TestA2JoinRetirementGuardRejectsSchemaContexts(t *testing.T) {
 		{"window", "join"}, {"complete_when", "join"}, {"remaining", "join"}, {"timeout", "join"},
 	} {
 		for _, nesting := range []string{"", "rules:\n        - ", "join:\n        on_complete:\n          "} {
-			prefix := "worker:\n  event_handlers:\n    arrived:\n      "
+			prefix := "worker:\n  arrived:\n      "
 			raw := prefix + nesting + test.context + ": {" + test.field + ": null}\n"
 			found, err := a2RetiredYAMLViolations("nodes.yaml", raw)
 			if err != nil || len(found) != 1 || !strings.Contains(found[0], test.field) {

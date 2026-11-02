@@ -61,7 +61,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 		"node-subscription":   "worker:\n  subscribes_to: [work.requested]\n",
 		"agent-subscription":  "worker:\n  subscriptions: [work.requested]\n",
 		"producer":            "worker:\n  produces: [work.ready]\n",
-		"handler-derived":     "worker:\n  event_handlers:\n    work.requested: {}\n",
+		"handler-derived":     "worker:\n  work.requested: {}\n",
 		"second-document":     "stages: []\n# fixture: inert\n---\nworker:\n  subscribes_to: [work.requested]\n",
 	}
 	for name, routing := range cases {
@@ -74,7 +74,11 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "routing.yaml"), []byte(routing), 0o644); err != nil {
+			file := "routing.yaml"
+			if name == "handler-derived" {
+				file = "nodes.yaml"
+			}
+			if err := os.WriteFile(filepath.Join(root, file), []byte(routing), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			live := liveCheckedYAMLRoutingRoots(t, repo)
@@ -343,15 +347,20 @@ func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 		"package-bind":     "bind: {inputs: {work.ready: parent.work_ready}}\n",
 		"package-requires": "requires: {inputs: [work.ready]}\n",
 		"template-mode":    "# fixture: child\nmode: template\n",
+		"direct-handler":   "worker:\n  work.ready: {}\n",
 		"event-source":     "work.ready: {swarm: {source: external}}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := routingOverlayError(source); err == nil {
+			file := "routing.yaml"
+			if name == "direct-handler" {
+				file = "nodes.yaml"
+			}
+			if err := routingOverlayError(file, source); err == nil {
 				t.Fatalf("routing overlay %q was accepted", source)
 			}
 		})
 	}
-	if err := routingOverlayError("types:\n  Account:\n    score: number\n"); err != nil {
+	if err := routingOverlayError("types.yaml", "types:\n  Account:\n    score: number\n"); err != nil {
 		t.Fatalf("non-routing overlay was rejected: %v", err)
 	}
 }
@@ -424,7 +433,7 @@ func TestCanonicalRoutingTimerSeparatesBareEventAndNoopHandler(t *testing.T) {
 		bare bool
 	}{
 		{"support/events.yaml", []string{"timer.reminder"}, true},
-		{"support/nodes.yaml", []string{"support-node", "event_handlers", "timer.reminder"}, false},
+		{"support/nodes.yaml", []string{"support-node", "timer.reminder"}, false},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(root, tc.file))
@@ -1079,7 +1088,7 @@ func fileContainsAuthoredRouting(t testing.TB, path string) bool {
 			t.Fatalf("parse routing census candidate %s: %v", path, err)
 		}
 		for _, node := range doc.Content {
-			if yamlNodeContainsAuthoredRouting(node) {
+			if yamlNodeContainsAuthoredRouting(path, node) {
 				return true
 			}
 		}

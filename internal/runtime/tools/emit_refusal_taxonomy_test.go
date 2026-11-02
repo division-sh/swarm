@@ -91,7 +91,7 @@ func emitRefusalSource(t *testing.T, reply bool, finalReceiver ...bool) semantic
 		for name, body := range map[string]string{
 			"schema.yaml":          "connect:\n  - {event: deploy.requested, from: consumer, to: producer}\n  - {event: deploy.done, from: producer, to: consumer, rename: deploy.completed, replies_to: deploy.requested}\n",
 			"producer/schema.yaml": "pins:\n  inputs: [deploy.requested]\n  outputs: [deploy.done]\n",
-			"producer/nodes.yaml":  "request-observer:\n  execution_type: system_node\n  event_handlers:\n    deploy.requested: {}\n",
+			"producer/nodes.yaml":  "request-observer:\n  deploy.requested: {}\n",
 			"consumer/schema.yaml": "pins:\n  inputs: [deploy.completed]\n  outputs: [deploy.requested]\n",
 			"consumer/events.yaml": "deploy.requested:\n",
 		} {

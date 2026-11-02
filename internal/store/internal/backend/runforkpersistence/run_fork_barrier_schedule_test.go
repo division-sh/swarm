@@ -200,7 +200,7 @@ func barrierScheduleProjectionFixture(t *testing.T) (*runForkRevisionSnapshot, [
 		t.Fatal(err)
 	}
 	bundle, digest := "bundle-v2:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64)
-	ref, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", "joined", declaration, bundle, digest)
+	ref, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", declaration, bundle, digest)
 	if err != nil {
 		t.Fatal(err)
 	}

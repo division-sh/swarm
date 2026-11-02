@@ -424,7 +424,7 @@ func TestDeliveryContinuationDispatchConsumesOnlyCommittedDeferredPublications(t
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\n",
 		"events.yaml":   "custom.receiver_projection:\ncustom.continuation_parent:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.continuation_parent]\n  event_handlers:\n    custom.continuation_parent: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.continuation_parent: {}\n",
 	}))
 	for _, test := range []struct {
 		name    string
@@ -495,7 +495,7 @@ func TestDeliveryContinuationDispatchTransfersCommittedDeferredHandoffBeforeCarr
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":   "stages: []\n",
 		"events.yaml":   "custom.receiver_projection:\ncustom.continuation_parent:\n",
-		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.continuation_parent]\n  event_handlers:\n    custom.continuation_parent: {}\n",
+		"nodes.yaml":    "workflow-node:\n  custom.continuation_parent: {}\n",
 	}))
 	store := newTargetRouteMemoryStore()
 	deferred := receiverProjectionEvent("continuation-deferred-handoff")

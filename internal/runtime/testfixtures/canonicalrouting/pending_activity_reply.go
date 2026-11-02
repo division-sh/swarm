@@ -19,13 +19,10 @@ request.noted:
 request.started:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "stop-node:\n", `request-note-node:
-  execution_type: system_node
-  subscribes_to: [request.note]
-  event_handlers:
-    request.note:
-      emit:
-        event: request.noted
-        fields: {note: payload.note}
+  request.note:
+    emit:
+      event: request.noted
+      fields: {note: payload.note}
 stop-node:
 `)
 	return root

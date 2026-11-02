@@ -90,7 +90,7 @@ func publishedJoinFixture(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := "        deadline: {after: 1h, from: stage_entry}\n        on_deadline: {advances_to: attention}\n"
+	deadline := "      deadline: {after: 1h, from: stage_entry}\n      on_deadline: {advances_to: attention}\n"
 	if strings.Count(string(data), deadline) != 1 {
 		t.Fatal("published join fixture lost its exact deadline variant")
 	}
@@ -114,7 +114,7 @@ func publishedJoinFixture(t *testing.T) string {
 	for name, replacement := range map[string][2]string{
 		"schema.yaml": {"stages:\n  awaiting:", "stages:\n  preparing: {}\n  awaiting:"},
 		"events.yaml": {"item.completed:\n", preparationDeclaration + "item.completed:\n  expected: [text]\n"},
-		"nodes.yaml":  {"  event_handlers:\n", "  event_handlers:\n    join.prepared:\n      data_accumulation:\n        writes: [expected]\n      advances_to: awaiting\n"},
+		"nodes.yaml":  {"join-node:\n", "join-node:\n  join.prepared:\n    data_accumulation:\n      writes: [expected]\n    advances_to: awaiting\n"},
 	} {
 		path := filepath.Join(root, flowID, name)
 		if flowID == "orders" && name == "events.yaml" {

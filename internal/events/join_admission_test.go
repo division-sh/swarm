@@ -11,7 +11,7 @@ import (
 
 func TestA2DeliveryContextRetainsExactJoinReceipt(t *testing.T) {
 	node := identitytest.FlowNode(t, "collector", "join")
-	declaration, err := timeridentity.NewJoinRef(node, "item.done", "collecting", "items")
+	declaration, err := timeridentity.NewJoinRef(node, "item.done", "collecting")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestA2DeliveryContextRetainsExactJoinReceipt(t *testing.T) {
 
 func TestA2JoinReceiptHasClosedAdmissionStates(t *testing.T) {
 	node := identitytest.FlowNode(t, "collector", "join")
-	declaration, _ := timeridentity.NewJoinRef(node, "item.done", "collecting", "items")
+	declaration, _ := timeridentity.NewJoinRef(node, "item.done", "collecting")
 	if err := (JoinAdmissionReceipt{Ref: declaration, Disposition: JoinAdmissionEarly}).Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -1,28 +1,20 @@
 pipeline:
-  execution_type: system_node
-  subscribes_to: [step.a_done, step.b_done, step.c_done]
-  produces: [release.ready]
-  event_handlers:
-    step.a_done:
-      data_accumulation:
-        writes:
-          - {target_field: g_a, value: true}
-      advances_to: stage_a
-    step.b_done:
-      guard:
-        id: requires_a
-        check: state.g_a == true
-      data_accumulation:
-        writes:
-          - {target_field: g_b, value: true}
-      advances_to: stage_b
-    step.c_done:
-      guard:
-        id: requires_b
-        check: state.g_b == true
-      data_accumulation:
-        writes:
-          - {target_field: g_c, value: true}
-      advances_to: released
-      emit:
-        event: release.ready
+  step.a_done:
+    data_accumulation:
+      writes:
+        - {target_field: g_a, value: true}
+    advances_to: stage_a
+  step.b_done:
+    guard: state.g_a == true
+    data_accumulation:
+      writes:
+        - {target_field: g_b, value: true}
+    advances_to: stage_b
+  step.c_done:
+    guard: state.g_b == true
+    data_accumulation:
+      writes:
+        - {target_field: g_c, value: true}
+    advances_to: released
+    emit:
+      event: release.ready

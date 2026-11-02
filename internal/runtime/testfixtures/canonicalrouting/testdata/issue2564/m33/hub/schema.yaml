@@ -4,7 +4,7 @@ stages:
   idle: {}
   working:
     timers:
-      - {id: deadline, after: 5s, advances_to: review}
+      - {after: 5s, advances_to: review}
   review: {}
   closed: {final: true}
 pins:

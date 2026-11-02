@@ -19,28 +19,28 @@ func CopyNestedNodeReplyDeadlines(t testing.TB) string {
 		writeClosedVariantFile(t, root, filepath.Join(flow, "state.yaml"), `expected: ["same-business-key"]
 `)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    provider.replied:
-      emit:
-        event: request.finished
-        fields:
-          request_id: payload.request_id
-          result: payload.result
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `  provider.replied:
+    emit:
+      event: request.finished
+      fields:
+        request_id: payload.request_id
+        result: payload.result
 `, nestedDeadlineReturn("provider.replied", "request.finished", false))
-	applyClosedReplacement(t, filepath.Join(root, "provider", "nodes.yaml"), `    t.replied:
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+	applyClosedReplacement(t, filepath.Join(root, "provider", "nodes.yaml"), `  t.replied:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `, nestedDeadlineReturn("t.replied", "provider.replied", true))
-	applyClosedReplacement(t, filepath.Join(root, "t", "nodes.yaml"), `    u.replied:
-      emit:
-        event: t.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+	applyClosedReplacement(t, filepath.Join(root, "t", "nodes.yaml"), `  u.replied:
+    emit:
+      event: t.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `, nestedDeadlineReturn("u.replied", "t.replied", true))
 	return root
 }
@@ -61,26 +61,23 @@ u.replied:
   result: text
 `)
 	writeClosedVariantFile(t, root, "u/nodes.yaml", `u-node:
-  execution_type: system_node
-  subscribes_to: [u.requested, u.ready]
-  event_handlers:
-    u.requested:
-      fan_out:
-        items_from: state.items
-        as: entry
-        identity: entry
-        emit:
-          event: u.ready
-          fields:
-            account_id: payload.account_id
-            request_id: entry
-    u.ready:
+  u.requested:
+    fan_out:
+      items_from: state.items
+      as: entry
+      identity: entry
       emit:
-        event: u.replied
+        event: u.ready
         fields:
           account_id: payload.account_id
-          request_id: payload.request_id
-          result: "approved"
+          request_id: entry
+  u.ready:
+    emit:
+      event: u.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: "approved"
 `)
 	return root
 }
@@ -97,20 +94,20 @@ func CopyTwoOpenFanOutReplyDeadlines(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "provider/schema.yaml"), "pins:\n", "stages:\n  waiting: {}\n  ready: {}\n  attention: {}\npins:\n")
 	writeClosedVariantFile(t, root, "provider/state.yaml", `expected: ["same-business-key"]
 `)
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    provider.replied:
-      emit:
-        event: request.finished
-        fields:
-          request_id: payload.request_id
-          result: payload.result
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `  provider.replied:
+    emit:
+      event: request.finished
+      fields:
+        request_id: payload.request_id
+        result: payload.result
 `, nestedDeadlineReturn("provider.replied", "request.finished", false))
-	applyClosedReplacement(t, filepath.Join(root, "provider/nodes.yaml"), `    t.replied:
-      emit:
-        event: provider.replied
-        fields:
-          account_id: payload.account_id
-          request_id: payload.request_id
-          result: payload.result
+	applyClosedReplacement(t, filepath.Join(root, "provider/nodes.yaml"), `  t.replied:
+    emit:
+      event: provider.replied
+      fields:
+        account_id: payload.account_id
+        request_id: payload.request_id
+        result: payload.result
 `, nestedDeadlineReturn("t.replied", "provider.replied", true))
 	return root
 }

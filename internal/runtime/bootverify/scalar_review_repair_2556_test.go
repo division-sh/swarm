@@ -20,7 +20,7 @@ func scalar2556SourceBundle(t *testing.T, handler string) (*contracts.WorkflowCo
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n  items: [text]\nproof.done:\n  value: text?\n  inherited: text?\n")
-	nodes := "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n" + handler
+	nodes := "worker:\n  proof.requested:\n" + handler
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
 	repo := repoRootForBootverifyTest(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
@@ -183,8 +183,7 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 	for _, tc := range []struct{ slot, handler string }{
 		{"rule.when", "rules:\n  - when: %s"},
 		{"on_complete.condition", "on_complete:\n  - condition: %s\n    emit: proof.done"},
-		{"guard.check", "guard: {check: %s}"},
-		{"guard.checks.check", "guard:\n  checks:\n    - check: %s"},
+		{"guard", "guard: %s"},
 		{"query.filter", "query:\n  entities: account\n  filter: %s"},
 		{"filter.condition", "filter:\n  items_from: payload.items\n  condition: %s"},
 		{"count.condition", "count:\n  items_from: payload.items\n  condition: %s"},
@@ -194,8 +193,9 @@ func TestScalar2556LoadedPredicatesRefuseBeforeExecution(t *testing.T) {
 				root := t.TempDir()
 				writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 				writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\nproof.done:\n")
 				handler := "      " + strings.ReplaceAll(fmt.Sprintf(tc.handler, sentinel), "\n", "\n      ") + "\n"
-				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n"+handler)
+				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  proof.requested:\n"+handler)
 				repo := repoRootForBootverifyTest(t)
 				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 				if err != nil {

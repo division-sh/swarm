@@ -370,7 +370,7 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-localization\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-localization\nconnect:\n  - {event: vertical.shortlisted, from: scoring, to: validation}\n")
 	writeFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "validation", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
@@ -383,19 +383,14 @@ pins:
     - vertical.shortlisted
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
+score.ready:
 vertical.shortlisted:
   entity_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  execution_type: system_node
-  subscribes_to:
-    - score.ready
-  produces:
-    - vertical.shortlisted
-  event_handlers:
-    score.ready:
-      emit: vertical.shortlisted
+  score.ready:
+    emit: vertical.shortlisted
 `)
 
 	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `# fixture: validation
@@ -414,12 +409,8 @@ validation.started:
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "nodes.yaml"), `
 validation-orchestrator:
-  execution_type: system_node
-  produces:
-    - validation.started
-  event_handlers:
-    vertical.shortlisted:
-      emit: validation.started
+  vertical.shortlisted:
+    emit: validation.started
 `)
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, "")
@@ -446,7 +437,7 @@ func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-on-success\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-on-success\nconnect:\n  - {event: vertical.shortlisted, from: scoring, to: validation}\n")
 	writeFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "validation", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
@@ -459,19 +450,14 @@ pins:
     - vertical.shortlisted
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "events.yaml"), `
+score.ready:
 vertical.shortlisted:
   entity_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  execution_type: system_node
-  subscribes_to:
-    - score.ready
-  produces:
-    - vertical.shortlisted
-  event_handlers:
-    score.ready:
-      emit: vertical.shortlisted
+  score.ready:
+    emit: vertical.shortlisted
 `)
 
 	writeFixtureFile(t, filepath.Join(root, "validation", "schema.yaml"), `# fixture: validation
@@ -493,16 +479,11 @@ validation.started:
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "nodes.yaml"), `
 validation-orchestrator:
-  execution_type: system_node
-  produces:
-    - validation.rule
-    - validation.started
-  event_handlers:
-    vertical.shortlisted:
-      rules:
-        - emit: validation.rule
-      on_success:
-        emit: validation.started
+  vertical.shortlisted:
+    rules:
+      - emit: validation.rule
+    on_success:
+      emit: validation.started
 `)
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, "")
@@ -571,14 +552,8 @@ evidence.recorded:
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 audit-node:
-  execution_type: system_node
-  subscribes_to:
-    - item.created
-  produces:
-    - evidence.recorded
-  event_handlers:
-    item.created:
-      emit: evidence.recorded
+  item.created:
+    emit: evidence.recorded
 `)
 	return root
 }
@@ -604,8 +579,7 @@ shared: root
 # fixture: parent
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "nodes.yaml"), `
-parent-node:
-  execution_type: system_node
+parent-node: {}
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "events.yaml"), `
 parent.started:
@@ -625,8 +599,7 @@ shared: package
 # fixture: child
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "nodes.yaml"), `
-child-node:
-  execution_type: system_node
+child-node: {}
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "events.yaml"), `
 child.completed:

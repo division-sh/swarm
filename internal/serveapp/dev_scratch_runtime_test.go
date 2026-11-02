@@ -242,7 +242,7 @@ func promoteDevScratchFixtureToStanding(t *testing.T, sourceRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedNodes := strings.Replace(string(nodes), "subscribes_to: [fulfillment.requested]", "subscribes_to: [fulfillment.requested, fixture.tick]", 1) + "    fixture.tick: {}\n"
+	updatedNodes := string(nodes) + "  fixture.tick: {}\n"
 	if err := os.WriteFile(nodesPath, []byte(updatedNodes), 0o644); err != nil {
 		t.Fatal(err)
 	}

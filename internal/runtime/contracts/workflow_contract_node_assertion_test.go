@@ -1,28 +1,20 @@
 package contracts
 
 import (
+	"strings"
 	"testing"
 )
 
-func TestSystemNodeContractTracksProducesDeclarationPresence(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		yaml     string
-		declared bool
-		count    int
-	}{
-		{name: "omitted", yaml: "event_handlers: {}\n", declared: false},
-		{name: "explicit empty", yaml: "produces: []\nevent_handlers: {}\n", declared: true},
-		{name: "explicit value", yaml: "produces: [work.completed]\nevent_handlers: {}\n", declared: true, count: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var node SystemNodeContract
-			if err := decodeNodeTestYAML([]byte(tc.yaml), &node); err != nil {
-				t.Fatalf("decode node: %v", err)
-			}
-			if node.ProducesDeclared != tc.declared || len(node.Produces) != tc.count {
-				t.Fatalf("node = %#v, want declared=%v count=%d", node, tc.declared, tc.count)
-			}
-		})
+func TestSystemNodeContractRefusesRetiredFieldsOnPresence(t *testing.T) {
+	for _, field := range []string{"execution_type", "subscribes_to", "produces", "event_handlers"} {
+		for _, value := range []string{"null", "{}", "[]", "system_node", "[work.completed]"} {
+			t.Run(field+"/"+value, func(t *testing.T) {
+				var node SystemNodeContract
+				err := decodeNodeTestYAML([]byte(field+": "+value+"\nwork.requested: {}\n"), &node)
+				if err == nil || !strings.Contains(err.Error(), field) || !strings.Contains(err.Error(), "directly under the node") {
+					t.Fatalf("retired node field accepted or missing teaching: %v", err)
+				}
+			})
+		}
 	}
 }

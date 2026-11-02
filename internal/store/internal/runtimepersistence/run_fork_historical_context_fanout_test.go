@@ -122,7 +122,7 @@ func seedHistoricalContextFanOutKinds(t *testing.T, tx *sql.Tx, f historicalCont
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,'.','fan_out',$3,0,'semantic_rejected',$4,$5)`, s.runID, s.deliveryID, fixture.semanticPath, string(failureJSON), s.at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE fan_out_intents SET cursor=1,status='closed' WHERE run_id=$1`, s.runID)
 	digest := fanOutOwnerFixtureEvidence(t, fixture).Ref.SemanticDigest
-	ref, err := timeridentity.NewFanOutDeliveryJoinRef(mustPersistenceRootNode("fan-out-source"), "items.ready", "all-items-delivered", mustFanOutBarrierDeclaration(t, fixture), fixture.bundleHash, digest)
+	ref, err := timeridentity.NewFanOutDeliveryJoinRef(mustPersistenceRootNode("fan-out-source"), "items.ready", mustFanOutBarrierDeclaration(t, fixture), fixture.bundleHash, digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,9 +140,9 @@ func seedHistoricalContextFanOutKinds(t *testing.T, tx *sql.Tx, f historicalCont
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_obligation_barriers (
 		run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,
-		target_flow_path,target_node_id,handler_event,join_id,route_scope_key,route_instance_id,route_instance_path,
+		target_flow_path,target_node_id,handler_event,route_scope_key,route_instance_id,route_instance_path,
 		entity_id,routing_source,execution_mode,timer_handle,status,created_at,updated_at
-	) VALUES ($1,$2,'.','fan_out',$3,$4,$5,$6,$7,$8,$9,'root','root','root',$10,$11,'live',$12,'armed',$13,$13)`,
-		s.runID, s.deliveryID, fixture.semanticPath, fixture.bundleHash, digest, ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(),
+	) VALUES ($1,$2,'.','fan_out',$3,$4,$5,$6,$7,$8,'root','root','root',$9,$10,'live',$11,'armed',$12,$12)`,
+		s.runID, s.deliveryID, fixture.semanticPath, fixture.bundleHash, digest, ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(),
 		s.entityID, historicalContextJSON(t, producer), historicalContextJSON(t, handle), s.at)
 }

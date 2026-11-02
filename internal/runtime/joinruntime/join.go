@@ -238,7 +238,6 @@ func (a Activation) FlowPath() string     { return a.JoinRef().FlowPath() }
 func (a Activation) NodeID() string       { return a.JoinRef().NodeID() }
 func (a Activation) HandlerEvent() string { return a.JoinRef().HandlerEvent() }
 func (a Activation) Stage() string        { return a.JoinRef().Stage() }
-func (a Activation) JoinID() string       { return a.JoinRef().JoinID() }
 func (a Activation) Generation() attemptgeneration.Generation {
 	return a.JoinRef().Generation()
 }

@@ -412,7 +412,7 @@ func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]
 	origins := map[string]string{"slack": "https://slack.com", "notion": "https://api.notion.com", "microsoft_graph": "https://graph.microsoft.com", "github": "https://api.github.com"}
 	for provider, activity := range activities {
 		inputs[provider+".requested"] = map[string]any{"text": "text"}
-		nodes[provider+"-worker"] = map[string]any{"execution_type": "system_node", "subscribes_to": []string{provider + ".requested"}, "event_handlers": map[string]any{provider + ".requested": map[string]any{"activity": map[string]any{"id": "send_" + provider, "tool": provider + "." + activity.tool, "input": activity.input}}}}
+		nodes[provider+"-worker"] = map[string]any{provider + ".requested": map[string]any{"activity": map[string]any{"id": "send_" + provider, "tool": provider + "." + activity.tool, "input": activity.input}}}
 		command("", "import", provider, root, "--json")
 		path := filepath.Join(root, provider, "connector.yaml")
 		raw, err := os.ReadFile(path)
@@ -437,7 +437,7 @@ func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]
 		}
 		writeReleaseFile(t, path, string(raw))
 	}
-	nodes["github-webhook-worker"] = map[string]any{"execution_type": "system_node", "subscribes_to": []string{"inbound.github.issue_opened"}, "event_handlers": map[string]any{"inbound.github.issue_opened": map[string]any{"activity": map[string]any{"id": "send_github_webhook", "tool": "github.create_issue", "input": githubValues}}}}
+	nodes["github-webhook-worker"] = map[string]any{"inbound.github.issue_opened": map[string]any{"activity": map[string]any{"id": "send_github_webhook", "tool": "github.create_issue", "input": githubValues}}}
 	for path, document := range map[string]any{"events.yaml": inputs, "nodes.yaml": nodes} {
 		raw, err := yaml.Marshal(document)
 		if err != nil {

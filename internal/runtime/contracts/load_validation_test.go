@@ -36,7 +36,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsDeprecatedGuardFall
 	if !ok {
 		t.Fatal("expected workflow handler")
 	}
-	handler.Guard = &GuardSpec{ID: "legacy_guard_only"}
+	handler.Guard = &GuardSpec{}
 	node := bundle.Nodes[nodeID]
 	node.EventHandlers[eventType] = handler
 	setLoadedWorkflowNode(t, bundle, nodeID, node)
@@ -58,40 +58,10 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMultipleAuthoritati
 	}
 }
 
-func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidExecutionType(t *testing.T) {
-	bundle := loadCurrentWorkflowBundleForTest(t)
-
-	for nodeID, node := range bundle.Nodes {
-		node.ExecutionType = "workflow_node"
-		setLoadedWorkflowNode(t, bundle, nodeID, node)
-		break
-	}
-
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !contractErrorContains(err, "unsupported execution_type") {
-		t.Fatalf("unexpected load validation error: %v", err)
-	}
-}
-
-func TestValidateWorkflowContractBundleLoadConstraintsAllowsMissingExecutionType(t *testing.T) {
-	bundle := loadCurrentWorkflowBundleForTest(t)
-
-	for nodeID, node := range bundle.Nodes {
-		node.ExecutionType = ""
-		setLoadedWorkflowNode(t, bundle, nodeID, node)
-		break
-	}
-
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err != nil {
-		t.Fatalf("unexpected load validation error for missing execution_type: %v", err)
-	}
-}
-
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := decodeNodeTestYAML([]byte("worker:\n  id: worker-alias\n"), &nodes)
-	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+	if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -99,7 +69,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *t
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsRenderedNodeIDTemplate(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := decodeNodeTestYAML([]byte("worker:\n  id: worker-{instance_id}\n"), &nodes)
-	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+	if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) {
 		t.Fatalf("unexpected node template admission: %v", err)
 	}
 }
@@ -311,9 +281,8 @@ func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *te
 			nodes: `
 worker:
   idempotency_table: worker_idempotency
-  event_handlers: {}
 `,
-			wantErr: "is not supported",
+			wantErr: "must be a mapping",
 		},
 	}
 	for _, tc := range tests {
@@ -338,7 +307,6 @@ worker:
     fields:
       count:
         type: integer
-  event_handlers: {}
 `)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -359,10 +327,8 @@ func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T
 	writeFieldReconciliationBundle(t, root, "", `
 worker:
   timers:
-    - id: reminder
-      event: timer.reminder
+    - event: timer.reminder
       delay_minutes: 5
-  event_handlers: {}
 `)
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err == nil || !contractErrorContains(err, "is not supported") || !contractErrorContains(err, "delay_minutes") {
@@ -961,11 +927,8 @@ task.done:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-a", "nodes.yaml"), `
 flow-a-wildcard:
-  execution_type: system_node
-  subscribes_to: [task.*]
-  event_handlers:
-    task.*:
-      advances_to: done
+  task.*:
+    advances_to: done
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `# fixture: flow-b
 stages:
@@ -981,11 +944,8 @@ task.done:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-b", "nodes.yaml"), `
 flow-b-wildcard:
-  execution_type: system_node
-  subscribes_to: [task.*]
-  event_handlers:
-    task.*:
-      advances_to: done
+  task.*:
+    advances_to: done
 `)
 	platformSpec := DefaultPlatformSpecFile(repoRoot)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)

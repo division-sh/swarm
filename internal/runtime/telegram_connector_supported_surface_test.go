@@ -278,7 +278,6 @@ func telegramConnectorSupportedSurfaceNodeKey(t testing.TB) string {
 type telegramConnectorSupportedSurfaceModule struct {
 	source semanticview.Source
 	nodes  []runtimepipeline.WorkflowNode
-	guards runtimepipeline.GuardRegistry
 }
 
 func (m telegramConnectorSupportedSurfaceModule) SemanticSource() semanticview.Source {
@@ -287,10 +286,6 @@ func (m telegramConnectorSupportedSurfaceModule) SemanticSource() semanticview.S
 
 func (m telegramConnectorSupportedSurfaceModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
-}
-
-func (m telegramConnectorSupportedSurfaceModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
 }
 
 func startTelegramConnectorSupportedSurfaceCoordinator(
@@ -308,7 +303,6 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 	module := telegramConnectorSupportedSurfaceModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc := newExternalRuntimeTestActivityCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),

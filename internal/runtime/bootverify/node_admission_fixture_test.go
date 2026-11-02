@@ -13,7 +13,8 @@ func admitBootHandlerFixture(t *testing.T, raw string) (runtimecontracts.SystemN
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      "+strings.ReplaceAll(strings.TrimSpace(raw), "\n", "\n      ")+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested:\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  proof.requested:\n      "+strings.ReplaceAll(strings.TrimSpace(raw), "\n", "\n      ")+"\n")
 	repo := repoRootForBootverifyTest(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

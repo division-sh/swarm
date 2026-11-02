@@ -8,7 +8,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -263,18 +262,7 @@ func appendGuardExecutableReaders(out *[]WorkflowExecutableReader, guard *runtim
 	if guard == nil {
 		return
 	}
-	for i, check := range guard.EffectiveChecks() {
-		kind := "guard.check"
-		if len(guard.Checks) > 0 {
-			kind = fmt.Sprintf("guard.checks[%d]", i)
-		}
-		before := len(*out)
-		appendConditionExecutableReader(out, kind, check.Check, WorkflowEntityFieldLifecycleGuard, WorkflowConditionContextGuard)
-		for index := before; index < len(*out); index++ {
-			(*out)[index].GuardCheckIndex = i
-			(*out)[index].HasGuardCheckIndex = true
-		}
-	}
+	appendConditionExecutableReader(out, "guard", guard.Check, WorkflowEntityFieldLifecycleGuard, WorkflowConditionContextGuard)
 }
 
 func appendDataAccumulationExecutableReaders(out *[]WorkflowExecutableReader, kind string, spec runtimecontracts.WorkflowDataAccumulation) {
@@ -522,8 +510,6 @@ type WorkflowExecutableReader struct {
 	AssignmentError           string
 	WriteIndex                int
 	HasWriteIndex             bool
-	GuardCheckIndex           int
-	HasGuardCheckIndex        bool
 	EmitSite                  *runtimecontracts.HandlerDeclarativeEmitSite
 	EmitField                 string
 	FanOutAfterWrites         bool
@@ -636,13 +622,6 @@ func WorkflowHandlerEmitExpressions(source semanticview.Source, node runtimeiden
 			for index := before; index < len(out); index++ {
 				out[index].ItemType = plan.ItemType.Clone()
 				out[index].HasItemType = true
-			}
-		}
-	}
-	if handler.Guard != nil {
-		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
-			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-				appendSpec("guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), WorkflowEntityFieldLifecycleGuardEscalation, "")
 			}
 		}
 	}

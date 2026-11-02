@@ -45,11 +45,11 @@ func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) 
 	return ""
 }
 
-func handlerGuardID(spec *runtimecontracts.GuardSpec) string {
+func handlerGuardExpression(spec *runtimecontracts.GuardSpec) string {
 	if spec == nil {
 		return ""
 	}
-	return strings.TrimSpace(spec.ID)
+	return strings.TrimSpace(spec.Check)
 }
 
 func gateSpecString(spec *runtimecontracts.GateSpec) string {
@@ -69,7 +69,7 @@ func handlerExecutionPlanFromNodeHandler(source interface {
 	plan := handlerExecutionPlan{
 		Node:             node,
 		EventType:        strings.TrimSpace(eventType),
-		Guard:            handlerGuardID(handler.Guard),
+		Guard:            handlerGuardExpression(handler.Guard),
 		GuardSpec:        handler.Guard,
 		Accumulate:       handler.Accumulate,
 		Compute:          handler.Compute,

@@ -38,9 +38,6 @@ func TestR3PolicyProgramConstructionFullBoot(t *testing.T) {
 				} else {
 					check = "emit_field_expression_validation"
 					bundle.Events["work.result"] = c.EventCatalogEntry{Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"accepted": {Type: "bool"}}, Required: []string{"accepted"}}}
-					entry := bundle.Nodes[node.Key()]
-					entry.Produces = []string{"work.result"}
-					bundle.Nodes[node.Key()] = entry
 					handler.Emit = c.EmitSpec{Event: "work.result", Fields: map[string]c.ExpressionValue{"accepted": c.CELExpression(expression)}}
 				}
 				writeBundleHandler(t, bundle, node, event, handler)

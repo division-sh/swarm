@@ -541,22 +541,19 @@ pins:
 
 		"flow_a/state.yaml": "name: \"activity-fork-proof\"\n",
 		"flow_a/nodes.yaml": `test-node:
-  execution_type: system_node
-  subscribes_to: [review.start, review.requested, review.retry, review.close]
-  event_handlers:
-    review.start:
-      loop: {start: revision, from: pending}
-      advances_to: review
-    review.requested:
-      loop: {admit: revision, from: review}
-      advances_to: review
-      activity: {id: connector, tool: provider.connector}
-    review.retry:
-      loop: {repeat: revision, from: review}
-      advances_to: review
-    review.close:
-      loop: {close: revision, from: review}
-      advances_to: closed
+  review.start:
+    loop: {start: revision, from: pending}
+    advances_to: review
+  review.requested:
+    loop: {admit: revision, from: review}
+    advances_to: review
+    activity: {id: connector, tool: provider.connector}
+  review.retry:
+    loop: {repeat: revision, from: review}
+    advances_to: review
+  review.close:
+    loop: {close: revision, from: review}
+    advances_to: closed
 `,
 		"tools.yaml": fmt.Sprintf(`provider.connector:
   handler_type: http
@@ -595,7 +592,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		Loop:     &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "pending"},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": handler},
 	}
 	flow := runtimecontracts.FlowContractView{

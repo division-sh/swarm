@@ -130,7 +130,7 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 						captured = child.Generation()
 						owner = correspondence.ProjectedActivations()[0]
 					}
-					ref, err := timeridentity.NewJoinRef(node, "review.requested", "working", "reviews")
+					ref, err := timeridentity.NewJoinRef(node, "review.requested", "working")
 					if err != nil {
 						t.Fatal(err)
 					}

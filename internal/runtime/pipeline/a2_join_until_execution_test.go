@@ -21,7 +21,6 @@ func VerifyNativeA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStor
 			files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "on_complete: {advances_to: ready}", "until: halt.requested\n        on_complete: {emit: {event: first.closed}}", 1)
 			files["orders/nodes.yaml"] += `    alternate.completed:
       join:
-        id: alternate
         stage: awaiting
         members: {count: 2, by: payload.member_id}
         output: payload.result

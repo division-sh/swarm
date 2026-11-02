@@ -34,7 +34,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 		"schema.yaml":          "stages:\n  pending: {}\nschedules:\n  removed: {every: 1h, emit: clock.removed}\n  retained: {every: 1h, emit: clock.retained}\n",
 		"events.yaml":          "clock.removed:\nclock.retained:\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"review/schema.yaml":   "instance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
+		"review/schema.yaml":   "instance: request_id\nstages:\n  pending:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\npins:\n  inputs: [task.create]\n",
 		"review/state.yaml":    "request_id: text\nlabel: text\nnested: json\nenabled: true\n",
 		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\ntimer.elapsed:\n",
 	}
@@ -60,7 +60,7 @@ func TestBundleUpgradeAdmissionPreservesLiveWorkBothStores(t *testing.T) {
 		return plan
 	}
 	candidateFiles["schema.yaml"] = strings.Replace(files["schema.yaml"], "  removed: {every: 1h, emit: clock.removed}\n", "", 1)
-	candidateFiles["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending:\n    timers:\n      - {id: pending.timeout, after: 1h, emit: timer.elapsed}", "  pending: {}", 1)
+	candidateFiles["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], "  pending:\n    timers:\n      - {after: 1h, emit: timer.elapsed}", "  pending: {}", 1)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, scenario := range []struct{ paused, retainedTimer bool }{{}, {paused: true}, {retainedTimer: true}, {paused: true, retainedTimer: true}} {
 			paused, retainedTimer := scenario.paused, scenario.retainedTimer

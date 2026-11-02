@@ -27,10 +27,6 @@ func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *te
 	if got := endpointCount(census.InputPins(), EventEndpointFlowInputPin, "worker", "work.requested"); got != 1 {
 		t.Fatalf("input endpoints = %d, want 1: %#v", got, census.InputPins())
 	}
-	assertions := census.ProducerAssertions()
-	if len(assertions) != 1 || assertions[0].NodeID != "worker-node" || !assertions[0].Declared || len(assertions[0].EventTypes) != 0 {
-		t.Fatalf("producer assertions = %#v, want explicit empty worker-node assertion", assertions)
-	}
 
 	producers := census.Producers()
 	producers[0].NodeID = "mutated"
@@ -391,7 +387,6 @@ func TestAuthoredEventEndpointCensusClassifiesImportedPackageOwnPatternAsSameFlo
 		t.Fatal("grandchild flow missing")
 	}
 	node := worker.Nodes["worker"]
-	node.SubscribesTo = append(node.SubscribesTo, "task.*")
 	node.EventHandlers["task.*"] = runtimecontracts.SystemNodeEventHandler{}
 	worker.Nodes["worker"] = node
 	bundle.Nodes["worker"] = node
@@ -441,7 +436,7 @@ func TestInvalidAuthoredSubscriptionsRejectConsumerRelativeDescendantIdentity(t 
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {SubscribesTo: []string{"grandchild/task.done"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"grandchild/task.done": {}}},
+			"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"grandchild/task.done": {}}},
 		},
 		Children: []runtimecontracts.FlowContractView{grandchild},
 	}
@@ -474,7 +469,7 @@ func TestInvalidAuthoredSubscriptionsRejectAbsoluteSiblingIdentity(t *testing.T)
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
 		Path:  "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {SubscribesTo: []string{"producer/task.done"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}}},
+			"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}}},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
@@ -502,7 +497,7 @@ func TestInvalidAuthoredSubscriptionsRejectFullURIWithoutFlowPathResolution(t *t
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
-				SubscribesTo:  []string{"myapp://producer/task.done"},
+
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"myapp://producer/task.done": {}},
 			},
 		},
@@ -539,7 +534,7 @@ func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *te
 	if afterCensus := yamlsource.DefaultStats().ParseCount; afterCensus != afterBundle {
 		t.Fatalf("census reparsed authoritative YAML: parse count %d -> %d", afterBundle, afterCensus)
 	}
-	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", "nodes.yaml", 12)
+	assertEndpointSourceLine(t, census.Consumers(), EventEndpointNodeHandler, "complete-node", "", "task.completed", "nodes.yaml", 7)
 	assertEndpointSourceLine(t, census.Consumers(), EventEndpointAgent, "", "test-agent", "task.assigned", "agents.yaml", 5)
 	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", "agents.yaml", 7)
 }
@@ -609,8 +604,7 @@ func endpointCensusFixture(t testing.TB, inputPins []runtimecontracts.FlowInputE
 
 func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runtimecontracts.WorkflowContractBundle {
 	node := runtimecontracts.SystemNodeContract{
-		ProducesDeclared: true,
-		Produces:         []string{},
+
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"work.requested": {
 				Emit: runtimecontracts.EmitSpec{Event: "work.completed"},

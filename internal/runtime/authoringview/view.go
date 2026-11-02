@@ -130,23 +130,14 @@ type FlowSourceFiles struct {
 }
 
 type StageGraphView struct {
-	FlowID            string                           `json:"flow_id"`
-	FlowPath          string                           `json:"flow_path,omitempty"`
-	Nodes             []StageGraphNodeView             `json:"nodes"`
-	Edges             []StageGraphEdgeView             `json:"edges"`
-	Timers            []StageGraphTimerView            `json:"timers,omitempty"`
-	Joins             []StageGraphJoinView             `json:"joins,omitempty"`
-	FanOuts           []StageGraphFanOutView           `json:"fan_outs,omitempty"`
-	Gates             []StageGraphGateView             `json:"gates,omitempty"`
-	GuardTerminations []StageGraphGuardTerminationView `json:"guard_terminations,omitempty"`
-}
-
-type StageGraphGuardTerminationView struct {
-	From         string `json:"from"`
-	To           string `json:"to"`
-	NodeID       string `json:"node_id"`
-	HandlerEvent string `json:"handler_event"`
-	GuardID      string `json:"guard_id"`
+	FlowID   string                 `json:"flow_id"`
+	FlowPath string                 `json:"flow_path,omitempty"`
+	Nodes    []StageGraphNodeView   `json:"nodes"`
+	Edges    []StageGraphEdgeView   `json:"edges"`
+	Timers   []StageGraphTimerView  `json:"timers,omitempty"`
+	Joins    []StageGraphJoinView   `json:"joins,omitempty"`
+	FanOuts  []StageGraphFanOutView `json:"fan_outs,omitempty"`
+	Gates    []StageGraphGateView   `json:"gates,omitempty"`
 }
 
 type StageGraphNodeView struct {
@@ -200,7 +191,6 @@ type StageGraphTimerView struct {
 }
 
 type StageGraphJoinView struct {
-	ID                string `json:"id"`
 	Stage             string `json:"stage,omitempty"`
 	FlowPath          string `json:"flow_path"`
 	NodeID            string `json:"node_id"`
@@ -618,31 +608,15 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		})
 	}
 	return StageGraphView{
-		FlowID:            strings.TrimSpace(label),
-		FlowPath:          strings.TrimSpace(path),
-		Nodes:             nodes,
-		Edges:             buildStageGraphEdgesForFlow(source, flowID),
-		Timers:            buildStageGraphTimersForFlow(source, flowID),
-		Joins:             buildStageGraphJoinsForFlow(source, flowID),
-		FanOuts:           buildStageGraphFanOutsForFlow(source, flowID, states, terminalSet),
-		Gates:             buildStageGraphGatesForFlow(source, flowID),
-		GuardTerminations: buildStageGraphGuardTerminationsForFlow(source, flowID),
+		FlowID:   strings.TrimSpace(label),
+		FlowPath: strings.TrimSpace(path),
+		Nodes:    nodes,
+		Edges:    buildStageGraphEdgesForFlow(source, flowID),
+		Timers:   buildStageGraphTimersForFlow(source, flowID),
+		Joins:    buildStageGraphJoinsForFlow(source, flowID),
+		FanOuts:  buildStageGraphFanOutsForFlow(source, flowID, states, terminalSet),
+		Gates:    buildStageGraphGatesForFlow(source, flowID),
 	}
-}
-
-func buildStageGraphGuardTerminationsForFlow(source semanticview.Source, flowID string) []StageGraphGuardTerminationView {
-	topology, ok := semanticview.WorkflowStageTopology(source, flowID)
-	if !ok {
-		return nil
-	}
-	var out []StageGraphGuardTerminationView
-	for _, possibility := range topology.PossibleGuardTerminations() {
-		out = append(out, StageGraphGuardTerminationView{
-			From: possibility.From, To: possibility.To, NodeID: possibility.Node.Key(),
-			HandlerEvent: possibility.HandlerEvent, GuardID: possibility.GuardID,
-		})
-	}
-	return out
 }
 
 func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []StageGraphJoinView {
@@ -655,7 +629,6 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 			continue
 		}
 		item := StageGraphJoinView{
-			ID:                strings.TrimSpace(plan.Spec.EffectiveID()),
 			Stage:             strings.TrimSpace(plan.Spec.Stage),
 			FlowPath:          plan.Node.FlowPath(),
 			NodeID:            plan.Node.NodeID(),
@@ -676,8 +649,8 @@ func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []St
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left := out[i].FlowPath + "\x00" + out[i].Stage + "\x00" + out[i].ID + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
-		right := out[j].FlowPath + "\x00" + out[j].Stage + "\x00" + out[j].ID + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
+		left := out[i].FlowPath + "\x00" + out[i].NodeID + "\x00" + out[i].HandlerEvent
+		right := out[j].FlowPath + "\x00" + out[j].NodeID + "\x00" + out[j].HandlerEvent
 		return left < right
 	})
 	return out

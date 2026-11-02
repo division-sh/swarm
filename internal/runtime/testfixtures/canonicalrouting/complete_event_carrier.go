@@ -8,7 +8,7 @@ func CopyCompleteEventCarrierElection(t testing.TB) string {
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: complete-event-carrier\n")
 	writeClosedVariantFile(t, root, "events.yaml", "custom.replay.checked:\n  task_id: string\n  text: string\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "declarative-node:\n  execution_type: system_node\n  event_handlers:\n    custom.replay.checked: {}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "declarative-node:\n  custom.replay.checked: {}\n")
 	writeClosedVariantFile(t, root, "agents.yaml", "complete-event-agent:\n  model: regular\n  intent: {inline: Prove complete event dispatch.}\n  subscriptions: [custom.replay.checked]\n")
 	return root
 }

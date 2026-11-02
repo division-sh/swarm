@@ -29,7 +29,7 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 		},
 		{
 			name:   "join outcomes",
-			source: "join:\n  id: membership-owner\n  stage: pending\n  members: {count: 1, by: payload.member_id}\n  output: payload.value\n  deadline: {after: 1h, from: stage_entry}\n  on_complete: {emit: chosen}\n  on_deadline: {emit: fallback}",
+			source: "join:\n  stage: pending\n  members: {count: 1, by: payload.member_id}\n  output: payload.value\n  deadline: {after: 1h, from: stage_entry}\n  on_complete: {emit: chosen}\n  on_deadline: {emit: fallback}",
 			labels: []string{"join.on_complete.emit", "join.on_deadline.emit"},
 		},
 	} {
@@ -39,7 +39,7 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  pending: {}\n  done: {final: true}\npins:\n  outputs: [chosen, fallback]\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  JoinValue:\n    value: {type: text}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "request:\n  ready: {type: boolean}\n  member_id: {type: text}\n  value: {type: JoinValue}\nchosen:\nfallback:\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    request:\n      "+strings.ReplaceAll(tc.source, "\n", "\n      ")+"\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  request:\n      "+strings.ReplaceAll(tc.source, "\n", "\n      ")+"\n")
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 			if err != nil {
@@ -58,8 +58,8 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 					t.Fatalf("site[%d] lost display, exact identity or original output: %#v display=%q", i, site, got)
 				}
 			}
-			if handler.Join != nil && handler.Join.EffectiveID() != "membership-owner" {
-				t.Fatalf("outcome presentation changed join membership identity: %#v", handler.Join)
+			if handler.Join != nil && handler.Join.Stage != "pending" {
+				t.Fatalf("outcome presentation changed the join's lifecycle scope: %#v", handler.Join)
 			}
 		})
 	}

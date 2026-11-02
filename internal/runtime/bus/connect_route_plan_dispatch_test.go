@@ -628,10 +628,10 @@ func mixedPubsubConnectStaticSource(t *testing.T) semanticview.Source {
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
-		"producer/nodes.yaml":    "local-observer:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"producer/nodes.yaml":    "local-observer:\n  deploy.done:\n    guard: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: _entity.id != \"\"\n",
 	}))
 }
 
@@ -643,10 +643,10 @@ func mixedPubsubConnectNoMatchSource(t *testing.T) semanticview.Source {
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done, local.done]\n",
 		"producer/events.yaml":   "deploy.done:\nlocal.done:\n",
-		"producer/nodes.yaml":    "local-observer:\n  execution_type: system_node\n  subscribes_to: [local.done]\n  event_handlers:\n    local.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"producer/nodes.yaml":    "local-observer:\n  local.done:\n    guard: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: _entity.id != \"\"\n",
 	}))
 }
 
@@ -658,7 +658,7 @@ func mixedPubsubConnectFailureSource(t *testing.T) semanticview.Source {
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
-		"producer/nodes.yaml":    "local-observer:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"producer/nodes.yaml":    "local-observer:\n  deploy.done:\n    guard: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\n",
 	}))
@@ -807,12 +807,10 @@ func connectReceiverPinCollisionSource(t *testing.T, producerMode string, rootRe
 		files[filepath.Join(receiverPrefix, "agents.yaml")] = "receiver:\n  intent: {inline: 'Observe accepted and audited work.'}\n  subscriptions: [work.accepted, work.audited]\n"
 	} else {
 		files[filepath.Join(receiverPrefix, "nodes.yaml")] = `receiver:
-  execution_type: system_node
-  event_handlers:
-    work.accepted:
-      guard: {id: selected_owner, check: _entity.id != ""}
-    work.audited:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  work.accepted:
+    guard: _entity.id != ""
+  work.audited:
+    guard: _entity.id != ""
 `
 		if mixed {
 			files[filepath.Join(receiverPrefix, "agents.yaml")] = "legal-agent:\n  intent: {inline: 'Observe accepted work.'}\n  subscriptions: [work.accepted]\n"
@@ -829,20 +827,16 @@ func connectReceiverPinLegalSource(t *testing.T, shape string) semanticview.Sour
 		{"event": "work.ready", "from": "producer", "to": "consumer", "rename": "work.audited"},
 	}
 	nodes := `accept-node:
-  execution_type: system_node
-  event_handlers:
-    work.accepted:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  work.accepted:
+    guard: _entity.id != ""
 `
 	if shape == "duplicate_edge" {
 		inputs = inputs[:1]
 		connects[1] = connects[0]
 	} else {
 		nodes += `audit-node:
-  execution_type: system_node
-  event_handlers:
-    work.audited:
-      guard: {id: selected_owner, check: _entity.id != ""}
+  work.audited:
+    guard: _entity.id != ""
 `
 	}
 	rootSchema, err := yaml.Marshal(map[string]any{"stages": []any{}, "connect": connects})
@@ -1817,7 +1811,7 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 	for _, id := range []string{"consumer-a", "consumer-b"} {
 		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [work.done]\n"
-		files[id+"/nodes.yaml"] = id + "-node:\n  execution_type: system_node\n  event_handlers:\n    work.done: {}\n"
+		files[id+"/nodes.yaml"] = id + "-node:\n  work.done: {}\n"
 	}
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 	graph := runtimepinrouting.CompileConnectGraph(source)
@@ -1871,7 +1865,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 		"producer/events.yaml":   "deploy.done:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.*:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  deploy.*:\n    guard: _entity.id != \"\"\n",
 	}))
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
@@ -3898,7 +3892,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
-		"producer/nodes.yaml":    "producer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
+		"producer/nodes.yaml":    "producer-node:\n  deploy.done: {}\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
 	}))
@@ -4591,7 +4585,7 @@ func connectRoutePlanStaticSource(t *testing.T) semanticview.Source {
 		"producer/events.yaml":   "deploy.done:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: _entity.id != \"\"\n",
 	}))
 }
 

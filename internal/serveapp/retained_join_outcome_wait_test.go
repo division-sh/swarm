@@ -155,7 +155,7 @@ func TestServedRetainedJoinOutcomeWaitRejectsUnrelatedOrUnfiredEvidence(t *testi
 
 func retainedJoinWaitArm(t *testing.T, loop loopruntime.Activation, node, entryID string, at time.Time) joinruntime.Activation {
 	t.Helper()
-	ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, node), "review.requested", "working", "reviews")
+	ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, node), "review.requested", "working")
 	if err != nil {
 		t.Fatal(err)
 	}

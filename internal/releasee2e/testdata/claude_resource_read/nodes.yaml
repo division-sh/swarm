@@ -1,7 +1,4 @@
 reference:
-  execution_type: system_node
-  subscribes_to: [records.loaded, task.finished]
-  event_handlers:
-    records.loaded: {}
-    task.finished:
-      advances_to: done
+  records.loaded: {}
+  task.finished:
+    advances_to: done

@@ -124,7 +124,7 @@ func nativeWorkflowJoinSourceCoordinatorForTest(t *testing.T, fixture *PipelineD
 	if err != nil {
 		t.Fatal(err)
 	}
-	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: source, workflowNodes: nodes, guardRegistry: NewContractGuardRegistry(source)}, GenericSchedules: schedules})
+	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: source, workflowNodes: nodes}, GenericSchedules: schedules})
 	observer.WorkflowEngineMutationOwner = pc.workflowStore.engineMutations
 	pc.workflowStore.engineMutations = observer
 	return pc
@@ -233,7 +233,7 @@ func driveNativePublishedJoinCompletionForTest(t *testing.T, fixture *PipelineDe
 	}
 	target := route.Target.Route()
 
-	declaration, err := timeridentity.NewJoinRef(node, "item.completed", handler.Join.Stage, handler.Join.EffectiveID())
+	declaration, err := timeridentity.NewJoinRef(node, "item.completed", handler.Join.Stage)
 	if err != nil {
 		return result, err
 	}

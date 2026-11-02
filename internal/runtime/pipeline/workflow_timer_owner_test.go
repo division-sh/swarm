@@ -129,7 +129,7 @@ func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRes
 					files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 					files[flow+"/schema.yaml"] = "stages:\n  waiting: {}\n"
 					files[flow+"/events.yaml"] = fmt.Sprintf("timer.arm:\ntimer.%s:\n", flow)
-					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  execution_type: system_node\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", flow, flow)
+					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  timers:\n    - {event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  timer.arm: {}\n", flow, flow)
 				}
 				bundle := loadWorkflowTempBundle(t, files)
 				if len(bundle.Semantics.Timers) != 2 {
@@ -919,7 +919,7 @@ func VerifyNativeWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothSto
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			files := workflowTimerOwnerSourceFiles()
-			files["schema.yaml"] = "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.timeout}\n  done: {}\n"
+			files["schema.yaml"] = "stages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.timeout}\n  done: {}\n"
 			files["events.yaml"] += "work.noted:\n"
 			files["nodes.yaml"] += "    work.noted: {}\n"
 			bundle := loadWorkflowTempBundle(t, files)
@@ -2352,12 +2352,10 @@ func workflowTimerOwnerSourceFiles() map[string]string {
 		"schema.yaml":   "stages:\n  waiting: {}\n  done: {}\n",
 		"events.yaml":   "timer.timeout:\nwork.completed:\nwork.reopened:\nreview.reopened:\ntest.workflow_progressed:\n",
 		"nodes.yaml": `timer-owner:
-  execution_type: system_node
-  event_handlers:
-    work.completed: {advances_to: done}
-    work.reopened: {advances_to: waiting}
-    review.reopened: {advances_to: waiting}
-    test.workflow_progressed: {advances_to: done}
+  work.completed: {advances_to: done}
+  work.reopened: {advances_to: waiting}
+  review.reopened: {advances_to: waiting}
+  test.workflow_progressed: {advances_to: done}
 `,
 	}
 }
@@ -2381,7 +2379,7 @@ func workflowTimerFirstDeclarationRevisionBundle(t *testing.T, revised bool) *ru
 	t.Helper()
 	schema := "stages:\n  waiting: {}\n"
 	if revised {
-		schema = "stages:\n  waiting:\n    timers:\n      - {id: waiting.first, after: 1s, emit: timer.first}\n"
+		schema = "stages:\n  waiting:\n    timers:\n      - {after: 1s, emit: timer.first}\n"
 	}
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
@@ -2395,7 +2393,7 @@ func workflowTimerProgressedSourceRevisionBundle(t *testing.T, revised bool) *ru
 	files := workflowTimerOwnerSourceFiles()
 	files["schema.yaml"] = "stages:\n  waiting: {}\n  done: {}\n"
 	files["events.yaml"] += "timer.keep:\ntimer.changed.v1:\ntimer.changed.v2:\ntimer.removed:\ntimer.added:\n"
-	files["nodes.yaml"] += "  timers:\n    - {id: waiting.keep, event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
+	files["nodes.yaml"] += "  timers:\n    - {event: timer.keep, start_on: 'state:waiting', delay: 1h}\n"
 	if revised {
 		files["nodes.yaml"] += "    - {id: waiting.changed, event: timer.changed.v2, start_on: 'state:waiting', delay: 2h}\n    - {id: waiting.added, event: timer.added, start_on: 'state:waiting', delay: 30m}\n"
 	} else {
@@ -2408,9 +2406,9 @@ func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.Workflow
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {after: 2h, emit: timer.initial}\n",
 		"events.yaml":   "timer.arm:\ntimer.initial:\ntimer.event:\n",
-		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n",
+		"nodes.yaml":    "timer-owner:\n  timers:\n    - {event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  timer.arm: {}\n",
 	})
 }
 
@@ -2427,7 +2425,7 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		files[path+"manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 		files[path+"schema.yaml"] = fmt.Sprintf("stages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", prefix)
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
-		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", prefix, armEvent)
+		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  timer.arm: {}\n", prefix, armEvent)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2436,9 +2434,9 @@ func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.Wo
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.state_entry}\n",
 		"events.yaml":   "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
-		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n    work.noted: {}\n",
+		"nodes.yaml":    "observer:\n  timers:\n    - {event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  timer.arm: {}\n  work.noted: {}\n",
 	})
 }
 
@@ -2449,18 +2447,16 @@ func workflowTimerLoopEventBundle(t *testing.T) *runtimecontracts.WorkflowContra
 		"schema.yaml":   "stages:\n  ready: {}\n  waiting: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n",
 		"events.yaml":   "loop.start:\nloop.repeat:\n  revision_id: text\ntimer.arm:\n  revision_id: text\ntimer.event_armed:\n",
 		"nodes.yaml": `observer:
-  execution_type: system_node
   timers:
-    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', delay: 1h}
-  event_handlers:
-    loop.start:
-      loop: {start: revision, from: ready}
-      advances_to: waiting
-    timer.arm:
-      loop: {admit: revision, from: waiting}
-    loop.repeat:
-      loop: {repeat: revision, from: waiting}
-      advances_to: waiting
+    - {event: timer.event_armed, start_on: 'event:timer.arm', delay: 1h}
+  loop.start:
+    loop: {start: revision, from: ready}
+    advances_to: waiting
+  timer.arm:
+    loop: {admit: revision, from: waiting}
+  loop.repeat:
+    loop: {repeat: revision, from: waiting}
+    advances_to: waiting
 `,
 	})
 }
@@ -2472,32 +2468,27 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 		"schema.yaml":   "stages:\n  waiting: {}\n",
 		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
-  execution_type: system_node
   timers:
-    - {id: accepted, event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
-    - {id: reject.start, event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
-    - {id: reject.target, event: timer.reject.target, start_on: 'event:reject.target', cancel_on: 'event:guard.reject', delay: 1h}
-    - {id: discard.start, event: timer.discard.start, start_on: 'event:guard.discard', delay: 1h}
-    - {id: discard.target, event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
-    - {id: dedup.start, event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
-    - {id: dedup.target, event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
-  event_handlers:
-    accepted.start: {}
-    accepted.cancel: {}
-    reject.target: {}
-    guard.reject:
-      guard:
-        check: false
-        on_fail: reject
-    discard.target: {}
-    guard.discard:
-      guard:
-        check: false
-        on_fail: discard
-    dedup.event:
-      accumulate: {into: items, from: payload, key: payload.item_id}
-    dedup.reset: {}
-    dedup.target: {}
+    - {event: timer.accepted, start_on: 'event:accepted.start', cancel_on: 'event:accepted.cancel', delay: 1h}
+    - {event: timer.reject.start, start_on: 'event:guard.reject', delay: 1h}
+    - {event: timer.reject.target, start_on: 'event:reject.target', cancel_on: 'event:guard.reject', delay: 1h}
+    - {event: timer.discard.start, start_on: 'event:guard.discard', delay: 1h}
+    - {event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
+    - {event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
+    - {event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
+  accepted.start: {}
+  accepted.cancel: {}
+  reject.target: {}
+  guard.reject:
+    guard: false
+  discard.target: {}
+  guard.discard:
+    rules:
+      - when: false
+  dedup.event:
+    accumulate: {into: items, from: payload, key: payload.item_id}
+  dedup.reset: {}
+  dedup.target: {}
 `,
 	})
 }

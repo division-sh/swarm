@@ -494,11 +494,9 @@ func gateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle 
 
 		"events.yaml": "launch.approved:\ndraft.ready:\nordinary.transition:\nreview.expired:\n",
 		"nodes.yaml": `reviewer:
-  execution_type: system_node
-  event_handlers:
-    draft.ready: {advances_to: awaiting_review}
-    ordinary.transition: {advances_to: operating}
-    review.expired: {advances_to: operating}
+  draft.ready: {advances_to: awaiting_review}
+  ordinary.transition: {advances_to: operating}
+  review.expired: {advances_to: operating}
 `,
 	})
 }

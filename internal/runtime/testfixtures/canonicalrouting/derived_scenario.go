@@ -52,17 +52,14 @@ fulfillment.requested:
 `,
 		"fulfillment/nodes.yaml": `
 complete-request:
-  execution_type: system_node
-  subscribes_to: [fulfillment.requested]
-  event_handlers:
-    fulfillment.requested: {}
+  fulfillment.requested: {}
 `,
 	}
 	if rootEvents != "" {
 		files["events.yaml"] = rootEvents
 		delete(files, "fulfillment/events.yaml")
 		files["fulfillment/schema.yaml"] = "# fixture: fulfillment\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [fulfillment.requested]\n"
-		files["fulfillment/nodes.yaml"] = "complete-request:\n  execution_type: system_node\n  subscribes_to: [fulfillment.requested]\n  event_handlers:\n    fulfillment.requested: {advances_to: done}\n"
+		files["fulfillment/nodes.yaml"] = "complete-request:\n  fulfillment.requested: {advances_to: done}\n"
 	}
 	for relative, body := range files {
 		writeClosedVariantFile(t, root, relative, body)

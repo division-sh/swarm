@@ -191,7 +191,7 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicityAndRendering(t *testing.T) {
 	catalog := packfixture.TriggerCatalog(t)
 	sourceRoot := writeInboundAdmissionPolicyMatrixFixture(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), sourceRoot, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot(), sourceRoot, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}

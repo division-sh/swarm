@@ -22,12 +22,12 @@ connect:
   - {event: work.ready, from: ., to: right}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "start:\nwork.ready:\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "source:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      emit: work.ready\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "source:\n  start:\n    emit: work.ready\n")
 	for _, flow := range []string{"left", "right"} {
 		writeClosedVariantFile(t, root, flow+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flow+"/schema.yaml", fmt.Sprintf("# fixture: %s\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [work.ready]\n", flow))
 		removeClosedVariantFiles(t, root, flow+"/state.yaml")
-		writeClosedVariantFile(t, root, flow+"/nodes.yaml", "initialize:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready: {}\n")
+		writeClosedVariantFile(t, root, flow+"/nodes.yaml", "initialize:\n  work.ready: {}\n")
 		writeClosedVariantFile(t, root, flow+"/agents.yaml", "worker:\n  model: regular\n  intent: {inline: Observe initialized work.}\n  subscriptions: [work.ready]\n")
 	}
 	return root

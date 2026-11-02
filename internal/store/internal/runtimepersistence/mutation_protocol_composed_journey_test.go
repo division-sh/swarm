@@ -65,7 +65,6 @@ func mutationProtocolFanOutRoot(t *testing.T) string {
 	}{
 		{"schema.yaml", "    - start.closed\n", "    - start.closed\n    - fanout.requested\n"},
 		{"schema.yaml", "outputs: [work.requested", "outputs: [fanout.child, work.requested"},
-		{"nodes.yaml", "  subscribes_to:\n    - start.seeded\n    - start.requested\n    - start.closed\n", "  subscribes_to:\n    - start.seeded\n    - start.requested\n    - start.closed\n    - fanout.requested\n"},
 	} {
 		path := filepath.Join(root, edit.file)
 		content, err := os.ReadFile(path)
@@ -81,7 +80,7 @@ func mutationProtocolFanOutRoot(t *testing.T) string {
 	}
 	for _, addition := range []struct{ file, content string }{
 		{"events.yaml", "fanout.requested:\n  items: [text]\nfanout.child:\n  value: text\n"},
-		{"nodes.yaml", "    fanout.requested:\n      fan_out:\n        items_from: payload.items\n        as: entry\n        identity: entry\n        max_items: 2\n        emit:\n          event: fanout.child\n          fields:\n            value: entry\n"},
+		{"nodes.yaml", "  fanout.requested:\n    fan_out:\n      items_from: payload.items\n      as: entry\n      identity: entry\n      max_items: 2\n      emit:\n        event: fanout.child\n        fields:\n          value: entry\n"},
 	} {
 		path := filepath.Join(root, addition.file)
 		file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)

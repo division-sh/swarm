@@ -231,7 +231,7 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 						"schema.yaml":        "stages: []\n",
 						"review/schema.yaml": "stages:\n  pending: {}\n  reviewing: {}\n",
 						"review/events.yaml": "work.ready:\nwork.recorded:\n",
-						"review/nodes.yaml":  "inspect:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: reviewing\n" + shape.effects, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+						"review/nodes.yaml":  "inspect:\n  work.ready:\n    advances_to: reviewing\n" + shape.effects, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}
 					if shape.entity != "" {
 						files["review/state.yaml"] = "marker: \"original\"\n"

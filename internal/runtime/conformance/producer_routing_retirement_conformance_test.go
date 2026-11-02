@@ -499,7 +499,7 @@ func TestProducerRoutingYAMLCensusExcludesNestedCheckout(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte("worker:\n  event_handlers:\n    request:\n      emit: {event: task.done, broadcast: true}\n"), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte("worker:\n  request:\n    emit: {event: task.done, broadcast: true}\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -544,7 +544,7 @@ func retiredProducerRoutingFiles(t *testing.T, repoRoot string) []string {
 }
 
 func TestProducerRoutingRetirementGuardIgnoresNestedLiteralEmitMap(t *testing.T) {
-	raw := []byte("worker:\n  event_handlers:\n    request:\n      emit:\n        event: task.done\n        fields:\n          config:\n            literal:\n              emit:\n                broadcast: true\n")
+	raw := []byte("worker:\n  request:\n    emit:\n      event: task.done\n      fields:\n        config:\n          literal:\n            emit:\n              broadcast: true\n")
 	retired, err := hasRetiredProducerRoutingYAML(raw)
 	if err != nil {
 		t.Fatal(err)

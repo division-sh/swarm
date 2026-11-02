@@ -206,7 +206,7 @@ func forkJoinInventoryChangeDeclaration(t *testing.T, command runtimegenericsche
 	if !valid {
 		t.Fatal("additional schedule lost its typed arrival handle")
 	}
-	declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), ref.Stage(), joinID)
+	declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), ref.Stage())
 	if err != nil {
 		t.Fatal(err)
 	}

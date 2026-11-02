@@ -1,9 +1,5 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [loop.event]
-  produces: [loop.event]
-  event_handlers:
-    loop.event:
-      advances_to: done
-      emit:
-        event: loop.event
+  loop.event:
+    advances_to: done
+    emit:
+      event: loop.event

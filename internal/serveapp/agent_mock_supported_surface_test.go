@@ -258,10 +258,7 @@ func addCanonicalTelegramApprovalOverlay(t testing.TB, sourceRoot string) {
 	}
 	revisionConsumer := `
 telegram-revision:
-  execution_type: system_node
-  subscribes_to: [telegram_send_message.revision_requested]
-  event_handlers:
-    telegram_send_message.revision_requested: {}
+  telegram_send_message.revision_requested: {}
 `
 	updated := strings.Replace(string(body), old, replacement, 1) + revisionConsumer
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {

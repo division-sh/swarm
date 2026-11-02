@@ -1,7 +1,3 @@
 beta-worker:
-  execution_type: system_node
-  subscribes_to: [beta.start]
-  produces: []
-  event_handlers:
-    beta.start:
-      advances_to: finished
+  beta.start:
+    advances_to: finished

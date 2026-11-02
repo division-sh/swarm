@@ -65,14 +65,14 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			var refErr error
 			switch compiledPlan.Mode {
 			case runtimecontracts.WorkflowJoinModeArrival:
-				ref, refErr = timeridentity.NewJoinRef(nodeRef, eventType, handler.Join.Stage, handler.Join.EffectiveID())
+				ref, refErr = timeridentity.NewJoinRef(nodeRef, eventType, handler.Join.Stage)
 			case runtimecontracts.WorkflowJoinModeFanOutDelivery:
 				fanOutDeclaration, identityErr := compiledPlan.FanOut.FanOut.ElementRef.DeclarationIdentity()
 				if identityErr != nil {
 					refErr = identityErr
 				} else {
 					ref, refErr = timeridentity.NewFanOutDeliveryJoinRef(
-						nodeRef, eventType, handler.Join.EffectiveID(), fanOutDeclaration,
+						nodeRef, eventType, fanOutDeclaration,
 						compiledPlan.FanOut.FanOut.BundleHash, compiledPlan.FanOut.FanOut.SemanticDigest,
 					)
 				}
@@ -90,11 +90,11 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			}
 			spec := plan.Spec
 			resultType := plan.ResultType
-			prefix := fmt.Sprintf("join %s", spec.EffectiveID())
+			prefix := fmt.Sprintf("join handler %s", eventType)
 			identityKey := ref.Declaration().Key()
 			duplicateLocation := nodeID + ":" + eventType
 			if prior, duplicate := seenIDs[identityKey]; duplicate {
-				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s has duplicate effective identity; already declared at %s (add explicit unique id values)", prefix, prior)))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s has duplicate node/event identity; already declared at %s", prefix, prior)))
 			} else {
 				seenIDs[identityKey] = duplicateLocation
 			}

@@ -84,30 +84,24 @@ item.recorded:
   marker: text
 `,
 		"nodes.yaml": `seed:
-  execution_type: system_node
-  subscribes_to: [seed]
-  event_handlers:
-    seed:
-      {}
+  seed:
+    {}
 collector:
-  execution_type: system_node
-  subscribes_to: [item.keyed, item.nested, item.unkeyed]
-  event_handlers:
-    item.keyed:
-      accumulate: {into: items, from: payload, key: payload.id}
-      data_accumulation:
-        writes: [{target_field: marker, value: payload.marker}]
-      emit: {event: item.recorded, fields: {marker: payload.marker}}
-    item.nested:
-      accumulate: {into: items, from: payload, key: payload.payload.id}
-      data_accumulation:
-        writes: [{target_field: marker, value: payload.marker}]
-      emit: {event: item.recorded, fields: {marker: payload.marker}}
-    item.unkeyed:
-      accumulate: {into: items, from: payload}
-      data_accumulation:
-        writes: [{target_field: marker, value: payload.marker}]
-      emit: {event: item.recorded, fields: {marker: payload.marker}}
+  item.keyed:
+    accumulate: {into: items, from: payload, key: payload.id}
+    data_accumulation:
+      writes: [{target_field: marker, value: payload.marker}]
+    emit: {event: item.recorded, fields: {marker: payload.marker}}
+  item.nested:
+    accumulate: {into: items, from: payload, key: payload.payload.id}
+    data_accumulation:
+      writes: [{target_field: marker, value: payload.marker}]
+    emit: {event: item.recorded, fields: {marker: payload.marker}}
+  item.unkeyed:
+    accumulate: {into: items, from: payload}
+    data_accumulation:
+      writes: [{target_field: marker, value: payload.marker}]
+    emit: {event: item.recorded, fields: {marker: payload.marker}}
 `,
 	}))
 	runID := uuid.NewString()

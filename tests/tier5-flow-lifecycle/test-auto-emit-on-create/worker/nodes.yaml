@@ -1,34 +1,25 @@
 worker:
-  execution_type: system_node
-  subscribes_to: [auto.started, worker.requested]
-  produces: [auto.processed]
-  event_handlers:
-    worker.requested:
-      guard:
-        check: payload.instance_id != ''
-      rules:
-        - when: instance.stage == 'awaiting_requested'
-          advances_to: done
-        - when: instance.stage == 'started'
-          advances_to: requested_started
-        - advances_to: requested
-    auto.started:
-      rules:
-        - when: instance.stage == 'requested'
-          advances_to: requested_started
-          emit:
-            event: auto.processed
-        - advances_to: started
-          emit:
-            event: auto.processed
+  worker.requested:
+    guard: payload.instance_id != ''
+    rules:
+      - when: instance.stage == 'awaiting_requested'
+        advances_to: done
+      - when: instance.stage == 'started'
+        advances_to: requested_started
+      - advances_to: requested
+  auto.started:
+    rules:
+      - when: instance.stage == 'requested'
+        advances_to: requested_started
+        emit:
+          event: auto.processed
+      - advances_to: started
+        emit:
+          event: auto.processed
 
 observer:
-  execution_type: system_node
-  subscribes_to: [auto.processed]
-  produces: []
-  event_handlers:
-    auto.processed:
-      rules:
-        - when: instance.stage == 'requested_started'
-          advances_to: done
-        - advances_to: awaiting_requested
+  auto.processed:
+    rules:
+      - when: instance.stage == 'requested_started'
+        advances_to: done
+      - advances_to: awaiting_requested

@@ -279,7 +279,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		"schema.yaml": "stages:\n  waiting: {}\n  active: {}\n  done: {final: true}\npins:\n  inputs: [start.seeded, start.requested, start.closed]\n",
 		"events.yaml": "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n",
 		"state.yaml":  "marker: text\n",
-		"nodes.yaml":  "controller:\n  execution_type: system_node\n  subscribes_to: [start.seeded, start.requested, start.closed]\n  event_handlers:\n    start.seeded: {}\n    start.requested: {}\n    start.closed: {advances_to: done}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"nodes.yaml":  "controller:\n  start.seeded: {}\n  start.requested: {}\n  start.closed: {advances_to: done}\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, file), []byte(body), 0600); err != nil {
 			t.Fatal(err)

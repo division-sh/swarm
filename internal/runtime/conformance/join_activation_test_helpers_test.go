@@ -12,9 +12,9 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-func findConformanceJoinActivation(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, node identity.ExecutableNode, event, stage, joinID string) (joinruntime.Activation, bool) {
+func findConformanceJoinActivation(t *testing.T, ctx context.Context, instance runtimepipeline.WorkflowInstance, node identity.ExecutableNode, event, stage string) (joinruntime.Activation, bool) {
 	t.Helper()
-	declaration, err := timeridentity.NewJoinRef(node, event, stage, joinID)
+	declaration, err := timeridentity.NewJoinRef(node, event, stage)
 	if err != nil {
 		t.Fatal(err)
 	}

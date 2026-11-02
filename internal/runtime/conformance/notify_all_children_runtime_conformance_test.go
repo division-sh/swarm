@@ -2293,7 +2293,7 @@ func newNotifyAllChildrenRuntime(
 			Options: runtimepkg.RuntimeOptions{
 				ExecutionPosture: posture, SourceArtifactFact: sourceArtifactFact,
 				RuntimeInstanceID: authorActivityTestRuntimeInstanceID, ProcessWorkOwner: conformanceTestProcessOwner(t),
-				WorkflowModule: conformanceLoadedWorkflowModule{source: source, nodes: nodes, guards: runtimepipeline.NewContractGuardRegistry(source)},
+				WorkflowModule: conformanceLoadedWorkflowModule{source: source, nodes: nodes},
 				LLMRuntime:     conformanceNoopLLMRuntime{},
 			},
 		}
@@ -2525,7 +2525,6 @@ func newNotifyAllChildrenRuntime(
 	module := conformanceLoadedWorkflowModule{
 		source: source,
 		nodes:  nodes,
-		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	rootedContext := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), notifyAllChildrenRootedSource(t, source).Admission())
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}

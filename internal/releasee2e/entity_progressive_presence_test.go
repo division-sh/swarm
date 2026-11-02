@@ -167,38 +167,34 @@ func writePresenceLastFieldFixture(t *testing.T, root string) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "state.yaml"), "review_note: text?\n")
 	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), `owner:
-  execution_type: system_node
-  subscribes_to: [work.opened, work.annotated, work.assessed, work.consume, work.completed]
-  produces: [work.consume, work.completed]
-  event_handlers:
-    work.opened:
-      data_accumulation:
-        writes:
-          - {target_field: review_note, value: "seeded"}
-      advances_to: assess
-    work.annotated:
-      guard: {check: instance.stage == 'assess'}
-      data_accumulation:
-        writes: [review_note]
-    work.assessed:
-      guard: {check: instance.stage == 'assess'}
-      advances_to: consume
-      emit: {event: work.consume}
-    work.consume:
-      guard: {check: instance.stage == 'consume'}
-      data_accumulation:
-        writes:
-          - op: clear
-            target: state.review_note
-      emit:
-        event: work.completed
-        fields:
-          business_brief: "An assessed brief"
-          attempt_count: 1
-          note_supplied: has(state.review_note)
-    work.completed:
-      guard: {check: instance.stage == 'consume' && !payload.note_supplied && !has(state.review_note)}
-      advances_to: done
+  work.opened:
+    data_accumulation:
+      writes:
+        - {target_field: review_note, value: "seeded"}
+    advances_to: assess
+  work.annotated:
+    guard: instance.stage == 'assess'
+    data_accumulation:
+      writes: [review_note]
+  work.assessed:
+    guard: instance.stage == 'assess'
+    advances_to: consume
+    emit: {event: work.consume}
+  work.consume:
+    guard: instance.stage == 'consume'
+    data_accumulation:
+      writes:
+        - op: clear
+          target: state.review_note
+    emit:
+      event: work.completed
+      fields:
+        business_brief: "An assessed brief"
+        attempt_count: 1
+        note_supplied: has(state.review_note)
+  work.completed:
+    guard: instance.stage == 'consume' && !payload.note_supplied && !has(state.review_note)
+    advances_to: done
 `)
 }
 

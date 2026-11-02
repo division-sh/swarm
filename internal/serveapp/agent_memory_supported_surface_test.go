@@ -569,20 +569,16 @@ mock.message_ready:
 `)
 	writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "enums:\n  MockConversationScope: {values: [direct, shared], default: direct}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `mock-input:
-  execution_type: system_node
-  subscribes_to: [mock.message]
-  produces: [mock.message_ready]
-  event_handlers:
-    mock.message:
-      emit:
-        event: mock.message_ready
-        fields:
-          operator_account: policy.operator_account
-          text: payload.text
-          external_account: payload.external_account
-          conversation_reference: payload.conversation_reference
-          conversation_scope: "direct"
-          provider_message_reference: payload.provider_message_reference
+  mock.message:
+    emit:
+      event: mock.message_ready
+      fields:
+        operator_account: policy.operator_account
+        text: payload.text
+        external_account: payload.external_account
+        conversation_reference: payload.conversation_reference
+        conversation_scope: "direct"
+        provider_message_reference: payload.provider_message_reference
 `)
 }
 

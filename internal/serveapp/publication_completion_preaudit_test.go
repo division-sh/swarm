@@ -326,10 +326,7 @@ connect:
 		"reviews/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"reviews/schema.yaml":   "stages: []\npins:\n  inputs: [work.requested]\n",
 		"reviews/nodes.yaml": `start:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested: {}
+  work.requested: {}
 `,
 	} {
 		path := filepath.Join(root, name)

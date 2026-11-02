@@ -727,7 +727,7 @@ func workflowTimerServedLifecycleBundle(t *testing.T, recurring bool) *runtimeco
 	t.Helper()
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {final: true}\n",
+		"schema.yaml":   "stages:\n  waiting:\n    timers:\n      - {after: 40ms, advances_to: done}\n  done: {final: true}\n",
 	})
 	// Recurrence is a runtime scheduler variant; the admitted timer transition stays exact.
 	bundle.Semantics.Timers[0].Recurring = recurring

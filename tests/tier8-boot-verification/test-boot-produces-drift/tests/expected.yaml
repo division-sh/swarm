@@ -1,8 +1,8 @@
 conformance:
   disposition: verify-only
-  verify: warning
+  verify: reject
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "produces_drift"
-    contains: "item.surprise"
+    category: "contract_loader.undefined_field"
+    contains: "produces"

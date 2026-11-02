@@ -271,7 +271,7 @@ func (c *upgradeCheck) instance(instance UpgradeInstance) error {
 	}
 	for _, join := range joins {
 		if join.Status == joinruntime.StatusOpen || join.OutcomePending {
-			c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "join_in_flight", join.JoinID(), "nodes", "")
+			c.add(instance.Route.InstancePath, instance.EntityID, instance.FlowID, "join_in_flight", join.JoinRef().Declaration().Key(), "nodes", "")
 		}
 	}
 	return nil

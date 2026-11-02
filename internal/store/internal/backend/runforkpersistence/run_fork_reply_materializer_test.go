@@ -52,7 +52,7 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 	if err != nil {
 		t.Fatal(err)
 	}
-	declaration, err := timeridentity.NewJoinRef(node, "result", entry.Stage, "reply-return")
+	declaration, err := timeridentity.NewJoinRef(node, "result", entry.Stage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 	if err != nil {
 		t.Fatal(err)
 	}
-	early, err := timeridentity.NewJoinRef(node, "later", "later", "early-return")
+	early, err := timeridentity.NewJoinRef(node, "later", "later")
 	if err != nil {
 		t.Fatal(err)
 	}

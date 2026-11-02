@@ -99,21 +99,17 @@ children: 0
 `,
 		"events.yaml": "bump:\n  token: integer\nrecurse:\n  token: integer\nchild:\n  token: integer\n",
 		"nodes.yaml": `writer:
-  execution_type: system_node
-  event_handlers:
-    bump:
-      data_accumulation:
-        writes: [{target_field: count, value: state.count + 1}]
-    recurse:
-      data_accumulation:
-        writes: [{target_field: parents, value: state.parents + 1}]
-      emit: {event: child, fields: {token: payload.token}}
+  bump:
+    data_accumulation:
+      writes: [{target_field: count, value: state.count + 1}]
+  recurse:
+    data_accumulation:
+      writes: [{target_field: parents, value: state.parents + 1}]
+    emit: {event: child, fields: {token: payload.token}}
 child:
-  execution_type: system_node
-  event_handlers:
-    child:
-      data_accumulation:
-        writes: [{target_field: children, value: state.children + 1}]
+  child:
+    data_accumulation:
+      writes: [{target_field: children, value: state.children + 1}]
 `,
 	})
 	selected, _, reopen := openTimerReplayNativeStore(t, backend)

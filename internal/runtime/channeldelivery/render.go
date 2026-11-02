@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/google/uuid"
 )
@@ -428,7 +429,7 @@ func orderedCardChoices(card decisioncard.Card) ([]Choice, error) {
 			outcome := card.Snapshot.Outcomes[key]
 			choice := Choice{Verdict: key, Label: outcome.Label}
 			if strings.TrimSpace(choice.Label) == "" {
-				choice.Label = key
+				choice.Label = runtimecontracts.HumanizeWorkflowKey(key)
 			}
 			for _, name := range outcome.InputOrder {
 				field, ok := outcome.Input[name]
@@ -472,7 +473,7 @@ func cardDraftPrompt(card decisioncard.Card, prompt DraftPrompt) (any, string, e
 			}
 			label := strings.TrimSpace(field.Label)
 			if label == "" {
-				label = name
+				label = runtimecontracts.HumanizeWorkflowKey(name)
 			}
 			line = "Input: " + label + " (" + field.Type + ")"
 			if field.Required {
@@ -547,7 +548,11 @@ func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, au
 	for _, choice := range choices {
 		line := "Action: " + choice.Label
 		for _, field := range choice.Fields {
-			line += " | " + field.Name + ": " + field.Type
+			label := strings.TrimSpace(card.Snapshot.Outcomes[choice.Verdict].Input[field.Name].Label)
+			if label == "" {
+				label = runtimecontracts.HumanizeWorkflowKey(field.Name)
+			}
+			line += " | " + label + ": " + field.Type
 			if field.Required {
 				line += " (required)"
 			}

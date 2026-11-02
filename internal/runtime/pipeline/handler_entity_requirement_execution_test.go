@@ -76,7 +76,7 @@ func VerifyNativeEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOn
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 				"schema.yaml":   "stages:\n  active: {}\n",
 				"events.yaml":   "work.ready:\n  item_id: text\nwork.emitted:\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready:\n      emit: work.emitted\n",
+				"nodes.yaml":    "node-a:\n  work.ready:\n    emit: work.emitted\n",
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			bus := observeNativePipelineDeliveryBusForTest(t, pc)
@@ -225,12 +225,8 @@ func VerifyNativeEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStoresFo
 				"schema.yaml":   "stages:\n  active: {}\n",
 				"events.yaml":   "work.ready:\n  item_id: text\n",
 				"nodes.yaml": `node-a:
-  execution_type: system_node
-  subscribes_to: [work.ready]
-  event_handlers:
-    work.ready:
-      guard:
-        check: payload.item_id == "a"
+  work.ready:
+    guard: payload.item_id == "a"
 `,
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)

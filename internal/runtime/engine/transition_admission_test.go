@@ -241,47 +241,23 @@ func TestExecutorCompiledTransitionNoOpHasNoCause(t *testing.T) {
 
 func TestExecutorCompiledGuardDispositionHasExplicitCause(t *testing.T) {
 	node := testFlowExecutableNode(t, "orders", "worker")
-	graph := contracts.BuildWorkflowStageTopology("orders", "ready", []string{"ready", "done", "killed"}, []string{"killed"}, nil, nil, nil)
+	graph := contracts.BuildWorkflowStageTopology("orders", "ready", []string{"ready", "done"}, []string{"done"}, nil, nil, nil)
 	source := semanticview.Wrap(&contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{
 		StageTopologies: map[string]contracts.WorkflowStageTopology{"orders": graph},
 	}})
-	for _, disposition := range []string{"kill", "reject", "discard"} {
-		t.Run(disposition, func(t *testing.T) {
-			exec, recorder := transitionTestExecutor(t, source)
-			handler := contracts.SystemNodeEventHandler{Guard: &contracts.GuardSpec{Check: "false", OnFail: disposition}, AdvancesTo: "done", Emit: contracts.EmitSpec{Event: "must.not.emit"}}
-			result, err := exec.ExecuteSemanticFixture(context.Background(), transitionTestRequest(t, node, "work.requested", handler, "ready"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(result.EmitIntents) != 0 {
-				t.Fatal("failed guard emitted ordinary work")
-			}
-			if !requireResolvedSelection(t, result.HandlerRuleSelection).Equal(handlerselection.NotApplicable()) {
-				t.Fatal("definitive guard outcome invented a rule observation")
-			}
-			cause := result.StateMutation.Transition
-			if disposition != "kill" {
-				if cause != nil || result.NextState != "ready" {
-					t.Fatalf("%s invented transition: %#v", disposition, result)
-				}
-				return
-			}
-			if cause == nil || cause.FlowID() != "orders" || cause.From() != "ready" || cause.To() != "killed" || len(recorder.mutations) != 1 {
-				t.Fatalf("guard cause = %#v, mutations=%d", cause, len(recorder.mutations))
-			}
-			if _, compiled := cause.Compiled(); compiled {
-				t.Fatal("guard kill masqueraded as authored edge")
-			}
-			if !reflect.DeepEqual(cause.GuardsEvaluated(), result.GuardsEvaluated) || len(cause.GuardsEvaluated()) == 0 {
-				t.Fatalf("lost evaluated guard: %#v", cause.GuardsEvaluated())
-			}
-			if err := cause.ValidateAgainst(graph); err != nil {
-				t.Fatal(err)
-			}
-		})
+	exec, _ := transitionTestExecutor(t, source)
+	handler := contracts.SystemNodeEventHandler{Guard: &contracts.GuardSpec{Check: "false"}, AdvancesTo: "done", Emit: contracts.EmitSpec{Event: "must.not.emit"}}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), transitionTestRequest(t, node, "work.requested", handler, "ready"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != OutcomeRejected || len(result.EmitIntents) != 0 || result.StateMutation.Transition != nil || result.NextState != "ready" {
+		t.Fatalf("scalar guard refusal acquired transition or emit authority: %#v", result)
+	}
+	if !requireResolvedSelection(t, result.HandlerRuleSelection).Equal(handlerselection.NotApplicable()) {
+		t.Fatal("guard refusal invented a selected row")
 	}
 }
-
 func TestExecutorRejectsRetiredHandlerConstructionBeforeMutation(t *testing.T) {
 	node := testFlowExecutableNode(t, "orders", "creator")
 	handler := contracts.SystemNodeEventHandler{CreateEntity: true, AdvancesTo: "working"}

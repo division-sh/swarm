@@ -40,24 +40,7 @@
   ],
   "consumers": [
     {
-      "id": "endpoint-0764949b60acf00f",
-      "direction": "consumer",
-      "kind": "node_handler",
-      "flow_id": "producer",
-      "flow_path": "producer",
-      "event": {
-        "authored": "validation.started",
-        "local": "validation.started",
-        "canonical": "producer/validation.started"
-      },
-      "node_id": "producer-node",
-      "handler_event": "validation.started",
-      "source_file": "producer/nodes.yaml",
-      "source_line": 1,
-      "source_location": "event_handlers.validation.started"
-    },
-    {
-      "id": "endpoint-b418f783b226bbfa",
+      "id": "endpoint-45195e88b6850aa1",
       "direction": "consumer",
       "kind": "node_handler",
       "flow_id": "producer",
@@ -71,10 +54,27 @@
       "handler_event": "validation.triggered",
       "source_file": "producer/nodes.yaml",
       "source_line": 1,
-      "source_location": "event_handlers.validation.triggered"
+      "source_location": "[\"validation.triggered\"]"
     },
     {
-      "id": "endpoint-ca427481ea1e85d5",
+      "id": "endpoint-a311dbdc361e68a2",
+      "direction": "consumer",
+      "kind": "node_handler",
+      "flow_id": "producer",
+      "flow_path": "producer",
+      "event": {
+        "authored": "validation.started",
+        "local": "validation.started",
+        "canonical": "producer/validation.started"
+      },
+      "node_id": "producer-node",
+      "handler_event": "validation.started",
+      "source_file": "producer/nodes.yaml",
+      "source_line": 1,
+      "source_location": "[\"validation.started\"]"
+    },
+    {
+      "id": "endpoint-de42f03d33ca82cb",
       "direction": "consumer",
       "kind": "node_handler",
       "flow_id": "validator",
@@ -88,7 +88,7 @@
       "handler_event": "validation.requested",
       "source_file": "validator/nodes.yaml",
       "source_line": 1,
-      "source_location": "event_handlers.validation.requested"
+      "source_location": "[\"validation.requested\"]"
     }
   ],
   "input_pins": [
@@ -323,88 +323,43 @@
       "requires_runtime_resolution": false
     },
     {
-      "id": "route-29f3da5d3d5714ab",
+      "id": "route-2ba492467ff15601",
       "scope": "typed_pubsub",
       "event": {
-        "authored": "validation.triggered",
-        "local": "validation.triggered",
-        "canonical": "producer/validation.triggered"
+        "authored": "validation.started",
+        "local": "validation.started",
+        "canonical": "producer/validation.started"
       },
       "producer": {
-        "id": "endpoint-fad5d685f5953ae1",
+        "id": "endpoint-fb2a19c2d9223109",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "producer",
         "flow_path": "producer",
         "event": {
-          "authored": "validation.triggered",
-          "local": "validation.triggered",
-          "canonical": "producer/validation.triggered"
+          "authored": "validation.started",
+          "local": "validation.started",
+          "canonical": "producer/validation.started"
         },
-        "pin_name": "validation.triggered",
-        "source_location": "pins.inputs.validation.triggered"
+        "pin_name": "validation.started",
+        "source_location": "pins.inputs.validation.started"
       },
       "consumer": {
-        "id": "endpoint-b418f783b226bbfa",
+        "id": "endpoint-a311dbdc361e68a2",
         "direction": "consumer",
         "kind": "node_handler",
         "flow_id": "producer",
         "flow_path": "producer",
         "event": {
-          "authored": "validation.triggered",
-          "local": "validation.triggered",
-          "canonical": "producer/validation.triggered"
+          "authored": "validation.started",
+          "local": "validation.started",
+          "canonical": "producer/validation.started"
         },
         "node_id": "producer-node",
-        "handler_event": "validation.triggered",
+        "handler_event": "validation.started",
         "source_file": "producer/nodes.yaml",
         "source_line": 1,
-        "source_location": "event_handlers.validation.triggered"
-      },
-      "typed_pubsub": {
-        "match": "exact",
-        "boundary": "same_flow"
-      },
-      "requires_runtime_resolution": false
-    },
-    {
-      "id": "route-7a650a5043ac60b5",
-      "scope": "typed_pubsub",
-      "event": {
-        "authored": "validation.requested",
-        "local": "validation.requested",
-        "canonical": "validator/validation.requested"
-      },
-      "producer": {
-        "id": "endpoint-691b9c224cf471d4",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": "validator",
-        "flow_path": "validator",
-        "event": {
-          "authored": "validation.requested",
-          "local": "validation.requested",
-          "canonical": "validator/validation.requested"
-        },
-        "pin_name": "validation.requested",
-        "source_location": "pins.inputs.validation.requested"
-      },
-      "consumer": {
-        "id": "endpoint-ca427481ea1e85d5",
-        "direction": "consumer",
-        "kind": "node_handler",
-        "flow_id": "validator",
-        "flow_path": "validator",
-        "event": {
-          "authored": "validation.requested",
-          "local": "validation.requested",
-          "canonical": "validator/validation.requested"
-        },
-        "node_id": "validator-node",
-        "handler_event": "validation.requested",
-        "source_file": "validator/nodes.yaml",
-        "source_line": 1,
-        "source_location": "event_handlers.validation.requested"
+        "source_location": "[\"validation.started\"]"
       },
       "typed_pubsub": {
         "match": "exact",
@@ -473,43 +428,43 @@
       "requires_runtime_resolution": true
     },
     {
-      "id": "route-e017cef40bd65a90",
+      "id": "route-e24adfbf4605a758",
       "scope": "typed_pubsub",
       "event": {
-        "authored": "validation.started",
-        "local": "validation.started",
-        "canonical": "producer/validation.started"
+        "authored": "validation.requested",
+        "local": "validation.requested",
+        "canonical": "validator/validation.requested"
       },
       "producer": {
-        "id": "endpoint-fb2a19c2d9223109",
+        "id": "endpoint-691b9c224cf471d4",
         "direction": "input_pin",
         "kind": "flow_input_pin",
-        "flow_id": "producer",
-        "flow_path": "producer",
+        "flow_id": "validator",
+        "flow_path": "validator",
         "event": {
-          "authored": "validation.started",
-          "local": "validation.started",
-          "canonical": "producer/validation.started"
+          "authored": "validation.requested",
+          "local": "validation.requested",
+          "canonical": "validator/validation.requested"
         },
-        "pin_name": "validation.started",
-        "source_location": "pins.inputs.validation.started"
+        "pin_name": "validation.requested",
+        "source_location": "pins.inputs.validation.requested"
       },
       "consumer": {
-        "id": "endpoint-0764949b60acf00f",
+        "id": "endpoint-de42f03d33ca82cb",
         "direction": "consumer",
         "kind": "node_handler",
-        "flow_id": "producer",
-        "flow_path": "producer",
+        "flow_id": "validator",
+        "flow_path": "validator",
         "event": {
-          "authored": "validation.started",
-          "local": "validation.started",
-          "canonical": "producer/validation.started"
+          "authored": "validation.requested",
+          "local": "validation.requested",
+          "canonical": "validator/validation.requested"
         },
-        "node_id": "producer-node",
-        "handler_event": "validation.started",
-        "source_file": "producer/nodes.yaml",
+        "node_id": "validator-node",
+        "handler_event": "validation.requested",
+        "source_file": "validator/nodes.yaml",
         "source_line": 1,
-        "source_location": "event_handlers.validation.started"
+        "source_location": "[\"validation.requested\"]"
       },
       "typed_pubsub": {
         "match": "exact",
@@ -567,6 +522,51 @@
       "resolution": {
         "mode": "static",
         "target_kind": "target"
+      },
+      "requires_runtime_resolution": false
+    },
+    {
+      "id": "route-feb901d441bb1338",
+      "scope": "typed_pubsub",
+      "event": {
+        "authored": "validation.triggered",
+        "local": "validation.triggered",
+        "canonical": "producer/validation.triggered"
+      },
+      "producer": {
+        "id": "endpoint-fad5d685f5953ae1",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "validation.triggered",
+          "local": "validation.triggered",
+          "canonical": "producer/validation.triggered"
+        },
+        "pin_name": "validation.triggered",
+        "source_location": "pins.inputs.validation.triggered"
+      },
+      "consumer": {
+        "id": "endpoint-45195e88b6850aa1",
+        "direction": "consumer",
+        "kind": "node_handler",
+        "flow_id": "producer",
+        "flow_path": "producer",
+        "event": {
+          "authored": "validation.triggered",
+          "local": "validation.triggered",
+          "canonical": "producer/validation.triggered"
+        },
+        "node_id": "producer-node",
+        "handler_event": "validation.triggered",
+        "source_file": "producer/nodes.yaml",
+        "source_line": 1,
+        "source_location": "[\"validation.triggered\"]"
+      },
+      "typed_pubsub": {
+        "match": "exact",
+        "boundary": "same_flow"
       },
       "requires_runtime_resolution": false
     }

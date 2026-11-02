@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -37,6 +38,15 @@ func TestLocalWildcardPayloadReaderRejectsMissingAndIncompatibleProducerSchemas(
 		{"incompatible presence", "incompatible producer schemas", canonicalrouting.LocalWildcardPayloadIncompatiblePresence},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.variant == canonicalrouting.LocalWildcardPayloadMissing {
+				root := canonicalrouting.CopyLocalWildcardPayload(t, tc.variant)
+				repo := repoRootForBootverifyTest(t)
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+				if bundle != nil || err == nil || !strings.Contains(err.Error(), `handler "missing.*"`) || !strings.Contains(err.Error(), "undeclared event") {
+					t.Fatalf("unmatched wildcard acquired admission: %v, %v", bundle != nil, err)
+				}
+				return
+			}
 			report := Run(context.Background(), wildcardPayloadProofSource(t, tc.variant), Options{})
 			if !reportContains(report.Errors(), "condition_expression_validation", tc.want) {
 				t.Fatalf("verification errors = %#v, want %q", report.Errors(), tc.want)

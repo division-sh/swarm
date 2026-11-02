@@ -1,18 +1,14 @@
 test-node:
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.stored]
-  event_handlers:
-    item.received:
-      data_accumulation:
-        writes:
-          - source_field: name
-            target_field: item_name
-          - score
-        source_event: item.received
-      advances_to: done
-      emit:
-        event: item.stored
+  item.received:
+    data_accumulation:
+      writes:
+        - source_field: name
+          target_field: item_name
+        - score
+      source_event: item.received
+    advances_to: done
+    emit:
+      event: item.stored
   state_schema:
     fields:
       item_name: string

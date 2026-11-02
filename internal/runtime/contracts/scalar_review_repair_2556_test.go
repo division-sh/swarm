@@ -10,8 +10,7 @@ func TestScalar2556EveryPredicatePreservesOrdinaryCELReference(t *testing.T) {
 	for _, tc := range []struct{ slot, body string }{
 		{"rule.when", "rules:\n  - when: %s\n"},
 		{"on_complete.condition", "on_complete:\n  - condition: %s\n    emit: done\n"},
-		{"guard.check", "guard:\n  check: %s\n"},
-		{"guard.checks.check", "guard:\n  checks:\n    - check: %s\n"},
+		{"guard", "guard: %s\n"},
 		{"query.filter", "query:\n  entities: account\n  filter: %s\n"},
 		{"filter.condition", "filter:\n  items_from: payload.items\n  condition: %s\n"},
 		{"count.condition", "count:\n  items_from: payload.items\n  condition: %s\n"},
@@ -31,8 +30,8 @@ func TestScalar2556EveryPredicatePreservesOrdinaryCELReference(t *testing.T) {
 						got = handler.Rules[0].Condition
 					case "on_complete.condition":
 						got = handler.OnComplete[0].Condition
-					case "guard.check", "guard.checks.check":
-						got = handler.Guard.EffectiveChecks()[0].Check
+					case "guard":
+						got = handler.Guard.Check
 					case "query.filter":
 						got = handler.Query.Filter
 					case "filter.condition":

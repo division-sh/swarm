@@ -25,22 +25,19 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 					"state.yaml":    "findings: [Finding]\nstatus: \"pending\"\n",
 					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",
 					"nodes.yaml": `writer:
-  execution_type: system_node
-  subscribes_to: [finding.received]
-  event_handlers:
-    finding.received:
-      data_accumulation:
-        writes:
-          - op: append
-            target: state.findings
-            value:
-              summary: payload.summary
-          - source_field: status
-            target_field: status
-      emit:
-        event: finding.recorded
-        fields:
-          status: state.status
+  finding.received:
+    data_accumulation:
+      writes:
+        - op: append
+          target: state.findings
+          value:
+            summary: payload.summary
+        - source_field: status
+          target_field: status
+    emit:
+      event: finding.recorded
+      fields:
+        status: state.status
 `,
 				})
 				bundle, ok := semanticview.Bundle(source)

@@ -103,7 +103,7 @@ func (e *Executor) admitSelectedTransition(frame *executionFrame, next string) e
 			if frame.req.Handler.Join == nil || frame.req.Handler.Join.Deadline == nil || !frame.req.Handler.Join.OnDeadlineFound {
 				return fmt.Errorf("join deadline transition lacks declaration")
 			}
-			site.TimerID = frame.req.Handler.Join.EffectiveID()
+			site.TimerID = strings.TrimSpace(frame.req.HandlerEventKey)
 		default:
 			return fmt.Errorf("selected advancing rule has no execution context")
 		}
