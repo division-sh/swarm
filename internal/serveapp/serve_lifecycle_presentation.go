@@ -85,6 +85,8 @@ type serveLifecyclePresenter struct {
 
 	bootEvents        map[int]runtime.BootProgressEvent
 	store             *storebackend.Selection
+	bypassedStorePath string
+	recoveryNext      []string
 	workspaces        []serveLifecycleWorkspaceFact
 	credentialSources []runtimecredentials.SourceFact
 	warnings          []runtimebootverify.Finding
@@ -253,6 +255,33 @@ func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) 
 		detail += " path=not_applicable"
 	}
 	p.boot(3, "db_connection", "ok", detail)
+}
+
+func (p *serveLifecyclePresenter) recordStartupContext(req runtimeCompositionRequest) {
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
+	command := "swarm --swarm-dir " + quote(req.SwarmDir.Path)
+	config := ""
+	if req.Config.Path != "" {
+		config = " --config " + quote(req.Config.Path)
+	}
+	doctor := command + " doctor" + config
+	if req.Options.Backend != "" {
+		doctor += " --backend " + quote(req.Options.Backend)
+	}
+	next := []string{"Check configuration (not an automatic repair): cd " + quote(req.Repo) + " && " + doctor}
+	directory := req.Repo
+	if req.StoreSelection.SQLitePathSource == storebackend.SourceProjectDefault {
+		directory = req.LocalState.Project.CanonicalProjectRoot
+	}
+	if req.StoreSelection.Backend != storebackend.BackendSQLite || req.StoreSelection.SQLitePathSource != storebackend.SourceSwarmDirDefault {
+		next = append(next, "Inspect the selected store: cd "+quote(directory)+" && "+command+" store status --store "+quote(req.StoreSelection.Backend.String())+config)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.recoveryNext = next
+	if req.Options.Dev && !req.Options.LocalRun && req.StoreSelection.SQLitePathSource == storebackend.SourceProjectScratch {
+		p.bypassedStorePath = req.LocalState.StoreSelection.SQLitePath
+	}
 }
 
 func (p *serveLifecyclePresenter) recordWorkspace(contextLabel string, decision cliapp.WorkspaceBackendSelection) {
@@ -589,11 +618,20 @@ func (p *serveLifecyclePresenter) writeBootEventLocked(out io.Writer, event runt
 }
 
 func (p *serveLifecyclePresenter) writeFailureLocked(out io.Writer, name string, err error) {
-	fmt.Fprintf(out, "ERROR: serve failed · %s", displayServeLifecycleName(name))
+	if name == "startup_recovery" {
+		fmt.Fprintf(out, "ERROR: startup recovery refused · step %d (%s)", p.failure.Step, displayServeLifecycleName(name))
+	} else {
+		fmt.Fprintf(out, "ERROR: serve failed · %s", displayServeLifecycleName(name))
+	}
 	if detail := serveLifecycleErrorDetail(err); detail != "" {
 		fmt.Fprintf(out, " · %s", detail)
 	}
 	fmt.Fprintln(out)
+	if name == "startup_recovery" {
+		for _, next := range p.recoveryNext {
+			fmt.Fprintf(out, "  %s\n", next)
+		}
+	}
 }
 
 func (p *serveLifecyclePresenter) writeCleanupContextLocked() {
@@ -639,6 +677,9 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 		state := "retained"
 		if p.dev {
 			state = "scratch; replaced by --dev"
+			if p.bypassedStorePath != "" {
+				state = "scratch store; retained store " + p.bypassedStorePath + " is not used"
+			}
 		}
 		if p.store.Backend == storebackend.BackendSQLite {
 			p.writeResolvedFactLocked("store", "sqlite · "+strings.TrimSpace(p.store.SQLitePath)+" · "+state)

@@ -30856,6 +30856,11 @@ cli_specification:
           stderr writers: readiness and clean shutdown render to stdout; warnings, startup/runtime/shutdown failures, and
           specialized diagnostics render only to stderr. It retains startup failure until all acquired cleanup completes and
           emits one joined terminal disposition. Machine/persisted diagnostics remain separate fact owners.
+          At the existing startup_recovery failure boundary the heading is `startup recovery refused`, retaining the
+          failed step, native reason and identifiers, integrity exit and independent cleanup failures. Suggested read-only
+          diagnostics retain the resolved configuration and store selectors; they do not repair or reinterpret recovery.
+          Dev output names the actual scratch store and the already-resolved retained store it does not use, without
+          opening that retained store. Current-holder metadata and interrupted-work summaries are separate contracts.
         projection_boundary: >
           Concise lifecycle wording is projected directly from typed store, workspace, recovery, listener, ingress, and
           signing facts. Diagnostic detail renderers, raw boot reason codes, capability-subject inventory renderers, catalog

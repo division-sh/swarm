@@ -514,24 +514,32 @@ func TestServeOwnershipTranscriptUsesOnlyHumanProjectLanguage(t *testing.T) {
 }
 
 func TestServeLifecyclePresenterJoinsEarlyFailureAndCleanupOnce(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
-	presenter.fail(4, "bundle_load", errors.New("bundle validation failed"))
-	presenter.cleanupFailure("bundle source cleanup", errors.New("remove bundle tempdir"))
-	presenter.cleanupFailure("store shutdown", errors.New("close journal"))
-	presenter.finish()
+	for _, name := range []string{"bundle_load", "startup_recovery"} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
+			presenter.fail(4, name, errors.New("bundle validation failed"))
+			presenter.cleanupFailure("bundle source cleanup", errors.New("remove bundle tempdir"))
+			presenter.cleanupFailure("store shutdown", errors.New("close journal"))
+			presenter.finish()
 
-	text := stderr.String()
-	if strings.Count(text, "ERROR:") != 1 || strings.Count(text, "serve failed") != 1 {
-		t.Fatalf("failure rendered more than one terminal disposition:\n%s", text)
-	}
-	for _, want := range []string{"bundle validation failed", "bundle source cleanup: remove bundle tempdir", "store shutdown: close journal"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("joined failure missing %q:\n%s", want, text)
-		}
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("joined failure contaminated stdout: %q", stdout.String())
+			text := stderr.String()
+			heading := "serve failed"
+			if name == "startup_recovery" {
+				heading = "startup recovery refused"
+			}
+			if strings.Count(text, "ERROR:") != 1 || strings.Count(text, heading) != 1 {
+				t.Fatalf("failure rendered more than one terminal disposition:\n%s", text)
+			}
+			for _, want := range []string{"bundle validation failed", "bundle source cleanup: remove bundle tempdir", "store shutdown: close journal"} {
+				if !strings.Contains(text, want) {
+					t.Fatalf("joined failure missing %q:\n%s", want, text)
+				}
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("joined failure contaminated stdout: %q", stdout.String())
+			}
+		})
 	}
 }
 
