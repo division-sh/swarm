@@ -468,7 +468,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgresForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowHandlerNativeFixtureForTest {
-				return workflowHandlerNativeFixture(t, backend, source, 3, 3)
+				return workflowHandlerNativeFixture(t, backend, source, 2, 2)
 			})
 		})
 	}

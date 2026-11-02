@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -4539,7 +4540,7 @@ func connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(
 func loadConnectRoutePlanCanonicalSource(t testing.TB, root string) semanticview.Source {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}

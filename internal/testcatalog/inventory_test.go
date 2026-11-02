@@ -34,8 +34,8 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 37 || counts[DispositionRetired] != 20 {
 		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=37 retired=20", counts)
 	}
-	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 6 || verifyCounts[VerifyReject] != 28 {
-		t.Fatalf("verify-only counts = %#v, want pass=3 warning=6 reject=28", verifyCounts)
+	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 5 || verifyCounts[VerifyReject] != 29 {
+		t.Fatalf("verify-only counts = %#v, want pass=3 warning=5 reject=29", verifyCounts)
 	}
 	if got := len(inventory.PublicCompanions()); got != 86 {
 		t.Fatalf("public companion count = %d, want 86", got)

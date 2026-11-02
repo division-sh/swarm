@@ -114,6 +114,7 @@ func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    to: consumer\n", "    to: missing\n")
+	removeClosedVariantFiles(t, root, "consumer/nodes.yaml")
 	return root
 }
 

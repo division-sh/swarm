@@ -305,8 +305,8 @@ func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string,
 	bundleHash := requireFullLifecycleHealth(t, process.rpc)
 	standing := waitForFullLifecycleStandingRun(t, process.rpc, bundleHash, "")
 	lifecycleCard := waitForFullLifecycleCard(t, process.rpc, standing.RunID, "lifecycle_ready")
-	if lifecycleCard.ListedTitle != "Confirm lifecycle readiness" || lifecycleCard.Snapshot.Title != lifecycleCard.ListedTitle {
-		t.Fatalf("lifecycle decision card title = %#v, want exact authored title", lifecycleCard)
+	if lifecycleCard.ListedTitle != "Lifecycle ready" || lifecycleCard.Snapshot.Title != lifecycleCard.ListedTitle {
+		t.Fatalf("lifecycle decision card title = %#v, want key-derived title", lifecycleCard)
 	}
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
 	decideFullLifecycleCard(t, process.rpc, lifecycleCard, "lifecycle-gate-"+standing.RunID)

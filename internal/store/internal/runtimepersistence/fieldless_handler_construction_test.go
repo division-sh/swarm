@@ -217,9 +217,9 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 		}{
 			{name: "fieldless_stage"},
 			{name: "fielded_stage", entity: "state", wantMarker: "original"},
-			{name: "fielded_accumulation", entity: "state", effects: "      data_accumulation:\n        writes:\n          - {target_field: marker, value: 'changed'}\n", wantMarker: "changed"},
-			{name: "fieldless_gate", effects: "      sets_gate: {name: approved}\n", gate: true},
-			{name: "fieldless_emit", effects: "      emit: {event: work.recorded}\n", emits: true},
+			{name: "fielded_accumulation", entity: "state", effects: "    data_accumulation:\n      writes:\n        - {target_field: marker, value: 'changed'}\n", wantMarker: "changed"},
+			{name: "fieldless_gate", effects: "    sets_gate: {name: approved}\n", gate: true},
+			{name: "fieldless_emit", effects: "    emit: {event: work.recorded}\n", emits: true},
 		} {
 			for _, constructed := range []bool{false, true} {
 				name := "absent"

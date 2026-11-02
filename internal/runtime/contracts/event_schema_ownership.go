@@ -413,8 +413,18 @@ func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimei
 	if provider, ok := b.PackAdmission.(interface {
 		DeclaresFlowProviderTriggerEvent(sourceartifact.RootedSource, string, string) bool
 	}); ok {
-		if rooted, err := b.RootedSource(); err == nil && provider.DeclaresFlowProviderTriggerEvent(rooted, ref.FlowPath(), eventType) {
-			return true
+		if rooted, err := b.RootedSource(); err == nil {
+			if provider.DeclaresFlowProviderTriggerEvent(rooted, ref.FlowPath(), eventType) {
+				return true
+			}
+			for _, row := range eventSchemaOwnershipRowsForReceiver(b, ref.FlowPath()) {
+				if !eventidentity.MatchPattern(eventType, row.receiverEvent) || !b.FlowHasInputEvent(ref.FlowPath(), row.receiverEvent) || !b.FlowHasOutputEvent(row.producerFlowID, row.producerEvent) {
+					continue
+				}
+				if provider.DeclaresFlowProviderTriggerEvent(rooted, row.producerFlowID, row.producerEvent) {
+					return true
+				}
+			}
 		}
 	}
 	pattern := b.ResolveExecutableNodeEventPattern(ref, eventType)

@@ -89,7 +89,7 @@ pins:
       output: payload.result
       on_complete: {advances_to: ready}
       deadline: {after: ` + timeout + `, from: stage_entry}
-        on_deadline: {advances_to: attention}
+      on_deadline: {advances_to: attention}
 `
 
 	switch flowID {

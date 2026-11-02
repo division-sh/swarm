@@ -85,7 +85,7 @@ func CopyConcurrentKeyedRootRawIngress(t testing.TB) string {
 func CopySchemaOmittedConstructionTree(t testing.TB) string {
 	t.Helper()
 	root := CopyNestedKeyedConnectionSelection(t)
-	removeClosedVariantFiles(t, root, "schema.yaml", "parent/middle/schema.yaml")
+	removeClosedVariantFiles(t, root, "schema.yaml", "parent/middle/schema.yaml", "parent/nodes.yaml", "parent/middle/leaf/nodes.yaml")
 	writeClosedVariantFile(t, root, "resources/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "resources/data/probe.json", `{"value": 1}`)
 	return root

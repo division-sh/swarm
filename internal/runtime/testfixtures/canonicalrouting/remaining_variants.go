@@ -368,7 +368,9 @@ component_scaffold.spawn_requested:
 func CopyProviderRollback(t testing.TB, withHandler bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
-	removeClosedVariantFiles(t, root, "events.yaml")
+	removeClosedVariantFiles(t, root, "events.yaml",
+		"producer/nodes.yaml", "producer/events.yaml", "producer/schema.yaml", "producer/manifest.yaml", "producer",
+		"account/nodes.yaml", "account/state.yaml", "account/schema.yaml", "account/manifest.yaml", "account")
 	nodes := ""
 	if withHandler {
 		nodes = "consumer-node:\n  inbound.telegram.text_message: {}\n"

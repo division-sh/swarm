@@ -561,10 +561,10 @@ pins:
 `, method, serverURL),
 	}
 	if consumeResult {
-		files["flow_a/nodes.yaml"] = strings.Replace(files["flow_a/nodes.yaml"], "review.retry, review.close]", "review.retry, review.close, connector.succeeded]", 1) + `
-    connector.succeeded:
-      loop: {repeat: revision, from: review}
-      advances_to: review
+		files["flow_a/nodes.yaml"] += `
+  connector.succeeded:
+    loop: {repeat: revision, from: review}
+    advances_to: review
 `
 	}
 	for path, contents := range files {

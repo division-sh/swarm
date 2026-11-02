@@ -612,7 +612,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			prompted, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
-			if err != nil || !strings.Contains(prompted.Frozen.FullText, "Input: feedback (text) required") ||
+			if err != nil || !strings.Contains(prompted.Frozen.FullText, "Input: Feedback (text) required") ||
 				prompted.Frozen.Hash == prepared.Frozen.Hash {
 				t.Fatalf("selected active draft prompt = %#v, %v", prompted, err)
 			}

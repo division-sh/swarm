@@ -701,12 +701,15 @@ func producerRoutingProofEmitNodes(document *yaml.Node) []*yaml.Node {
 	}
 	var emits []*yaml.Node
 	for index := 1; index < len(root.Content); index += 2 {
-		node := root.Content[index]
-		handlers := producerRoutingProofMappingValue(node, "event_handlers")
+		handlers := root.Content[index]
 		if handlers == nil || handlers.Kind != yaml.MappingNode {
 			continue
 		}
 		for handlerIndex := 1; handlerIndex < len(handlers.Content); handlerIndex += 2 {
+			switch handlers.Content[handlerIndex-1].Value {
+			case "timers", "state_table", "state_schema", "gate_state":
+				continue
+			}
 			handler := handlers.Content[handlerIndex]
 			emits = appendProducerRoutingProofEmit(emits, handler)
 			emits = appendProducerRoutingProofEmit(emits, producerRoutingProofMappingValue(handler, "on_success"))

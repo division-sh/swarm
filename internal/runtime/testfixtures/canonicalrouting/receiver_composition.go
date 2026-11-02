@@ -28,7 +28,7 @@ func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 		activeStage = "  active: {}\n"
 		seedPin = "    - work.seeded\n"
 		seedSchema = "work.seeded:\n  seed: boolean\n"
-		seedHandler = "    work.seeded:\n      advances_to: active\n"
+		seedHandler = "  work.seeded:\n    advances_to: active\n"
 	}
 	files := map[string]string{
 		"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
@@ -46,16 +46,10 @@ connect:
 `,
 		"events.yaml": "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n" + seedSchema,
 		"nodes.yaml": `controller:
-` + func() string {
-			if existing {
-				return ", work.seeded"
-			}
-			return ""
-		}() + `]
-` + seedHandler + "    work.requested:\n" + `      advances_to: done
-      emit:
-        event: work.completed
-        fields: {result: "emitted"}
+` + seedHandler + "  work.requested:\n" + `    advances_to: done
+    emit:
+      event: work.completed
+      fields: {result: "emitted"}
 `,
 		"sink/schema.yaml": `# fixture: sink
 pins:
@@ -276,7 +270,7 @@ func CopyReceiverMixedAgent(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.completed]", "outputs: [work.completed, child.seeded]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.seeded, from: ., to: sink}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.seeded:\n  seed: boolean\nwork.seeded:\n")
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: active\n", "      advances_to: active\n      emit:\n        event: child.seeded\n        fields: {seed: true}\n")
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    advances_to: active\n", "    advances_to: active\n    emit:\n      event: child.seeded\n      fields: {seed: true}\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", `# fixture: sink
 stages:
   waiting: {}

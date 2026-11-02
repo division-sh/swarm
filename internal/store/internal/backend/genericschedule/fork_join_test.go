@@ -197,14 +197,6 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 				}
 				forkJoinSetHandle(t, &r.Child, handle)
 			}},
-			{"child_join_declaration", func(t *testing.T, r *ForkJoinRequest) {
-				_, ref := forkJoinCommandHandle(t, r.Child)
-				declaration, err := timeridentity.NewJoinRef(ref.Node(), ref.HandlerEvent(), ref.Stage())
-				if err != nil {
-					t.Fatal(err)
-				}
-				forkJoinBindCommandRef(t, &r.Child, declaration, ref.StageEntry(), ref.Generation())
-			}},
 			{"child_handler_declaration", func(t *testing.T, r *ForkJoinRequest) {
 				_, ref := forkJoinCommandHandle(t, r.Child)
 				declaration, err := timeridentity.NewJoinRef(ref.Node(), "other.completed", ref.Stage())

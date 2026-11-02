@@ -62,7 +62,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 				if first.From != "waiting" || first.To != "active" || first.TriggerEventID != childEvent ||
 					first.Evidence.FlowID() != flow || selected.Ref().Flow().String() != flow || selected.DisplayLabel() != "rules[0]: when payload.choice == 'alpha'" ||
 					selected.Ref().SemanticPath() != `nodes["controller"].handlers["work.first"].rules[0]` ||
-					!reflect.DeepEqual(first.GuardsEvaluated, []string{"first_choice", "first_nonempty"}) {
+					!reflect.DeepEqual(first.GuardsEvaluated, []string{"payload.choice in ['alpha', 'beta'] && payload.choice != ''"}) {
 					t.Fatalf("scope %q lost exact child transition cause: %+v", scope, history)
 				}
 				var entity operatorread.OperatorEntityFull
