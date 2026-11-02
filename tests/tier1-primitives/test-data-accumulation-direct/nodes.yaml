@@ -9,7 +9,3 @@ test-node:
     advances_to: done
     emit:
       event: item.stored
-  state_schema:
-    fields:
-      item_name: string
-      score: integer

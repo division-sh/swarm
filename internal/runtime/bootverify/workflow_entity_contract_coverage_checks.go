@@ -240,6 +240,15 @@ func wave1DeclaredEntityContracts(source semanticview.Source) []wave1EntityContr
 
 func wave1EntityWriterCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
+	for _, transition := range source.DerivedHandlerTransitions() {
+		if transition.Accumulate != nil {
+			flow := transition.Node.FlowPath()
+			if out[flow] == nil {
+				out[flow] = map[string]struct{}{}
+			}
+			out[flow][transition.Accumulate.Target] = struct{}{}
+		}
+	}
 	for _, target := range wave1AllEntityWriteTargets(source) {
 		if !target.Entity || wave1SpecialClearTarget(target.Field) {
 			continue

@@ -19,7 +19,7 @@ func flowViewChildren(view *FlowContractView) []*FlowContractView {
 	}
 	return children
 }
-func loadFlowContractViewFromSource(artifact *sourceartifact.AdmittedSourceArtifact, source FlowSource, schema FlowSchemaDocument) (FlowContractView, error) {
+func loadFlowContractViewFromSource(artifact *sourceartifact.AdmittedSourceArtifact, source FlowSource, schema FlowSchemaDocument, types TypeCatalogDocument) (FlowContractView, error) {
 	paths := FlowContractPaths{
 		FlowPath: source.FlowPath, SchemaFile: source.Schema, TypesFile: source.Types,
 		EntitiesFile: source.State, NodesFile: source.Nodes, EventsFile: source.Events,
@@ -36,7 +36,7 @@ func loadFlowContractViewFromSource(artifact *sourceartifact.AdmittedSourceArtif
 	if view.Nodes, err = loadOptionalNodeDeclarationsFromSource(artifact, source.Nodes); err != nil {
 		return view, err
 	}
-	if view.Events, err = loadOptionalEventCatalogFromSource(artifact, source.Events); err != nil {
+	if view.Events, err = loadOptionalEventCatalogFromSource(artifact, source.Events, types); err != nil {
 		return view, err
 	}
 	if view.Agents, err = loadOptionalAgentDeclarationsFromSource(artifact, source.Agents); err != nil {

@@ -183,7 +183,7 @@ func VerifyDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMuta
 	})
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: eventtest.UUID("missing-existing-target")}
 	evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); !errors.Is(err, runtimeengine.ErrUnconstructedWorkflowTarget) {
@@ -270,7 +270,7 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 			stateBefore, lifecycleBefore := countRows("entity_state"), countRows("flow_instances")
 			node := pipelineNode(t, ".", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}), now,
@@ -479,7 +479,7 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 
 			node := pipelineNode(t, ".", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}
 			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 			_, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
@@ -563,7 +563,7 @@ func VerifyNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutati
 	before := readStorage()
 	countsBefore := nativeWorkflowEnginePhysicalCountsForTest(t, fixture, ctx)
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+		Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"},
 		Emit:       runtimecontracts.EmitSpec{Event: "work.emitted"},
 	}
 	execute := func(label string, coordinator *PipelineCoordinator) {
@@ -637,7 +637,7 @@ func VerifyDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMut
 		}
 	}()
 	result, err := pc.executeNodeContractHandler(deliveryCtx, node, runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+		Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"},
 	}, workflowTriggerContext{Event: evt}, false)
 	if err != nil {
 		t.Fatalf("execute exact entity-only pre-state: %v", err)
@@ -679,7 +679,7 @@ func VerifyDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres
 
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}
 	evt := handlerTestRootIngress(
 		uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}), time.Now().UTC(),
@@ -725,7 +725,7 @@ func TestDeliveryTargetApplicationRequiresExactPreviewOwnerAndRejectsConflict(t 
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}
 	entityID := eventtest.UUID("preview-exact-target")
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}
 	evt := handlerTestRootIngress(

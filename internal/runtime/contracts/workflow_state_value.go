@@ -25,7 +25,17 @@ func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (Ent
 		return EntityContract{}, err
 	}
 	state := EntityContract{Fields: map[string]EntityFieldDecl{}}
+	embedded, err := embeddedRecordFields(fields, types)
+	if err != nil {
+		return EntityContract{}, err
+	}
+	for name, field := range embedded {
+		state.Fields[name] = EntityFieldDecl{Type: field.Type, IsOptional: field.IsOptional}
+	}
 	for _, field := range fields {
+		if field.Name == "_embed" {
+			continue
+		}
 		if field.Name == "_description" {
 			return EntityContract{}, nodeValueError(field.Value, fmt.Errorf("_description is not a key; use a YAML comment"))
 		}

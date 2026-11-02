@@ -7,6 +7,3 @@ test-node:
         id: instance.id
         name: state.name
         status: instance.stage
-  state_schema:
-    fields:
-      name: string

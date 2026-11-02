@@ -84,7 +84,7 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 		})
 	}
 	t.Run("ordinary_field_names", func(t *testing.T) {
-		source, err := yamlsource.Load([]byte("_description: text\n_owner: text\nstate: text\nid: text\nstage: text\ncurrent_state: text\nflow_instance: text\ngates: text\n"))
+		source, err := yamlsource.Load([]byte("_owner: text\nstate: text\nid: text\nstage: text\ncurrent_state: text\nflow_instance: text\ngates: text\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range []string{"_description", "_owner", "state", "id", "stage", "current_state", "flow_instance", "gates"} {
+		for _, name := range []string{"_owner", "state", "id", "stage", "current_state", "flow_instance", "gates"} {
 			if field, ok := state.Fields[name]; !ok || field.Type != "text" {
 				t.Fatalf("ordinary state field %q = %#v, present=%v", name, field, ok)
 			}
@@ -103,11 +103,11 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 		for file, body := range map[string]string{
 			"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 			"schema.yaml":             "stages: {done: {final: true}}\n",
-			"types.yaml":              "types:\n  Profile:\n    name: text\n",
+			"types.yaml":              "Profile:\n  name: text\n",
 			"state.yaml":              "profile: Profile\nready: false\n",
 			"child/manifest.yaml":     "version: 1.0.0\nplatform_version: '*'\n",
 			"child/schema.yaml":       "stages: {done: {final: true}}\n",
-			"child/types.yaml":        "types:\n  Local:\n    count: integer\n",
+			"child/types.yaml":        "Local:\n  count: integer\n",
 			"child/state.yaml":        "profile: Profile\nlocal: Local\n",
 			"stateless/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			"stateless/schema.yaml":   "stages: {done: {final: true}}\n",

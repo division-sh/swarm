@@ -36,8 +36,6 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "condition", handler: runtimecontracts.SystemNodeEventHandler{Condition: "size(state.verticals) > 0"}},
 		{name: "logic", handler: runtimecontracts.SystemNodeEventHandler{Logic: "state.verticals"}},
 		{name: "rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{ID: "executable_reader_probe", Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
-		{name: "accumulate source", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{From: "state.verticals"}}},
-		{name: "accumulate key", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Key: "state.verticals"}}},
 		{name: "join members by", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{By: "state.verticals"}}}},
 		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{From: "state.verticals"}}}},
 		{name: "join completion", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{OnComplete: runtimecontracts.HandlerRuleEntry{Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{"value": entityCEL}}}}}},
@@ -188,9 +186,8 @@ func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 
 func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{From: "state.status", Key: "payload.key"},
-		GroupBy:    &runtimecontracts.GroupBySpec{ItemsFrom: "state.items", Key: "status"},
-		Compute:    &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"state.status"}}},
+		GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "state.items", Key: "status"},
+		Compute: &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"state.status"}}},
 		FanOut: &runtimecontracts.FanOutSpec{
 			ItemsFrom: "state.items", As: "line_item", Identity: "line_item.id",
 			Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
@@ -200,8 +197,6 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "state.status == 'done'"}},
 	}
 	want := map[string]runtimepipeline.WorkflowEntityFieldLifecyclePhase{
-		"accumulate.from":      runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
-		"accumulate.key":       runtimepipeline.WorkflowEntityFieldLifecycleAccumulate,
 		"group_by.items_from":  runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
 		"compute.lookup.on[0]": runtimepipeline.WorkflowEntityFieldLifecycleCompute,
 		"fan_out.items_from":   runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
@@ -265,14 +260,6 @@ func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {
 				}},
 			}},
 			wantKind: "data_accumulation.writes[0].value.ref",
-		},
-		{
-			name: "accumulate source",
-			handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
-				Into: "items",
-				From: "state.missing",
-			}},
-			wantKind: "accumulate.from",
 		},
 	}
 

@@ -131,7 +131,7 @@ func decodeNodeTestYAML(body []byte, target any) error {
 	switch target.(type) {
 	case *SystemNodeContract, *map[string]SystemNodeContract,
 		*SystemNodeEventHandler, *HandlerRuleEntry, *[]HandlerRuleEntry,
-		*NodeStateSchema, *NodeGateStateSchema, *WorkflowTimerContract,
+		*NodeGateStateSchema, *WorkflowTimerContract,
 		*GuardSpec, *GateSpec, *AccumulateSpec, *FanOutSpec,
 		*GroupBySpec, *FilterSpec, *ReduceSpec, *CountSpec,
 		*QuerySpec, *ComputeSpec, *WorkflowDataWrite,
@@ -165,8 +165,6 @@ func decodeNodeTestYAML(body []byte, target any) error {
 		*out, err = projectNodeRuleEntryValue(root, handlerRuleDecodeContextRules)
 	case *[]HandlerRuleEntry:
 		*out, err = projectNodeRuleRowsValue(root, handlerRuleDecodeContextRules)
-	case *NodeStateSchema:
-		*out, err = projectNodeStateSchemaValue(root)
 	case *NodeGateStateSchema:
 		*out, err = projectNodeGateStateValue(root)
 	case *WorkflowTimerContract:

@@ -28,7 +28,7 @@ func TestAgentFactoryRejectsAuthoredPromptAuthority(t *testing.T) {
 
 func TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory(t *testing.T) {
 	intent := managerRecoveryIntent(t)
-	source := managerRecoverySource(t, intent, nil)
+	source := managerRecoverySource(t, intent)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ID:       "worker",
 		Identity: managerAgentIdentity("worker"),
@@ -62,37 +62,6 @@ func TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory(t
 	}
 }
 
-func TestSelectedStoreRecoveryRejectsCriteriaMismatchBeforeProviderFactory(t *testing.T) {
-	intent := managerRecoveryIntent(t)
-	source := managerRecoverySource(t, intent, []string{"quality"})
-	cfg := managerTestAgentConfig(models.AgentConfig{
-		ID:       "worker",
-		Identity: managerAgentIdentity("worker"),
-		Role:     "worker",
-		Model:    "regular",
-		Intent:   intent,
-		Criteria: []string{"hostile-replacement"},
-	})
-	cfg.Prompt = runtimeagentintent.DerivedPrompt{}
-
-	providerCalls := 0
-	am := newTestAgentManagerWithOptions(t, nil, func(got models.AgentConfig) (Agent, error) {
-		providerCalls++
-		return newGenericAgent(got), nil
-	}, AgentManagerOptions{SemanticSource: source})
-
-	err := bindCanonicalAgentPrompt(source, &cfg)
-	if err == nil {
-		_, err = am.buildAgent(cfg)
-	}
-	if err == nil || !strings.Contains(err.Error(), "runtime refs must match contract agent criteria") {
-		t.Fatalf("reconstruct selected-store prompt error = %v, want criteria mismatch rejection", err)
-	}
-	if providerCalls != 0 {
-		t.Fatalf("provider factory calls = %d, want 0", providerCalls)
-	}
-}
-
 func managerRecoveryIntent(t testing.TB) runtimeagentintent.Resolved {
 	t.Helper()
 	intent, err := runtimeagentintent.Resolve(
@@ -107,7 +76,7 @@ func managerRecoveryIntent(t testing.TB) runtimeagentintent.Resolved {
 	return intent
 }
 
-func managerRecoverySource(t *testing.T, intent runtimeagentintent.Resolved, criteria []string) semanticview.Source {
+func managerRecoverySource(t *testing.T, intent runtimeagentintent.Resolved) semanticview.Source {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "recovery")
 	for _, flow := range []string{".", "review"} {
@@ -115,10 +84,6 @@ func managerRecoverySource(t *testing.T, intent runtimeagentintent.Resolved, cri
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "stages: []\n")
 	}
 	agent := fmt.Sprintf("worker:\n  role: worker\n  model: regular\n  intent: {inline: %q}\n", intent.Content)
-	if len(criteria) != 0 {
-		agent += "  criteria: [quality]\n"
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "rules.yaml"), "quality:\n  classes:\n    hard: {disposition: reject}\n  rules:\n    - {id: QUALITY-01, class: hard, text: Require declared quality.}\n")
-	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review", "agents.yaml"), agent)
 	repo := filepath.Clean("../../..")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))

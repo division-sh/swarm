@@ -152,7 +152,6 @@ func PlatformCleanupCatalogForPolicy(policy CleanupPolicy) []CleanupCatalogEntry
 func DefaultGeneratedCleanupCatalog() []CleanupCatalogEntry {
 	return []CleanupCatalogEntry{
 		{Table: "generated_entity_tables", TableKind: CleanupTableKindGenerated, Classification: CleanupSplitPreserve, PredicateOwner: "no generated run_id", PreservationProof: "deleting by entity_id would cross runs"},
-		{Table: "generated_node_state_tables", TableKind: CleanupTableKindGenerated, Classification: CleanupSplitPreserve, PredicateOwner: "no generated run_id", PreservationProof: "deleting by entity_id would cross runs"},
 		{Table: "contract_driven_product_optimization_tables", TableKind: CleanupTableKindGenerated, Classification: CleanupSplitPreserve, PredicateOwner: "product-owned optimization state", PreservationProof: "not reset truth"},
 	}
 }

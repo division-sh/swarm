@@ -203,7 +203,6 @@ var definitions = map[Class]Definition{
 }
 
 var detailClasses = map[string]Class{
-	"criteria_citation_validation_failed": ClassSchemaInvalid,
 	"cross_flow_read_forbidden":           ClassAuthorizationDenied,
 	"cross_flow_write_forbidden":          ClassAuthorizationDenied,
 	"dependency_unavailable":              ClassDependencyUnavailable,

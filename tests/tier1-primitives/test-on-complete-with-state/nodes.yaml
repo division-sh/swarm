@@ -5,6 +5,3 @@ test-node:
         emit:
           event: item.expedited
         advances_to: done
-  state_schema:
-    fields:
-      priority: string

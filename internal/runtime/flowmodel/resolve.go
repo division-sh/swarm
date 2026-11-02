@@ -51,7 +51,7 @@ func ResolvePolicyByID[T any](
 			continue
 		}
 		for key, value := range policy(view).Values {
-			out.Values[key] = PolicyValue{Value: cloneCriteriaParamValue(value.Value)}
+			out.Values[key] = PolicyValue{Value: clonePolicyValue(value.Value)}
 		}
 	}
 	return out

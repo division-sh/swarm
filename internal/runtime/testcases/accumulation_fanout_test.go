@@ -41,8 +41,8 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	}
 
 	processed := mustHandler(t, bundle, "intake-router", "item.processed")
-	if processed.Accumulate == nil || processed.Accumulate.Into != "processed_items" {
-		t.Fatal("expected open stream accumulation on item.processed")
+	if processed.Accumulate != nil || len(processed.DataAccumulation.Writes) == 0 || processed.DataAccumulation.Writes[0].Operation != "append" || processed.DataAccumulation.Writes[0].Target() != "state.processed_items" {
+		t.Fatal("expected ordinary append on item.processed")
 	}
 	completed := previewHandler(t, bundle, "intake-router", "item.processed", map[string]any{
 		"entity_id":        "item-123",

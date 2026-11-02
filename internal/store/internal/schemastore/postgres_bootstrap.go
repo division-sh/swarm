@@ -51,10 +51,7 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 		default:
 			return fmt.Errorf("unknown postgres schema compatibility state %q", report.State)
 		}
-		if err := ensurePostgresStatePlans(sqlCtx, tx, request.StatePlans, diagnostic); err != nil {
-			return err
-		}
-		if err := ensurePostgresStatePlans(sqlCtx, tx, request.deploymentPlans, diagnostic); err != nil {
+		if err := ensurePostgresDeploymentPlans(sqlCtx, tx, request.deploymentPlans, diagnostic); err != nil {
 			return err
 		}
 		return nil
@@ -275,8 +272,8 @@ func executePostgresPlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDD
 	return nil
 }
 
-func ensurePostgresStatePlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDDL, diagnostic schemaCompatibilityDiagnostic) error {
-	missing, err := inspectStatePlans(ctx, tx, plans, SchemaDialectPostgres, diagnostic)
+func ensurePostgresDeploymentPlans(ctx context.Context, tx *sql.Tx, plans []SchemaTableDDL, diagnostic schemaCompatibilityDiagnostic) error {
+	missing, err := inspectDeploymentPlans(ctx, tx, plans, SchemaDialectPostgres, diagnostic)
 	if err != nil {
 		return err
 	}

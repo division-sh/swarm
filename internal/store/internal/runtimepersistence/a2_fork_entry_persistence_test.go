@@ -38,15 +38,15 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					flowID, path := "owner", "owner/one"
 					files := map[string]string{
 						"schema.yaml":       "stages: []\n",
-						"owner/schema.yaml": "instance: owner_key\nstages:\n  active: {}\npins:\n  inputs:\n    - construct.requested\n",
-						"owner/state.yaml":  "owner_key: text\n",
+						"owner/schema.yaml": "instance: owner_key\nstages:\n  active: {}\ninputs:\n  - construct.requested\n",
+						"owner/state.yaml":  "owner_key: text\nitems: [json]\n",
 						"owner/events.yaml": "construct.requested:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					}
 					if root {
 						flowID, path = ".", "."
 						files = map[string]string{
 							"schema.yaml": "stages:\n  active: {}\n",
-							"state.yaml":  "owner_key: \"one\"\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+							"state.yaml":  "owner_key: \"one\"\nitems: [json]\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						}
 					}
 					construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
@@ -141,21 +141,20 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if err := joinruntime.Store(buckets, arm); err != nil {
 						t.Fatal(err)
 					}
-					bucket := timeridentity.NewAccumulatorBucketRefForGeneration(node, "result", captured)
 					acc := accumulator.Load(nil)
-					if duplicate, err := acc.Admit(&contracts.AccumulateSpec{Into: "items", From: "payload", Key: "payload.id"}, map[string]any{"id": " exact ", "event_id": "authored-business", "payload": map[string]any{"id": "nested-business"}}, "source-delivery"); err != nil || duplicate {
+					if duplicate, err := acc.Admit(&contracts.AccumulateSpec{Target: "items", Key: "id"}, map[string]any{"id": " exact ", "event_id": "authored-business", "payload": map[string]any{"id": "nested-business"}}); err != nil || duplicate {
 						t.Fatalf("source business state = duplicate %v %v", duplicate, err)
 					}
-					accRaw, err := json.Marshal(acc)
+					f.state = persisted.State
+					var fields map[string]any
+					if err := json.Unmarshal(f.state.Fields, &fields); err != nil {
+						t.Fatal(err)
+					}
+					fields["items"] = acc.Items
+					f.state.Fields, err = json.Marshal(fields)
 					if err != nil {
 						t.Fatal(err)
 					}
-					var accValue map[string]any
-					if err := json.Unmarshal(accRaw, &accValue); err != nil {
-						t.Fatal(err)
-					}
-					buckets[node.Key()] = map[string]any{"handler_accumulators": map[string]any{bucket.Key(): accValue}}
-					f.state = persisted.State
 					f.state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 					f.state.ExpectedState, f.state.ExpectedRevision = "active", 1
 					f.state.UpdatedAt = at.Add(3 * time.Second)
@@ -247,11 +246,9 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if arms[0].Generation() != wantGeneration || arms[0].Generation().Attempt != 1 || arms[0].JoinRef().StageEntry() != want || arms[0].Status != arm.Status || arms[0].CloseReason != arm.CloseReason || !reflect.DeepEqual(arms[0].Outputs, arm.Outputs) || !arms[0].OutcomePending {
 						t.Fatal("materialized arm changed its exact history/business payload")
 					}
-					bucket.Generation = wantGeneration
-					stored := carrier.StateBuckets[node.Key()]["handler_accumulators"].(map[string]any)
-					gotAccumulator := accumulator.Load(stored[bucket.Key()].(map[string]any))
-					if gotAccumulator.Err() != nil || !reflect.DeepEqual(gotAccumulator.Items, acc.Items) || !reflect.DeepEqual(gotAccumulator.Received, acc.Received) {
-						t.Fatal("materialized accumulator lost exact business admission/history")
+					gotAccumulator := accumulator.Load(child.Buckets[0]["items"])
+					if gotAccumulator.Err() != nil || !reflect.DeepEqual(gotAccumulator.Items, acc.Items) {
+						t.Fatal("materialized state list lost exact business items")
 					}
 					before := snapshotOwnershipCounts(t, f, result.ForkRunID)
 					again, err := f.store.RequireMaterializedRunFork(f.ctx, result.ForkRunID, request)

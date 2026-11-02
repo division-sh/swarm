@@ -53,7 +53,11 @@ func (b *WorkflowContractBundle) WorkflowLoops() []WorkflowLoopPlan {
 	if b == nil {
 		return nil
 	}
-	return append([]WorkflowLoopPlan(nil), b.Semantics.Loops...)
+	plans := append([]WorkflowLoopPlan(nil), b.Semantics.Loops...)
+	for i := range plans {
+		plans[i].CollectedFields = append([]string(nil), plans[i].CollectedFields...)
+	}
+	return plans
 }
 func (b *WorkflowContractBundle) WorkflowGates() []WorkflowGatePlan {
 	if b == nil {

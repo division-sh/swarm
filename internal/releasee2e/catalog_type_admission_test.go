@@ -13,35 +13,17 @@ import (
 	"time"
 )
 
-const admissionPublicTypes = `scalars:
-  Label: text
-  ID: uuid
-enums:
-  Status: {values: [open, closed], default: open}
-types:
-  Item:
-    id: Label
-    note: Label?
-  List:
-    value: Label
-  LIST:
-    value: Label
+const admissionPublicTypes = `Status: ['open', 'closed']
+Item:
+  id: text
+  note: text?
+List:
+  value: text
+LIST:
+  value: text
 `
 
 const admissionPublicNodes = `complete-task:
-  state_table: admission_list_state
-  state_schema:
-    fields:
-      labels: [text]
-      amounts:
-        - numeric(5,2)
-      items: [Item]
-      named_list: List
-      named_upper: {type: LIST}
-      named_lists: [List]
-      named_uppers: [LIST]
-      scalar_amount: numeric(5,2)
-      snapshot: jsonb
   task.requested:
     data_accumulation:
       writes:
@@ -79,10 +61,10 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
 			writeReleaseFile(t, filepath.Join(source, "types.yaml"), admissionPublicTypes)
 			writeReleaseFile(t, filepath.Join(source, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-			writeReleaseFile(t, filepath.Join(source, "schema.yaml"), "stages:\n  pending: {}\n  collecting: {}\n  done: {final: true}\npins:\n  inputs: [task.requested]\n")
-			fields := "  labels: [Label]\n  lookup: map[Label]Item\n  enums: map[Status]Item\n  uuids: map[ID]Item\n"
-			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n"+fields+"key.observed:\n  member_id: Label\n")
-			writeReleaseFile(t, filepath.Join(source, "state.yaml"), "labels: [Label]\nlookup: map[Label]Item\nenums: map[Status]Item\nuuids: map[ID]Item\n")
+			writeReleaseFile(t, filepath.Join(source, "schema.yaml"), "stages:\n  pending: {}\n  collecting: {}\n  done: {final: true}\ninputs: [task.requested]\n")
+			fields := "  labels: [text]\n  lookup: map[text]Item\n  enums: map[Status]Item\n  uuids: map[uuid]Item\n"
+			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n"+fields+"key.observed:\n  member_id: text\n")
+			writeReleaseFile(t, filepath.Join(source, "state.yaml"), "labels: [text]\nlookup: map[text]Item\nenums: map[Status]Item\nuuids: map[uuid]Item\n")
 			writeReleaseFile(t, filepath.Join(source, "nodes.yaml"), admissionPublicNodes)
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
@@ -202,7 +184,7 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 				writeReleaseFile(t, filepath.Join(bad, "unused/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 				writeReleaseFile(t, filepath.Join(bad, "unused/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 				writeReleaseFile(t, filepath.Join(bad, "unused/schema.yaml"), "stages: {done: {final: true}}\n")
-				writeReleaseFile(t, filepath.Join(bad, "unused/types.yaml"), "types:\n  Unused:\n    "+invalid.declaration+"\n")
+				writeReleaseFile(t, filepath.Join(bad, "unused/types.yaml"), "Unused:\n  "+invalid.declaration+"\n")
 				for _, command := range []string{"verify", "describe", "serve"} {
 					args := []string{command, bad, "--config", config}
 					if command != "serve" {
@@ -231,24 +213,6 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 					}
 				}
 			}
-			for index, spelling := range []string{"text[]", "[]text", "Item[]", "[]Item", "numeric(5,2)[]", "[]numeric(5,2)"} {
-				bad := filepath.Join(base, "node-refusal-"+string(rune('a'+index)))
-				copyReleaseTree(t, source, bad)
-				writeReleaseFile(t, filepath.Join(bad, "nodes.yaml"), "complete-task:\n  state_schema:\n    fields:\n      items: {type: '"+spelling+"'}\n")
-				for _, command := range []string{"verify", "describe", "serve"} {
-					args := []string{command, bad, "--config", config}
-					if command != "serve" {
-						args = append(args, "--json")
-						if command == "verify" {
-							args = append(args, "--portable")
-						}
-					}
-					refused := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
-					if refused.err == nil || !strings.Contains(refused.output, "nodes.yaml") || !strings.Contains(refused.output, "retired") {
-						t.Fatalf("%s admitted retired authored node list %s: %v\n%s", command, spelling, refused.err, refused.output)
-					}
-				}
-			}
 		})
 	}
 }
@@ -265,10 +229,9 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			base := filepath.Join(root, backend)
 			source := filepath.Join(base, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples/routing/template-select-or-create"), source)
-			writeReleaseFile(t, filepath.Join(source, "types.yaml"), "scalars:\n  Label: text\n")
-			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "account.requested:\n  account_id: Label\n")
-			writeReleaseFile(t, filepath.Join(source, "producer/events.yaml"), "account.ready:\n  key: account_id\n  account_id: Label\n")
-			writeReleaseFile(t, filepath.Join(source, "account/state.yaml"), "account_id: Label\n")
+			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "account.requested:\n  account_id: text\n")
+			writeReleaseFile(t, filepath.Join(source, "producer/events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n")
+			writeReleaseFile(t, filepath.Join(source, "account/state.yaml"), "account_id: text\n")
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)

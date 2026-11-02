@@ -355,22 +355,6 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	return root
 }
 
-func CopyVerifyStateSchemaFloat(t testing.TB) string {
-	t.Helper()
-	root := CopyExample(t, RootIngress)
-	removeInheritedScenarios(t, root)
-
-	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: verify-state-schema-float\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
-	removeClosedVariantFiles(t, root, "state.yaml", "nodes.yaml", "events.yaml")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\nstages:\n  idle: {}\n  done: {final: true}\ninputs:\n  - task.assigned\n")
-	removeClosedVariantFiles(t, root, "child/state.yaml")
-	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
-	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  task.assigned:\n    advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
-	return root
-}
-
 type VerifyModelAliasVariant uint8
 
 const (

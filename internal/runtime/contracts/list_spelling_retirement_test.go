@@ -41,9 +41,6 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 	case "events":
 		field, optional, err := admitEventPayloadField(value)
 		return field.Type, optional, nil, err
-	case "nodes":
-		field, err := projectNodeStateFieldValue("items", value)
-		return field.Type, false, field.Default, err
 	default:
 		t.Fatalf("unclassified surface %s", surface)
 		return "", false, nil, nil
@@ -51,7 +48,7 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 }
 
 func TestListSpellingRetirementTypedFields(t *testing.T) {
-	for _, surface := range []string{"types", "events", "nodes"} {
+	for _, surface := range []string{"types", "events"} {
 		for _, source := range []string{
 			"list<ProbeItem>", "'list<ProbeItem>'", "list<ProbeItem>?", "{type: list<ProbeItem>}",
 			"map[text]list<ProbeItem>", "'[list<ProbeItem>]'", "{type: '[list<ProbeItem>]'}",
@@ -79,7 +76,7 @@ func TestListSpellingRetirementTypedFields(t *testing.T) {
 }
 
 func TestListSpellingRetirementPresenceMatrix(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events", "nodes"} {
+	for _, surface := range []string{"types", "entities", "events"} {
 		for _, value := range []string{"", "null", "''", "ProbeItem", "0", "false", "[]", "[ProbeItem]", "{}", "{type: ProbeItem}"} {
 			for _, prefix := range []string{"type: list, ", "type: text, ", ""} {
 				source := "{" + prefix + "of: " + value + "}"
@@ -97,7 +94,7 @@ func TestListSpellingRetirementPresenceMatrix(t *testing.T) {
 func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 	for _, surface := range []string{"types", "events"} {
 		t.Run(surface, func(t *testing.T) {
-			typeRef, optional, _, err := listRetirementDecode(t, surface, listRetirementField(t, "{type: '[text]?', length: {min: 0, max: 3}, description: 'list<T> is business text'}"))
+			typeRef, optional, _, err := listRetirementDecode(t, surface, listRetirementField(t, "{type: '[text]?'}"))
 			if err != nil || typeRef != "[text]" || !optional {
 				t.Fatalf("metadata type slot changed: %q/%v/%v", typeRef, optional, err)
 			}
@@ -109,7 +106,6 @@ func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 	}
 	for _, test := range []struct{ surface, source string }{
 		{"entities", "['list<T>', '[text]', 'text']"},
-		{"nodes", "{type: '[ProbeItem]', default: ['list<T>', '[text]', 'text']}"},
 	} {
 		t.Run(test.surface+"/data", func(t *testing.T) {
 			_, _, initial, err := listRetirementDecode(t, test.surface, listRetirementField(t, test.source))
@@ -121,7 +117,7 @@ func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 }
 
 func TestListSpellingRetirementBundleStyle(t *testing.T) {
-	for _, surface := range []string{"types", "entities", "events", "nodes"} {
+	for _, surface := range []string{"types", "entities", "events"} {
 		for _, form := range []struct {
 			name, source string
 			reject       bool
@@ -144,12 +140,12 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				files := map[string]string{
 					"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 					"schema.yaml":   "# fixture: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
-					"types.yaml":    "types:\n  ProbeItem:\n    value: text\n",
+					"types.yaml":    "ProbeItem:\n  value: text\n",
 					"state.yaml":    "item: text\n",
 				}
 				switch surface {
 				case "types":
-					files["types.yaml"] += "  Container:\n    items: " + strings.ReplaceAll(form.source, "\n", "\n  ") + "\n"
+					files["types.yaml"] += "Container:\n  items: " + form.source + "\n"
 				case "entities":
 					if strings.HasPrefix(form.source, "{") {
 						form.source = strings.TrimSuffix(form.source, "}") + ", indexed: true}"
@@ -160,8 +156,6 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 					files["state.yaml"] = "items: " + form.source + "\n"
 				case "events":
 					files["events.yaml"] = "proof.received:\n  items: " + form.source + "\n"
-				case "nodes":
-					files["nodes.yaml"] = "proof:\n  state_schema:\n    fields:\n      items: " + strings.ReplaceAll(form.source, "\n", "\n    ") + "\n"
 				}
 				for path, source := range files {
 					writeFixtureFile(t, root+"/"+path, source)
@@ -228,50 +222,8 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 	}
 }
 
-func TestListSpellingRetirementNodeState(t *testing.T) {
-	for _, source := range []string{
-		"items: [ProbeItem]\n",
-		"- name: items\n  type: '[ProbeItem]'\n",
-	} {
-		snapshot, err := yamlsource.Load([]byte(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		fields, err := projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root())
-		if err != nil || !reflect.DeepEqual(fields, []NodeStateField{{Name: "items", Type: "[ProbeItem]"}}) {
-			t.Fatalf("FIELDS-container versus TYPE-sequence identity: %#v / %v", fields, err)
-		}
-	}
-	for _, source := range []string{"- {name: items, type: list, of: null}\n", "- {name: items, type: list<ProbeItem>}\n"} {
-		snapshot, err := yamlsource.Load([]byte(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root()); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") {
-			t.Fatalf("named FIELDS-container bypassed retirement: %v", err)
-		}
-	}
-	for _, test := range []struct{ source, want string }{
-		{"[text]", "[text]"},
-		{"\n  - numeric(5,2)", "[numeric(5,2)]"},
-		{"{type: '[numeric(5,2)]'}", "[numeric(5,2)]"},
-		{"numeric(5,2)", "numeric(5,2)"},
-		{"jsonb", "jsonb"},
-	} {
-		typeRef, _, initial, err := listRetirementDecode(t, "nodes", listRetirementField(t, test.source))
-		if err != nil || typeRef != test.want || initial != nil {
-			t.Fatalf("G-owned primitive meaning changed: %s -> %s initial=%#v err=%v", test.source, typeRef, initial, err)
-		}
-	}
-	for _, source := range []string{"'[text]'", "['text']", "[numeric(5,2)]", "{type: 'text[]'}", "{type: 'numeric(5,2)[]'}", "{type: '[]ProbeItem'}"} {
-		if _, _, _, err := listRetirementDecode(t, "nodes", listRetirementField(t, source)); err == nil || !errors.Is(err, ErrInvalidField) {
-			t.Fatalf("authored declaration bypassed shape/G spelling owner: %s / %v", source, err)
-		}
-	}
-}
-
 func TestListSpellingRetirementAliasMergeDiagnostics(t *testing.T) {
-	for _, surface := range []string{"types", "events", "nodes"} {
+	for _, surface := range []string{"types", "events"} {
 		for _, source := range []string{
 			"definition: &value 'list<ProbeItem>'\nitems: *value\n",
 			"definition: &value ['ProbeItem']\nitems: *value\n",
@@ -331,7 +283,7 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 				case "indexed_state":
 					body = "items: {type: " + tc.source + ", indexed: true}\n"
 				case "types":
-					file, body = "types.yaml", "types:\n  Container:\n    items: "+tc.source+"\n"
+					file, body = "types.yaml", "Container:\n  items: "+tc.source+"\n"
 				case "events":
 					file, body = "events.yaml", "proof.received:\n  items: "+tc.source+"\n"
 				}
@@ -385,7 +337,7 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 					prefix := ""
 					switch surface {
 					case "types":
-						prefix = "types:\n  Unused:\n    items: "
+						prefix = "Unused:\n  items: "
 					case "entities":
 						file = scope + "state.yaml"
 						prefix = "items: "
@@ -423,7 +375,7 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 	for _, name := range []string{"List", "LIST"} {
 		t.Run(name, func(t *testing.T) {
-			for _, surface := range []string{"types", "entities", "events", "nodes"} {
+			for _, surface := range []string{"types", "entities", "events"} {
 				for _, source := range []string{name, "{type: '" + name + "'}", "[" + name + "]"} {
 					if surface == "entities" && strings.HasPrefix(source, "{") {
 						source = strings.TrimSuffix(source, "}") + ", indexed: true}"
@@ -442,10 +394,9 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 			for file, source := range map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				"schema.yaml":   "# fixture: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
-				"types.yaml":    "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
+				"types.yaml":    name + ":\n  value: text\nHolder:\n  item: " + name + "\n",
 				"state.yaml":    "item: " + name + "\n",
 				"events.yaml":   "proof.received:\n  item: " + name + "\n",
-				"nodes.yaml":    "collector:\n  state_schema:\n    fields:\n      item: " + name + "\n",
 			} {
 				writeFixtureFile(t, root+"/"+file, source)
 			}
