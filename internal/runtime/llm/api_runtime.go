@@ -415,12 +415,17 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, lease *se
 func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model string) (anthropicRequest, error) {
 	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
 	for _, m := range s.Messages {
-		am, ok := toAnthropicMessage(m)
+		am, ok, err := toAnthropicMessage(m)
+		if err != nil {
+			return anthropicRequest{}, err
+		}
 		if ok {
 			msgs = append(msgs, am)
 		}
 	}
-	if am, ok := toAnthropicMessage(input); ok {
+	if am, ok, err := toAnthropicMessage(input); err != nil {
+		return anthropicRequest{}, err
+	} else if ok {
 		msgs = append(msgs, am)
 	}
 
@@ -464,27 +469,44 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 	}, nil
 }
 
-func toAnthropicMessage(m Message) (anthropicMessage, bool) {
+func toAnthropicMessage(m Message) (anthropicMessage, bool, error) {
 	content := m.Content
-	if content == "" && m.Role != "user" {
-		return anthropicMessage{}, false
-	}
 	role := strings.ToLower(strings.TrimSpace(m.Role))
 	switch role {
 	case "assistant":
-		return anthropicMessage{Role: "assistant", Content: content}, true
-	case "tool":
-		// Tool results are normalized as user observations for stateless API calls.
-		if results := providerToolResults(content); len(results) != 0 && strings.HasPrefix(strings.TrimSpace(content), "[") {
-			var out []string
-			for _, result := range results {
-				out = append(out, result.Payload)
-			}
-			return anthropicMessage{Role: "user", Content: strings.Join(out, "\n")}, true
+		if len(m.ToolCalls) == 0 {
+			return anthropicMessage{Role: "assistant", Content: content}, content != "", nil
 		}
-		return anthropicMessage{Role: "user", Content: "Tool result:\n" + content}, true
+		blocks := make([]any, 0, len(m.ToolCalls)+1)
+		if content != "" {
+			blocks = append(blocks, anthropicTextBlock{Type: "text", Text: content})
+		}
+		for _, call := range m.ToolCalls {
+			if strings.TrimSpace(call.ID) == "" {
+				return anthropicMessage{}, false, fmt.Errorf("anthropic stored tool_use %q has no provider id", call.Name)
+			}
+			input := call.Arguments
+			if input == nil {
+				input = map[string]any{}
+			}
+			blocks = append(blocks, anthropicToolUseBlock{Type: "tool_use", ID: call.ID, Name: call.Name, Input: input})
+		}
+		return anthropicMessage{Role: "assistant", Content: blocks}, true, nil
+	case "tool":
+		results := providerToolResults(content)
+		if len(results) == 0 {
+			return anthropicMessage{}, false, fmt.Errorf("anthropic stored tool result has no linked provider call")
+		}
+		blocks := make([]anthropicToolResultBlock, 0, len(results))
+		for _, result := range results {
+			if result.CallID == "" {
+				return anthropicMessage{}, false, fmt.Errorf("anthropic stored tool_result has no tool_use_id")
+			}
+			blocks = append(blocks, anthropicToolResultBlock{Type: "tool_result", ToolUseID: result.CallID, Content: result.Payload})
+		}
+		return anthropicMessage{Role: "user", Content: blocks}, true, nil
 	default:
-		return anthropicMessage{Role: "user", Content: content}, true
+		return anthropicMessage{Role: "user", Content: content}, content != "" || role == "user", nil
 	}
 }
 
@@ -582,6 +604,7 @@ func convertAnthropicResponse(parsed anthropicResponse, names map[string]string)
 			}
 		case "tool_use":
 			resp.ToolCalls = append(resp.ToolCalls, ToolCall{
+				ID:        block.ID,
 				Name:      block.Name,
 				Arguments: block.Input,
 			})
@@ -606,6 +629,24 @@ type anthropicMessage struct {
 	Content any    `json:"content"`
 }
 
+type anthropicTextBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type anthropicToolUseBlock struct {
+	Type  string `json:"type"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Input any    `json:"input"`
+}
+
+type anthropicToolResultBlock struct {
+	Type      string `json:"type"`
+	ToolUseID string `json:"tool_use_id"`
+	Content   string `json:"content"`
+}
+
 type anthropicTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -620,6 +661,7 @@ type anthropicResponse struct {
 	} `json:"usage"`
 	Content []struct {
 		Type  string `json:"type"`
+		ID    string `json:"id,omitempty"`
 		Text  string `json:"text,omitempty"`
 		Name  string `json:"name,omitempty"`
 		Input any    `json:"input,omitempty"`
