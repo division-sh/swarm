@@ -405,7 +405,7 @@ func (r connectRoutePlanResolver) matchConnectPlan(ctx context.Context, evt even
 		out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
 		return true, nil
 	}
-	intents, err := connectRoutePlanDeliveryIntents(evt.RunID(), plan, routes, liveRoutes, routeCreatedInPlan, r.routeTable.staticAgentDeclarationPlans())
+	intents, err := connectRoutePlanDeliveryIntents(evt.RunID(), plan, routes, liveRoutes, routeCreatedInPlan, r.routeTable.staticAgentPlans)
 	if err != nil {
 		return false, err
 	}

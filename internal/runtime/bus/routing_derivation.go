@@ -230,13 +230,6 @@ func (rt *RouteTable) ConnectReceiverDefinitions(runID string, instance runtimef
 	return bound, nil
 }
 
-func (rt *RouteTable) staticAgentDeclarationPlans() map[agentidentity.Plan]struct{} {
-	if rt == nil || rt.staticAgentPlans == nil {
-		return make(map[agentidentity.Plan]struct{})
-	}
-	return maps.Clone(rt.staticAgentPlans)
-}
-
 func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEvaluation) []Subscriber {
 	recipients := evaluation.Recipients()
 	out := make([]Subscriber, 0, len(recipients))

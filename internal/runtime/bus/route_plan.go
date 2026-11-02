@@ -195,13 +195,11 @@ func (r DeliveryRouteBlueprint) normalized() DeliveryRouteBlueprint {
 	}
 }
 
-type plannedDeliveryRoute = DeliveryRouteBlueprint
-
-func normalizePlannedDeliveryRoutes(in []plannedDeliveryRoute) []plannedDeliveryRoute {
+func normalizePlannedDeliveryRoutes(in []DeliveryRouteBlueprint) []DeliveryRouteBlueprint {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]plannedDeliveryRoute, 0, len(in))
+	out := make([]DeliveryRouteBlueprint, 0, len(in))
 	seen := make(map[deliveryIntentKey]struct{}, len(in))
 	for _, route := range in {
 		route = route.normalized()
@@ -532,7 +530,7 @@ func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute) [
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routePlanDeliveryIntentsFromRoutes(routes []plannedDeliveryRoute, producer routeIntentProducer) []RoutePlanDeliveryIntent {
+func routePlanDeliveryIntentsFromRoutes(routes []DeliveryRouteBlueprint, producer routeIntentProducer) []RoutePlanDeliveryIntent {
 	routes = normalizePlannedDeliveryRoutes(routes)
 	out := make([]RoutePlanDeliveryIntent, 0, len(routes))
 	for _, route := range routes {
@@ -753,11 +751,7 @@ func cloneStringAnyMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
+	return cloneAnyMap(in)
 }
 
 func containsString(in []string, want string) bool {

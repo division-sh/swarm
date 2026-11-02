@@ -69,7 +69,7 @@ func TestTerminalTargetDiagnosticRequiresExactBlockedConnectionEvidence(t *testi
 }
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
-	routes := []plannedDeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "consumer-node")), Target: events.RouteIdentity{
+	routes := []DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "consumer-node")), Target: events.RouteIdentity{
 		FlowInstance: "consumer/inst-1",
 		EntityID:     "ent-consumer",
 	},
