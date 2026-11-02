@@ -1178,11 +1178,12 @@ type WorkflowStageContract struct {
 	Description string `yaml:"description"`
 }
 type WorkflowDataAccumulation struct {
-	Writes      []WorkflowDataWrite `yaml:"writes"`
-	SourceEvent string              `yaml:"source_event"`
+	Writes       []WorkflowDataWrite `yaml:"writes"`
+	SourceEvent  string              `yaml:"source_event"`
+	From         string              `yaml:"from,omitempty" json:"-"`
+	fromLocation string
 }
 type WorkflowDataWrite struct {
-	Field         string                `yaml:"-" json:"field,omitempty"`
 	SourceField   string                `yaml:"source_field,omitempty" json:"source_field,omitempty"`
 	SourcePath    paths.Path            `yaml:"-" json:"-"`
 	Operation     WorkflowDataOperation `yaml:"op,omitempty" json:"op,omitempty"`
@@ -1199,8 +1200,6 @@ func (w WorkflowDataWrite) Source() string {
 	switch {
 	case strings.TrimSpace(w.SourceField) != "":
 		return strings.TrimSpace(w.SourceField)
-	case strings.TrimSpace(w.Field) != "":
-		return strings.TrimSpace(w.Field)
 	default:
 		return strings.TrimSpace(w.TargetField)
 	}
@@ -1213,12 +1212,6 @@ func (w WorkflowDataWrite) Target() string {
 		return strings.TrimSpace(w.TargetPathRef)
 	case strings.TrimSpace(w.TargetField) != "":
 		field := strings.TrimSpace(w.TargetField)
-		if !strings.Contains(field, ".") && paths.Parse(field).HasExplicitRoot() {
-			return "state." + field
-		}
-		return field
-	case strings.TrimSpace(w.Field) != "":
-		field := strings.TrimSpace(w.Field)
 		if !strings.Contains(field, ".") && paths.Parse(field).HasExplicitRoot() {
 			return "state." + field
 		}
@@ -1262,7 +1255,7 @@ func (a WorkflowDataAccumulation) TargetFields() []string {
 	return out
 }
 func (a WorkflowDataAccumulation) HasWrites() bool {
-	return len(a.Writes) > 0
+	return len(a.Writes) > 0 || a.From != ""
 }
 
 type WorkflowTimerContract struct {

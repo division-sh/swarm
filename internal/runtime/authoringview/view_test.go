@@ -31,11 +31,11 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
 	members := map[string][]byte{
 		"manifest.yaml":           []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"schema.yaml":             []byte("stages: []\npins:\n  inputs: [inbound.team-bot.text_message]\n"),
+		"schema.yaml":             []byte("stages: []\ninputs: [inbound.team-bot.text_message]\n"),
 		"child/manifest.yaml":     []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"child/schema.yaml":       []byte("stages: []\npins:\n  inputs: [inbound.team_bot.text_message]\n"),
+		"child/schema.yaml":       []byte("stages: []\ninputs: [inbound.team_bot.text_message]\n"),
 		"inherited/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"inherited/schema.yaml":   []byte("stages: []\npins:\n  inputs: [inbound.team-bot.text_message]\n"),
+		"inherited/schema.yaml":   []byte("stages: []\ninputs: [inbound.team-bot.text_message]\n"),
 	}
 	provider := packfixture.NeutralProviderMembers()
 	provider["trigger.yaml"] = []byte(strings.Replace(string(provider["trigger.yaml"]), "transport: session\n", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\n", 1))
@@ -1349,14 +1349,12 @@ func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "schema.yaml"), `
 stages: []
-pins:
-  inputs:
-    - observed
+inputs:
+  - observed
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "types.yaml"), `
-types:
-  Item:
-    name: text
+Item:
+  name: text
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "state.yaml"), `id: text
 items: map[text]Item

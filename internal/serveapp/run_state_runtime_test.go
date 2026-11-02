@@ -62,7 +62,7 @@ func runStatusSubscriptionSource(t *testing.T, withAgent bool) semanticview.Sour
 	root := t.TempDir()
 	files := map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "required_agents: []\nstages:\n  ready: {}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.completed]\n",
+		"schema.yaml":   "stages:\n  ready: {}\ninputs: [scan.requested]\noutputs: [scan.completed]\n",
 		"events.yaml":   "scan.requested:\n  topic: text\nscan.completed:\n",
 	}
 	if withAgent {

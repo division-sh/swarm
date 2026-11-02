@@ -43,7 +43,7 @@ func TestKeyedRootInputAdmissionConsumesDeclarationsBeforeConstruction(t *testin
 	root := t.TempDir()
 	for label, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "instance: provider_event_id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"schema.yaml":   "instance: provider_event_id\nstages: []\ninputs: [account.opened]\n",
 		"events.yaml":   "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
 		"state.yaml":    "provider_event_id: text\n",
 		"nodes.yaml":    "receiver:\n  account.opened: {}\n",

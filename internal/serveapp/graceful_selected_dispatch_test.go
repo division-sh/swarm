@@ -84,10 +84,10 @@ func TestOrdinaryDispatchStopsBeforeSelectedHandoffBothStores(t *testing.T) {
 					}
 					switch name {
 					case "schema.yaml", "hold/schema.yaml":
-						pins := lookup(doc.Content[0], "pins", "inputs")
+						pins := lookup(doc.Content[0], "inputs")
 						pins.Content = append(pins.Content, value("item.arm"))
 						if name == "schema.yaml" {
-							outputs := lookup(doc.Content[0], "pins", "outputs")
+							outputs := lookup(doc.Content[0], "outputs")
 							outputs.Content = append(outputs.Content, value("item.arm"))
 							connect := lookup(doc.Content[0], "connect")
 							connect.Content = append(connect.Content, value(map[string]any{"event": "item.arm", "from": ".", "to": "hold"}))
