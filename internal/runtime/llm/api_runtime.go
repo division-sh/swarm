@@ -413,6 +413,9 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, lease *se
 }
 
 func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model string) (anthropicRequest, error) {
+	if err := validateProviderReplayToolNames(s.Messages, input); err != nil {
+		return anthropicRequest{}, err
+	}
 	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
 	for _, m := range s.Messages {
 		am, ok, err := toAnthropicMessage(m)
@@ -489,7 +492,7 @@ func toAnthropicMessage(m Message) (anthropicMessage, bool, error) {
 			if input == nil {
 				input = map[string]any{}
 			}
-			blocks = append(blocks, anthropicToolUseBlock{Type: "tool_use", ID: call.ID, Name: call.Name, Input: input})
+			blocks = append(blocks, anthropicToolUseBlock{Type: "tool_use", ID: call.ID, Name: providerToolWireName(call.Name), Input: input})
 		}
 		return anthropicMessage{Role: "assistant", Content: blocks}, true, nil
 	case "tool":
