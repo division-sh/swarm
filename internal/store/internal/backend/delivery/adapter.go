@@ -258,25 +258,8 @@ func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *muta
 			return nil, fmt.Errorf("delivery run contradicts its immutable publication")
 		}
 	}
-	for _, route := range routes {
-		if route.Initialization.Empty() && !(route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
-			continue
-		}
-		deliveryEvent, err := events.NewDeliveryEvent(publication, route)
-		if err != nil {
-			return nil, err
-		}
-		expectedRun := runID
-		if publication.IsRunlessPlatformPublication() {
-			expectedRun = route.Context.RunID
-		}
-		if deliveryEvent.Event().RunID() != expectedRun {
-			return nil, fmt.Errorf("receiver materialization run contradicts publication")
-		}
-		if err := events.ValidateReceiverMaterializations(publication, routes); err != nil {
-			return nil, err
-		}
-		break
+	if err := validateInitialDeliveryMaterializations(publication, runID, routes); err != nil {
+		return nil, err
 	}
 	if len(routes) == 0 {
 		return nil, nil
@@ -304,6 +287,30 @@ func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *muta
 		proofs = append(proofs, proof)
 	}
 	return proofs, nil
+}
+
+func validateInitialDeliveryMaterializations(publication events.Event, runID string, routes []events.DeliveryRoute) error {
+	for _, route := range routes {
+		if route.Initialization.Empty() && !(route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
+			continue
+		}
+		deliveryEvent, err := events.NewDeliveryEvent(publication, route)
+		if err != nil {
+			return err
+		}
+		expectedRun := runID
+		if publication.IsRunlessPlatformPublication() {
+			expectedRun = route.Context.RunID
+		}
+		if deliveryEvent.Event().RunID() != expectedRun {
+			return fmt.Errorf("receiver materialization run contradicts publication")
+		}
+		if err := events.ValidateReceiverMaterializations(publication, routes); err != nil {
+			return err
+		}
+		break
+	}
+	return nil
 }
 
 // ActivateNormalAuthority is the crash/replacement handoff for nonterminal
@@ -3400,13 +3407,9 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	if err != nil {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery status: %v", ErrConflict, err)
 	}
-	record.FinalSelection = AbsentSelection()
-	if selectionID.Valid {
-		fact, err := handlerselection.Hydrate(selectionContext.String, disposition.String, flowPath.String, family.String, semanticPath.String, label.String)
-		if err != nil {
-			return deliveryRecord{}, fmt.Errorf("%w: persisted final selection: %v", ErrConflict, err)
-		}
-		record.FinalSelection = PresentSelection(fact)
+	record.FinalSelection, err = hydrateRecordFinalSelection(selectionID, selectionContext, disposition, flowPath, family, semanticPath, label)
+	if err != nil {
+		return deliveryRecord{}, err
 	}
 	if err := ValidateSelectionPresence(record.Status, record.FinalSelection); err != nil {
 		return deliveryRecord{}, fmt.Errorf("%w: %v", ErrConflict, err)
@@ -3473,6 +3476,17 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		return deliveryRecord{}, err
 	}
 	return record, nil
+}
+
+func hydrateRecordFinalSelection(selectionID, selectionContext, disposition, flowPath, family, semanticPath, label sql.NullString) (SelectionPresence, error) {
+	if !selectionID.Valid {
+		return AbsentSelection(), nil
+	}
+	fact, err := handlerselection.Hydrate(selectionContext.String, disposition.String, flowPath.String, family.String, semanticPath.String, label.String)
+	if err != nil {
+		return SelectionPresence{}, fmt.Errorf("%w: persisted final selection: %v", ErrConflict, err)
+	}
+	return PresentSelection(fact), nil
 }
 
 func validateRecordShape(record deliveryRecord) error {
