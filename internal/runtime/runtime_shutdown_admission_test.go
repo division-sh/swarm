@@ -300,10 +300,14 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 			case started <- struct{}{}:
 			default:
 			}
-			<-ctx.Done()
-			canceled <- struct{}{}
-			<-release
-			return nil, ctx.Err()
+			select {
+			case <-release:
+				return nil, nil
+			case <-ctx.Done():
+				canceled <- struct{}{}
+				<-release
+				return nil, ctx.Err()
+			}
 		},
 	}
 
@@ -426,12 +430,12 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 
 	select {
 	case <-canceled:
-	case <-time.After(time.Second):
-		t.Fatal("accepted work was not canceled during retirement")
+		t.Fatal("accepted work canceled before its graceful release")
+	default:
 	}
 	select {
 	case err := <-shutdownErrCh:
-		t.Fatalf("Shutdown returned before canceled work settled: %v", err)
+		t.Fatalf("Shutdown returned before accepted work settled: %v", err)
 	default:
 	}
 

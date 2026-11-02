@@ -198,7 +198,7 @@ func TestServePostgresGracefulContract(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 			client := &http.Client{Timeout: time.Second}
-			resp, err := client.Get("http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/healthz")
+			resp, err := client.Get("http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/readyz")
 			if err == nil {
 				_ = resp.Body.Close()
 				if resp.StatusCode != http.StatusServiceUnavailable {
