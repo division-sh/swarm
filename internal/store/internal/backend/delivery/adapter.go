@@ -604,6 +604,11 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 	if err != nil {
 		return ClaimResult{}, err
 	}
+	// The execution fence precedes delivery rows; expiry is checked after any row wait.
+	current, executionExpiresAt, err := a.selectedExecutionCurrentWithLock(ctx, tx, authority, true)
+	if err != nil {
+		return ClaimResult{}, err
+	}
 	record, err := a.loadByEventAndRoute(ctx, tx, event.ID(), identity, true)
 	if errors.Is(err, ErrNotFound) {
 		return ClaimResult{Disposition: ClaimAbsent}, nil
@@ -624,10 +629,6 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 		result.Disposition = ClaimWrongAuthority
 		return result, nil
 	}
-	current, err := a.selectedExecutionCurrent(ctx, tx, authority)
-	if err != nil {
-		return ClaimResult{}, err
-	}
 	if !current {
 		result.Disposition = ClaimWrongAuthority
 		return result, nil
@@ -635,6 +636,10 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return ClaimResult{}, err
+	}
+	if !executionExpiresAt.IsZero() && !executionExpiresAt.After(now) {
+		result.Disposition = ClaimWrongAuthority
+		return result, nil
 	}
 	previous := ClaimDisposition("")
 	switch record.Status {
@@ -3177,15 +3182,20 @@ func (a *Adapter) requireExactClaim(ctx context.Context, tx *sql.Tx, claim Claim
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
+	// The opaque claim has no authority field; discover it without taking a row lock.
+	observed, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
+	if err != nil {
+		return deliveryRecord{}, time.Time{}, err
+	}
+	current, executionExpiresAt, err := a.selectedExecutionCurrentWithLock(ctx, tx, observed.Authority, true)
+	if err != nil {
+		return deliveryRecord{}, time.Time{}, err
+	}
 	record, now, err := a.requireExactClaim(ctx, tx, claim)
 	if err != nil {
 		return deliveryRecord{}, time.Time{}, err
 	}
-	current, err := a.selectedExecutionCurrent(ctx, tx, record.Authority)
-	if err != nil {
-		return deliveryRecord{}, time.Time{}, err
-	}
-	if !current {
+	if !record.Authority.Equal(observed.Authority) || !current || (!executionExpiresAt.IsZero() && !executionExpiresAt.After(now)) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: selected delivery execution is fenced", ErrConflict)
 	}
 	return record, now, nil
