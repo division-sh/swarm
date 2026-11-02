@@ -13,7 +13,7 @@ func TestAnthropicToolRoundStoredMessagesAreReplayed(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{"content":[{"type":"tool_use","id":"call-1","name":"inspect","input":{"x":"value"}},{"type":"tool_use","id":"call-2","name":"empty","input":{}}]}`), &response); err != nil {
 				t.Fatal(err)
 			}
-			converted := convertAnthropicResponse(response)
+			converted := convertAnthropicResponse(response, map[string]string{"inspect": "inspect", "empty": "empty"})
 			converted.Message.Content = text
 			if len(converted.ToolCalls) != 2 || converted.ToolCalls[0].ID != "call-1" || converted.ToolCalls[1].ID != "call-2" {
 				t.Fatalf("response lost provider IDs: %+v", converted.ToolCalls)

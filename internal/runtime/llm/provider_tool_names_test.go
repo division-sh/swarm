@@ -21,7 +21,10 @@ func TestProviderToolWireNamesAcrossAPIEncoders(t *testing.T) {
 	for _, protocol := range []llmapi.Protocol{llmapi.OpenAICompatible, llmapi.OpenAIResponses, llmapi.Anthropic} {
 		t.Run(string(protocol), func(t *testing.T) {
 			session := &Session{Tools: []ToolDefinition{{Name: "partner.ping", Description: "Server's exact description", Schema: map[string]any{"type": "object"}}},
-				Messages: []Message{{Role: "assistant", Content: "prior reply", ToolCalls: []ToolCall{{ID: "prior-call", Name: "partner.ping", Arguments: map[string]any{"text": "prior"}}}}}}
+				Messages: []Message{
+					{Role: "assistant", Content: "prior reply", ToolCalls: []ToolCall{{ID: "prior-call", Name: "partner.ping", Arguments: map[string]any{"text": "prior"}}}},
+					{Role: "tool", Content: `[{"tool_call_id":"prior-call","ok":true,"result":"prior result","provider_content":"prior result"}]`},
+				}}
 			before, _ := json.Marshal(session)
 			names, err := admitProviderToolNames(session.Tools)
 			if err != nil {
@@ -46,7 +49,7 @@ func TestProviderToolWireNamesAcrossAPIEncoders(t *testing.T) {
 				if !bytes.Contains(request.Body, []byte(`"name":"partner_ping"`)) || !bytes.Contains(request.Body, []byte("Server's exact description")) {
 					t.Error("request lost the wire name or changed the server description")
 				}
-				if protocol != llmapi.Anthropic && bytes.Count(request.Body, []byte(`"name":"partner_ping"`)) != 2 {
+				if bytes.Count(request.Body, []byte(`"name":"partner_ping"`)) != 2 {
 					t.Error("replayed assistant call did not use the same wire name as its definition")
 				}
 				return llmapi.Reply{ID: "response", Model: "model", Tools: []llmapi.ToolCall{{ID: "wire-call", OutputID: "output-item", Name: "partner_ping", Arguments: json.RawMessage(`{"text":"value"}`)}}}, nil
@@ -86,7 +89,7 @@ func TestProviderToolWireNamesAcrossAPIEncoders(t *testing.T) {
 				err = json.Unmarshal(body, &parsed)
 				response = convertAnthropicResponse(parsed, names)
 			}
-			if err != nil || len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "partner.ping" || response.Message.ToolCalls[0].Name != "partner.ping" || !reflect.DeepEqual(response.ToolCalls[0].Arguments, map[string]any{"text": "value"}) {
+			if err != nil || len(response.ToolCalls) != 1 || response.ToolCalls[0].ID != "wire-call" || response.ToolCalls[0].Name != "partner.ping" || response.Message.ToolCalls[0].ID != "wire-call" || response.Message.ToolCalls[0].Name != "partner.ping" || !reflect.DeepEqual(response.ToolCalls[0].Arguments, map[string]any{"text": "value"}) {
 				t.Fatalf("exact reverse resolution: response=%+v err=%v", response, err)
 			}
 			after, _ := json.Marshal(session)
