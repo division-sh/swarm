@@ -32,8 +32,8 @@ type attachmentAgentAcquisitionRoutes struct {
 	fault       error
 }
 
-func (r *attachmentAgentAcquisitionRoutes) PrepareAgentRoute(token effects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) bus.AgentRoutePreparation {
-	return &attachmentAgentAcquisitionPublication{AgentRoutePreparation: r.attachmentAgentRouteProbe.PrepareAgentRoute(token, admission), owner: r}
+func (r *attachmentAgentAcquisitionRoutes) PrepareAgentRoute(ctx context.Context, token effects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) bus.AgentRoutePreparation {
+	return &attachmentAgentAcquisitionPublication{AgentRoutePreparation: r.attachmentAgentRouteProbe.PrepareAgentRoute(ctx, token, admission), owner: r}
 }
 
 type attachmentAgentAcquisitionPublication struct {

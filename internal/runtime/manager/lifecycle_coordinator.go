@@ -97,7 +97,7 @@ type deferredAgentTermination struct {
 }
 
 type AgentRouteBus interface {
-	PrepareAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation
+	PrepareAgentRoute(context.Context, runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation
 	FenceAgentRoute(runtimeeffects.LifecycleToken)
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
 	SignalDeliveryContinuations()
@@ -125,6 +125,10 @@ type executableAgentReadiness struct {
 }
 
 func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {
+	return c.executableReadinessForAccepted(context.Background(), identity, false)
+}
+
+func (c *agentLifecycleCoordinator) executableReadinessForAccepted(ctx context.Context, identity runtimeagentidentity.Identity, acceptedReadiness bool) (executableAgentReadiness, error) {
 	if c == nil {
 		return executableAgentReadiness{}, errors.New("agent lifecycle coordinator is required")
 	}
@@ -148,8 +152,12 @@ func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runti
 			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not an exact pre-run preparation")
 		}
 		return executableAgentReadiness{Kind: executableAgentPreparedBeforeRun, State: state}, nil
-	case runtimeLifecycleRunning:
-		if !c.executionRunnableCurrentOccurrenceLocked(cell) {
+	case runtimeLifecycleRunning, runtimeLifecycleShuttingDown:
+		grace := c.registrationWithinShutdownGrace(ctx, acceptedReadiness)
+		if c.phase == runtimeLifecycleShuttingDown && !grace {
+			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "manager lifecycle does not admit executable readiness")
+		}
+		if !c.executionRunnableLocked(cell, grace) {
 			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not reachable in the current manager occurrence")
 		}
 		return executableAgentReadiness{Kind: executableAgentRunnableCurrentOccurrence, State: state}, nil
@@ -266,7 +274,11 @@ func executionPreparedBeforeRunLocked(cell *agentLifecycleCell) bool {
 }
 
 func (c *agentLifecycleCoordinator) executionRunnableCurrentOccurrenceLocked(cell *agentLifecycleCell) bool {
-	if c == nil || cell == nil || cell.execution == nil || c.phase != runtimeLifecycleRunning ||
+	return c.executionRunnableLocked(cell, false)
+}
+
+func (c *agentLifecycleCoordinator) executionRunnableLocked(cell *agentLifecycleCell, shutdownGrace bool) bool {
+	if c == nil || cell == nil || cell.execution == nil || c.phase != runtimeLifecycleRunning && !shutdownGrace ||
 		c.runCtx == nil || c.runCtx.Err() != nil {
 		return false
 	}
@@ -901,7 +913,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	topology runtimeagenttopology.Admission,
 	readinessOwner **agentLifecycleCell,
 ) error {
-	return c.registerExecutionCandidate(ctx, rec, persist, func() (Agent, error) { return agent, nil }, admission, topology, readinessOwner)
+	return c.registerExecutionCandidate(ctx, rec, persist, func() (Agent, error) { return agent, nil }, admission, topology, readinessOwner, false)
 }
 
 func (c *agentLifecycleCoordinator) registerExecutionCandidate(
@@ -912,6 +924,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	admission semanticview.FlowOwnedAgentSubscriptionAdmission,
 	topology runtimeagenttopology.Admission,
 	readinessOwner **agentLifecycleCell,
+	acceptedReadiness bool,
 ) error {
 	if c == nil {
 		return fmt.Errorf("agent lifecycle coordinator is required")
@@ -946,14 +959,14 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	if err := c.sourceSetTransitionConflictLocked("register_execution", identity); err != nil {
 		return err
 	}
-	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+	if c.phase == runtimeLifecycleResetting || c.phase == runtimeLifecycleShuttingDown && !c.registrationWithinShutdownGrace(ctx, acceptedReadiness) {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
 	if persist && c.outcomeReader == nil {
 		return errors.New("agent registration requires its immutable outcome owner")
 	}
 	if pending := c.registrations[identity]; pending != nil {
-		if resolved, err := c.resumeAgentRegistrationLocked(ctx, rec, revision, pending, readinessOwner); resolved {
+		if resolved, err := c.resumeAgentRegistrationLocked(ctx, rec, revision, pending, readinessOwner, acceptedReadiness); resolved {
 			return err
 		}
 	}
@@ -991,7 +1004,8 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if c.phase != preparedPhase || c.runGeneration != preparedRun || c.resetOccurrence != preparedReset || c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+	grace := c.registrationWithinShutdownGrace(ctx, acceptedReadiness)
+	if c.phase != preparedPhase && !(preparedPhase == runtimeLifecycleRunning && grace) || c.runGeneration != preparedRun || c.resetOccurrence != preparedReset || c.phase == runtimeLifecycleShuttingDown && !grace || c.phase == runtimeLifecycleResetting {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
 	}
 	current, currentFound, err := c.loadAgentView(ctx, identity)
@@ -1066,7 +1080,7 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 		if err != nil {
 			return err
 		}
-		pending := &agentRegistration{request: transition, agent: agent, binding: binding, phase: preparedPhase, run: preparedRun,
+		pending := &agentRegistration{request: transition, agent: agent, binding: binding, phase: c.phase, run: preparedRun,
 			admission: admission}
 		if c.registrations == nil {
 			c.registrations = map[runtimeagentidentity.Identity]*agentRegistration{}
@@ -1085,6 +1099,16 @@ func (c *agentLifecycleCoordinator) registerExecutionCandidate(
 	}
 	c.publishRegisteredExecutionLocked(rec, agent, admission, view, readinessOwner)
 	return nil
+}
+
+// Called under mu; retirement closes this exception before cancelling work.
+func (c *agentLifecycleCoordinator) registrationWithinShutdownGrace(ctx context.Context, acceptedReadiness bool) bool {
+	if !acceptedReadiness || c.phase != runtimeLifecycleShuttingDown || ctx.Err() != nil {
+		return false
+	}
+	c.workMu.Lock()
+	defer c.workMu.Unlock()
+	return !c.workRetiring && c.runOwner != nil && c.runCtx != nil && c.runCtx.Err() == nil
 }
 
 func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence) (context.Context, bool, error) {
@@ -1300,12 +1324,7 @@ func (c *agentLifecycleCoordinator) drainShutdownWork(ctx context.Context) error
 	if owner == nil {
 		return nil
 	}
-	if err := owner.DrainForShutdown(ctx); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.terminalErr
+	return owner.DrainForShutdown(ctx)
 }
 
 func (c *agentLifecycleCoordinator) retireWorkAdmissionAs(shutdown bool) bool {
@@ -1806,6 +1825,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	topology *runtimeagenttopology.Admission,
 	lockedCell *agentLifecycleCell,
 	preparedToken runtimeeffects.LifecycleToken,
+	acceptedReadiness bool,
 ) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
@@ -1818,7 +1838,8 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
-	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+	grace := trigger == "start" && c.registrationWithinShutdownGrace(ctx, acceptedReadiness)
+	if c.phase == runtimeLifecycleShuttingDown && !grace || c.phase == runtimeLifecycleResetting {
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 	}
@@ -1839,7 +1860,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	if previousExecution != nil {
 		previousCancel = previousExecution.cancelGeneration
 	}
-	runCtx, mode, running := c.runCtx, c.runMode, c.phase == runtimeLifecycleRunning
+	runCtx, mode, running := c.runCtx, c.runMode, c.phase == runtimeLifecycleRunning || grace
 	nextEpoch := runtimebus.CurrentRuntimeEpoch()
 	nextGeneration := previousGeneration + 1
 	if preparedToken.Valid() {

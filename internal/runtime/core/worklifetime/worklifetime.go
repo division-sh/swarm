@@ -95,23 +95,23 @@ func (g *gate) beginClass(parent context.Context, transient bool) (*Lease, error
 	return g.beginWithParent(parent, transient, nil)
 }
 
-func (g *gate) beginAcceptedDescendant(parent context.Context, dispatch bool) (*Lease, error) {
+func (g *gate) beginAcceptedDescendant(parent context.Context, dispatch, transient bool) (*Lease, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
 	ancestor, _ := parent.Value(acceptedLeaseContextKey{}).(*Lease)
 	if ancestor == nil {
-		return g.beginOwned(parent, true, nil, false, dispatch)
+		return g.beginOwned(parent, transient, nil, false, dispatch)
 	}
 	ancestor.mu.Lock()
 	defer ancestor.mu.Unlock()
-	if ancestor.settled || ancestor.gate != g {
-		return g.beginOwned(parent, true, nil, false, dispatch)
+	if ancestor.settled || ancestor.gate != g || !transient && (!ancestor.transient || parent.Err() != nil || ancestor.ctx.Err() != nil) {
+		return g.beginOwned(parent, transient, nil, false, dispatch)
 	}
 	// A standing scanner cannot start fresh work after dispatch closes. A live
 	// transient parent already owns its firing/publication and its descendants.
 	dispatch = dispatch && !ancestor.transient
-	return g.beginOwned(parent, true, ancestor, false, dispatch)
+	return g.beginOwned(parent, transient, ancestor, false, dispatch)
 }
 
 func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor *Lease) (*Lease, error) {
@@ -638,7 +638,7 @@ func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurre
 		var lease *Lease
 		var err error
 		if standing {
-			lease, err = m.occurrence.gate.beginStanding(ctx)
+			lease, err = m.occurrence.gate.beginAcceptedDescendant(ctx, false, false)
 		} else {
 			lease, err = m.occurrence.begin(ctx)
 		}
@@ -762,7 +762,7 @@ func (m *ManagerWorkOccurrence) BeginAcceptedDescendant(ctx context.Context) (*L
 		}
 		childCtx = CarryAcceptedLease(companionLease.Context(), ctx)
 	}
-	lease, err := m.manager.occurrence.gate.beginAcceptedDescendant(childCtx, false)
+	lease, err := m.manager.occurrence.gate.beginAcceptedDescendant(childCtx, false, true)
 	if err != nil {
 		if companionLease != nil {
 			_ = companionLease.Done()
@@ -980,7 +980,7 @@ func (r *RuntimeOccurrence) BeginContinuationDispatch(ctx context.Context) (*Lea
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
 	}
-	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r), true)
+	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r), true, true)
 }
 
 // BeginAcceptedDescendant preserves already-admitted work through a shutdown
@@ -989,7 +989,7 @@ func (r *RuntimeOccurrence) BeginAcceptedDescendant(ctx context.Context) (*Lease
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
 	}
-	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r), false)
+	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r), false, true)
 }
 
 func (r *RuntimeOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
@@ -1087,10 +1087,32 @@ func (r *RuntimeOccurrence) NewRoute(ctx context.Context, identity RouteIdentity
 		return nil, err
 	}
 	if err := r.occurrence.gate.admits(); err != nil {
-		return nil, fmt.Errorf("admit route occurrence: %w", err)
+		if !errors.Is(err, ErrAdmissionFenced) {
+			return nil, fmt.Errorf("admit route occurrence: %w", err)
+		}
+		accepted, admitErr := retainManagerRoute(ctx, r)
+		if admitErr != nil {
+			return nil, fmt.Errorf("admit retained manager route: %w", admitErr)
+		}
+		if err := accepted.Done(); err != nil {
+			return nil, err
+		}
 	}
 	identity.Agent = identity.Agent.Normalize()
 	return &RouteOccurrence{occurrence: r.occurrence.newChild(nil), identity: identity, owner: r}, nil
+}
+
+func retainManagerRoute(ctx context.Context, owner Occurrence) (*Lease, error) {
+	current, _ := OccurrenceFromContext(ctx)
+	manager, ok := current.(*ManagerWorkOccurrence)
+	if ctx == nil || ctx.Err() != nil || !ok || manager.manager == nil || manager.manager.occurrence.parentLease == nil {
+		return nil, ErrAdmissionFenced
+	}
+	parent, _ := OccurrenceFromContext(manager.manager.occurrence.parentLease.Context())
+	if parent != owner {
+		return nil, ErrAdmissionFenced
+	}
+	return manager.manager.BeginStanding(ctx)
 }
 
 func (r *RouteOccurrence) Begin(ctx context.Context) (*Lease, error) {
@@ -1170,7 +1192,7 @@ func (s *SelectedForkOccurrence) BeginAcceptedDescendant(ctx context.Context) (*
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")
 	}
-	return s.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, s.process), s), false)
+	return s.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, s.process), s), false, true)
 }
 
 func (s *SelectedForkOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
@@ -1231,6 +1253,9 @@ func (s *SelectedForkOccurrence) NewRoute(ctx context.Context, identity RouteIde
 		return nil, err
 	}
 	parentLease, err := s.BeginStanding(ctx)
+	if errors.Is(err, ErrAdmissionFenced) {
+		parentLease, err = retainManagerRoute(ctx, s)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-fork route occurrence: %w", err)
 	}

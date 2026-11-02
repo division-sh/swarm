@@ -29,11 +29,11 @@ type attachmentAgentRouteProbe struct {
 	removed  map[effects.LifecycleToken]struct{}
 }
 
-func (p *attachmentAgentRouteProbe) PrepareAgentRoute(token effects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) bus.AgentRoutePreparation {
+func (p *attachmentAgentRouteProbe) PrepareAgentRoute(ctx context.Context, token effects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) bus.AgentRoutePreparation {
 	p.mu.Lock()
 	p.prepared[token] = struct{}{}
 	p.mu.Unlock()
-	return p.sqliteFlowActivationBus.PrepareAgentRoute(token, admission)
+	return p.sqliteFlowActivationBus.PrepareAgentRoute(ctx, token, admission)
 }
 
 func (p *attachmentAgentRouteProbe) FenceAgentRoute(token effects.LifecycleToken) {

@@ -242,7 +242,7 @@ func TestAgentRegistrationCandidateIsBoundToObservedRow(t *testing.T) {
 		return reconfigureTestAgent{id: record.Config.ID}, nil
 	}
 	register := func(persist bool, candidate func() (Agent, error)) error {
-		return coordinator.registerExecutionCandidate(ctx, record, persist, candidate, testManagerSubscriptionAdmission(t, record.Config), record.Topology, nil)
+		return coordinator.registerExecutionCandidate(ctx, record, persist, candidate, testManagerSubscriptionAdmission(t, record.Config), record.Topology, nil, false)
 	}
 	if err := register(false, build); err == nil || builds != 0 {
 		t.Fatalf("missing row reached factory: builds=%d err=%v", builds, err)
@@ -268,6 +268,14 @@ func TestAgentRegistrationCandidateIsBoundToObservedRow(t *testing.T) {
 	})
 	if err == nil || builds != 2 || len(coordinator.cells) != 0 {
 		t.Fatalf("changed row published stale candidate: builds=%d err=%v cells=%d", builds, err, len(coordinator.cells))
+	}
+	for _, phase := range []runtimeLifecyclePhase{runtimeLifecycleShuttingDown, runtimeLifecycleResetting} {
+		coordinator.phase = phase
+		err := coordinator.registerExecutionCandidate(ctx, record, false, build, testManagerSubscriptionAdmission(t, record.Config), record.Topology, nil, phase == runtimeLifecycleResetting)
+		var failure *runtimefailures.Error
+		if !errors.As(err, &failure) || failure.Failure.Class != runtimefailures.ClassLifecycleConflict || failure.Failure.Detail.Code != "lifecycle_transition_conflict" || builds != 2 {
+			t.Fatalf("fresh/reset registration crossed %s admission: builds=%d err=%v", phase, builds, err)
+		}
 	}
 }
 

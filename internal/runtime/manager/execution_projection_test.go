@@ -220,7 +220,7 @@ func (b *projectionTestBus) LogRuntime(_ context.Context, entry runtimepipeline.
 	b.mu.Unlock()
 	return nil
 }
-func (b *projectionTestBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation {
+func (b *projectionTestBus) PrepareAgentRoute(_ context.Context, token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.prepareErr {
@@ -239,7 +239,7 @@ func (b *projectionTestBus) PrepareAgentRoute(token runtimeeffects.LifecycleToke
 }
 
 func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToken, admission semanticview.FlowOwnedAgentSubscriptionAdmission) <-chan *worklifetime.EventDelivery {
-	prepared := b.PrepareAgentRoute(token, admission)
+	prepared := b.PrepareAgentRoute(context.Background(), token, admission)
 	if prepared == nil || prepared.Publish() != nil {
 		return nil
 	}

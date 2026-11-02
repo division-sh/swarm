@@ -71,7 +71,7 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, ownerCtx context.Context, ro
 		return reconfigureTestAgent{id: rec.Config.ID}, nil
 	}
 	register := func(ctx context.Context, record PersistedAgent) error {
-		return am.lifecycle.registerExecutionCandidate(ctx, record, true, build, testManagerSubscriptionAdmission(t, record.Config), record.Topology, nil)
+		return am.lifecycle.registerExecutionCandidate(ctx, record, true, build, testManagerSubscriptionAdmission(t, record.Config), record.Topology, nil, false)
 	}
 	cut = strings.TrimPrefix(cut, "reintroduction_")
 	t.Cleanup(func() {

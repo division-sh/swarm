@@ -15,8 +15,25 @@ func (am *AgentManager) observeCommittedAgentAttachment(ctx context.Context, ide
 	if !running || ownerCtx == nil || ownerCtx.Err() != nil {
 		return false, false, nil
 	}
-	key, active, executor, receipt, hash := am.installingAgentAttachment(identity)
-	if active == nil || am.workflowInstances == nil {
+	return am.observeInstallingAgentAttachment(ctx, identity, ownerCtx, nil)
+}
+
+func (am *AgentManager) acceptedReadinessRegistration(ctx context.Context, identity agentidentity.Identity) (bool, error) {
+	attempt := readinessAttemptFromContext(ctx)
+	if attempt == nil {
+		return false, nil
+	}
+	ownerCtx, _, _ := am.lifecycle.runSnapshot()
+	observed, planned, err := am.observeInstallingAgentAttachment(ctx, identity, ownerCtx, attempt)
+	return observed && planned, err
+}
+
+func (am *AgentManager) observeInstallingAgentAttachment(ctx context.Context, identity agentidentity.Identity, ownerCtx context.Context, required *dynamicFlowRuntimeReadinessAttempt) (observed, planned bool, err error) {
+	if ownerCtx == nil || ownerCtx.Err() != nil || ctx.Err() != nil {
+		return false, false, ctx.Err()
+	}
+	key, active, executor, receipt, hash := am.agentAttachment(identity, required)
+	if active == nil || am.workflowInstances == nil || required != nil && executor != required {
 		return false, false, nil
 	}
 	if err := receipt.Validate(); err != nil {
@@ -41,6 +58,9 @@ func (am *AgentManager) observeCommittedAgentAttachment(ctx context.Context, ide
 		return false, false, err
 	}
 	installing, err := installingAgentReadiness(row, found, active, receipt, hash)
+	if required != nil && err == nil && found {
+		installing = row.Eligible() && row.AttemptState == "accepted" && row.Phase.Valid()
+	}
 	if err != nil || !installing {
 		return false, false, err
 	}
@@ -77,6 +97,10 @@ func readinessPlanOwnsAgent(plan pipeline.DynamicFlowRuntimeReadinessPlan, ident
 }
 
 func (am *AgentManager) installingAgentAttachment(identity agentidentity.Identity) (dynamicFlowRuntimeReadinessKey, *dynamicFlowActiveAttempt, *dynamicFlowRuntimeReadinessAttempt, pipeline.DynamicFlowRuntimeActivationAttempt, string) {
+	return am.agentAttachment(identity, nil)
+}
+
+func (am *AgentManager) agentAttachment(identity agentidentity.Identity, required *dynamicFlowRuntimeReadinessAttempt) (dynamicFlowRuntimeReadinessKey, *dynamicFlowActiveAttempt, *dynamicFlowRuntimeReadinessAttempt, pipeline.DynamicFlowRuntimeActivationAttempt, string) {
 	am.dynamicFlowReadinessMu.Lock()
 	defer am.dynamicFlowReadinessMu.Unlock()
 	for key, active := range am.dynamicFlowActiveAttempts {
@@ -84,7 +108,7 @@ func (am *AgentManager) installingAgentAttachment(identity agentidentity.Identit
 			continue
 		}
 		executor := am.dynamicFlowReadinessAttempts[key]
-		if agentAttachmentInstalling(active, executor) {
+		if required == nil && agentAttachmentInstalling(active, executor) || executor == required && agentAttachmentRetained(active, executor) {
 			return key, active, executor, active.receipt, active.planHash
 		}
 	}
@@ -92,14 +116,24 @@ func (am *AgentManager) installingAgentAttachment(identity agentidentity.Identit
 }
 
 func agentAttachmentInstalling(active *dynamicFlowActiveAttempt, executor *dynamicFlowRuntimeReadinessAttempt) bool {
+	if !agentAttachmentRetained(active, executor) {
+		return false
+	}
+	select {
+	case <-executor.retiring:
+		return false
+	default:
+		return true
+	}
+}
+
+func agentAttachmentRetained(active *dynamicFlowActiveAttempt, executor *dynamicFlowRuntimeReadinessAttempt) bool {
 	if active == nil || executor == nil || active.pending != nil || active.complete || active.retiring || active.retirementKind != 0 ||
 		active.locallyRetired || executor.successorRequired || executor.attemptOrdinal != active.receipt.Ordinal() || executor.planHash != active.planHash {
 		return false
 	}
 	select {
 	case <-executor.done:
-		return false
-	case <-executor.retiring:
 		return false
 	default:
 		return true
