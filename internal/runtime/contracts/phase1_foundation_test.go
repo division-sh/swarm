@@ -53,7 +53,6 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 	expectMissingField(t, reflect.TypeOf(ToolInputSchema{}), "Properties")
 	expectMissingField(t, reflect.TypeOf(ToolSchemaEntry{}), "InputSchema")
 	expectMissingField(t, reflect.TypeOf(ToolSchemaEntry{}), "HandlerType")
-	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "StateSchema", reflect.TypeOf(NodeStateSchema{}))
 	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "GateState", reflect.TypeOf(NodeGateStateSchema{}))
 	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Swarm")
 	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Emitter")

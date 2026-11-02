@@ -5,17 +5,13 @@ import (
 	"testing"
 )
 
-// CopyForkLoopAccumulator exercises generation-keyed state through ordinary
-// handlers. Explicit clear is a separate authored choice, not fork cleanup.
-func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
+// CopyForkLoopAccumulator collects the current revision into its declared list.
+func CopyForkLoopAccumulator(t testing.TB) string {
 	t.Helper()
 	root := CopyForkLoopGenerationState(t)
 	nodes := filepath.Join(root, "review", "nodes.yaml")
-	applyClosedReplacement(t, nodes, "  review.requested:\n    loop:", "  review.requested:\n    accumulate:\n      into: reviews\n      from: payload\n      key: payload.token\n    loop:")
-	applyClosedReplacement(t, nodes, "  review.requested:\n", "  state_schema:\n    fields:\n      reviews: [Review]\n  review.requested:\n")
-	if clearOnAdmit {
-		applyClosedReplacement(t, nodes, "  review.requested:\n    accumulate:", "  review.requested:\n    clear: {targets: [accumulator_state]}\n    accumulate:")
-	}
+	applyClosedReplacement(t, nodes, "  review.requested:\n    loop:", "  review.requested:\n    accumulate: {target: reviews, key: token}\n    loop:")
+	applyClosedReplacement(t, filepath.Join(root, "review", "state.yaml"), "observed_token: \"\"\n", "observed_token: \"\"\nreviews: [Review]\n")
 	writeClosedVariantFile(t, root, "review/types.yaml", "Review:\n  revision_id: text\n  token: text\n")
 	return root
 }

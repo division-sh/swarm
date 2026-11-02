@@ -28,6 +28,16 @@ func TestProjectNodeDeclarationsValueReachesNestedHandler(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nodes.yaml:3:") || !strings.Contains(err.Error(), "from") {
 		t.Fatalf("expected nested source-located retirement, got %v", err)
 	}
+	for _, shape := range []string{"null", "scratch", "[]", "{}"} {
+		source, err := yamlsource.Load([]byte("worker:\n  state_table: " + shape + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = projectNodeDeclarationsValue(source.Document("nodes.yaml").Root())
+		if err == nil || !strings.Contains(err.Error(), "state_table is not a node field") || !strings.Contains(err.Error(), "nodes.yaml:2:") {
+			t.Fatalf("retired state-table source admission: %v", err)
+		}
+	}
 }
 
 func TestNodeRootExplicitNoOpHandlerVersusNull(t *testing.T) {

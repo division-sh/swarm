@@ -4,6 +4,3 @@ test-node:
       writes: [foo]
       source_event: item.received
     advances_to: done
-  state_schema:
-    fields:
-      foo: string

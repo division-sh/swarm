@@ -155,7 +155,7 @@ func TestStreamAccumulatorDerivesNoIntrinsicTimeoutSubscriptionOrTransition(t *t
 
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"item.arrived": {
-						Accumulate: &AccumulateSpec{Into: "items", From: "payload"},
+						Accumulate: &AccumulateSpec{Target: "items", Key: "id"},
 						AdvancesTo: "processed",
 					},
 				},

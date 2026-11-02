@@ -10,13 +10,6 @@ import (
 
 func TestGenericBundle_SystemNodeReliabilityPatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
-	for _, nodeID := range []string{"intake-router", "processing-node", "delivery-node"} {
-		node := bundle.Nodes[nodeID]
-		if node.StateTable == "" {
-			t.Fatalf("expected state table for %s", nodeID)
-		}
-	}
-
 	source := semanticview.Wrap(bundle)
 	if owners := source.RuntimeEventOwners("item.review_requested"); !containsExecutableNode(owners, genericExecutableNode(t, bundle, "processing-node")) {
 		t.Fatalf("expected processing-node to own item.review_requested, got %v", owners)

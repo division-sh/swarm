@@ -39,26 +39,33 @@ func loadOptionalEventCatalog(path string) (map[string]EventCatalogEntry, error)
 	if err != nil || !present {
 		return map[string]EventCatalogEntry{}, err
 	}
-	entries, err := admitEventCatalogDocument(admission.document)
+	entries, err := admitEventCatalogDocument(admission.document, TypeCatalogDocument{})
 	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
 	return entries, admission.RequireLive(len(entries))
 }
 
-func loadOptionalEventCatalogFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string) (map[string]EventCatalogEntry, error) {
+func loadOptionalEventCatalogFromSource(artifact *sourceartifact.AdmittedSourceArtifact, label string, types ...TypeCatalogDocument) (map[string]EventCatalogEntry, error) {
 	admission, present, err := admitOptionalDeclarationSource(artifact, label, optionalDeclarationEvents)
 	if err != nil || !present {
 		return map[string]EventCatalogEntry{}, err
 	}
-	entries, err := admitEventCatalogDocument(admission.document)
+	entries, err := admitEventCatalogDocument(admission.document, types...)
 	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, label)
 	}
 	return entries, admission.RequireLive(len(entries))
 }
 
-func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCatalogEntry, error) {
+func admitEventCatalogDocument(document yamlsource.Document, catalogs ...TypeCatalogDocument) (map[string]EventCatalogEntry, error) {
+	if len(catalogs) > 1 {
+		return nil, fmt.Errorf("event admission requires one declaring-flow catalog")
+	}
+	types := TypeCatalogDocument{}
+	if len(catalogs) == 1 {
+		types = catalogs[0]
+	}
 	root := document.Root()
 	switch root.Presence() {
 	case yamlsource.PresenceEmptyMapping:
@@ -87,7 +94,7 @@ func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCa
 			return nil, fmt.Errorf("events.yaml has colliding admitted event declaration %q at %s and %s", name, previous, declaration.KeyLocation)
 		}
 		admitted[name] = declaration.KeyLocation
-		entry, err := admitEventCatalogEntry(name, declaration)
+		entry, err := admitEventCatalogEntry(name, declaration, types)
 		if err != nil {
 			return nil, fmt.Errorf("event %q: %w", name, err)
 		}
@@ -104,7 +111,7 @@ func eventDeclarationClaimsInboundNamespace(name string) bool {
 	return strings.HasPrefix(leaf, "inbound.") || first == "*" || first == "**"
 }
 
-func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (EventCatalogEntry, error) {
+func admitEventCatalogEntry(name string, declaration yamlsource.MappingField, types TypeCatalogDocument) (EventCatalogEntry, error) {
 	value := declaration.Value
 	bare, err := admitEventDeclarationShape(name, value)
 	if err != nil {
@@ -115,6 +122,16 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		return EventCatalogEntry{}, err
 	}
 	entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{}}}
+	embedded, err := embeddedRecordFields(fields, types)
+	if err != nil {
+		return EventCatalogEntry{}, err
+	}
+	for name, field := range embedded {
+		entry.Payload.Properties[name] = EventFieldSpec{Type: field.Type}
+		if !field.IsOptional {
+			entry.Payload.Required = append(entry.Payload.Required, name)
+		}
+	}
 	if field, ok := byName["key"]; ok {
 		key, err := requiredLiteralString(field.Value, "event key")
 		if err != nil {
@@ -179,7 +196,7 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 
 func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.MappingField) error {
 	for _, field := range fields {
-		if field.Name == "key" {
+		if field.Name == "key" || field.Name == "_embed" {
 			continue
 		}
 		payloadField, optional, err := admitEventPayloadField(field.Value)

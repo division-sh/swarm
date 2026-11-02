@@ -26,14 +26,14 @@ func TestR3DescribeEffectiveLiteralPolicyAndRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"a.b":null`, `"value":3`, `"description":"business"`, `"override":false`, `"review":{"classes"`, `"params":{"limit":3}`} {
+	for _, want := range []string{`"a.b":null`, `"value":3`, `"description":"business"`, `"override":false`, `"matches":{"classes"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("missing %s: %s", want, raw)
 		}
 	}
 	view.Root.Policy["business"].(map[string]any)["value"] = 99
-	view.Root.Rules["review"].Criteria.Rules[0].ID = "changed"
-	if bundle.Policy.Values["business"].Value.(map[string]any)["value"] != 3 || bundle.Rules["review"].Criteria.Rules[0].ID != "R1" {
+	view.Root.Rules["matches"].Validation.Rules[0].ID = "changed"
+	if bundle.Policy.Values["business"].Value.(map[string]any)["value"] != 3 || bundle.Rules["matches"].Validation.Rules[0].ID != "M1" {
 		t.Fatal("describe aliases admitted source")
 	}
 }

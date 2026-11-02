@@ -4,32 +4,63 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func scopedComponentAccumulatorSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	for path, text := range map[string]string{
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "connect: []\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/schema.yaml":   "stages:\n  pending: {}\ninputs: [component.scaffolded]\n",
+		"operating/state.yaml":    "items: [Component]\ncomponent_count: integer\n",
+		"operating/types.yaml":    "Component:\n  component_id: text\n",
+		"operating/events.yaml":   "component.scaffolded:\n  _embed: [Component]\n",
+	} {
+		writeEngineProjectionFixtureFile(t, filepath.Join(root, path), text)
+	}
+	repo := repoRootForEngineProjectionTest(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
 
 func a2AccumulatorExecutor(t *testing.T) (*Executor, *persistentStateRepo) {
 	t.Helper()
+	itemFields := map[string]runtimecontracts.TypeFieldSpec{
+		"id": {Type: "text"}, "marker": {Type: "text"},
+		"event_id": {Type: "text", IsOptional: true}, "event_type": {Type: "text", IsOptional: true},
+		"source": {Type: "text", IsOptional: true}, "received_at": {Type: "text", IsOptional: true},
+		"payload": {Type: "BusinessRecord", IsOptional: true},
+	}
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"marker": {Type: "text"}, "items": {Type: "[ArrivalItem]"},
+		}}},
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"BusinessRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}, "marker": {Type: "text"}}},
+			"ArrivalItem":    {Fields: itemFields},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.received": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-				"id": {Type: "text"}, "marker": {Type: "text"}, "event_id": {Type: "text"}, "event_type": {Type: "text"}, "source": {Type: "text"}, "received_at": {Type: "text"}, "payload": {Type: "BusinessRecord"},
-			}}},
+				"id": {Type: "text"}, "marker": {Type: "text"}, "event_id": {Type: "text"}, "event_type": {Type: "text"},
+				"source": {Type: "text"}, "received_at": {Type: "text"}, "payload": {Type: "BusinessRecord"},
+			}, Required: []string{"id", "marker"}}},
 		},
 	})
 	repo := &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "active", StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}}
@@ -49,7 +80,7 @@ func a2AccumulatorRequest(t *testing.T, key, payload, eventID string) ExecutionR
 		EntityID: "entity-1", Node: testRootExecutableNode(t, "collector"), HandlerEventKey: "item.received",
 		Event: eventtest.RunCreatingRootIngress(eventID, "item.received", "transport-source", "", json.RawMessage(payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Accumulate:       &runtimecontracts.AccumulateSpec{Into: "items", Key: key},
+			Accumulate:       &runtimecontracts.AccumulateSpec{Target: "items", Key: key},
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{SourceField: "marker", TargetField: "marker"}}},
 			Emit:             runtimecontracts.EmitSpec{Event: "item.recorded"},
 		},
@@ -67,12 +98,13 @@ func requireAccumulatorFailure(t *testing.T, err error, class failures.Class) {
 func TestA2M10M11AccumulatorDuplicateAndConflictStopEffects(t *testing.T) {
 	executor, repo := a2AccumulatorExecutor(t)
 	const original = `{"id":"item","marker":"first","event_id":"business-event","event_type":"business-type","source":"business-source","received_at":"business-time","payload":{"id":"nested","marker":"nested-marker"}}`
-	first := a2AccumulatorRequest(t, "payload.id", original, "event-1")
+	first := a2AccumulatorRequest(t, "id", original, "event-1")
 	result, err := executor.ExecuteSemanticFixture(context.Background(), first)
 	if err != nil || len(result.EmitIntents) != 1 {
 		t.Fatalf("first execution = %#v, %v", result, err)
 	}
-	before := cloneStateBucketSet(repo.snapshot.StateCarrier.StateBuckets)
+	beforeFields := cloneStringAnyMap(repo.snapshot.StateCarrier.Fields)
+	beforeBuckets := cloneStateBucketSet(repo.snapshot.StateCarrier.StateBuckets)
 	for _, tc := range []struct {
 		name, payload string
 		class         failures.Class
@@ -81,19 +113,19 @@ func TestA2M10M11AccumulatorDuplicateAndConflictStopEffects(t *testing.T) {
 		{"changed-payload", `{"id":"item","marker":"changed","event_id":"business-event","event_type":"business-type","source":"business-source","received_at":"business-time","payload":{"id":"nested","marker":"nested-marker"}}`, failures.ClassConflictingDuplicate},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := executor.ExecuteSemanticFixture(context.Background(), a2AccumulatorRequest(t, "payload.id", tc.payload, "different-transport-event"))
+			result, err := executor.ExecuteSemanticFixture(context.Background(), a2AccumulatorRequest(t, "id", tc.payload, "different-transport-event"))
 			if tc.class != "" {
 				requireAccumulatorFailure(t, err, tc.class)
 			} else if err != nil || result.Status != OutcomeDiscarded {
 				t.Fatalf("duplicate = %#v, %v", result, err)
 			}
-			if len(result.EmitIntents) != 0 || repo.snapshot.StateCarrier.Fields["marker"] != "first" || !reflect.DeepEqual(repo.snapshot.StateCarrier.StateBuckets, before) {
+			if len(result.EmitIntents) != 0 || !reflect.DeepEqual(repo.snapshot.StateCarrier.Fields, beforeFields) || !reflect.DeepEqual(repo.snapshot.StateCarrier.StateBuckets, beforeBuckets) {
 				t.Fatalf("refusal/duplicate changed state or effects: %#v", result)
 			}
 		})
 	}
-	acc, ok := loadAccumulator(repo.snapshot, first.Node, "item.received")
-	if !ok || acc.Err() != nil || len(acc.Items) != 1 {
+	acc := runtimeaccumulator.Load(repo.snapshot.StateCarrier.Fields["items"])
+	if acc.Err() != nil || len(acc.Items) != 1 {
 		t.Fatalf("accumulator = %#v", acc)
 	}
 	var expected map[string]any
@@ -106,11 +138,11 @@ func TestA2M10M11AccumulatorDuplicateAndConflictStopEffects(t *testing.T) {
 }
 
 func TestA2M12AccumulatorKeyRefusalHasNoStateOrEffects(t *testing.T) {
-	for _, payload := range []string{`{"marker":"missing"}`, `{"id":null,"marker":"null"}`, `{"id":"","marker":"empty"}`, `{"id":1,"marker":"numeric"}`, `{"id":true,"marker":"boolean"}`, `{"id":{"value":"record"},"marker":"record"}`, `{"id":["list"],"marker":"list"}`} {
+	for _, payload := range []string{`{"marker":"missing"}`, `{"id":null,"marker":"null"}`, `{"id":{"value":"record"},"marker":"record"}`, `{"id":["list"],"marker":"list"}`} {
 		t.Run(payload, func(t *testing.T) {
 			executor, repo := a2AccumulatorExecutor(t)
 			before := cloneStateBucketSet(repo.snapshot.StateCarrier.StateBuckets)
-			result, err := executor.ExecuteSemanticFixture(context.Background(), a2AccumulatorRequest(t, "payload.id", payload, "not-a-business-key"))
+			result, err := executor.ExecuteSemanticFixture(context.Background(), a2AccumulatorRequest(t, "id", payload, "not-a-business-key"))
 			requireAccumulatorFailure(t, err, failures.ClassSchemaInvalid)
 			if len(result.EmitIntents) != 0 || len(repo.snapshot.StateCarrier.Fields) != 0 || !reflect.DeepEqual(before, repo.snapshot.StateCarrier.StateBuckets) {
 				t.Fatalf("invalid key changed state/effects: %#v %#v", repo.snapshot, result)
@@ -119,123 +151,31 @@ func TestA2M12AccumulatorKeyRefusalHasNoStateOrEffects(t *testing.T) {
 	}
 }
 
-func a2DeliveryContext(t *testing.T, deliveryID string) context.Context {
-	t.Helper()
-	claim, err := runtimedelivery.AdmitPersistedClaim(deliveryID, semanticExecutionFixtureRunID, "exact-route", "fence", 1, runtimedelivery.SubscriberNode, testRootExecutableNode(t, "collector").Key())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runtimedelivery.WithClaim(context.Background(), claim)
-}
-
-func TestA2M14UnkeyedAccumulatorUsesDurableDeliveryNotEventIdentity(t *testing.T) {
-	executor, repo := a2AccumulatorExecutor(t)
-	request := a2AccumulatorRequest(t, "", `{"marker":"same","id":"same"}`, "same-event-identity")
-	for _, delivery := range []string{"delivery-2-committed-first", "delivery-1-committed-second"} {
-		result, err := executor.ExecuteSemanticFixture(a2DeliveryContext(t, delivery), request)
-		if err != nil || len(result.EmitIntents) != 1 {
-			t.Fatalf("distinct delivery = %#v, %v", result, err)
-		}
-	}
-	result, err := executor.ExecuteSemanticFixture(a2DeliveryContext(t, "delivery-2-committed-first"), request)
-	if err != nil || result.Status != OutcomeDiscarded || len(result.EmitIntents) != 0 {
-		t.Fatalf("delivery retry = %#v, %v", result, err)
-	}
-	acc, _ := loadAccumulator(repo.snapshot, request.Node, "item.received")
-	if len(acc.Items) != 2 || len(acc.Received) != 0 || len(acc.Deliveries) != 2 {
-		t.Fatalf("unkeyed multiplicity = %#v", acc)
-	}
-	result, err = executor.ExecuteSemanticFixture(context.Background(), request)
-	requireAccumulatorFailure(t, err, failures.ClassLifecycleConflict)
-	if len(result.EmitIntents) != 0 {
-		t.Fatalf("unclaimed delivery emitted: %#v", result)
-	}
-}
-
-func TestA2M15AccumulatorBucketIsolationAndCapturedGeneration(t *testing.T) {
-	executor, _ := a2AccumulatorExecutor(t)
-	firstNode, secondNode := testRootExecutableNode(t, "collector"), testRootExecutableNode(t, "other-collector")
-	instanceA, instanceB := StateSnapshot{}, StateSnapshot{}
-	activation := &loopruntime.Activation{LoopID: "loop", ActivationID: "activation", RevisionField: "revision", RevisionID: "revision-1", Attempt: 1}
-	for _, tc := range []struct {
-		state      *StateSnapshot
-		node       identity.ExecutableNode
-		event      string
-		activation *loopruntime.Activation
-	}{
-		{&instanceA, firstNode, "item.received", nil},
-		{&instanceA, secondNode, "item.received", nil},
-		{&instanceA, firstNode, "other.handler", nil},
-		{&instanceA, firstNode, "item.received", activation},
-		{&instanceB, firstNode, "item.received", nil},
-	} {
-		frame := &executionFrame{req: ExecutionRequest{Node: tc.node, HandlerEventKey: tc.event}, loopActivation: tc.activation}
-		bucket, ok, err := executor.resolveAccumulatorBucketRef(frame, nil)
-		if err != nil || !ok || !bucket.Valid() {
-			t.Fatalf("bucket = %#v, %v", bucket, err)
-		}
-		acc := &Accumulator{}
-		if _, err := acc.Admit(&runtimecontracts.AccumulateSpec{Key: "payload.id"}, map[string]any{"id": "same-key"}, ""); err != nil {
-			t.Fatal(err)
-		}
-		storeAccumulatorForBucket(tc.state, bucket, acc)
-		loaded, ok := loadAccumulatorForBucket(*tc.state, bucket)
-		if !ok || loaded.Err() != nil || len(loaded.Items) != 1 || accumulatorExpressionValue(loaded)["received_count"] != 1 {
-			t.Fatalf("isolated accumulator = %#v", loaded)
-		}
-	}
-	rootBucket := timeridentity.NewAccumulatorBucketRef(firstNode, "item.received")
-	delete(instanceA.StateCarrier.StateBuckets[firstNode.Key()][handlerAccumulatorBucketKey].(map[string]any), rootBucket.Key())
-	if _, ok := loadAccumulatorForBucket(instanceA, rootBucket); ok {
-		t.Fatal("reset retained its selected accumulator")
-	}
-	generationBucket := timeridentity.NewAccumulatorBucketRefForGeneration(firstNode, "item.received", activation.Generation())
-	if _, ok := loadAccumulatorForBucket(instanceA, generationBucket); !ok {
-		t.Fatal("reset crossed the captured-generation boundary")
-	}
-	if _, ok := loadAccumulatorForBucket(instanceB, rootBucket); !ok {
-		t.Fatal("reset crossed the instance boundary")
-	}
-	frame := &executionFrame{req: ExecutionRequest{Node: firstNode, HandlerEventKey: "item.received"}, loopActivation: activation}
-	captured, _, err := executor.resolveAccumulatorBucketRef(frame, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	activation.Attempt++
-	cached, _, err := executor.resolveAccumulatorBucketRef(frame, nil)
-	if err != nil || cached.Key() != captured.Key() {
-		t.Fatalf("consumer retargeted captured generation: %#v, %v", cached, err)
-	}
-	frame = &executionFrame{req: ExecutionRequest{Node: firstNode, HandlerEventKey: "item.received"}, loopActivation: &loopruntime.Activation{}}
-	_, _, err = executor.resolveAccumulatorBucketRef(frame, nil)
-	requireAccumulatorFailure(t, err, failures.ClassLifecycleConflict)
-}
-
 func TestA2M15AccumulatorFilterReduceCountAndComputeUseBusinessItems(t *testing.T) {
 	acc := &Accumulator{}
-	spec := &runtimecontracts.AccumulateSpec{Key: "payload.id"}
+	spec := &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
 	for _, item := range []map[string]any{
 		{"id": "a", "score": int64(8), "payload": map[string]any{"score": int64(0)}},
 		{"id": "b", "score": int64(2), "payload": map[string]any{"score": int64(100)}},
 	} {
-		if _, err := acc.Admit(spec, item, ""); err != nil {
+		if _, err := acc.Admit(spec, item); err != nil {
 			t.Fatal(err)
 		}
 	}
-	path := paths.Parse("accumulated.items")
+	path := paths.Parse("state.items")
 	itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
 		{Name: "id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
 		{Name: "score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
 	}}
-	resolution := runtimecontracts.WorkflowCollectionItemResolution{Kind: runtimecontracts.WorkflowCollectionSourcePath, Source: "accumulated.items", Path: path, ItemType: itemType}
+	resolution := runtimecontracts.WorkflowCollectionItemResolution{Kind: runtimecontracts.WorkflowCollectionSourcePath, Source: "state.items", Path: path, ItemType: itemType}
 	frame := &executionFrame{
 		ctx: context.Background(),
 		req: ExecutionRequest{Handler: runtimecontracts.SystemNodeEventHandler{
-			Filter: &runtimecontracts.FilterSpec{ItemsFrom: "accumulated.items", ItemsPath: path, Condition: "item.score > 5", StoreAs: "computed.selected"},
-			Reduce: &runtimecontracts.ReduceSpec{ItemsFrom: "accumulated.items", ItemsPath: path, Operation: "count", StoreAs: "computed.reduced"},
-			Count:  &runtimecontracts.CountSpec{ItemsFrom: "accumulated.items", ItemsPath: path, StoreAs: "computed.counted"},
+			Filter: &runtimecontracts.FilterSpec{ItemsFrom: "state.items", ItemsPath: path, Condition: "item.score > 5", StoreAs: "computed.selected"},
+			Reduce: &runtimecontracts.ReduceSpec{ItemsFrom: "state.items", ItemsPath: path, Operation: "count", StoreAs: "computed.reduced"},
+			Count:  &runtimecontracts.CountSpec{ItemsFrom: "state.items", ItemsPath: path, StoreAs: "computed.counted"},
 		}},
-		state:          ExecutionState{Accumulated: accumulatorExpressionValue(acc), Computed: map[string]any{}},
+		state:          ExecutionState{State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"items": acc.Items}, nil, nil)}, Computed: map[string]any{}},
 		collectionPlan: runtimecontracts.WorkflowHandlerCollectionPlan{Filter: &resolution, Reduce: &resolution, Count: &resolution},
 	}
 	executor := &Executor{}

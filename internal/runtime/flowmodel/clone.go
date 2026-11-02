@@ -11,7 +11,7 @@ func ApplyPolicyOverrides(doc *PolicyDocument, overrides map[string]any) {
 	}
 	for key, value := range overrides {
 		item := doc.Values[key]
-		item.Value = cloneCriteriaParamValue(value)
+		item.Value = clonePolicyValue(value)
 		doc.Values[key] = item
 	}
 }

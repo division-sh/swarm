@@ -15,7 +15,6 @@ type nodePresenceShape struct {
 // Admission outcomes are field-specific. Semantic requiredness that depends on
 // the enclosing stage/operation is exercised by the supported branch tests.
 var nodeScalarFieldAdmission = map[string][8]bool{
-	"node.state_table":     {true, false, true, true, false, false, false, false},
 	"timer.stage":          {true, false, true, true, false, false, false, false},
 	"timer.event":          {false, false, false, true, false, false, false, false},
 	"timer.owner":          {true, false, true, true, false, false, false, false},
@@ -26,7 +25,6 @@ var nodeScalarFieldAdmission = map[string][8]bool{
 	"timer.cancel_on":      {true, false, true, true, false, false, false, false},
 	"handler.description":  {true, false, true, true, false, false, false, false},
 	"handler.advances_to":  {true, false, true, true, false, false, false, false},
-	"state.description":    {true, false, true, true, false, false, false, false},
 	"activity.id":          {false, false, false, true, false, false, false, false},
 	"activity.tool":        {true, false, true, true, false, false, false, false},
 	"query.source":         {true, false, true, true, false, false, false, false},
@@ -61,10 +59,8 @@ func TestW4ScalarFieldPresenceAndTypedProjection(t *testing.T) {
 		newTarget  func() any
 		fields     map[string]string
 	}{
-		{"node", "", func() any { return new(SystemNodeContract) }, map[string]string{"state_table": "StateTable"}},
 		{"timer", "", func() any { return new(WorkflowTimerContract) }, map[string]string{"stage": "Stage", "event": "Event", "owner": "Owner", "action": "Action", "cancellation": "Cancellation", "delay": "Delay", "start_on": "StartOn", "cancel_on": "CancelOn"}},
 		{"handler", "emit: ready\n", func() any { return new(SystemNodeEventHandler) }, map[string]string{"description": "Description", "advances_to": "AdvancesTo"}},
-		{"state", "fields: {}\n", func() any { return new(NodeStateSchema) }, map[string]string{"description": "Description"}},
 		{"activity", "input: {}\n", func() any { return new(ActivitySpec) }, map[string]string{"id": "ID", "tool": "Tool"}},
 		{"query", "count: false\n", func() any { return new(QuerySpec) }, map[string]string{"source": "Source", "entities": "Entities", "filter": "Filter", "group_by": "GroupBy", "store_as": "StoreAs"}},
 		{"group_by", "", func() any { return new(GroupBySpec) }, map[string]string{"items_from": "ItemsFrom", "key": "Key", "store_as": "StoreAs"}},
@@ -191,8 +187,8 @@ func TestW4HandlerContainerPresence(t *testing.T) {
 				t.Fatalf("query=%#v", h.Query)
 			}
 		}},
-		{"accumulate", "rows", "[rows]", "{into: rows}", [8]bool{true, false, false, false, false, false, true, true}, func(t *testing.T, h SystemNodeEventHandler) {
-			if h.Accumulate == nil || h.Accumulate.Into != "rows" {
+		{"accumulate", "rows", "[rows]", "{target: rows, key: id}", [8]bool{true, false, false, false, false, false, false, true}, func(t *testing.T, h SystemNodeEventHandler) {
+			if h.Accumulate == nil || h.Accumulate.Target != "rows" || h.Accumulate.Key != "id" {
 				t.Fatalf("accumulate=%#v", h.Accumulate)
 			}
 		}},
@@ -324,25 +320,6 @@ func TestW4NodeTimerPresence(t *testing.T) {
 		}, decodeNodeTestYAML, func(t *testing.T, name string, out WorkflowTimerContract) {
 			if out.ID != "" || out.Event != "timer.reminder" || out.Recurring != (name == "scalar") {
 				t.Fatalf("timer=%#v", out)
-			}
-		})
-}
-
-func TestW4NodeStateFieldPresence(t *testing.T) {
-	proveNodePresence(t, nodePresenceShapes("seen", "[{name: seen, type: boolean}]", "{seen: boolean}"),
-		[8]bool{true, false, false, false, true, true, true, true},
-		func(shape nodePresenceShape) string {
-			if shape.name == "missing" {
-				return "description: state\n"
-			}
-			return "fields: " + shape.value + "\n"
-		}, decodeNodeTestYAML, func(t *testing.T, name string, out NodeStateSchema) {
-			wantField := name == "sequence" || name == "mapping"
-			if (len(out.Fields) == 1) != wantField {
-				t.Fatalf("fields=%#v", out.Fields)
-			}
-			if wantField && (out.Fields[0].Name != "seen" || out.Fields[0].Type != "boolean") {
-				t.Fatalf("typed field=%#v", out.Fields[0])
 			}
 		})
 }

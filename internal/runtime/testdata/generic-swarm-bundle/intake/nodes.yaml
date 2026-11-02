@@ -1,7 +1,4 @@
 intake-router:
-  state_table: intake_router_state
-  gate_state:
-    intake_ready: gate set when intake is ready
   item.created:
     guard: payload.item_id != ''
     fan_out:
@@ -14,13 +11,12 @@ intake-router:
           item_id: intake_item.id
           score: intake_item.score
   item.processed:
-    accumulate:
-      into: processed_items
-      from: payload
+    data_accumulation:
+      writes:
+        - {op: append, target: state.processed_items, value: payload}
+        - {target_field: intake_ready, value: true}
+        - {target_field: needs_revision, value: false}
     emit:
       event: item.review_requested
       fields:
         score: payload.score
-    sets_gate: intake_ready
-    clear_gates:
-      - needs_revision

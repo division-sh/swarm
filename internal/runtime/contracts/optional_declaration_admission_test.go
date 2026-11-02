@@ -58,7 +58,7 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "rules", fileName: "rules.yaml", valid: r3AgentRules, merged: "<<: &declarations\n  review:\n    classes: {hard: {disposition: none}}\n    rules: [{id: R1, class: hard, text: Review}]\n", blank: "\"\": {}\n", collide: r3AgentRules + "\" review \": {}\n",
+			name: "rules", fileName: "rules.yaml", valid: r3MachineRules, merged: "<<: &declarations\n  " + strings.ReplaceAll(strings.TrimSuffix(r3MachineRules, "\n"), "\n", "\n  ") + "\n", blank: "\"\": {}\n", collide: r3MachineRules + "\" review \": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalRulesDeclarations(path)
 				return len(value), err
@@ -282,35 +282,6 @@ func TestOptionalDeclarationAdmissionRejectsBlankAndNormalizedCollidingNames(t *
 	}
 }
 
-func TestOptionalDeclarationAdmissionRejectsEmptyTypedContainers(t *testing.T) {
-	tests := []struct {
-		name     string
-		fileName string
-		body     string
-		load     func(string) error
-	}{
-		{
-			name: "types empty maps", fileName: "types.yaml", body: "scalars: {}\nenums: {}\ntypes: {}\n",
-			load: func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err },
-		},
-		{
-			name: "types null containers", fileName: "types.yaml", body: "scalars: null\nenums: null\ntypes: null\n",
-			load: func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err },
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), test.fileName)
-			writeFixtureFile(t, path, test.body)
-			err := test.load(path)
-			diagnostic, ok := AsLoaderDiagnostic(err)
-			if !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" {
-				t.Fatalf("diagnostic = %#v, %v", diagnostic, err)
-			}
-		})
-	}
-}
-
 func TestR3PolicyReservedLookingNamesAreLiteralData(t *testing.T) {
 	for _, name := range []string{"modules", "criteria", "validation", "value", "description", "override"} {
 		for _, value := range []string{"null", "''", "[]", "{}", "{value: 1, description: info, override: true}"} {
@@ -329,7 +300,7 @@ func TestR3PolicyReservedLookingNamesAreLiteralData(t *testing.T) {
 
 func TestOptionalDeclarationAdmissionPreservesSpecificTypedDiagnostics(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "types.yaml")
-	writeFixtureFile(t, path, "unsupported: {}\n")
+	writeFixtureFile(t, path, "Item:\n  value: {type: text, unsupported: true}\n")
 	_, err := loadOptionalTypeDeclarations(path)
 	diagnostic, ok := AsLoaderDiagnostic(err)
 	if !ok || diagnostic.Code != "contract_loader.undefined_field" {

@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -193,26 +193,6 @@ func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
 				t.Fatalf("committed carrier = %#v", loaded.StateCarrier)
 			}
 		})
-	}
-}
-
-func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source: stubSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "item.arrived", "", "", json.RawMessage(`{"item_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-			OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "accumulated.count >= 2", AdvancesTo: "complete"}},
-		},
-	})
-	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "cannot be combined with handler.on_complete") {
-		t.Fatalf("Execute error = %v, want shared accumulator isolation rejection", err)
 	}
 }
 
@@ -432,7 +412,8 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 
 func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T) {
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}, "items": {Type: "[Item]"}}}},
+		RootTypes:    runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"Item": {Fields: map[string]runtimecontracts.TypeFieldSpec{"item_id": {Type: "text"}, "marker": {Type: "text"}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 			"item_id": {Type: "text"}, "marker": {Type: "text"},
 		})},
@@ -455,9 +436,8 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Accumulate: &runtimecontracts.AccumulateSpec{
-			Into: "items",
-			From: "payload",
-			Key:  "payload.item_id",
+			Target: "items",
+			Key:    "item_id",
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -500,12 +480,9 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	if got := repo.snapshot.StateCarrier.Fields["marker"]; got != "first" {
 		t.Fatalf("marker after duplicate = %#v, want first arrival value", got)
 	}
-	acc, ok := loadAccumulator(repo.snapshot, first.Node, events.EventType("task.completed"))
-	if !ok {
-		t.Fatal("expected accumulator state")
-	}
-	if got := len(acc.Received); got != 1 {
-		t.Fatalf("received count = %d, want 1", got)
+	acc := runtimeaccumulator.Load(repo.snapshot.StateCarrier.Fields["items"])
+	if acc.Err() != nil {
+		t.Fatal(acc.Err())
 	}
 	if got := len(acc.Items); got != 1 {
 		t.Fatalf("item count = %d, want 1", got)

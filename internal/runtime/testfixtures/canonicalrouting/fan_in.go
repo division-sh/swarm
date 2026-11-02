@@ -33,7 +33,7 @@ func ApplyArrivalJoinNegativeMutation(t testing.TB, root string, mutation Arriva
 	case ArrivalJoinRetiredTimeout:
 		applyClosedReplacement(t, nodes, "      deadline:\n        after: 5m\n        from: stage_entry\n      on_deadline:\n        advances_to: failed\n", "      timeout: {after: 5m, advances_to: failed}\n")
 	case ArrivalJoinWithAccumulate:
-		applyClosedReplacement(t, nodes, "  period.reported:\n    join:\n", "  period.reported:\n    accumulate: {into: operating_reports, from: payload, key: payload.operating_id}\n    join:\n")
+		applyClosedReplacement(t, nodes, "  period.reported:\n    join:\n", "  period.reported:\n    accumulate: {target: operating_reports, key: operating_id}\n    join:\n")
 	default:
 		t.Fatalf("unsupported arrival join negative mutation %d", mutation)
 	}

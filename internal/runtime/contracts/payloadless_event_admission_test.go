@@ -83,7 +83,6 @@ func TestPayloadlessEventRejectsAlternateNullSpellings(t *testing.T) {
 		{"single_quotes", "test.event: ''\n", "''"},
 		{"anchor", "test.event: &empty\n", "&empty"},
 		{"null_tag", "test.event: !!null\n", "!!null"},
-		{"metadata_only", "test.event:\n  description: No fields\n", "mapping"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(tc.source))
@@ -107,7 +106,7 @@ func TestPayloadlessEventRejectsNullAliasAtUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = admitEventCatalogEntry("test.event", declarations[1])
+	_, err = admitEventCatalogEntry("test.event", declarations[1], TypeCatalogDocument{})
 	if err == nil || !strings.Contains(err.Error(), "(remove the `*empty`).") {
 		t.Fatalf("alias use bypassed bare-only admission: %v", err)
 	}

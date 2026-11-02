@@ -276,7 +276,7 @@ func bootverifyHandlerUsesCanonicalEntity(source semanticview.Source, node runti
 	if bootverifyEmitSitesReferenceEntity(source, node, eventType, handler) {
 		return true
 	}
-	if bootverifyAccumulateReferencesEntity(handler.Accumulate) {
+	if handler.Accumulate != nil {
 		return true
 	}
 	allowedFields := bootverifyWorkflowEntitySchemaFields(source, flowID)
@@ -400,14 +400,6 @@ func bootverifyEmitReferencesEntity(spec runtimecontracts.EmitSpec) bool {
 		}
 	}
 	return false
-}
-
-func bootverifyAccumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return strings.HasPrefix(strings.TrimSpace(spec.From), "state.") ||
-		strings.HasPrefix(strings.TrimSpace(spec.Key), "state.")
 }
 
 func bootverifyNormalizeEntityWriteTarget(target string) string {

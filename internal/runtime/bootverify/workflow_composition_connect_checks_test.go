@@ -308,7 +308,7 @@ func TestRun_KeyedPortfolioStreamUsesOrdinaryConnectAndAccumulator(t *testing.T)
 	}
 	assertOrdinaryPortfolioInput(t, source, "portfolio", "operating.reported", "period_id", runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	handler, ok := source.ExecutableNodeEventHandler(identitytest.FlowNode(t, "portfolio", "portfolio-collector"), "operating.reported")
-	if !ok || handler.Accumulate == nil || handler.Accumulate.Into != "operating_reports" || handler.Accumulate.From != "payload" || handler.Accumulate.Key != "payload.operating_id" || handler.Join != nil {
+	if !ok || handler.Accumulate == nil || handler.Accumulate.Target != "operating_reports" || handler.Accumulate.Key != "operating_id" || handler.Join != nil {
 		t.Fatalf("stream must retain its own keyed accumulator, not a pin aggregation variant: %#v", handler)
 	}
 	if plans := source.WorkflowJoins(); len(plans) != 0 {

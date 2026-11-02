@@ -326,30 +326,6 @@ worker:
 	}
 }
 
-func TestLoadWorkflowContractBundleAllowsPublicNodeStateTable(t *testing.T) {
-	repoRoot := contractRepoRoot(t)
-	root := t.TempDir()
-	writeFieldReconciliationBundle(t, root, "", `
-worker:
-  state_table: worker_state
-  state_schema:
-    fields:
-      count:
-        type: integer
-`)
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	node, ok := bundle.Nodes["worker"]
-	if !ok {
-		t.Fatalf("worker node missing: %#v", bundle.Nodes)
-	}
-	if got, want := strings.TrimSpace(node.StateTable), "worker_state"; got != want {
-		t.Fatalf("StateTable = %q, want %q", got, want)
-	}
-}
-
 func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
@@ -523,33 +499,6 @@ func TestLoadWorkflowContractBundleRejectsRetiredPromptInputs(t *testing.T) {
 	}
 }
 
-func TestValidateWorkflowCriteriaContractsAllowsFlowLocalCriteriaAndCitation(t *testing.T) {
-	bundle := criteriaValidationTestBundle(t)
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err != nil {
-		t.Fatalf("validateWorkflowContractBundleLoadConstraints: %v", err)
-	}
-}
-
-func TestValidateWorkflowCriteriaContractsAllowsSelectedRootCriteriaAndCitation(t *testing.T) {
-	bundle := criteriaValidationTestBundle(t)
-	root := bundle.FlowTree.ByID["validation"]
-	root.Paths.FlowPath = "."
-	bundle.FlowTree = FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}
-	bundle.FlowSchemas = map[string]FlowSchemaDocument{".": {Name: "root-criteria"}}
-	for key, source := range bundle.scopedAgentSources {
-		source.FlowPath = "."
-		bundle.scopedAgentSources[key] = source
-	}
-	for key, source := range bundle.scopedEventSources {
-		source.FlowPath = "."
-		bundle.scopedEventSources[key] = source
-	}
-	if errs := validateWorkflowCriteriaContracts(bundle); len(errs) != 0 {
-		t.Fatalf("root criteria/citation errors: %v", errs)
-	}
-}
-
 func TestValidateWorkflowPolicyValidationContractsAllowsSelectedRoot(t *testing.T) {
 	pinCandidate := false
 	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Rules: RulesDocument{"equal_values": {Validation: &PolicyValidationSet{
@@ -564,224 +513,36 @@ func TestValidateWorkflowPolicyValidationContractsAllowsSelectedRoot(t *testing.
 	if errs := validateWorkflowPolicyValidationContracts(bundle); len(errs) != 0 {
 		t.Fatalf("root validation errors: %v", errs)
 	}
+	valid := RulesDocument{"equal_values": root.Rules["equal_values"]}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*PolicyValidationSet)
+		want   string
+	}{
+		{"duplicate stable id", func(s *PolicyValidationSet) { s.Rules = append(s.Rules, s.Rules[0]) }, "duplicate stable validation id"},
+		{"unknown policy param", func(s *PolicyValidationSet) {
+			s.Rules[0].Params = map[string]PolicyValidationParam{"max": {Value: "policy.missing"}}
+		}, "references unknown policy scalar"},
+		{"container param", func(s *PolicyValidationSet) {
+			s.Rules[0].Params = map[string]PolicyValidationParam{"max": {Value: []any{1}}}
+		}, "must be a typed scalar"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate, _ := valid.Validation("equal_values")
+			tc.mutate(&candidate)
+			root.Rules["equal_values"] = RuleSet{Validation: &candidate}
+			errs := validateWorkflowPolicyValidationContracts(bundle)
+			if len(errs) == 0 || !strings.Contains(errors.Join(errs...).Error(), tc.want) {
+				t.Fatalf("machine validation errors=%v, want %q", errs, tc.want)
+			}
+		})
+	}
+	root.Rules = valid
 	set := *root.Rules["equal_values"].Validation
 	set.Rules[0].Check.Equal.Right = "input.missing"
 	*root.Rules["equal_values"].Validation = set
 	if errs := validateWorkflowPolicyValidationContracts(bundle); len(errs) == 0 {
 		t.Fatal("root validation skipped an invalid input reference")
-	}
-}
-
-func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testing.T) {
-	tests := []struct {
-		name      string
-		mutate    func(*WorkflowContractBundle)
-		wantError string
-	}{
-		{
-			name: "duplicate rule id",
-			mutate: func(bundle *WorkflowContractBundle) {
-				flow := bundle.FlowTree.ByID["validation"]
-				set := *flow.Rules["feasibility_exclusions"].Criteria
-				set.Rules = append(set.Rules, PolicyCriteriaRule{ID: "FX-HARD-01", Class: "soft", Text: "Duplicate."})
-				*flow.Rules["feasibility_exclusions"].Criteria = set
-			},
-			wantError: "duplicate stable criteria id",
-		},
-		{
-			name: "bad policy param ref",
-			mutate: func(bundle *WorkflowContractBundle) {
-				flow := bundle.FlowTree.ByID["validation"]
-				set := *flow.Rules["feasibility_exclusions"].Criteria
-				set.Rules[0].Params = map[string]PolicyCriteriaParam{"max": {Value: "policy.missing"}}
-				*flow.Rules["feasibility_exclusions"].Criteria = set
-			},
-			wantError: "references unknown policy scalar",
-		},
-		{
-			name: "unknown agent criteria ref",
-			mutate: func(bundle *WorkflowContractBundle) {
-				agent := bundle.scopedAgents["validation::cto-agent"]
-				agent.Criteria = []string{"missing"}
-				bundle.scopedAgents["validation::cto-agent"] = agent
-			},
-			wantError: "criteria ref \"missing\" does not resolve",
-		},
-		{
-			name: "missing allowed classes",
-			mutate: func(bundle *WorkflowContractBundle) {
-				flow := bundle.FlowTree.ByID["validation"]
-				field := flow.Events["cto.spec_vetoed"].Payload.Properties["cites"]
-				field.Citation.AllowedClasses = nil
-				flow.Events["cto.spec_vetoed"].Payload.Properties["cites"] = field
-				bundle.scopedEvents["validation::cto.spec_vetoed"] = flow.Events["cto.spec_vetoed"]
-			},
-			wantError: "allowed_classes is required",
-		},
-		{
-			name: "undeclared allowed class",
-			mutate: func(bundle *WorkflowContractBundle) {
-				flow := bundle.FlowTree.ByID["validation"]
-				field := flow.Events["cto.spec_vetoed"].Payload.Properties["cites"]
-				field.Citation.AllowedClasses = []string{"allow"}
-				flow.Events["cto.spec_vetoed"].Payload.Properties["cites"] = field
-				bundle.scopedEvents["validation::cto.spec_vetoed"] = flow.Events["cto.spec_vetoed"]
-			},
-			wantError: "allowed class \"allow\" is not declared",
-		},
-		{
-			name: "event citation criteria ref resolves without emitter",
-			mutate: func(bundle *WorkflowContractBundle) {
-				flow := bundle.FlowTree.ByID["validation"]
-				field := flow.Events["cto.spec_vetoed"].Payload.Properties["cites"]
-				field.Citation.Criteria = "missing"
-				flow.Events["cto.spec_vetoed"].Payload.Properties["cites"] = field
-				bundle.scopedEvents["validation::cto.spec_vetoed"] = flow.Events["cto.spec_vetoed"]
-				bundle.scopedAgents = map[string]AgentRegistryEntry{}
-				bundle.scopedAgentSources = map[string]ContractItemSource{}
-			},
-			wantError: "criteria set \"missing\" does not resolve in flow validation rules.yaml",
-		},
-		{
-			name: "agent emits criteria event without declaring set",
-			mutate: func(bundle *WorkflowContractBundle) {
-				agent := bundle.scopedAgents["validation::cto-agent"]
-				agent.Criteria = nil
-				bundle.scopedAgents["validation::cto-agent"] = agent
-			},
-			wantError: "but the agent does not declare it",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := criteriaValidationTestBundle(t)
-			tc.mutate(bundle)
-			if err := CompileWorkflowSemantics(bundle); err != nil {
-				t.Fatal(err)
-			}
-			err := validateWorkflowContractBundleLoadConstraints(bundle)
-			if err == nil || !contractErrorContains(err, tc.wantError) {
-				t.Fatalf("validateWorkflowContractBundleLoadConstraints error = %v, want %q", err, tc.wantError)
-			}
-		})
-	}
-}
-
-func TestAgentAndEventCriteriaCitationYAMLDecode(t *testing.T) {
-	var agent AgentRegistryEntry
-	if err := decodeNodeTestYAML([]byte(`
-intent: {inline: business intent}
-role: cto
-model: regular
-subscriptions: [spec.review_requested]
-emit_events: [cto.spec_vetoed]
-criteria: [feasibility_exclusions]
-`), &agent); err != nil {
-		t.Fatalf("yaml.Unmarshal AgentRegistryEntry: %v", err)
-	}
-	if got := strings.Join(agent.Criteria, ","); got != "feasibility_exclusions" {
-		t.Fatalf("agent criteria = %q, want feasibility_exclusions", got)
-	}
-
-	event, err := admitEventCatalogEntryForTest(t, `
-reason: text
-cites:
-  type: "[text]"
-  citation:
-    criteria: feasibility_exclusions
-    allowed_classes: [hard, soft]
-`)
-	if err != nil {
-		t.Fatalf("admit EventCatalogEntry: %v", err)
-	}
-	field := event.Payload.Properties["cites"]
-	if field.Citation.Criteria != "feasibility_exclusions" {
-		t.Fatalf("citation criteria = %q, want feasibility_exclusions", field.Citation.Criteria)
-	}
-	if got := strings.Join(field.Citation.AllowedClasses, ","); got != "hard,soft" {
-		t.Fatalf("allowed classes = %q, want hard,soft", got)
-	}
-}
-
-func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
-	t.Helper()
-	flow := FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "validation"},
-		Policy: PolicyDocument{
-			Values: map[string]PolicyValue{
-				"max_features": {Value: 5},
-			},
-		}, Rules: RulesDocument{"feasibility_exclusions": {Criteria: criteriaValidationTestSet()}}, Events: map[string]EventCatalogEntry{
-			"cto.spec_vetoed": {
-				Payload: EventPayloadSpec{
-					Type: "object",
-					Properties: map[string]EventFieldSpec{
-						"cites": {
-							Type: "[text]",
-							Citation: CriteriaCitation{
-								Criteria:       "feasibility_exclusions",
-								AllowedClasses: []string{"hard"},
-							},
-						},
-					},
-					Required: []string{"cites"},
-				},
-			},
-		},
-	}
-	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Children: []FlowContractView{flow}}
-	flowPtr := &root.Children[0]
-	agent := AgentRegistryEntry{
-		Model:          "regular",
-		Role:           "cto",
-		ResolvedIntent: resolvedInlineIntentForTest(t, "validation/agents.yaml#agents.cto-agent.intent", "Validate the specification."),
-		EmitEvents:     []string{"cto.spec_vetoed"},
-		Criteria:       []string{"feasibility_exclusions"},
-	}
-	return &WorkflowContractBundle{
-		FlowSchemas: map[string]FlowSchemaDocument{
-			"validation": {Name: "validation"},
-		},
-		FlowTree: FlowTree{
-			Root: root,
-			ByID: map[string]*FlowContractView{
-				"validation": flowPtr,
-			},
-			ByPath: map[string]*FlowContractView{".": root, "validation": flowPtr},
-		},
-		scopedAgents: map[string]AgentRegistryEntry{
-			"validation::cto-agent": agent,
-		},
-		scopedAgentSources: map[string]ContractItemSource{
-			"validation::cto-agent": {FlowPath: "validation", Family: "agents", File: "validation/agents.yaml"},
-		},
-		scopedEvents: map[string]EventCatalogEntry{
-			"validation::cto.spec_vetoed": flow.Events["cto.spec_vetoed"],
-		},
-		scopedEventSources: map[string]ContractItemSource{
-			"validation::cto.spec_vetoed": {FlowPath: "validation", Family: "events", File: "validation/events.yaml"},
-		},
-	}
-}
-
-func criteriaValidationTestSet() *PolicyCriteriaSet {
-	return &PolicyCriteriaSet{
-		Classes: map[string]PolicyCriteriaClass{
-			"hard": {Disposition: "cto.spec_vetoed"},
-			"soft": {Disposition: "cto.spec_revision_needed"},
-		},
-		Rules: []PolicyCriteriaRule{{
-			ID:    "FX-HARD-01",
-			Class: "hard",
-			Text:  "Requires regulated real-time integration.",
-			Params: map[string]PolicyCriteriaParam{
-				"max_features": {Value: "policy.max_features"},
-			},
-		}, {
-			ID:    "FX-SOFT-04",
-			Class: "soft",
-			Text:  "Missing MVP spec.",
-		}},
 	}
 }
 
@@ -809,6 +570,7 @@ func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
 		contains string
 	}{
 		{name: "tools_tier2", body: "tools_tier2: [lookup_data]\n", contains: "is not supported"},
+		{name: "criteria", body: "criteria: [review]\n", contains: "is not supported"},
 		{name: "subscriptions_bootstrap", body: "subscriptions_bootstrap: [scan.requested]\n", contains: "is not supported"},
 		{name: "subscribes_to", body: "subscribes_to: [scan.requested]\n", contains: "is not supported"},
 	}

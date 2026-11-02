@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -736,8 +736,7 @@ func bindCanonicalAgentPrompt(source semanticview.Source, cfg *models.AgentConfi
 	if cfg.Content != matched.Entry.Content {
 		return fmt.Errorf("agent %s content differs from its captured declaration", cfg.ID)
 	}
-	bundle, _ := semanticview.Bundle(source)
-	prompt, err := runtimecontracts.AssembleAgentPrompt(bundle, matched.OwnerFlowID, matched.Entry, cfg.Criteria)
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(matched.Entry.ResolvedIntent)
 	if err != nil {
 		return fmt.Errorf("agent %s reconstruct derived prompt: %w", strings.TrimSpace(cfg.ID), err)
 	}

@@ -547,7 +547,7 @@ func TestValidateWorkflowContractSurface_RejectsCreateEntityWithAccumulate(t *te
 	node := bundle.Nodes["complete-task"]
 	handler := node.EventHandlers["task.requested"]
 	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "items"}
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
 	node.EventHandlers["task.requested"] = handler
 	bundle.Nodes["complete-task"] = node
 	if bundle.Semantics.NodeHandlers == nil {

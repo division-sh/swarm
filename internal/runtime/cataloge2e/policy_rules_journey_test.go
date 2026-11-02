@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,18 +50,6 @@ func assertR3RuntimeOutput(t *testing.T, h *runtimeHarness, run, event string, c
 	}
 }
 
-func assertR3DeliveredCriteria(t *testing.T, h *runtimeHarness) {
-	t.Helper()
-	h.llm.mu.Lock()
-	defer h.llm.mu.Unlock()
-	for _, prompt := range h.llm.systemPrompts {
-		if strings.Contains(prompt, "R1") && strings.Contains(prompt, "Compare the supplied numbers.") {
-			return
-		}
-	}
-	t.Fatal("real managed actor did not receive the rules.yaml criteria")
-}
-
 func TestR3RulesNormalActorMachineRestartReplayBothStores(t *testing.T) {
 	fixture := r3RuntimeFixture(t)
 	transcript := buildCatalogExecutionTranscript(t, fixture)
@@ -72,7 +59,6 @@ func TestR3RulesNormalActorMachineRestartReplayBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			h, baseline := executeCatalogTranscript(t, fixture, backend, transcript)
 			assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.accepted", 1)
-			assertR3DeliveredCriteria(t, h)
 			reopenCatalogTranscript(t, fixture, transcript, h, baseline)
 			_, replay := executeCatalogTranscript(t, fixture, backend, transcript)
 			if string(replay.projection) != string(baseline.projection) {
@@ -126,7 +112,6 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			}
 			assertR3RuntimeOutput(t, h, result.Materialization.ForkRunID, "work.accepted", 1)
 			assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.accepted", 0)
-			assertR3DeliveredCriteria(t, h)
 			var pending int
 			if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM event_deliveries WHERE run_id=$1 AND event_id=$2 AND subscriber_type='agent' AND subscriber_id='review-agent' AND status='pending'`, catalogRuntimeRunID, point).Scan(&pending); err != nil {
 				t.Fatal(err)
@@ -138,35 +123,20 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 	}
 }
 
-func TestR3RulesHostileCitationAndUnequalMachineBothStores(t *testing.T) {
+func TestR3RulesUnequalMachineBothStores(t *testing.T) {
 	fixture := r3RuntimeFixture(t)
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
-		for _, kind := range []string{"unknown citation", "unequal machine"} {
-			t.Run(string(backend)+"/"+kind, func(t *testing.T) {
-				h := newRuntimeHarnessForBackend(t, fixture.Root, backend, true)
-				h.seedInitialState(pipeline.FlowInstanceEntityID(catalogRuntimeRunID))
-				cite, right := "R1", 2
-				if kind == "unknown citation" {
-					cite, right = "UNKNOWN", 1
-				}
-				h.llm.mu.Lock()
-				h.llm.agentEventFlow["review-agent"] = []scriptedAgentFixtureStep{{On: "work.requested", Emits: []agentFixtureEmit{{Event: "review.reported", Payload: map[string]any{"left": 1, "right": right, "cite": cite}}}}}
-				h.llm.mu.Unlock()
-				_ = h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "work.requested", Payload: map[string]any{"left": 1, "right": right}}, 10*time.Second, true)
-				h.waitForCatalogStoreQuiescence(10 * time.Second)
-				assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.accepted", 0)
-				if kind == "unequal machine" {
-					assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.rejected", 1)
-				} else {
-					var count int
-					if err := h.db.QueryRowContext(h.ctx, `SELECT count(*) FROM events WHERE run_id=$1 AND event_name='review.reported'`, catalogRuntimeRunID).Scan(&count); err != nil {
-						t.Fatal(err)
-					}
-					if count != 0 {
-						t.Fatal("hostile citation published")
-					}
-				}
-			})
-		}
+		t.Run(string(backend), func(t *testing.T) {
+			h := newRuntimeHarnessForBackend(t, fixture.Root, backend, true)
+			h.seedInitialState(pipeline.FlowInstanceEntityID(catalogRuntimeRunID))
+			right := 2
+			h.llm.mu.Lock()
+			h.llm.agentEventFlow["review-agent"] = []scriptedAgentFixtureStep{{On: "work.requested", Emits: []agentFixtureEmit{{Event: "review.reported", Payload: map[string]any{"left": 1, "right": right}}}}}
+			h.llm.mu.Unlock()
+			_ = h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "work.requested", Payload: map[string]any{"left": 1, "right": right}}, 10*time.Second, true)
+			h.waitForCatalogStoreQuiescence(10 * time.Second)
+			assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.accepted", 0)
+			assertR3RuntimeOutput(t, h, catalogRuntimeRunID, "work.rejected", 1)
+		})
 	}
 }

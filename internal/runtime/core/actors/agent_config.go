@@ -79,7 +79,6 @@ type AgentConfig struct {
 	TurnTimeout          *timeridentity.TurnTimeout       `json:"turn_timeout,omitempty"`
 	Subscriptions        []string                         `json:"subscriptions,omitempty"`
 	EmitEvents           []string                         `json:"emit_events,omitempty"`
-	Criteria             []string                         `json:"criteria,omitempty"`
 	Tools                []string                         `json:"tools,omitempty"`
 	Permissions          []string                         `json:"permissions,omitempty"`
 	NativeTools          NativeToolConfig                 `json:"native_tools,omitempty"`
@@ -106,7 +105,7 @@ func (cfg AgentConfig) ValidateIntentCarrier() error {
 	if err := cfg.ValidateIntentInputs(); err != nil {
 		return err
 	}
-	if err := cfg.Prompt.Validate(cfg.Intent, cfg.Criteria); err != nil {
+	if err := cfg.Prompt.Validate(cfg.Intent); err != nil {
 		return fmt.Errorf("derived prompt: %w", err)
 	}
 	return nil
@@ -116,9 +115,6 @@ func (cfg AgentConfig) ValidateIntentInputs() error {
 	if err := cfg.Intent.Validate(); err != nil {
 		return fmt.Errorf("resolved intent: %w", err)
 	}
-	if !slices.Equal(cfg.Criteria, normalizeStringList(cfg.Criteria)) {
-		return fmt.Errorf("criteria references are not canonical")
-	}
 	return nil
 }
 
@@ -126,14 +122,14 @@ func (cfg AgentConfig) DerivedSystemPrompt() (string, error) {
 	if err := cfg.ValidateIntentCarrier(); err != nil {
 		return "", err
 	}
-	return cfg.Prompt.Text(cfg.Intent, cfg.Criteria)
+	return cfg.Prompt.Text(cfg.Intent)
 }
 
 func (cfg AgentConfig) ProviderPrompt(environment runtimeagentintent.EnvironmentContext) (runtimeagentintent.ProviderPrompt, error) {
 	if err := cfg.ValidateIntentCarrier(); err != nil {
 		return runtimeagentintent.ProviderPrompt{}, err
 	}
-	return runtimeagentintent.AssembleProviderPrompt(cfg.Intent, cfg.Criteria, cfg.Prompt, environment)
+	return runtimeagentintent.AssembleProviderPrompt(cfg.Intent, cfg.Prompt, environment)
 }
 
 func ValidateNoAuthoredSystemPrompt(raw json.RawMessage) error {
@@ -237,7 +233,6 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.ParentAgent = strings.TrimSpace(cfg.ParentAgent)
 	cfg.Subscriptions = normalizeStringList(cfg.Subscriptions)
 	cfg.EmitEvents = normalizeStringList(cfg.EmitEvents)
-	cfg.Criteria = normalizeStringList(cfg.Criteria)
 	cfg.Tools = normalizeStringList(cfg.Tools)
 	cfg.Permissions = normalizeStringList(cfg.Permissions)
 	cfg.FlowDataAccess = normalizeStringList(cfg.FlowDataAccess)

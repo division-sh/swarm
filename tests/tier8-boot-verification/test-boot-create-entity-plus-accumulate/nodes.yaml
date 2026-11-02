@@ -2,6 +2,6 @@ test-node:
   task.started:
     create_entity: true
     accumulate:
-      into: items
-      from: payload
+      target: items
+      key: item_id
     advances_to: done

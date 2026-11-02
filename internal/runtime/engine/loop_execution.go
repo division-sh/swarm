@@ -92,6 +92,12 @@ func (e *Executor) stepLoop(frame *executionFrame) error {
 				activation.CurrentStage = strings.TrimSpace(plan.Escape.AdvancesTo)
 				escape := runtimecontracts.HandlerRuleEntry{AdvancesTo: plan.Escape.AdvancesTo, Emit: plan.Escape.Emit}
 				frame.rule = &escape
+			} else {
+				for _, field := range plan.CollectedFields {
+					if err := e.applyDataAccumulation(frame, runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: field, Value: runtimecontracts.LiteralExpression([]any{})}}}); err != nil {
+						return err
+					}
+				}
 			}
 		case runtimecontracts.LoopOperationClose:
 			if err := activation.Close(strings.TrimSpace(frame.req.Handler.AdvancesTo), frame.req.Event.ID(), now); err != nil {

@@ -215,7 +215,6 @@ func cloneEventCatalogEntry(in EventCatalogEntry) EventCatalogEntry {
 	out.Payload.Required = append([]string(nil), in.Payload.Required...)
 	out.Payload.Properties = make(map[string]EventFieldSpec, len(in.Payload.Properties))
 	for name, field := range in.Payload.Properties {
-		field.Citation.AllowedClasses = append([]string(nil), field.Citation.AllowedClasses...)
 		field.Refinements = field.Refinements.Clone()
 		if field.ExactSchema != nil {
 			schema := *field.ExactSchema

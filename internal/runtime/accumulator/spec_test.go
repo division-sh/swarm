@@ -9,16 +9,25 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
-func TestA2AccumulatorKeyRequiresCatalogTextField(t *testing.T) {
+func TestA2AccumulatorKeyRequiresCatalogScalarField(t *testing.T) {
+	fields := map[string]runtimecontracts.TypeFieldSpec{
+		"id": {Type: "text"}, "number": {Type: "integer"}, "flag": {Type: "boolean"},
+		"optional": {Type: "text", IsOptional: true}, "record": {Type: "Record"},
+	}
 	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{Name: "accumulator-test"},
+		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"items": {Type: "[Item]"}, "scalar": {Type: "text"},
+		}}},
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
-			"BusinessRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}, "number": {Type: "integer"}}},
+			"Record": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}},
+			"Item":   {Fields: fields},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"item.received": {Payload: runtimecontracts.EventPayloadSpec{Type: "object", Properties: map[string]runtimecontracts.EventFieldSpec{
-				"id": {Type: "text"}, "number": {Type: "integer"}, "record": {Type: "BusinessRecord"}, "event_id": {Type: "text"},
-			}}},
+			"item.received": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"id": {Type: "text"}, "number": {Type: "integer"}, "flag": {Type: "boolean"},
+				"optional": {Type: "text"}, "record": {Type: "Record"},
+			}, Required: []string{"id", "number", "flag", "record"}}},
 		},
 	})
 	bundle, _ := semanticview.Bundle(source)
@@ -26,17 +35,22 @@ func TestA2AccumulatorKeyRequiresCatalogTextField(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := identitytest.RootNode(t, "collector")
-	for _, key := range []string{"payload.id", "payload.record.id", "payload.event_id", ""} {
-		if err := ValidateSpecForHandler(source, node, "item.received", &runtimecontracts.AccumulateSpec{Key: key}); err != nil {
-			t.Fatalf("key %q: %v (schema: %#v)", key, err, semanticview.ResolveEventSchema(source, node.FlowPath(), "item.received"))
+	for _, key := range []string{"id", "number", "flag"} {
+		if err := ValidateSpecForHandler(source, node, "item.received", &runtimecontracts.AccumulateSpec{Target: "items", Key: key}); err != nil {
+			t.Fatalf("key %q: %v", key, err)
 		}
 	}
-	for _, key := range []string{"payload.number", "payload.record.number", "payload.record.absent", "payload.absent", "event.id", "id", "payload", "payload..id", "payload.id.", " payload.id", "payload. id", "${payload.id}"} {
-		if err := ValidateSpecForHandler(source, node, "item.received", &runtimecontracts.AccumulateSpec{Key: key}); err == nil {
-			t.Fatalf("key %q admitted without an exact catalog text field", key)
+	for _, key := range []string{"optional", "record", "record.id", "absent", "payload.id", "state.id", "", " id", "${payload.id}"} {
+		if err := ValidateSpecForHandler(source, node, "item.received", &runtimecontracts.AccumulateSpec{Target: "items", Key: key}); err == nil {
+			t.Fatalf("key %q admitted without an exact required scalar field", key)
 		}
 	}
-	if err := ValidateSpecForHandler(source, node, "unknown", &runtimecontracts.AccumulateSpec{Key: "payload.id"}); err == nil {
-		t.Fatal("unknown event catalog admitted a business key")
+	for _, target := range []string{"missing", "scalar", "state.items"} {
+		if err := ValidateSpecForHandler(source, node, "item.received", &runtimecontracts.AccumulateSpec{Target: target, Key: "id"}); err == nil {
+			t.Fatalf("target %q admitted without a declared state list", target)
+		}
+	}
+	if err := ValidateSpecForHandler(source, node, "unknown", &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}); err == nil {
+		t.Fatal("unknown event catalog admitted an accumulator")
 	}
 }

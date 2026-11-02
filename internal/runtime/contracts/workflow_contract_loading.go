@@ -174,11 +174,6 @@ func loadWorkflowFlowDeclarations(bundle *WorkflowContractBundle) (map[string]Fl
 				return nil, fmt.Errorf("decode %s: %w", source.Schema, err)
 			}
 		}
-		view, err := loadFlowContractViewFromSource(artifact, source, schema)
-		if err != nil {
-			return nil, err
-		}
-		flowViewsByID[source.FlowPath] = view
 		flowTypes, err := loadOptionalTypeDeclarationsFromSource(artifact, source.Types)
 		if err != nil {
 			return nil, err
@@ -187,6 +182,11 @@ func loadWorkflowFlowDeclarations(bundle *WorkflowContractBundle) (map[string]Fl
 		if source.FlowPath != "." {
 			stateTypes = mergeTypeCatalogDocuments(bundle.RootTypes, flowTypes)
 		}
+		view, err := loadFlowContractViewFromSource(artifact, source, schema, stateTypes)
+		if err != nil {
+			return nil, err
+		}
+		flowViewsByID[source.FlowPath] = view
 		flowEntities, err := loadOptionalEntityDeclarationsFromSource(artifact, source.State, stateTypes)
 		if err != nil {
 			return nil, err
@@ -318,7 +318,6 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
 	errs = append(errs, validateClockScheduleTopology(bundle)...)
 	errs = append(errs, validateCompiledConnectEventSchemaOwnership(bundle)...)
-	errs = append(errs, validateWorkflowCriteriaContracts(bundle)...)
 	errs = append(errs, validateScopedAgentIntentCoordinates(bundle)...)
 	errs = append(errs, validateAgentTurnTimeoutContracts(bundle)...)
 	errs = append(errs, validateWorkflowPolicyValidationContracts(bundle)...)

@@ -5,65 +5,29 @@ import "strings"
 func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
 	out := PolicyDocument{Values: make(map[string]PolicyValue, len(in.Values))}
 	for key, value := range in.Values {
-		out.Values[key] = PolicyValue{Value: cloneCriteriaParamValue(value.Value)}
+		out.Values[key] = PolicyValue{Value: clonePolicyValue(value.Value)}
 	}
 	return out
 }
 
-func clonePolicyCriteriaSet(in PolicyCriteriaSet) PolicyCriteriaSet {
-	out := PolicyCriteriaSet{
-		Classes: map[string]PolicyCriteriaClass{},
-	}
-	for key, value := range in.Classes {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out.Classes[key] = PolicyCriteriaClass{Disposition: strings.TrimSpace(value.Disposition)}
-	}
-	if len(in.Rules) > 0 {
-		out.Rules = make([]PolicyCriteriaRule, 0, len(in.Rules))
-		for _, rule := range in.Rules {
-			cloned := PolicyCriteriaRule{
-				ID:     strings.TrimSpace(rule.ID),
-				Class:  strings.TrimSpace(rule.Class),
-				Text:   strings.TrimSpace(rule.Text),
-				Params: map[string]PolicyCriteriaParam{},
-			}
-			for key, value := range rule.Params {
-				key = strings.TrimSpace(key)
-				if key == "" {
-					continue
-				}
-				cloned.Params[key] = PolicyCriteriaParam{Value: cloneCriteriaParamValue(value.Value)}
-			}
-			if len(cloned.Params) == 0 {
-				cloned.Params = nil
-			}
-			out.Rules = append(out.Rules, cloned)
-		}
-	}
-	return out
-}
-
-func cloneCriteriaParamValue(value any) any {
+func clonePolicyValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for key, value := range typed {
-			out[key] = cloneCriteriaParamValue(value)
+			out[key] = clonePolicyValue(value)
 		}
 		return out
 	case []any:
 		out := make([]any, len(typed))
 		for i, value := range typed {
-			out[i] = cloneCriteriaParamValue(value)
+			out[i] = clonePolicyValue(value)
 		}
 		return out
 	case map[any]any:
 		out := make(map[any]any, len(typed))
 		for key, value := range typed {
-			out[key] = cloneCriteriaParamValue(value)
+			out[key] = clonePolicyValue(value)
 		}
 		return out
 	case map[string]string:
@@ -107,7 +71,7 @@ func clonePolicyValidationSet(in PolicyValidationSet) PolicyValidationSet {
 				ID:     strings.TrimSpace(rule.ID),
 				Class:  strings.TrimSpace(rule.Class),
 				Text:   strings.TrimSpace(rule.Text),
-				Params: map[string]PolicyCriteriaParam{},
+				Params: map[string]PolicyValidationParam{},
 				Check: PolicyValidationCheck{
 					Equal: clonePolicyValidationEqualCheck(rule.Check.Equal),
 				},
@@ -121,7 +85,7 @@ func clonePolicyValidationSet(in PolicyValidationSet) PolicyValidationSet {
 				if key == "" {
 					continue
 				}
-				cloned.Params[key] = PolicyCriteriaParam{Value: cloneCriteriaParamValue(value.Value)}
+				cloned.Params[key] = PolicyValidationParam{Value: clonePolicyValue(value.Value)}
 			}
 			if len(cloned.Params) == 0 {
 				cloned.Params = nil

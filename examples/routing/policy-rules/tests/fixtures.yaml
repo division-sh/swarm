@@ -3,4 +3,4 @@ agent_fixtures:
     - on: work.requested
       emits:
         - event: review.reported
-          payload: {left: 1, right: 1, cite: R1}
+          payload: {left: 1, right: 1}

@@ -144,7 +144,7 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatal(err)
 	}
