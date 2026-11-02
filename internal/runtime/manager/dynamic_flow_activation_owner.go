@@ -9,6 +9,8 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
+type terminalProcessCapability interface{ ProcessCapabilityTerminal() bool }
+
 // AdoptSelectedFlowActivation transfers a committed selected attempt from the
 // outer preparation owner to the Manager that will receive its deliveries.
 func (am *AgentManager) AdoptSelectedFlowActivation(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, timersProjected bool) error {
@@ -371,8 +373,13 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 	if len(attempts) == 0 {
 		return nil
 	}
+	localCtx := ctx
 	ctx, err := am.bindRuntimeOperationContext(ctx)
 	if err != nil {
+		var terminal terminalProcessCapability
+		if errors.As(err, &terminal) && terminal.ProcessCapabilityTerminal() {
+			return am.settleFencedDynamicFlowAttemptsAfterJoin(localCtx, attempts)
+		}
 		return err
 	}
 	var result error
@@ -425,7 +432,7 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 			continue
 		}
 		deferDurable := active.retirementKind != flowActivationFailedRetirement
-		settleErr := am.settleDynamicFlowAttemptAfterJoin(ctx, key, active, deferDurable)
+		settleErr := am.settleDynamicFlowAttemptAfterJoin(ctx, key, active, deferDurable, false)
 		result = errors.Join(result, settleErr)
 		if settleErr == nil && deferDurable {
 			batch = append(batch, joinedFlowRetirement{key: key, active: active})
@@ -437,6 +444,30 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 		finish([]joinedFlowRetirement{{key: key, active: active}}, settleErr == nil)
 	}
 	flush()
+	return result
+}
+
+// A fenced process can join its local attempts, but cannot retire their
+// persisted timers or receipts. The next process reconciles those facts.
+func (am *AgentManager) settleFencedDynamicFlowAttemptsAfterJoin(ctx context.Context, attempts map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt) (result error) {
+	for key, active := range attempts {
+		am.dynamicFlowReadinessMu.Lock()
+		current := am.dynamicFlowActiveAttempts[key] == active
+		if current {
+			active.retiring = true
+		}
+		am.dynamicFlowReadinessMu.Unlock()
+		if !current {
+			result = errors.Join(result, fmt.Errorf("flow activation attempt %s changed before joined retirement", key.instancePath))
+			continue
+		}
+		result = errors.Join(result, am.settleDynamicFlowAttemptAfterJoin(ctx, key, active, true, true))
+		am.dynamicFlowReadinessMu.Lock()
+		if am.dynamicFlowActiveAttempts[key] == active {
+			active.retiring = false
+		}
+		am.dynamicFlowReadinessMu.Unlock()
+	}
 	return result
 }
 
@@ -453,7 +484,7 @@ func (am *AgentManager) retireJoinedDynamicFlowAttemptBatch(ctx context.Context,
 	return am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts)
 }
 
-func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, key dynamicFlowRuntimeReadinessKey, active *dynamicFlowActiveAttempt, deferDurable bool) (result error) {
+func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, key dynamicFlowRuntimeReadinessKey, active *dynamicFlowActiveAttempt, deferDurable, localOnly bool) (result error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = fmt.Errorf("retire joined flow activation attempt %s: %v", key.instancePath, recovered)
@@ -469,7 +500,7 @@ func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, k
 		active.locallyRetired = true
 		am.dynamicFlowReadinessMu.Unlock()
 	}
-	if !active.timersRetired {
+	if !localOnly && !active.timersRetired {
 		if active.timersProjected {
 			identity := active.identity
 			if err := identity.Validate(); err != nil {
@@ -483,7 +514,7 @@ func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, k
 		active.timersRetired = true
 		am.dynamicFlowReadinessMu.Unlock()
 	}
-	if deferDurable {
+	if deferDurable || localOnly {
 		return nil
 	}
 	if err := am.settleDynamicFlowAttemptDurably(ctx, active); err != nil {

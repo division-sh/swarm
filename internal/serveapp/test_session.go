@@ -11,12 +11,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -105,6 +109,8 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	defer presenter.finish()
 	var executionErr error
 	called := false
+	var scenarioMu sync.Mutex
+	scenarioRuns := map[string]struct{}{}
 	code := buildPrivateTestComposition(ctx, runtimeCompositionRequest{
 		Purpose: executionposture.MockOnly, ProviderIngress: false,
 		WorkspacePreference: preference,
@@ -121,11 +127,57 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 		Presenter:          presenter, NoticePresentation: newServeNoticePresentationSink(presenter),
 		Cancel: cancel, BootStartedAt: time.Now().UTC(), RuntimeInstanceID: runtimeID,
 		DataProjectionRoot: filepath.Join(privateRoot, "data-projections"),
-		OnReady: func(readyCtx context.Context, server string, publication apiv1.EventPublicationOptions) error {
+		OnReady: func(readyCtx context.Context, server string, publication apiv1.EventPublicationOptions, rt *runtimepkg.Runtime) error {
 			called = true
 			executionErr = execute(readyCtx, cliapp.TestSessionEndpoint{APIServer: server, Token: token,
 				StartScenario: func(ctx context.Context, params map[string]any) (string, error) {
-					return apiv1.StartPrivateScenario(ctx, publication, params, time.Now().UTC())
+					var output *providertriggers.PublicationAdmission
+					if eventName, _ := params["event_name"].(string); strings.HasPrefix(eventName, "inbound.") {
+						payload, ok := params["payload"].(map[string]any)
+						if !ok {
+							return "", fmt.Errorf("private provider input requires an object payload")
+						}
+						_, admission, handled, err := rt.Options.ProviderTriggerCatalog.IssuePrivateTestPublication(ctx, publication.Bundle.BundleHash, ".", uuid.NewString(), eventName, privateTestOperatorAccount(in.Bundle, payload), payload, time.Now().UTC())
+						if err != nil {
+							return "", err
+						}
+						if handled {
+							output = &admission
+						}
+					}
+					runID, err := apiv1.StartPrivateScenario(ctx, publication, params, time.Now().UTC(), output)
+					if err == nil {
+						scenarioMu.Lock()
+						scenarioRuns[runID] = struct{}{}
+						scenarioMu.Unlock()
+					}
+					return runID, err
+				},
+				PublishProviderInput: func(ctx context.Context, params map[string]any) (cliapp.TestProviderPublication, bool, error) {
+					var empty cliapp.TestProviderPublication
+					eventName, _ := params["event_name"].(string)
+					if !strings.HasPrefix(eventName, "inbound.") {
+						return empty, false, nil
+					}
+					runID, _ := params["run_id"].(string)
+					scenarioMu.Lock()
+					_, owned := scenarioRuns[runID]
+					scenarioMu.Unlock()
+					if !owned {
+						return empty, true, fmt.Errorf("private provider input requires this test host's scenario run")
+					}
+					payload, ok := params["payload"].(map[string]any)
+					if !ok {
+						return empty, true, fmt.Errorf("private provider input requires an object payload")
+					}
+					key, _ := params["idempotency_key"].(string)
+					ctx, release, err := apiv1.AdmitPrivateProviderScenarioRun(ctx, publication, runID, params)
+					if err != nil {
+						return empty, true, err
+					}
+					defer release()
+					eventID, handled, err := rt.InboundGateway.PublishPrivateTestProviderOutput(ctx, rt.Options.ProviderTriggerCatalog, publication.Bundle.BundleHash, ".", runID, eventName, privateTestOperatorAccount(in.Bundle, payload), payload, key, time.Now().UTC())
+					return cliapp.TestProviderPublication{EventID: eventID, RunID: runID}, handled, err
 				},
 			})
 			return executionErr
@@ -142,6 +194,16 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 		return errors.Join(executionErr, startupErr, cleanupErr, fmt.Errorf("private test session failed (exit %d)", code))
 	}
 	return errors.Join(executionErr, cleanupErr)
+}
+
+func privateTestOperatorAccount(bundle *runtimecontracts.WorkflowContractBundle, payload map[string]any) string {
+	if bundle != nil {
+		if account, err := bundle.ResolveFlowOperatorAccount("."); err == nil && account.FromPolicy {
+			return account.Policy
+		}
+	}
+	value, _ := payload["operator_account"].(string)
+	return value
 }
 
 func removePrivateTestRoot(root string) error {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -48,8 +49,8 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 		ordered = append(ordered, flow)
 	}
 	slices.Sort(ordered)
-	if len(ordered) != 0 && eb.durable.LiveRuns == nil {
-		return RoutePlan{}, fmt.Errorf("platform publication requires its native live-run reader")
+	if len(ordered) != 0 && eb.durable.LandingRuns == nil {
+		return RoutePlan{}, fmt.Errorf("platform publication requires its native landing-run reader")
 	}
 	var internal []deliveryRecipientCandidate
 	if planner.routeResolver.resolveSubscribedRecipients != nil {
@@ -62,15 +63,18 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 		}
 	}
 	combined := routePlanFromManifest(event, deliveryRecipientManifest{LiveRecipients: internal})
+	var unavailable []string
 	for _, flow := range ordered {
 		scope := runlifecycle.LiveRunScope{FlowPath: flowidentity.ScopeKey(eb.semanticSource, flow)}
-		live, found, err := eb.durable.LiveRuns.LoadLiveRun(ctx, scope)
+		landing, found, err := eb.durable.LandingRuns.LoadLandingRun(ctx, scope)
 		if err != nil {
 			return RoutePlan{}, err
 		}
-		if !found {
-			return RoutePlan{}, &PlatformLiveRunUnavailableError{FlowPath: scope.FlowPath, Event: event.Type()}
+		if !found || (landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
+			unavailable = append(unavailable, scope.FlowPath)
+			continue
 		}
+		live := landing.LiveRun
 		if live.Scope != scope || !live.Source.Matches(fact) {
 			return RoutePlan{}, runlifecycle.ErrLiveRunChanged
 		}
@@ -106,6 +110,10 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 		if err := mergeConnectEvaluation(&combined.ConnectEvaluation, plan.ConnectEvaluation); err != nil {
 			return RoutePlan{}, err
 		}
+	}
+	if len(unavailable) != 0 {
+		combined.TargetFailure = pinrouting.FailureTargetUnreachableTerminated
+		combined.ExtraDetail = map[string]any{"unavailable_flow_paths": unavailable}
 	}
 	combined = combined.Normalized()
 	if diagnostic {

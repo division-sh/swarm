@@ -2,20 +2,93 @@ package providertriggers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
+
+// IssuePrivateTestPublication seals an isolated test host's own provider
+// double as the same raw/normalized pair consumed by inbound publication.
+// The issuer is unavailable outside the private scenario host.
+func (s *CatalogSnapshot) IssuePrivateTestPublication(ctx context.Context, bundleHash, flowID, providerEventID, eventName, operatorAccount string, payload map[string]any, now time.Time) (Delivery, PublicationAdmission, bool, error) {
+	if !scenarioexecution.HasPrivateHostScope(ctx) {
+		return Delivery{}, PublicationAdmission{}, false, fmt.Errorf("provider double requires its private test host")
+	}
+	if s == nil {
+		return Delivery{}, PublicationAdmission{}, false, nil
+	}
+	for provider, entry := range s.byProvider {
+		var rawName string
+		matched := false
+		for _, output := range entry.manifest.OutputManifest() {
+			switch output.Kind {
+			case OutputKindRaw:
+				rawName = strings.TrimSpace(output.EventName.Literal)
+			case OutputKindNormalized:
+				matched = matched || output.Event == eventName
+			}
+		}
+		if !matched {
+			continue
+		}
+		if rawName == "" || providerEventID == "" || bundleHash == "" || flowID == "" {
+			return Delivery{}, PublicationAdmission{}, true, fmt.Errorf("private provider output requires its exact raw declaration, receipt, source and flow")
+		}
+		authorization, err := provideroutput.NewAuthorization(provider, eventName, entry.identity.ID(), entry.identity.Version(), entry.identity.ManifestHash(), s.generation)
+		if err != nil {
+			return Delivery{}, PublicationAdmission{}, true, err
+		}
+		if err := s.VerifyProviderOutputAuthorization(authorization); err != nil {
+			return Delivery{}, PublicationAdmission{}, true, err
+		}
+		providerEventType := strings.TrimPrefix(eventName, "inbound."+provider+".")
+		raw := DeliveryEvent{Name: events.EventType(rawName), Kind: OutputKindRaw, Payload: map[string]any{
+			"provider": provider, "event_type": providerEventType, "provider_event_type": providerEventType,
+			"provider_event_id": providerEventID, "provider_delivery_id": providerEventID,
+			"payload": payload, "headers": map[string]any{}, "received_at": now.UTC().Format(time.RFC3339),
+		}}
+		normalized := DeliveryEvent{Name: events.EventType(eventName), Kind: OutputKindNormalized, Payload: payload, Authorization: authorization}
+		admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: provider, deliveryID: providerEventID, generation: s.generation, operatorAccount: operatorAccount, privateTest: true}
+		for _, output := range []DeliveryEvent{raw, normalized} {
+			encoded, err := canonicaljson.Bytes(output.Payload)
+			if err != nil {
+				return Delivery{}, PublicationAdmission{}, true, err
+			}
+			admission.outputs = append(admission.outputs, admittedPublicationOutput{
+				name: output.Name, kind: provideroutput.Kind(output.Kind), payloadDigest: canonicaljson.HashBytes(encoded), authorization: output.Authorization,
+			})
+		}
+		return Delivery{ProviderEventID: providerEventID, ProviderEventType: providerEventType, Events: []DeliveryEvent{raw, normalized}}, admission, true, nil
+	}
+	return Delivery{}, PublicationAdmission{}, false, nil
+}
+
+func (a PublicationAdmission) PrivateTestOutputMatches(eventName string, payload json.RawMessage) bool {
+	if !a.privateTest || len(a.outputs) != 2 || a.outputs[1].name != events.EventType(eventName) {
+		return false
+	}
+	decoded, err := canonicaljson.Decode(payload)
+	if err != nil {
+		return false
+	}
+	encoded, err := canonicaljson.Bytes(decoded)
+	return err == nil && canonicaljson.HashBytes(encoded) == a.outputs[1].payloadDigest
+}
 
 // PublicationAdmission transfers an authenticated plan's exact outputs. It is
 // not receiver permission. HTTP receipts consume its authenticated delivery ID;
 // native receipt coordinates remain owned by the original capture.
 type PublicationAdmission struct {
+	privateTest     bool
 	bundleHash      string
 	flowID          string
 	provider        string
@@ -34,6 +107,7 @@ type admittedPublicationOutput struct {
 }
 
 func (a PublicationAdmission) SourceBundleHash() string { return a.bundleHash }
+func (a PublicationAdmission) Provider() string         { return a.provider }
 func (a PublicationAdmission) OperatorAccount() string  { return a.operatorAccount }
 
 func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundleHash, flowID string) (Delivery, PublicationAdmission, error) {

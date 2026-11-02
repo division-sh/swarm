@@ -20,9 +20,15 @@ type TestSessionRequest struct {
 }
 
 type TestSessionEndpoint struct {
-	APIServer     string
-	Token         string
-	StartScenario func(context.Context, map[string]any) (string, error)
+	APIServer            string
+	Token                string
+	StartScenario        func(context.Context, map[string]any) (string, error)
+	PublishProviderInput func(context.Context, map[string]any) (TestProviderPublication, bool, error)
+}
+
+type TestProviderPublication struct {
+	EventID string
+	RunID   string
 }
 
 // TestSessionRunner owns acquisition and joined cleanup around one ready callback.
