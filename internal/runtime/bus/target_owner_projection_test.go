@@ -488,6 +488,45 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 		if !route.Target.ExistingEntity() || route.Target.Route() != want[route.AgentIdentity].Normalized() {
 			t.Fatalf("route = %#v, want exact selected owner %#v", route, want[route.AgentIdentity].Normalized())
 		}
+		if route.Initialization.Empty() || events.SameDeliveryTargetOwnership(route.Target, route.Initialization.ConstructionTarget()) {
+			t.Fatalf("independent actor lost its distinct construction dependency: %#v", route)
+		}
+	}
+	for _, prospective := range []bool{false, true} {
+		for _, actor := range []agentidentity.Identity{rootIdentity, nestedIdentity} {
+			t.Run(fmt.Sprintf("exact-construction/%s/prospective=%t", actor.AgentID(), prospective), func(t *testing.T) {
+				flow := "consumer"
+				if actor.Route.Presence == agentidentity.RouteRoot {
+					flow = semanticview.RootExecutionFlowID(source)
+				}
+				instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
+				candidate := projection
+				candidate.agents = map[agentidentity.Identity]ActiveAgentDescriptor{actor: {Identity: actor, EntityID: instance.EntityID}}
+				if prospective {
+					owner := newTestFlowInstanceActivationOwner(nil)
+					activation, err := owner.PrepareFlowInstanceActivation(constructionIndexContext(t, source), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, TriggerEvent: plan.Event, OccurredAt: plan.Event.CreatedAt()})
+					if err != nil {
+						t.Fatal(err)
+					}
+					candidate, err = candidate.withActivationPlans([]runtimepipeline.FlowInstanceActivationPlan{activation})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				dependency, err := candidate.agentConstructionDependency(plan.Event, actor, events.RouteIdentity{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor, Producer: routeIntentProducerOrdinary, Persist: true}
+				resolved, err := candidate.resolveRoutePlan(RoutePlan{Event: plan.Event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := resolved.DeliveryRoutes(); len(got) != 1 || !events.SameDeliveryTargetOwnership(got[0].Target, dependency.ConstructionTarget()) || !got[0].Initialization.Equal(dependency) || got[0].Target.MaterializingEntity() != prospective {
+					t.Fatalf("exact actor target lost construction receipt or required kind: %#v", got)
+				}
+			})
+		}
 	}
 }
 
