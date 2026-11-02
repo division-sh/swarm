@@ -378,13 +378,12 @@ func issue2564SchemaProperty(value any, name string) bool {
 	return false
 }
 
-// Anthropic's existing observation translation joins the current outputs as
-// newline-delimited JSON. Do not search an older batch or infer a receipt.
 type issue2564ToolResult struct {
 	id    string
 	value map[string]any
 }
 
+// Decode only the current linked result blocks, never an older batch.
 func issue2564ToolResults(value any) []issue2564ToolResult {
 	message, ok := value.(map[string]any)
 	if !ok || message["role"] != "user" {
