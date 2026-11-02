@@ -4074,11 +4074,6 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 	}
 }
 
-func writeVerifyMissingPinWarningFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyVerifyMissingPin(t)
-}
-
 func TestExecutionValidation_UnreachableStageReturnsHardInvalidity(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
