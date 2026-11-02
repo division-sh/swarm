@@ -38,7 +38,7 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 				if !ok || bundle == nil {
 					t.Fatal("shared serving requires actual bundle sources")
 				}
-				storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), selected, bundle)
+				storetest.RequireBundleDataCatalog(t, originalConformanceFixtureContext(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), selected), selected, bundle)
 			}
 			topology := newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), selected, sources...)
 			runtimes := make([]notifyAllChildrenRuntime, len(sources))

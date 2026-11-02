@@ -52,7 +52,10 @@ type durableDataSelectedStore interface {
 
 func TestDurableDataSelectedStoreRejectsUnshapedDeclarationCatalog(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		withoutShapes := catalog
 		withoutShapes.ImportShapes = nil
@@ -100,7 +103,10 @@ func requireEmptySourceDefectsPage(t testing.TB, result durabledata.SourceOperat
 
 func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, primary durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), primary.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, primary, catalog); err != nil {
 			t.Fatalf("register durable data test catalog: %v", err)
@@ -247,7 +253,10 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 
 func TestResolveDataVersionPayloadIsAtomicAcrossPruneAndRematerialize(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatalf("register durable data test catalog: %v", err)
@@ -342,7 +351,10 @@ func TestResolveDataVersionPayloadIsAtomicAcrossPruneAndRematerialize(t *testing
 
 func TestDurableDataSelectedStoreKeylessPreservesMultiplicityOrderAndSchemaMode(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataKeylessTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -386,7 +398,10 @@ func TestDurableDataSelectedStoreKeylessPreservesMultiplicityOrderAndSchemaMode(
 
 func TestDurableDataConcurrentCASHasOneWinner(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -429,7 +444,10 @@ func TestDurableDataConcurrentCASHasOneWinner(t *testing.T) {
 
 func TestDurableDataHeadConflictEvidenceIgnoresHistoricalRetentionState(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -491,7 +509,10 @@ func TestDurableDataHeadConflictEvidenceIgnoresHistoricalRetentionState(t *testi
 
 func TestDurableDataFailsClosedOnPayloadCorruption(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -530,7 +551,10 @@ func TestDurableDataFailsClosedOnPayloadCorruption(t *testing.T) {
 
 func TestDurableDataSourceReceiptRejectsCandidateStateCorruption(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -584,7 +608,10 @@ func TestDurableDataSourceReceiptRejectsCandidateStateCorruption(t *testing.T) {
 
 func TestDurableDataSourceReceiptRejectsDefectsPageCorruption(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -688,7 +715,10 @@ func TestDurableDataSourceReceiptRejectsAggregateCorruptionMatrix(t *testing.T) 
 		{name: "request hash agreement", column: "request_json", mutate: func(value map[string]any) { value["actor"] = "hostile" }},
 	}
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -720,7 +750,10 @@ func TestDurableDataSourceReceiptRejectsAggregateCorruptionMatrix(t *testing.T) 
 
 func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -865,7 +898,10 @@ func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing
 
 func TestDurableDataSourceReceiptsRetainHistoricalBaseAfterPrune(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -924,7 +960,10 @@ func TestDurableDataSourceReceiptsRetainHistoricalBaseAfterPrune(t *testing.T) {
 
 func TestDurableDataProvenanceOwnsTypedLineageAndProjection(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1077,7 +1116,10 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 		{name: "request hash agreement", column: "request_json", mutate: func(value map[string]any) { value["actor"] = "hostile" }},
 	}
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1127,7 +1169,10 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 
 func TestDurableDataSourceReceiptAnchorsAdmittedContextAndHistoricalBase(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1215,7 +1260,10 @@ func TestDurableDataSourceReceiptOrdersEvaluationByRevisionNotWallClock(t *testi
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-				ctx := context.Background()
+				ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+				if originalErr != nil {
+					t.Fatal(originalErr)
+				}
 				catalog, ref := durableDataTestCatalog(t)
 				if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 					t.Fatal(err)
@@ -1259,7 +1307,10 @@ func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
 	for _, scenario := range []string{"missing provenance", "missing head history", "wrong head history"} {
 		t.Run(scenario, func(t *testing.T) {
 			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-				ctx := context.Background()
+				ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+				if originalErr != nil {
+					t.Fatal(originalErr)
+				}
 				catalog, ref := durableDataTestCatalog(t)
 				if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 					t.Fatal(err)
@@ -1304,7 +1355,10 @@ func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
 
 func TestDurableDataNonMutatingSourceReceiptsRejectCommitFacts(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1382,7 +1436,10 @@ func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
 	}
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1430,7 +1487,10 @@ func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
 	}
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1630,7 +1690,10 @@ func corruptDurableDataJSONColumn(t testing.TB, ctx context.Context, selected du
 
 func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
-		ctx := context.Background()
+		ctx, originalErr := agentfixture.ProcessContext(t, context.Background(), selected.(agentfixture.Store))
+		if originalErr != nil {
+			t.Fatal(originalErr)
+		}
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)

@@ -21,7 +21,7 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, other := uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{run, other} {
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				record := pipeline.ActivityAttemptRecord{
 					RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: executionmode.Live,
 					ActivityID: uuid.NewString(), Tool: "journal.storage",

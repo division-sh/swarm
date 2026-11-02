@@ -38,12 +38,16 @@ func EventOrigin(t testing.TB, eventID, eventType string) runtimerunlifecycle.Ru
 }
 
 func ForcePostgresCompletionCandidateRevision(ctx context.Context, tx *sql.Tx, runID string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE runs SET completion_due_at = NULL WHERE run_id = $1::uuid`, strings.TrimSpace(runID))
+	_, err := tx.ExecContext(ctx, `INSERT INTO run_completion_evidence (run_id, revision, record_kind, due_at)
+		SELECT run_id,MAX(revision),'clear',NULL FROM run_completion_evidence WHERE run_id=$1::uuid AND record_kind='request'
+		GROUP BY run_id ON CONFLICT (run_id,revision,record_kind) DO NOTHING`, strings.TrimSpace(runID))
 	return err
 }
 
 func ForceSQLiteCompletionCandidateRevision(ctx context.Context, tx *sql.Tx, runID string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE runs SET completion_due_at = NULL WHERE run_id = ?`, strings.TrimSpace(runID))
+	_, err := tx.ExecContext(ctx, `INSERT INTO run_completion_evidence (run_id, revision, record_kind, due_at)
+		SELECT run_id,MAX(revision),'clear',NULL FROM run_completion_evidence WHERE run_id=? AND record_kind='request'
+		GROUP BY run_id ON CONFLICT (run_id,revision,record_kind) DO NOTHING`, strings.TrimSpace(runID))
 	return err
 }
 

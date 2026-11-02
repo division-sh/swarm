@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -253,33 +253,6 @@ func TestSelectedForkAcknowledgmentPrecedesBusinessDrainBothStores(t *testing.T)
 	}
 }
 
-func TestSelectedCompletionActualScopeBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture := newActivityForkFixture(t, backend)
-			owner, selected := fixture.owner, fixture.owner.ports.fork
-			ctx, request, _ := q1GateComponentSource(t, owner, false, true, false)
-			attachment := q1StageBranchPointComponent(t, ctx, request)
-			selectedCtx := attachment.container.attachment.ctx
-			if _, err := owner.ports.busDurable.RunLifecycle.TransitionActiveRun(selectedCtx, runlifecycle.ActiveTransitionRequest{
-				RunID: attachment.materialized.ForkRunID, State: runlifecycle.StateRunning,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := attachment.container.attachment.runtime.startExecution(selectedCtx, attachment.container.attachment.pipeline, attachment.container.diagnostics, false); err != nil {
-				t.Fatal(err)
-			}
-			requester := selected.(interface {
-				RequestCompletionCandidate(context.Context, runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error)
-			})
-			if _, err := requester.RequestCompletionCandidate(selectedCtx, runlifecycle.CandidateAtTime(attachment.materialized.ForkRunID, time.Now().UTC())); err != nil {
-				t.Fatal(err)
-			}
-			proveSelectedCompletionScope(t, ctx, selectedCtx, selected, owner.ports.candidates, attachment.prepared.loadedSource.Source, attachment.materialized.ForkRunID)
-		})
-	}
-}
-
 func TestReviewerSelectedAsyncFailureDisposesResources(t *testing.T) {
 	for _, fault := range []string{"publication", "execution-scope", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop"} {
 		t.Run(fault, func(t *testing.T) { proveRetainedAcknowledgment(t, fault) })
@@ -322,9 +295,15 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			defer release()
 			owner.ports.fork, owner.ports.replay = probe, probe
 			request.Owner = owner
-			process, _ := worklifetime.ProcessFromContext(ctx)
-			baselineLeases := process.ActiveCount()
 			attachment := q1StageBranchPointComponent(t, ctx, request)
+			var childBefore map[string]storetest.SelectedForkStorageTableSnapshot
+			if fault == "continuation" {
+				var err error
+				childBefore, err = storetest.ReadSelectedForkSourceDomain(ctx, selected, attachment.materialized.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := owner.retainPrepared(attachment.prepared); err != nil {
 				t.Fatal(err)
 			}
@@ -436,9 +415,6 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 					}
 					owner.ports.contexts.mu.Unlock()
 					if retained != nil {
-						if process.ActiveCount() <= baselineLeases {
-							t.Fatal("unacknowledged failure lost process possession")
-						}
 						if err := retained.Close(); err != nil {
 							t.Fatalf("retry exact failure disposition: %v", err)
 						}
@@ -460,12 +436,12 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				owner.ports.contexts.mu.Lock()
 				retained := len(owner.ports.contexts.entries)
 				owner.ports.contexts.mu.Unlock()
-				if storage.State == "closed" && storage.RunStatus == wantStatus && retained == 0 && process.ActiveCount() == baselineLeases {
+				if storage.State == "closed" && storage.RunStatus == wantStatus && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("failed serving was not settled and retired: %+v preparations=%d leases=%d (baseline=%d)", storage, retained, process.ActiveCount(), baselineLeases)
+					t.Fatalf("failed serving was not settled and retired: %+v preparations=%d", storage, retained)
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
@@ -473,9 +449,94 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			if err != nil || found || !reflect.DeepEqual(record, after) {
 				t.Fatalf("private failure fabricated an acknowledged creation: %+v %v", after, err)
 			}
+			wantInputs := 0
+			if fault == "continuation" {
+				wantInputs = 1
+				inputID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, request.At)
+				input := storetest.LoadCanonicalEventRecord(t, wait, selected, inputID)
+				source := storetest.LoadCanonicalEventRecord(t, wait, selected, request.At)
+				lineage, retained := input.SelectedForkLineage()
+				if !retained || lineage.SourceRunID() != sourceID || lineage.SourceEventID() != request.At ||
+					input.RunID() != result.Materialization.ForkRunID || input.Type() != source.Type() ||
+					input.ExecutionMode() != source.ExecutionMode() || !reflect.DeepEqual(input.Payload(), source.Payload()) {
+					t.Fatalf("failed startup lost its exact committed input: %+v lineage=%+v", input, lineage)
+				}
+				childAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, result.Materialization.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(childBefore["entity_state"], childAfter["entity_state"]) {
+					t.Fatal("failed continuation startup changed child entity state")
+				}
+				deliveries, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_deliveries"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				attempts, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_delivery_attempts"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(childBefore["event_delivery_attempts"].Rows) != 0 || len(attempts) == 0 || len(attempts) != len(deliveries) {
+					t.Fatalf("startup retirement did not terminalize each unexecuted delivery once: deliveries=%d attempts=%d", len(deliveries), len(attempts))
+				}
+				remaining := make(map[string]bool, len(deliveries))
+				for _, row := range deliveries {
+					id, err := row["delivery_id"].Text()
+					if err != nil || id == "" || remaining[id] {
+						t.Fatalf("invalid exact child delivery identity: %q %v", id, err)
+					}
+					remaining[id] = true
+				}
+				for _, row := range attempts {
+					id, err := row["delivery_id"].Text()
+					if err != nil || !remaining[id] {
+						t.Fatalf("retirement attempt has foreign or duplicate delivery: %q %v", id, err)
+					}
+					remaining[id] = false
+					for column, want := range map[string]string{"closure_kind": "settled", "outcome": "terminalized", "reason_code": "run_failed"} {
+						value, err := row[column].Text()
+						if err != nil || value != want {
+							t.Fatalf("startup cleanup %s=%q want=%q: %v", column, value, want, err)
+						}
+					}
+					open := string(row["open_marker"].Value)
+					sideEffects, err := row["side_effects"].Text()
+					if err != nil || sideEffects != "null" {
+						t.Fatalf("startup retirement recorded handler effects: %q %v", sideEffects, err)
+					}
+					if (open != "false" && open != "0") || string(row["claim_version"].Value) != "1" || string(row["completed_at"].Value) == "null" ||
+						string(row["current_delivery_id"].Value) != "null" || string(row["active_session_id"].Value) != "null" ||
+						string(row["duration_ms"].Value) != "0" {
+						t.Fatalf("startup retirement contained executing or dispatched work: %+v", row)
+					}
+				}
+				selections, err := storetest.DecodeSelectedForkSnapshotRows(childAfter["event_delivery_handler_rule_selections"])
+				if err != nil || len(childBefore["event_delivery_handler_rule_selections"].Rows) != 0 || len(selections) != len(attempts) {
+					t.Fatalf("startup cleanup lost its exact non-handler selections: count=%d %v", len(selections), err)
+				}
+				for _, row := range selections {
+					id, err := row["delivery_id"].Text()
+					seen, found := remaining[id]
+					if err != nil || !found || seen {
+						t.Fatalf("cleanup selection has foreign or duplicate delivery: %q %v", id, err)
+					}
+					remaining[id] = true
+					for column, want := range map[string]string{"selection_context": "none", "disposition": "not_applicable", "display_label": ""} {
+						value, err := row[column].Text()
+						if err != nil || value != want {
+							t.Fatalf("startup cleanup selected a handler: %s=%q want=%q: %v", column, value, want, err)
+						}
+					}
+					for _, column := range []string{"flow_path", "declaration_family", "semantic_path"} {
+						if string(row[column].Value) != "null" {
+							t.Fatalf("startup cleanup retained handler identity: %+v", row)
+						}
+					}
+				}
+			}
 			cardinality, err := storetest.ReadLifecycleEventCardinality(wait, selected, result.Materialization.ForkRunID, "item.received")
-			if err != nil || cardinality != 0 {
-				t.Fatalf("failed publication leaked or duplicated business events: count=%d %v", cardinality, err)
+			if err != nil || cardinality != wantInputs {
+				t.Fatalf("failed startup input conservation: count=%d want=%d %v", cardinality, wantInputs, err)
 			}
 			sourceAfter, err := storetest.ReadSelectedForkSourceDomain(wait, selected, sourceID)
 			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {

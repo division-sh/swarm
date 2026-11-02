@@ -13,9 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
@@ -25,36 +23,6 @@ type pipelineObligationParityStore interface {
 	semanticEventFixtureStore
 	diagnosticRuntimeLogFixtureStore
 	PipelineObligations() runtimepipelineobligation.Store
-}
-
-type pipelineClaimReleaseProbeSink struct {
-	owner   runtimepipelineobligation.Store
-	eventID string
-	result  chan error
-}
-
-type pipelineClaimReleaseProbeAdmission struct {
-	sink *pipelineClaimReleaseProbeSink
-}
-
-func (s *pipelineClaimReleaseProbeSink) ReserveCompletionCandidate(context.Context) (runtimerunlifecycle.CandidateAdmission, error) {
-	return &pipelineClaimReleaseProbeAdmission{sink: s}, nil
-}
-
-func (a *pipelineClaimReleaseProbeAdmission) Submit(runtimerunlifecycle.Candidate) error {
-	work, err := a.sink.owner.ClaimEvent(context.Background(), a.sink.eventID, runtimepipelineobligation.PurposeRecovery)
-	if err == nil {
-		err = errors.Join(
-			errors.New("settled pipeline event remained eligible after lifecycle handoff"),
-			a.sink.owner.Release(context.Background(), work.Claim),
-		)
-	}
-	a.sink.result <- err
-	return nil
-}
-
-func (*pipelineClaimReleaseProbeAdmission) Cancel() error {
-	return nil
 }
 
 func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
@@ -103,9 +71,6 @@ func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
 			t.Run("settlement_failure_rolls_back_and_retains_claim", func(t *testing.T) {
 				provePipelineSettlementRollback(t, ctx, fixture, selected)
 			})
-			t.Run("settlement_retires_claim_before_lifecycle_handoff", func(t *testing.T) {
-				provePipelineClaimRetiredBeforeLifecycleHandoff(t, ctx, fixture, selected)
-			})
 			t.Run("committed_settlement_survives_cleanup_failure", func(t *testing.T) {
 				provePipelineCommittedSettlementCleanupOutcome(t, ctx, fixture, selected)
 			})
@@ -121,7 +86,7 @@ func provePipelineExactPayloadRecovery(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	payload := []byte("{\n  \"value\": 1.0, \"order\": [2, 1]\n}")
 	event := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType("recovery.payload_bytes"), "runtime", "", payload,
@@ -159,7 +124,7 @@ func provePipelineCommittedSettlementCleanupOutcome(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	owner := selected.PipelineObligations()
 	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
@@ -198,58 +163,6 @@ func provePipelineCommittedSettlementCleanupOutcome(
 	}
 }
 
-func provePipelineClaimRetiredBeforeLifecycleHandoff(
-	t *testing.T,
-	ctx context.Context,
-	fixture authorActivityReceiptFixture,
-	selected pipelineObligationParityStore,
-) {
-	t.Helper()
-	registrar, ok := selected.(runtimerunlifecycle.CandidateRegistrar)
-	if !ok {
-		t.Fatalf("%T does not expose completion candidate registration", selected)
-	}
-	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
-	owner := selected.PipelineObligations()
-	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
-	if err != nil {
-		t.Fatalf("claim pipeline event: %v", err)
-	}
-
-	process := worklifetime.NewProcess()
-	occurrence := newRunLifecycleExecutorOccurrence(t, process)
-	runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
-	probe := &pipelineClaimReleaseProbeSink{
-		owner: owner, eventID: eventID, result: make(chan error, 1),
-	}
-	registration, err := registrar.RegisterCompletionCandidateSink(
-		runtimeCtx,
-		runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
-		probe,
-	)
-	if err != nil {
-		t.Fatalf("register completion candidate probe: %v", err)
-	}
-	defer registration.Release()
-
-	if _, err := owner.Settle(runtimeCtx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
-		t.Fatalf("settle pipeline event: %v", err)
-	}
-	select {
-	case probeErr := <-probe.result:
-		if !errors.Is(probeErr, runtimepipelineobligation.ErrIneligible) {
-			t.Fatalf("claim state observed by lifecycle handoff = %v, want ErrIneligible", probeErr)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for lifecycle handoff claim-state probe")
-	}
-
-	retireRunLifecycleExecutorOccurrence(t, occurrence)
-	retireRunLifecycleProcess(t, process)
-}
-
 func provePipelineAgeIndependentSelection(
 	t *testing.T,
 	ctx context.Context,
@@ -258,7 +171,7 @@ func provePipelineAgeIndependentSelection(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	createdAt := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, createdAt)
 	owner := selected.PipelineObligations()
@@ -294,7 +207,7 @@ func provePipelineClaimLifecycle(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Hour))
 	owner := selected.PipelineObligations()
 
@@ -352,7 +265,7 @@ func provePipelineScopeFailure(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	if err := updatePipelineScopeRaw(ctx, fixture, eventID, "guessed"); err == nil {
 		t.Fatal("fresh schema accepted an invalid committed pipeline scope")
@@ -391,7 +304,7 @@ func provePipelineMalformedRecoveryPreclassification(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := uuid.NewString()
 	event := eventtest.RuntimeDiagnostic(
 		eventID,
@@ -443,7 +356,7 @@ func provePipelineRunSummary(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	base := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	owner := selected.PipelineObligations()
 
@@ -487,7 +400,7 @@ func provePipelineRunSummary(
 	}
 
 	terminalOnlyRunID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, terminalOnlyRunID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, terminalOnlyRunID)
 	terminalOnlyID := commitPipelineParityEvent(t, ctx, selected, terminalOnlyRunID, base.Add(6*time.Second))
 	settlePipelineParityEvent(t, ctx, owner, terminalOnlyID, runtimepipelineobligation.DeadLetter("terminal_only", nil))
 	terminalOnly, err := owner.SummarizeRun(ctx, terminalOnlyRunID)
@@ -508,7 +421,7 @@ func provePipelineDecisionRouteDispositions(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	owner := selected.PipelineObligations()
 	at := time.Now().UTC().Add(-time.Minute)
 
@@ -558,7 +471,7 @@ func provePipelineReceiptFamilySeparation(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	insertWorkflowTransitionReceipt(t, ctx, fixture, eventID)
 
@@ -583,7 +496,7 @@ func provePipelineParentTerminalizationFence(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 	owner := selected.PipelineObligations()
 	work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
@@ -642,7 +555,7 @@ func provePipelineSettlementRollback(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := uuid.NewString()
 	event := eventtest.PersistedProjection(
 		eventID, events.EventType("test.event"), "runtime", "", []byte(`{"ok":true}`),

@@ -99,14 +99,15 @@ func TestReceiverConstructionStorageRefusesRawCancelledClosedAndUnavailableOwner
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			original := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			refuse(t, ctx, fixture.store)
-			if err := SetReceiverConstructionObservationUnavailableForTest(context.Background(), fixture.store, true); err != nil {
+			if err := SetReceiverConstructionObservationUnavailableForTest(original, fixture.store, true); err != nil {
 				t.Fatal(err)
 			}
 			refuse(t, context.Background(), fixture.store)
-			if err := SetReceiverConstructionObservationUnavailableForTest(context.Background(), fixture.store, false); err != nil {
+			if err := SetReceiverConstructionObservationUnavailableForTest(original, fixture.store, false); err != nil {
 				t.Fatal(err)
 			}
 			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {

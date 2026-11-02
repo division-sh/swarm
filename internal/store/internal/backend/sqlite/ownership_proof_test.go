@@ -387,7 +387,7 @@ func newOwnershipProofTestBackend(t *testing.T, limit int) (*Backend, context.Co
 			t.Errorf("close ownership-proof test backend: %v", err)
 		}
 	})
-	return backend, ctx
+	return backend.Backend, ctx
 }
 
 func ownershipProofLimit(base, retained int) int {

@@ -130,7 +130,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 								}
 							}
 						}
-						markGateRecoveryTopologyReadyFixture(t, selected, readiness, createdAt)
+						markGateRecoveryTopologyReadyFixture(t, ctx, selected, readiness, createdAt)
 						requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, readiness.Identity)
 					}
 					materialize(instances[0])

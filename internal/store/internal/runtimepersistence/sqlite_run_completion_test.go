@@ -188,7 +188,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	var eventCount int
 	if err := store.backend.QueryRowContext(ctx, `
 		SELECT event_count
-		FROM runs
+		FROM run_event_counts
 		WHERE run_id = ?
 	`, runID).Scan(&eventCount); err != nil {
 		t.Fatalf("load incremental sqlite event counter: %v", err)

@@ -227,6 +227,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		} else {
 			reopened = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
 		}
+		ctx = originalStoreFixtureContext(t, ctx, reopened)
 		refuseWithoutEffects := func(runID string, lease *sessions.Lease, metadata sessions.RotationMetadata, want sessions.RotationRefusalReason) {
 			t.Helper()
 			before := snapshotRotationEffects(t, ctx, selected.db, runID)
@@ -383,6 +384,7 @@ func TestSelectedRotationSameKeyConcurrentBothStores(t *testing.T) {
 				} else {
 					second = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
 				}
+				ctx = originalStoreFixtureContext(t, ctx, second)
 				owners := []llmSessionAttemptJourneyOwner{first, second}
 				type outcome struct {
 					lease *sessions.Lease
@@ -458,6 +460,7 @@ func TestSelectedRotationReceiptPrecisionBothStores(t *testing.T) {
 		} else {
 			reopened = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
 		}
+		ctx = originalStoreFixtureContext(t, ctx, reopened)
 		replayed, err := reopened.Rotate(ctx, predecessor, request)
 		if err != nil || replayed == nil || *replayed != *first {
 			t.Fatalf("non-microsecond TTL replay=%+v first=%+v err=%v", replayed, first, err)
@@ -548,6 +551,7 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		ctx := runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure)
 		fixture := newExactFactFixture(t, selected)
+		ctx = originalStoreFixtureContext(t, ctx, selected.selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		reset := selected.selected.(interface {

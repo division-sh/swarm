@@ -72,7 +72,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Observability: observability,
 		}),
 	})
@@ -205,7 +205,7 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Observability: observability,
 		}),
 	})
@@ -254,7 +254,7 @@ func TestOperatorObservabilityHandlersTypedErrors(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Observability: observability,
 		}),
 	})

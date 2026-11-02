@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -14,7 +13,7 @@ func TestChannelOnboardingConfirmedReconnectBeforeParentPhaseSelectedStoreParity
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			prior := rig.start(t, channelonboarding.VerbConnect, "predecessor-token", false)
 			rig.confirm(t, prior, "account-a")
 			rig.complete(t, prior.Operation.OperationID)
@@ -55,7 +54,7 @@ func TestChannelOnboardingStaleConfirmationBeforeParentPhaseSelectedStoreParity(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
 			claimed, err := rig.fixture.settle(ctx, operatorChannelContractClaim(*begun.IdentityOperation, operatorchannel.ConversationScopeDirect, "account-a", "conversation-account-a", uuid.NewString()), rig.now)
 			if err != nil {

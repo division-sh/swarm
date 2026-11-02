@@ -469,6 +469,7 @@ func TestSelectedCanceledOriginRecoveryCommitsReactionBothStores(t *testing.T) {
 			if err := f.process.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
+			retireStoreTestWorkFixture(t)
 			recoveryProcess := selectedPreparationProcessForTest(t, selected)
 			process, err := recoveryProcess.Evidence()
 			if err != nil {

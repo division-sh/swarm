@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -61,14 +62,18 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					if phase == "admitted" {
 						fault = storetest.SetResetPlanReceiptFault
 					}
-					if err := fault(context.Background(), selected, true); err != nil {
+					faultCtx, err := startupownership.WithProcessMutationAuthority(t.Context(), previousSupervisor.processCapability)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := fault(faultCtx, selected, true); err != nil {
 						t.Fatal(err)
 					}
 					params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
 					if response := requestServedJSONRPC(t, endpoint, "runtime.nuke", params); response.Error == nil {
 						t.Fatal("final receipt fault did not interrupt reset")
 					}
-					if err := fault(context.Background(), selected, false); err != nil {
+					if err := fault(faultCtx, selected, false); err != nil {
 						t.Fatal(err)
 					}
 					var actualPhase string

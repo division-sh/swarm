@@ -113,7 +113,7 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 			} {
 				row := control.row()
 				if runID, ok := row.runID.(string); ok && runID != "" {
-					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+					ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				}
 				insertUnsafeEventRow(t, ctx, fixture, row, control.name)
 			}
@@ -121,7 +121,7 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 				t.Run(malformed.name, func(t *testing.T) {
 					control := malformed.baseline()
 					if runID, ok := control.runID.(string); ok && runID != "" {
-						seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+						ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 					}
 					insertUnsafeEventRow(t, ctx, fixture, control, malformed.name+" control")
 					invalid := control

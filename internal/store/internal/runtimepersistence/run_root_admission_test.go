@@ -146,6 +146,12 @@ func TestS1RunRootActiveAdmissionRejectsForeignContextBothStores(t *testing.T) {
 			}
 			rollback := errors.New("rollback rooted source admission proof")
 			err := runSelectedFixtureMutation(ctx, selected, "rooted active source admission", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				if err := attempt.WithSQL(txctx, func(bound context.Context, tx *sql.Tx) error {
+					_, err := mutationprotocol.RunRowLock(bound, tx, request.RunID, true)
+					return err
+				}); err != nil {
+					return err
+				}
 				admit := func(source sourceartifact.RootedSource, wantError bool) error {
 					bound := runtimecorrelation.WithRootAdmission(txctx, source.Admission())
 					return attempt.WithSQL(bound, func(bound context.Context, tx *sql.Tx) error {

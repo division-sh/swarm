@@ -32,6 +32,9 @@ func (s upgradeSnapshot) ActiveNonStandingRunBundleAvailabilities(ctx context.Co
 }
 
 func (s upgradeSnapshot) ReadBundleUpgradeState(ctx context.Context, runID string, source semanticview.Source) (runbundle.UpgradeState, error) {
+	if _, err := mutationprotocol.RunRowLock(ctx, s.tx, runID, true); err != nil {
+		return runbundle.UpgradeState{}, err
+	}
 	return readBundleUpgradeStateTx(ctx, s.tx, s.owner, s.sqlite, runID, source)
 }
 

@@ -12,14 +12,80 @@ import (
 	"time"
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
 const pinnedTestBundle = "test-bundle"
 const pinnedTestRun = "test-run"
+
+func pinnedTestOriginalContext(t *testing.T, db *sql.DB, sqlite *sqlitebackend.Backend) context.Context {
+	t.Helper()
+	ctx := t.Context()
+	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "runtime_process_generation" {
+			continue
+		}
+		for _, statement := range plan.Statements {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := platformschema.SeedFreshProcessGeneration(ctx, db, []platformschema.TableDDL{plan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	identity := processbinding.LeaseIdentity{LeaseID: uuid.NewString(), OwnerID: "native-statement-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend}
+	var acquire func(context.Context, func(context.Context, *sql.Tx) error) (bool, error)
+	if sqlite != nil {
+		identity.Backend = processbinding.SQLiteLeaseBackend
+		acquire = sqlite.RunProcessAcquisitionOutcome
+	} else {
+		backend, err := postgresbackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, held, err := postgresbackend.AcquireAdvisoryLockLease(ctx, backend, "swarm:runtime:shared-store-owner")
+		if err != nil || !held {
+			t.Fatalf("retain original statement process: held=%v err=%v", held, err)
+		}
+		t.Cleanup(func() {
+			if err := lease.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+		acquire = lease.RunProcessAcquisitionOutcome
+	}
+	var original processbinding.LeaseStamp
+	committed, err := acquire(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		original, err = generationauthority.AdvanceProcessGeneration(ctx, tx, identity, sqlite != nil)
+		return err
+	})
+	if err != nil || !committed {
+		t.Fatalf("acquire original statement process: committed=%v err=%v", committed, err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 func pinnedTestVersion(t *testing.T, rows int, value string) runtimedata.CompiledVersion {
 	t.Helper()
@@ -162,14 +228,17 @@ func TestExpandedCanonicalPayloadIsReadableAndIntegrityCheckedBothStores(t *test
 
 func TestPinnedImmutableReadsBypassSQLiteMutationAdmission(t *testing.T) {
 	compiled := pinnedTestVersion(t, 1, "one")
-	owner, _, backend := pinnedTestOwner(t, "sqlite", compiled)
+	owner, db, backend := pinnedTestOwner(t, "sqlite", compiled)
+	original := pinnedTestOriginalContext(t, db, backend)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	mutationCtx, cancelMutation := context.WithTimeout(original, 5*time.Second)
+	defer cancelMutation()
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	finished := make(chan error, 1)
 	go func() {
-		finished <- backend.RunTransaction(ctx, "held mutation admission", func(context.Context, *sql.Tx) error {
+		finished <- backend.RunTransaction(mutationCtx, "held mutation admission", func(context.Context, *sql.Tx) error {
 			close(entered)
 			<-release
 			return nil

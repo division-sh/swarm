@@ -30,7 +30,9 @@ func TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	storetest.RequireBundleDataCatalog(t, context.Background(), selected, bundle)
+	ctx := serveFixtureProcessContext(t, context.Background(), selected)
+	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
+	releaseServeTestAgentFixtureCapability(t, selected)
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	if err := os.RemoveAll(borrowedRoot); err != nil {
 		t.Fatalf("remove admitted source root: %v", err)
@@ -71,7 +73,9 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 	if err != nil {
 		t.Fatal(err)
 	}
-	storetest.RequireBundleDataCatalog(t, context.Background(), selected, bundle)
+	ctx := serveFixtureProcessContext(t, context.Background(), selected)
+	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
+	releaseServeTestAgentFixtureCapability(t, selected)
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	var out bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repoRootForTest(), []string{

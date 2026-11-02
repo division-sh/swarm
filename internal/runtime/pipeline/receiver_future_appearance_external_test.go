@@ -91,7 +91,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 						}
 					}
 				}
-				markGateRecoveryTopologyReadyFixture(t, selected, unrelatedReadiness, time.Now().UTC())
+				markGateRecoveryTopologyReadyFixture(t, ctx, selected, unrelatedReadiness, time.Now().UTC())
 				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, unrelatedReadiness.Identity)
 				receiverKey := uuid.NewString()
 				payload, err := json.Marshal(map[string]any{"receiver_id": receiverKey, "account_id": "appearing-key", "item": "accepted"})
@@ -145,7 +145,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 						}
 					}
 				}
-				markGateRecoveryTopologyReadyFixture(t, selected, readiness, time.Now().UTC())
+				markGateRecoveryTopologyReadyFixture(t, ctx, selected, readiness, time.Now().UTC())
 				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, readiness.Identity)
 				evt, err = events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}))
 				if err != nil {

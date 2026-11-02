@@ -2,9 +2,10 @@ package runtimepersistence
 
 import (
 	"encoding/json"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
+
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"

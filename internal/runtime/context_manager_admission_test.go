@@ -386,6 +386,7 @@ func runtimeAdmissionTestContext(t *testing.T, source semanticview.Source, catal
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
 		ProviderCredentials: identityInboundCredentialStore{}, SourceArtifactFact: contextDef.SourceArtifactFact,
 		RuntimeInstanceID: contextDef.RuntimeInstanceID,
+		ProcessWorkOwner:  contextDef.Runtime.Options.ProcessWorkOwner,
 	}
 	contextDef.StandingTargets, err = contextDef.Runtime.PlanStandingTargets()
 	if err != nil {

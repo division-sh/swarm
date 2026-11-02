@@ -241,7 +241,7 @@ func TestCoordinatorRetirementRealEventBusDispatch(t *testing.T) {
 				dispatcher := retirementBusDispatcher{bus: eb, result: result}
 				var c *deliverycontinuation.Coordinator
 				if selected {
-					c, err = deliverycontinuation.NewSelected(scan, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err })
+					c, err = deliverycontinuation.NewSelected(scan, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err }, func(context.Context) error { return nil })
 				} else {
 					c, err = deliverycontinuation.New(scan, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err })
 				}

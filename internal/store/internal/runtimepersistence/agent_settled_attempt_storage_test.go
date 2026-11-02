@@ -19,7 +19,7 @@ func TestAgentSettledAttemptStoragePreservesEventRoleSubscriberAndOriginalReadBo
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, run)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "attempt.storage", "gateway", "", nil, 0, run, events.EventEnvelope{}, time.Now().UTC())
 			routes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: mustTestAgentIdentityForRun(run, "agent-a", "storage/agent-a")},

@@ -95,10 +95,8 @@ func TestTransactionExitFaultDisposition(t *testing.T) {
 				if _, err := db.Exec("CREATE TABLE counter (value INTEGER); INSERT INTO counter VALUES (0)"); err != nil {
 					t.Fatal(err)
 				}
-				b, err := New(db)
-				if err != nil {
-					t.Fatal(err)
-				}
+				b := originalTransactionTestBackend(t, db, control.path)
+				var err error
 				var survivor *sql.Conn
 				if poolSize > 1 {
 					survivor, err = db.Conn(context.Background())
@@ -230,10 +228,8 @@ func TestTransactionCancellationCuts(t *testing.T) {
 				db := sql.OpenDB(control)
 				db.SetMaxOpenConns(1)
 				defer db.Close()
-				b, err := New(db)
-				if err != nil {
-					t.Fatal(err)
-				}
+				b := originalTransactionTestBackend(t, db, control.path)
+				var err error
 				if _, err := db.Exec("CREATE TABLE counter(value INTEGER); INSERT INTO counter VALUES(0)"); err != nil {
 					t.Fatal(err)
 				}

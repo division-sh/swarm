@@ -247,8 +247,8 @@ func TestHistoricalDeclarationBatchNeverPromotesEvidenceToSourceAuthorityBothSto
 				t.Fatal("incompatible source lacks its exact keyed declaration")
 			}
 			files["review/schema.yaml"] = strings.Replace(files["review/schema.yaml"], declaration, "", 1)
-			foreign := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
-			source, incompatible := semanticview.Wrap(f.bundle), semanticview.Wrap(foreign.bundle)
+			foreign := loadLifecyclePersistenceFixtureForTest(t, files)
+			source, incompatible := semanticview.Wrap(f.bundle), semanticview.Wrap(foreign)
 			lookup, err := pipeline.NewExactFlowInstanceLookup(source, mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash()), f.owner)
 			if err != nil {
 				t.Fatal(err)
@@ -291,14 +291,14 @@ func TestHistoricalDeclarationBatchNeverPromotesEvidenceToSourceAuthorityBothSto
 			}); err != nil {
 				t.Fatal(err)
 			}
-			rooted, err := foreign.bundle.RootedSource()
+			rooted, err := foreign.RootedSource()
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.store.(sourceartifactfixture.RootedWriter).EnsureRootedSource(f.ctx, rooted); err != nil {
 				t.Fatal(err)
 			}
-			fact := mustStoreTestSourceArtifactFact(foreign.bundle.SourceArtifact.BundleHash())
+			fact := mustStoreTestSourceArtifactFact(foreign.SourceArtifact.BundleHash())
 			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: f.owner.RunID, Source: fact, RootAdmission: rooted.Admission()}); err != nil {
 				t.Fatal(err)
 			}

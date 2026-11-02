@@ -321,7 +321,7 @@ func TestSelectedStoreAgentSnapshotHandlersExecuteAcrossBackends(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					AgentConversations: fixture.store,
 				}),
 			})
@@ -350,7 +350,7 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 			fixture.setSessionLease(t, "snapshot-lease")
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					AgentConversations: fixture.store,
 				}),
 			})

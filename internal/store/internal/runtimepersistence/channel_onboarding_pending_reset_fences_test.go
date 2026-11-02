@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -24,7 +23,7 @@ func TestChannelOnboardingPendingResetInterruptionSelectedStoreParity(t *testing
 				for _, recovery := range []string{"retry", "local"} {
 					t.Run(fmt.Sprintf("%s/inherited=%t/%s/%s", backend, inherited, boundary, recovery), func(t *testing.T) {
 						rig := newBoundHandoffRig(t, fixture)
-						ctx := context.Background()
+						ctx := fixture.ctx
 						begun, account, retained := beginPendingResetJourney(t, rig, channelonboarding.VerbConnect, true, inherited)
 						claimed := claimPendingResetJourney(t, rig, begun, account, true)
 						before := rig.parent(t, begun.Operation.OperationID)
@@ -81,7 +80,7 @@ func TestChannelOnboardingPendingResetSelectedStoreFences(t *testing.T) {
 		for _, change := range []string{"retired", "revision", "missing_child", "publishing", "bound", "pending", "rejected", "expired", "wrong_parent", "wrong_evidence", "wrong_predecessor", "wrong_retained_revision", "unbound", "wrong_kind", "retire_during_cleanup", "revision_during_cleanup", "reset_during_cleanup"} {
 			t.Run(backend+"/"+change, func(t *testing.T) {
 				rig := newBoundHandoffRig(t, fixture)
-				ctx := context.Background()
+				ctx := fixture.ctx
 				begun, account, _ := beginPendingResetJourney(t, rig, channelonboarding.VerbConnect, false, true)
 				claimed := claimPendingResetJourney(t, rig, begun, account, false)
 				parent := rig.parent(t, begun.Operation.OperationID)
@@ -113,7 +112,7 @@ func TestChannelOnboardingPendingResetSelectedStoreFences(t *testing.T) {
 				req := channelonboarding.PendingResetRequest{OperationID: parent.OperationID, ExpectedRevision: parent.Revision, Now: rig.now}
 				switch change {
 				case "retired":
-					retireChannelOnboardingParent(t, fixture.store, parent, rig.now)
+					retireChannelOnboardingParent(t, fixture.ctx, fixture.store, parent, rig.now)
 				case "revision":
 					req.ExpectedRevision++
 				case "missing_child", "publishing", "wrong_retained_revision":
@@ -165,7 +164,7 @@ func TestChannelOnboardingPendingResetSelectedStoreFences(t *testing.T) {
 						rig.credentialFile.afterRelease = nil
 						switch change {
 						case "retire_during_cleanup":
-							retireChannelOnboardingParent(t, fixture.store, before, rig.now)
+							retireChannelOnboardingParent(t, fixture.ctx, fixture.store, before, rig.now)
 						case "revision_during_cleanup":
 							advance(channelonboarding.AdvanceRequest{OperationID: before.OperationID, ExpectedRevision: before.Revision, Phase: before.Phase, Now: rig.now})
 						case "reset_during_cleanup":
@@ -202,7 +201,7 @@ func TestChannelOnboardingPendingResetIdentityJoinSelectedStoreParity(t *testing
 			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
 			begun, account, retained := beginPendingResetJourney(t, rig, channelonboarding.VerbConnect, false, true)
 			child := claimPendingResetJourney(t, rig, begun, account, true)
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			if err := rig.file.Set(ctx, child.ProviderAuthority.Credential.Key, "rotated"); err != nil {
 				t.Fatal(err)
 			}

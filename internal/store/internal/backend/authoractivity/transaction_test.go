@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
-func orderingScopeFixture(t *testing.T, dialect Dialect, head int64) (context.Context, *sql.Tx, func(), func()) {
+func orderingScopeFixture(t *testing.T, dialect Dialect, head int64, domainFirst bool) (context.Context, *sql.Tx, func(), func()) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -20,6 +20,9 @@ func orderingScopeFixture(t *testing.T, dialect Dialect, head int64) (context.Co
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if domainFirst {
+		mock.ExpectQuery("SELECT 'domain-before-ordering'").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("domain"))
 	}
 	if dialect == DialectSQLite {
 		mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -44,7 +47,7 @@ func orderingScopeFixture(t *testing.T, dialect Dialect, head int64) (context.Co
 func TestOrderingScopeReusesOnlyExactTransactionPossession(t *testing.T) {
 	for _, dialect := range []Dialect{DialectPostgres, DialectSQLite} {
 		t.Run(string(dialect), func(t *testing.T) {
-			ctx, tx, _, _ := orderingScopeFixture(t, dialect, 17)
+			ctx, tx, _, _ := orderingScopeFixture(t, dialect, 17, true)
 			var slot transactiontest.Slot
 			collector, restore, err := slot.Install(transactiontest.Options{})
 			if err != nil {
@@ -53,6 +56,14 @@ func TestOrderingScopeReusesOnlyExactTransactionPossession(t *testing.T) {
 			defer restore()
 			probe := slot.Begin(false, false)
 			ctx = transactiontest.WithAttempt(ctx, probe)
+			story, err := Begin(ctx, tx, dialect)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var domain string
+			if err := tx.QueryRowContext(ctx, "SELECT 'domain-before-ordering'").Scan(&domain); err != nil || domain != "domain" {
+				t.Fatalf("domain work could not precede ordering: %q %v", domain, err)
+			}
 			if err := FenceMutationOrder(ctx, tx, dialect); err != nil {
 				t.Fatal(err)
 			}
@@ -61,8 +72,7 @@ func TestOrderingScopeReusesOnlyExactTransactionPossession(t *testing.T) {
 					t.Fatalf("held fence required another SQL acquisition: %v", err)
 				}
 			}
-			story, err := Begin(ctx, tx, dialect)
-			if err != nil || story.last != 17 {
+			if err := story.Finalize(ctx); err != nil || story.last != 17 {
 				t.Fatalf("story lost locked sequence: %+v %v", story, err)
 			}
 			if _, err := Begin(ctx, tx, dialect); err == nil {
@@ -91,7 +101,7 @@ func TestOrderingScopeReusesOnlyExactTransactionPossession(t *testing.T) {
 func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 	for _, dialect := range []Dialect{DialectPostgres, DialectSQLite} {
 		t.Run(string(dialect), func(t *testing.T) {
-			ctx, tx, cancel, release := orderingScopeFixture(t, dialect, 17)
+			ctx, tx, cancel, release := orderingScopeFixture(t, dialect, 17, false)
 			var slot transactiontest.Slot
 			collector, restore, err := slot.Install(transactiontest.Options{})
 			if err != nil {
@@ -111,7 +121,7 @@ func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 			if err := FenceMutationOrder(ctx, tx, dialect); !errors.Is(err, sql.ErrTxDone) {
 				t.Fatalf("ended native transaction retained possession: %v", err)
 			}
-			nextCtx, nextTx, _, _ := orderingScopeFixture(t, dialect, 23)
+			nextCtx, nextTx, _, _ := orderingScopeFixture(t, dialect, 23, false)
 			next := slot.Begin(false, false)
 			nextCtx = transactiontest.WithAttempt(nextCtx, next)
 			if err := FenceMutationOrder(ctx, nextTx, dialect); !errors.Is(err, sql.ErrTxDone) {
@@ -123,6 +133,9 @@ func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 			story, err := Begin(nextCtx, nextTx, dialect)
 			if err != nil || story.last != 23 {
 				t.Fatalf("retry reused predecessor sequence: %+v %v", story, err)
+			}
+			if err := story.Finalize(nextCtx); err != nil {
+				t.Fatal(err)
 			}
 			first.Finish(context.Canceled)
 			next.Finish(nil)
@@ -137,6 +150,9 @@ func TestOrderingScopeCancellationRetirementAndFreshAttempt(t *testing.T) {
 func TestOrderingScopeRefusesMissingAndBooleanAuthority(t *testing.T) {
 	tx := new(sql.Tx)
 	for _, ctx := range []context.Context{context.Background(), context.WithValue(context.Background(), orderingTransactionKey{}, true)} {
+		if _, err := Begin(ctx, tx, DialectPostgres); err == nil {
+			t.Fatal("non-native context reserved a story batch")
+		}
 		if err := FenceMutationOrder(ctx, tx, DialectPostgres); err == nil {
 			t.Fatal("non-native context authorized ordering reuse")
 		}

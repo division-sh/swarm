@@ -212,7 +212,6 @@ type publicationGroupAgentCrashGroup struct {
 	gate    *publicationGroupAgentGate
 	signal  *publicationGroupSignalCrash
 	cut     string
-	before  func()
 }
 
 var _ pipelineobligation.PublicationGroup = publicationGroupAgentCrashGroup{}
@@ -230,7 +229,6 @@ func (g publicationGroupAgentCrashGroup) Settle(ctx context.Context, members []p
 	case <-ctx.Done():
 		return pipelineobligation.PublicationGroupOutcome{}, ctx.Err()
 	}
-	g.before()
 	if g.cut == "after_commit_before_ack" {
 		g.control.armed.Store(true)
 		ctx = context.WithValue(ctx, fanOutCrashCommitKey{}, g.control)

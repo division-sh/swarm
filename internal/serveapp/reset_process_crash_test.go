@@ -230,8 +230,8 @@ func TestResetCrashServeProcessHelper(t *testing.T) {
 	opts.Verbose, opts.SelfCheck = true, true
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	if os.Getenv("SWARM_TEST_RESET_RECOVER") != "1" {
-		opts.TestRuntimeReadyHook = func(*runtime.Runtime) {
-			if err := fault(context.Background(), selected, true); err != nil {
+		opts.TestRuntimeReadyHook = func(rt *runtime.Runtime) {
+			if err := fault(servedRuntimeProofAuthorActivityContext(t, rt, rt.Options.SourceArtifactFact.BundleHash()), selected, true); err != nil {
 				t.Fatal(err)
 			}
 		}

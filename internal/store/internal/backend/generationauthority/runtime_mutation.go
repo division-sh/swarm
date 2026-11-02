@@ -48,7 +48,7 @@ func requireCurrentRuntimeGrantTx(ctx context.Context, tx *sql.Tx, original runt
 		(SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1)
 		FROM runtime_process_generation WHERE singleton_id=1`
 	if !sqlite {
-		query += " FOR UPDATE"
+		query += " FOR SHARE"
 	}
 	var generation int64
 	var lease, owner, boot, runtime, backend sql.NullString

@@ -320,7 +320,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations:     reads,
 			AgentDeliveryLifecycle: reads,
 			AgentUsage:             reads,
@@ -570,7 +570,7 @@ func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -620,7 +620,7 @@ func TestOperatorAgentConversationHandlersSanitizeRunIDProjectionFailures(t *tes
 	reader := &fakeAgentConversationReadStore{listConversationsErr: rawRunIDColumnErr}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reader,
 		}),
 	})
@@ -719,7 +719,7 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					AgentConversations:     tc.reads,
 					AgentDeliveryLifecycle: tc.reads,
 					AgentUsage:             tc.reads,
@@ -752,7 +752,7 @@ func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reads,
 			AgentUsage:         reads,
 		}),
@@ -784,7 +784,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -828,7 +828,7 @@ func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *test
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -859,7 +859,7 @@ func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testin
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentDeliveryLifecycle: reads,
 		}),
 	})
@@ -895,7 +895,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -925,7 +925,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -983,7 +983,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 			}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: testOperatorHandlers(testOperatorCapabilities{
+				Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 					AgentConversations: reads,
 				}),
 			})
@@ -1003,7 +1003,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 func TestOperatorAgentDiagnoseRejectsQueueLimit(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: &fakeAgentConversationReadStore{},
 		}),
 	})
@@ -1018,7 +1018,7 @@ func TestOperatorAgentDiagnoseRejectsQueueLimit(t *testing.T) {
 func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: &fakeAgentConversationReadStore{agentDiagnosisErr: operatorread.ErrInvalidPendingAgentDeliveryCursor},
 		}),
 	})
@@ -1033,7 +1033,7 @@ func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentUsage: &fakeAgentConversationReadStore{},
 		}),
 	})
@@ -1048,7 +1048,7 @@ func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
 func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: &fakeAgentConversationReadStore{},
 		}),
 	})
@@ -1069,7 +1069,7 @@ func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {
 func TestOperatorAgentDeliveryLifecycleRejectsBadCursorAndStatuses(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentDeliveryLifecycle: &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: operatorread.AgentDeliveryLifecycleCursorError{}},
 		}),
 	})
@@ -1096,7 +1096,7 @@ func TestOperatorAgentDeliveryLifecycleRejectsBadCursorAndStatuses(t *testing.T)
 func TestOperatorAgentDeliveryDiagnosticsRejectsBadCursor(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			AgentConversations: &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: operatorread.AgentDeliveryDiagnosticsCursorError{Field: "dead_letter_cursor"}},
 		}),
 	})

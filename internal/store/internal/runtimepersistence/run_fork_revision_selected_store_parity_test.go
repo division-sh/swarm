@@ -209,6 +209,7 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
 	at := time.Date(2026, 8, 25, 20, 0, 0, 123000000, time.UTC)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, State: sourceState, StartedAt: at.Add(-time.Minute),
 		BundleHash: authorActivityTestBundleHash,
@@ -413,6 +414,7 @@ func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, selected any, db *sq
 	requireRunForkRevisionMatrixEmptyStart(t, ctx, selected, fixture.runID)
 
 	rollbackRunID := "00000000-0000-0000-0000-000000002287"
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: rollbackRunID, StartedAt: fixture.at,
 	})
@@ -517,6 +519,7 @@ func proveRunForkRevisionMultiRunFinalization(t *testing.T, ctx context.Context,
 		"00000000-0000-0000-0000-000000002289",
 	}
 	for _, runID := range runIDs {
+		ctx = originalStoreFixtureContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 			Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at,
 		})

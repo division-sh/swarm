@@ -328,19 +328,26 @@ func TestFanOutPublicationGroupIndependentRunOverlapBothStores(t *testing.T) {
 			}
 			second.seal(t)
 			go func() { _, err := second.owner.CommitFanOutChunk(second.ctx, second.command); secondDone <- err }()
-			// Both dialects retain the existing generation/story mutation order.
-			// Independent groups and preparation overlap, not these SQL writers.
-			select {
-			case err := <-secondDone:
-				t.Fatalf("writer bypassed existing mutation order: %v", err)
-			case <-time.After(50 * time.Millisecond):
+			if backend == "postgres" {
+				if err := receiveGroupProof(t, secondDone); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// SQLite's single physical writer still serializes COMMIT.
+				select {
+				case err := <-secondDone:
+					t.Fatalf("writer bypassed SQLite mutation order: %v", err)
+				case <-time.After(50 * time.Millisecond):
+				}
 			}
 			releaseBarrier()
 			if err := receiveGroupProof(t, firstDone); err != nil {
 				t.Fatal(err)
 			}
-			if err := receiveGroupProof(t, secondDone); err != nil {
-				t.Fatal(err)
+			if backend != "postgres" {
+				if err := receiveGroupProof(t, secondDone); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := second.group.Settle(second.ctx, second.members()); err != nil {
 				t.Fatal(err)
