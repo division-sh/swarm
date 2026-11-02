@@ -247,7 +247,7 @@ func compatibleToolRoundFixture(t *testing.T) (openAICompatibleRequest, *Session
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := convertOpenAICompatibleResponse(previousResponse)
+	response, err := convertOpenAICompatibleResponse(previousResponse, map[string]string{"inspect": "inspect"})
 	if err != nil {
 		t.Fatal(err)
 	}

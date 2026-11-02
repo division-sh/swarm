@@ -116,6 +116,9 @@ func (r *OpenAIResponsesRuntime) PersistConversationSnapshot(ctx context.Context
 }
 
 func (r *OpenAIResponsesRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+	if _, err := admitProviderToolNames(tools); err != nil {
+		return nil, err
+	}
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		if lease != nil {
@@ -255,6 +258,10 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		r.baseURL = baseURL
 	}
 
+	toolNames, err := admitProviderToolNames(s.Tools)
+	if err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -334,7 +341,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		return nil, err
 	}
 
-	resp, err := convertOpenAIResponsesResponse(parsed)
+	resp, err := convertOpenAIResponsesResponse(parsed, toolNames)
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
@@ -444,6 +451,12 @@ func (r *OpenAIResponsesRuntime) buildRequest(s *Session, input Message, model s
 	if len(items) == 0 {
 		return openAIResponsesRequest{}, errors.New("at least one input item is required")
 	}
+	if _, err := admitProviderToolNames(s.Tools); err != nil {
+		return openAIResponsesRequest{}, err
+	}
+	if err := validateProviderReplayToolNames(s.Messages, input); err != nil {
+		return openAIResponsesRequest{}, err
+	}
 
 	tools := make([]openAIResponsesTool, 0, len(s.Tools))
 	for _, t := range s.Tools {
@@ -456,7 +469,7 @@ func (r *OpenAIResponsesRuntime) buildRequest(s *Session, input Message, model s
 		}
 		tools = append(tools, openAIResponsesTool{
 			Type:        "function",
-			Name:        strings.TrimSpace(t.Name),
+			Name:        providerToolWireName(t.Name),
 			Description: DeliveredToolDescription(t),
 			Parameters:  schema,
 		})
@@ -613,7 +626,7 @@ func openAIResponsesFunctionCallInputs(calls []ToolCall) []openAIResponsesFuncti
 		out = append(out, openAIResponsesFunctionCallInput{
 			Type:      "function_call",
 			CallID:    strings.TrimSpace(call.ID),
-			Name:      name,
+			Name:      providerToolWireName(name),
 			Arguments: args,
 		})
 	}
@@ -640,7 +653,7 @@ func openAIResponsesToolResultItems(content string) []any {
 	return items
 }
 
-func convertOpenAIResponsesResponse(parsed openAIResponsesResponse) (Response, error) {
+func convertOpenAIResponsesResponse(parsed openAIResponsesResponse, names map[string]string) (Response, error) {
 	if len(parsed.Output) == 0 {
 		return Response{}, errors.New("openai-responses response missing output")
 	}
@@ -659,8 +672,8 @@ func convertOpenAIResponsesResponse(parsed openAIResponsesResponse) (Response, e
 				}
 			}
 		case "function_call":
-			name := strings.TrimSpace(item.Name)
-			if name == "" {
+			name := item.Name
+			if strings.TrimSpace(name) == "" {
 				continue
 			}
 			id := strings.TrimSpace(item.CallID)
@@ -676,6 +689,7 @@ func convertOpenAIResponsesResponse(parsed openAIResponsesResponse) (Response, e
 	}
 	resp.Message.Content = strings.Join(content, "\n")
 	resp.Message.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+	resolveProviderToolNames(&resp, names)
 	if resp.Message.Content == "" && len(resp.ToolCalls) == 0 {
 		return Response{}, errors.New("openai-responses response missing message or function call output")
 	}
