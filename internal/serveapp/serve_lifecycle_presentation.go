@@ -272,8 +272,13 @@ func (p *serveLifecyclePresenter) recordStartupContext(req runtimeCompositionReq
 		doctor += " --backend " + quote(req.Options.Backend)
 	}
 	next := []string{"Check configuration (not an automatic repair): cd " + quote(req.Repo) + " && " + doctor}
-	if req.StoreSelection.Backend != storebackend.BackendSQLite || req.StoreSelection.SQLitePathSource == storebackend.SourceRuntimeConfig {
-		next = append(next, "Inspect the selected store: cd "+quote(req.Repo)+" && "+command+" store status --store "+quote(req.StoreSelection.Backend.String())+config)
+	directory := req.Repo
+	projectDefault := req.StoreSelection.Backend == storebackend.BackendSQLite && req.StoreSelection.SQLitePathSource == storebackend.SourceProjectDefault && req.LocalState.Project.CanonicalProjectRoot != ""
+	if projectDefault {
+		directory = req.LocalState.Project.CanonicalProjectRoot
+	}
+	if req.StoreSelection.Backend != storebackend.BackendSQLite || req.StoreSelection.SQLitePathSource == storebackend.SourceRuntimeConfig || projectDefault {
+		next = append(next, "Inspect the selected store: cd "+quote(directory)+" && "+command+" store status --store "+quote(req.StoreSelection.Backend.String())+config)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

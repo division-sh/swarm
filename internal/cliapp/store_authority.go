@@ -57,7 +57,11 @@ func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	selection, err := resolveAuthorityStoreSelection(root, cmd, cfgResult, CLISourcePaths{}, opts.storeMode, cmd.Flags().Changed("store"))
+	paths, err := resolveCLISourcePathsFromConfig(repo, CLISourcePathOptions{}, cfgResult.cli)
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	selection, err := resolveAuthorityStoreSelection(root, cmd, cfgResult, paths, opts.storeMode, cmd.Flags().Changed("store"))
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
