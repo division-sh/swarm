@@ -41,9 +41,8 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 		if err != nil {
 			t.Fatal(err)
 		}
-		text := strings.Replace(string(raw), "    - account.notification.completed\n", "", 1)
-		text = strings.Replace(text, "    account.notification.completed:\n      advances_to: completed\n", "", 1)
-		text = strings.Replace(text, "    account.registered:\n", "    account.registered:\n      advances_to: completed\n", 1)
+		text := strings.Replace(string(raw), "  account.notification.completed:\n    advances_to: completed\n", "", 1)
+		text = strings.Replace(text, "  account.registered:\n", "  account.registered:\n    advances_to: completed\n", 1)
 		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}

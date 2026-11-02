@@ -1,23 +1,20 @@
 package bus_test
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/bootverify"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
-	for _, mode := range []string{"static"} {
+	for _, handler := range []string{"thing.created", "thing.*"} {
 		for _, rootPin := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s/root_pin=%t", mode, rootPin), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/root_pin=%t", handler, rootPin), func(t *testing.T) {
 				root := t.TempDir()
 				rootSchema := "stages: []\n"
 				if rootPin {
@@ -29,7 +26,7 @@ func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
 					"schema.yaml":         rootSchema,
 					"events.yaml":         "thing.created:\n",
 					"child/schema.yaml":   "pins:\n  inputs:\n    - thing.created\n",
-					"child/nodes.yaml":    "observer:\n  thing.created:\n    guard: true\n",
+					"child/nodes.yaml":    fmt.Sprintf("observer:\n  %s:\n    guard: true\n", handler),
 				} {
 					file := filepath.Join(root, path)
 					if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
@@ -41,21 +38,9 @@ func TestRootPinCannotSatisfyUnconnectedPrivateSourceInput(t *testing.T) {
 				}
 				repo := filepath.Clean("../../..")
 				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-				if err != nil {
-					t.Fatal(err)
-				}
-				source := semanticview.Wrap(bundle)
-				missing := false
-				for _, finding := range bootverify.Run(context.Background(), source, bootverify.Options{}).HardInvalidities() {
-					if finding.CheckID == "input_pin_wiring" && finding.Location == "child" {
-						missing = true
-					}
-				}
-				if !missing {
-					t.Fatal("unconnected child passed input producer verification")
-				}
-				if _, err := runtimebus.DeriveRouteTable(source); err == nil || !strings.Contains(err.Error(), "does not resolve to receiver-local event") {
-					t.Fatalf("unconnected child subscription admission = %v, want private receiver refusal", err)
+				if bundle != nil || !errors.Is(err, runtimecontracts.ErrInvalidField) ||
+					!strings.Contains(err.Error(), fmt.Sprintf("handler %q", handler)) || !strings.Contains(err.Error(), "undeclared event") {
+					t.Fatalf("unconnected private handler admission = %v, want receiver-local declaration refusal", err)
 				}
 			})
 		}
