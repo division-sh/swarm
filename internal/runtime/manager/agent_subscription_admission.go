@@ -2,6 +2,7 @@ package manager
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -63,19 +64,31 @@ func prepareAgentContent(source semanticview.Source, cfg *runtimeactors.AgentCon
 	for key := range scope.Events {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
 	localEvents := localEventSet(keys)
+	for _, subscription := range cfg.Subscriptions {
+		admission := semanticview.ClassifyAuthoredSubscription(source, semanticview.AuthoredSubscriptionRequest{
+			ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent, ConsumerID: cfg.ID,
+			FlowID: cfg.FlowID, FlowPath: cfg.CanonicalFlowPath(), LocalEvents: localEvents, Authored: subscription,
+		})
+		if !admission.Admitted() {
+			return fmt.Errorf("agent %s content subscription: %s", cfg.ID, admission.Message())
+		}
+		if !admission.Pattern() {
+			keys = append(keys, admission.LocalEvent())
+		}
+	}
+	sort.Strings(keys)
+	keys = slices.Compact(keys)
 	programs := make(map[string]cel.Program, len(keys))
 	for _, key := range keys {
 		if len(cfg.Subscriptions) > 0 && !agentContentSubscriptionMatches(source, cfg, key, localEvents) {
 			continue
 		}
-		typ, found := source.ResolveFlowEventStructuralType(cfg.FlowID, key)
-		options := workflowexpr.ValueExpressionOptions{}
-		if found {
-			options.PayloadType = &typ
+		schema := semanticview.ResolveEventSchema(source, cfg.FlowID, key)
+		if !schema.HasSchema || !schema.HasStructural {
+			return fmt.Errorf("agent %s content for %s requires its admitted input schema", cfg.ID, key)
 		}
-		program, err := workflowexpr.PrepareAgentContentExpression(cfg.Content, options.PayloadType)
+		program, err := workflowexpr.PrepareAgentContentExpression(cfg.Content, &schema.StructuralType)
 		if err != nil {
 			return fmt.Errorf("agent %s content for %s: %w", cfg.ID, key, err)
 		}
