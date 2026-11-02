@@ -38,7 +38,7 @@ func TestS1ZeroAgentStartupRefusesOtherRootBothStores(t *testing.T) {
 	}
 	spareArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"schema.yaml":   []byte("stages: []\nrequired_agents: []\n"),
+		"schema.yaml":   []byte("stages: []\n# spare source\n"),
 	})
 	if err != nil {
 		t.Fatal(err)

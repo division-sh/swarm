@@ -361,7 +361,7 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Profile:\n    id: text\n    note: text?\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "Profile:\n  id: text\n  note: text?\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "profile: Profile\nobserved: text\nnotes: [text]\nby_id: map[text]Profile\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `owner:

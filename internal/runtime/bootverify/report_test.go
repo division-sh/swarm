@@ -3520,10 +3520,10 @@ func TestRun_RejectsUnconnectedRootNodeEmitAsChildInputProducerPath(t *testing.T
 func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "pins:\n  inputs:\n    - work.started\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "inputs:\n  - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.started: {value: text}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "pins:\n  inputs:\n    - work.started\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "inputs:\n  - work.started\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.started: {value: text}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  work.started: {}\n")
 	repo := repoRootForBootverifyTest(t)
@@ -5536,9 +5536,8 @@ opco.spend_requested:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "schema.yaml"), `stages:
   active: {}
-pins:
-  inputs:
-    - opco.spend_requested
+inputs:
+  - opco.spend_requested
 `,
 	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "events.yaml"), `
@@ -5747,9 +5746,8 @@ func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 stages:
   idle: {}
   done: {final: true}
-pins:
-  outputs:
-    - ticket.ready
+outputs:
+  - ticket.ready
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), `
 ticket.ready:
@@ -5765,11 +5763,10 @@ ticket.ready:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "schema.yaml"), `stages:
   waiting: {}
   done: {final: true}
-pins:
-  inputs:
-    - ticket.ready
-  outputs:
-    - consumer.started
+inputs:
+  - ticket.ready
+outputs:
+  - consumer.started
 `,
 	)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "events.yaml"), `
@@ -5895,9 +5892,8 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `stages:
   idle: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.assigned
+inputs:
+  - task.assigned
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "local: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `

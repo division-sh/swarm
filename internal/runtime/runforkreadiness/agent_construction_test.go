@@ -34,7 +34,7 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 		}
 		for name, body := range map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			"schema.yaml":   "stages: []\npins:\n  inputs:\n    - work.ready\n",
+			"schema.yaml":   "stages: []\ninputs:\n  - work.ready\n",
 			"events.yaml":   "work.ready:\n",
 			"agents.yaml":   "worker:\n  model: regular\n  intent:\n    inline: Consume the exact selected input.\n  subscriptions: [work.ready]\n",
 		} {

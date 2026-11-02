@@ -40,7 +40,7 @@ func TestHTTPOperatorConstructorRequiresAuthenticatedDeliveryIdentity(t *testing
 		"manifest.yaml":                  []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":                    []byte("stages: []\n"),
 		"ingress/manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"ingress/schema.yaml":            []byte("stages: []\npins:\n  inputs: [inbound.telegram.text_message]\n"),
+		"ingress/schema.yaml":            []byte("stages: []\ninputs: [inbound.telegram.text_message]\n"),
 		"ingress/telegram/manifest.yaml": entry.Provider().ManifestBody(),
 	}
 	for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {

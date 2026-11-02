@@ -114,6 +114,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 			return fmt.Errorf("compile flow %s output pins: %w", flowID, err)
 		}
 	}
+	if err := bundle.lowerPayloadWriteSources(); err != nil {
+		return err
+	}
 	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
 		return fmt.Errorf("compile fan_out: %s", failures[0].Error())
 	}
