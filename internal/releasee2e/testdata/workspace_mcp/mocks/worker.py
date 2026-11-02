@@ -9,7 +9,7 @@ def handle(input):
         return {"calls": [{"name": "read_flow_data", "arguments": {
             "kind": "static_file", "static_id": static_id,
         }}], "usage": {"input_tokens": 1, "output_tokens": 1}}
-    result = json.loads(results[-1]["content"])["tool_result"][-1]
+    result = json.loads(results[-1]["content"])[-1]
     assert result["ok"], result
     return {"calls": [{"name": "emit_work_completed", "arguments": {
         "marker": result["result"]["content"].strip(),
