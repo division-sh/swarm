@@ -8,9 +8,9 @@ import (
 
 func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
-	timer, ok := bundle.WorkflowTimerForNode(genericExecutableNode(t, bundle, "delivery-node"), "item_timeout")
+	timer, ok := bundle.WorkflowTimerForNode(genericExecutableNode(t, bundle, "delivery-node"), "delivery-node.timer.item.timeout")
 	if !ok {
-		t.Fatal("expected item_timeout timer")
+		t.Fatal("expected delivery-node.timer.item.timeout timer")
 	}
 	if timer.Owner != "delivery-node" || timer.Event != "timer.item.timeout" {
 		t.Fatalf("unexpected timer contract: %+v", timer)

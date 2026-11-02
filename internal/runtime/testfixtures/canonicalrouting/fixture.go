@@ -350,11 +350,11 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	handler := ""
 	switch mutation {
 	case RetiredStaticCreate:
-		handler = "      create_entity: true\n"
+		handler = "    create_entity: true\n"
 	case RetiredStaticSelect:
-		handler = "      select_entity:\n        by:\n          legacy_id: payload.legacy_id\n"
+		handler = "    select_entity:\n      by:\n        legacy_id: payload.legacy_id\n"
 	case RetiredStaticSelectOrCreate:
-		handler = "      select_or_create_entity:\n        by:\n          legacy_id: payload.legacy_id\n"
+		handler = "    select_or_create_entity:\n      by:\n        legacy_id: payload.legacy_id\n"
 	case RetiredStaticMissingAcquisition:
 	default:
 		t.Fatalf("unsupported retired static mutation %q", mutation)
@@ -387,12 +387,12 @@ amount: 0
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/nodes.yaml", `legacy-writer:
   legacy.seen:
-`+handler+`      data_accumulation:
-        writes:
-          - source_field: legacy_id
-            target_field: legacy_id
-          - source_field: amount
-            target_field: amount
+`+handler+`    data_accumulation:
+      writes:
+        - source_field: legacy_id
+          target_field: legacy_id
+        - source_field: amount
+          target_field: amount
 `)
 }
 
@@ -400,6 +400,7 @@ amount: 0
 // caller-selected identity invalidity used by the retirement proof.
 func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	t.Helper()
+	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "account/nodes.yaml")
 	writeClosedNegativeFile(t, root, "state.yaml", "display_name: text\n")
 	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "schema.yaml", `# fixture: template-select-or-create

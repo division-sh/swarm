@@ -64,20 +64,20 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "[item.completed, halt.requested]", "[item.completed, halt.requested, touch]", 1)
 				files["events.yaml"] += "touch:\n"
 				files["state.yaml"] += "marker: integer\nfinal_missing: [text]\nfinal_timed_out: boolean\nmembers_list: [text]\n"
-				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "        until: halt.requested\n", "        until: halt.requested\n        deadline: {after: 1h, from: stage_entry}\n", 1)
-				files["nodes.yaml"] += `        on_deadline:
-          advances_to: ready
-          data_accumulation:
-            writes:
-              - {target_field: final_expected, value: join.expected}
-              - {target_field: final_completed, value: join.completed}
-              - {target_field: final_results, value: join.results}
-              - {target_field: final_reason, value: join.close_reason}
-              - {target_field: final_missing, value: join.missing}
-              - {target_field: final_timed_out, value: join.timed_out}
-    touch:
-      data_accumulation:
-        writes: [{target_field: marker, value: 1}]
+				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "      until: halt.requested\n", "      until: halt.requested\n      deadline: {after: 1h, from: stage_entry}\n", 1)
+				files["nodes.yaml"] += `      on_deadline:
+        advances_to: ready
+        data_accumulation:
+          writes:
+            - {target_field: final_expected, value: join.expected}
+            - {target_field: final_completed, value: join.completed}
+            - {target_field: final_results, value: join.results}
+            - {target_field: final_reason, value: join.close_reason}
+            - {target_field: final_missing, value: join.missing}
+            - {target_field: final_timed_out, value: join.timed_out}
+  touch:
+    data_accumulation:
+      writes: [{target_field: marker, value: 1}]
 `
 				if explicit {
 					files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "members: {count: 2, by: payload.member_id}", "members: {from: state.members_list, by: payload.member_id}", 1)

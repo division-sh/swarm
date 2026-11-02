@@ -130,7 +130,7 @@ item.ready:
 `,
 	}
 	if gather {
-		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    batch.ready:\n", "    batch.ready:\n      advances_to: awaiting\n", 1)
+		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "  batch.ready:\n", "  batch.ready:\n    advances_to: awaiting\n", 1)
 		files["nodes.yaml"] += `collector:
   item.ready:
     join:
@@ -687,7 +687,7 @@ func runA2MapToListDuplicateOrdinals(t *testing.T, selected gateRecoveryStoreCas
   count: integer
   value: integer
 `
-	files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    batch.ready:\n", "    batch.ready:\n      advances_to: awaiting\n", 1)
+	files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "  batch.ready:\n", "  batch.ready:\n    advances_to: awaiting\n", 1)
 	files["nodes.yaml"] += `expander:
   item.ready:
     fan_out:
