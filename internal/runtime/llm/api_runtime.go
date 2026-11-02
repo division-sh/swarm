@@ -114,6 +114,9 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, l
 }
 
 func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+	if _, err := admitProviderToolNames(tools); err != nil {
+		return nil, err
+	}
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		if lease != nil {
@@ -246,6 +249,10 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		return nil, err
 	}
 
+	toolNames, err := admitProviderToolNames(s.Tools)
+	if err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -305,7 +312,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		return nil, lastErr
 	}
 
-	resp := convertAnthropicResponse(parsed)
+	resp := convertAnthropicResponse(parsed, toolNames)
 	resp.Raw = rawResp
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
 		resp.CapabilitySurface = &surface
@@ -420,11 +427,14 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 	if len(msgs) == 0 {
 		return anthropicRequest{}, errors.New("at least one message is required")
 	}
+	if _, err := admitProviderToolNames(s.Tools); err != nil {
+		return anthropicRequest{}, err
+	}
 
 	tools := make([]anthropicTool, 0, len(s.Tools))
 	for _, t := range s.Tools {
 		tool := anthropicTool{
-			Name:        t.Name,
+			Name:        providerToolWireName(t.Name),
 			Description: DeliveredToolDescription(t),
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		}
@@ -559,7 +569,7 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	return body, parsed, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil)
 }
 
-func convertAnthropicResponse(parsed anthropicResponse) Response {
+func convertAnthropicResponse(parsed anthropicResponse, names map[string]string) Response {
 	resp := Response{
 		Message: Message{Role: "assistant"},
 	}
@@ -579,6 +589,7 @@ func convertAnthropicResponse(parsed anthropicResponse) Response {
 	}
 	resp.Message.Content = strings.TrimSpace(strings.Join(textParts, "\n"))
 	resp.Message.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+	resolveProviderToolNames(&resp, names)
 	return resp
 }
 

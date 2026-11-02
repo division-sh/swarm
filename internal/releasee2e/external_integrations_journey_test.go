@@ -22,6 +22,15 @@ import (
 )
 
 func TestExternalMCPPublicJourneyBothStores(t *testing.T) {
+	runExternalMCPPublicJourneyBothStores(t, false)
+}
+
+func TestExternalMCPUnknownProviderNameRefusedBothStores(t *testing.T) {
+	runExternalMCPPublicJourneyBothStores(t, true)
+}
+
+func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
+	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {
 		t.Fatalf("%s required", goldenPostgresEnv)
@@ -35,7 +44,11 @@ func TestExternalMCPPublicJourneyBothStores(t *testing.T) {
 			remote := mcpapi.New(t, "synthetic-mcp-secret")
 			var rejections, inferences atomic.Int64
 			model := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", func(request llmapi.Request) (llmapi.Reply, error) {
-				reply, err := externalMCPJourneyReply(request)
+				respond := externalMCPJourneyReply
+				if unknownName {
+					respond = externalMCPUnknownNameReply
+				}
+				reply, err := respond(request)
 				if reply.StatusCode >= 300 {
 					rejections.Add(1)
 					t.Logf("mock provider refused request before inference: HTTP %d %s", reply.StatusCode, reply.ErrorBody)
@@ -101,7 +114,11 @@ func TestExternalMCPPublicJourneyBothStores(t *testing.T) {
 				t.Fatalf("public MCP input failed: %v", err)
 			}
 			completed := waitConnectorPublicResult(t, process, published.RunID, "external.completed", 1, secrets)
-			if completed.Payload["text"] != "synthetic MCP request" {
+			wantText, wantCalls := "synthetic MCP request", 1
+			if unknownName {
+				wantText, wantCalls = "provider name refused", 0
+			}
+			if completed.Payload["text"] != wantText {
 				t.Fatalf("public result lost external MCP value: %#v", completed.Payload)
 			}
 			calls := 0
@@ -116,15 +133,77 @@ func TestExternalMCPPublicJourneyBothStores(t *testing.T) {
 					}
 				}
 			}
-			if calls != 1 || len(model.Requests()) != 2 {
-				t.Fatalf("MCP calls/model requests=%d/%d, want 1/2", calls, len(model.Requests()))
+			if calls != wantCalls || len(model.Requests()) != 2 {
+				t.Fatalf("MCP calls/model requests=%d/%d, want %d/2", calls, len(model.Requests()), wantCalls)
 			}
+			requireMCPJourneyWireInspection(t, ctx, process, published.RunID, model.Requests()[0].Body)
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
 			requireConnectorSecretsAbsent(t, process.output.String(), secrets)
 			t.Logf("real binary MCP discovery/agent/external-call/public-result; backend=%s; elapsed=%s (shared build excluded)", backend, time.Since(started))
 		})
+	}
+}
+
+func externalMCPUnknownNameReply(request llmapi.Request) (llmapi.Reply, error) {
+	if request.Number == 1 {
+		reply, err := externalMCPJourneyReply(request)
+		if err == nil && len(reply.Tools) == 1 {
+			// This is the admitted canonical spelling, NOT the offered wire name.
+			reply.Tools[0].Name = "partner.ping"
+		}
+		return reply, err
+	}
+	var body struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+			CallID  string `json:"tool_call_id"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(request.Body, &body); err != nil {
+		return llmapi.Reply{}, err
+	}
+	for _, message := range body.Messages {
+		if request.Number == 2 && message.Role == "tool" && message.CallID == "mcp-call" && strings.HasPrefix(message.Content, "error: tool_not_offered:") {
+			return llmapi.Reply{ID: "refusal-observed", Model: "fixture-model", InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
+				Tools: []llmapi.ToolCall{{ID: "emit-refusal", Name: "emit_external_completed", Arguments: json.RawMessage(`{"text":"provider name refused"}`)}}}, nil
+		}
+	}
+	return llmapi.Reply{}, fmt.Errorf("model did not receive the exact tool_not_offered failed-call result")
+}
+
+func requireMCPJourneyWireInspection(t *testing.T, ctx context.Context, process *releaseServeProcess, runID string, actual json.RawMessage) {
+	t.Helper()
+	conversations := listGoldenConversations(t, ctx, process.rpc, runID)
+	if len(conversations) != 1 {
+		t.Fatalf("public MCP conversation count=%d, want 1", len(conversations))
+	}
+	turns := listGoldenTurns(t, ctx, process.rpc, conversations[0].SessionID)
+	if len(turns) != 2 {
+		t.Fatalf("public MCP turn count=%d, want 2", len(turns))
+	}
+	var sent struct {
+		Tools []any `json:"tools"`
+	}
+	if err := json.Unmarshal(actual, &sent); err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range turns {
+		var detail struct {
+			ProviderRendering struct {
+				Status string `json:"status"`
+				Source string `json:"source"`
+				Tools  []any  `json:"tools"`
+			} `json:"provider_rendering"`
+		}
+		if err := process.rpc.call(ctx, "conversation.get_turn", map[string]any{"session_id": conversations[0].SessionID, "turn_id": turn.TurnID}, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if detail.ProviderRendering.Status != "recorded" || detail.ProviderRendering.Source != "recorded_provider_request" || !reflect.DeepEqual(detail.ProviderRendering.Tools, sent.Tools) {
+			t.Fatal("public inspection does not show the exact wire tool definitions sent")
+		}
 	}
 }
 
@@ -157,7 +236,7 @@ func externalMCPJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 		}
 		names[tool.Function.Name] = true
 	}
-	if !names["partner.ping"] || !names["emit_external_completed"] {
+	if !names["partner_ping"] || !names["emit_external_completed"] || names["partner.ping"] {
 		return llmapi.Reply{}, fmt.Errorf("model did not receive the exact external/terminal tools: %v", names)
 	}
 	reply := llmapi.Reply{ID: fmt.Sprintf("integration-%d", request.Number), Model: "fixture-model", Reasoning: "synthetic integration reasoning", InputTokens: 10, OutputTokens: 5, TotalTokens: 15}
@@ -170,7 +249,7 @@ func externalMCPJourneyReply(request llmapi.Request) (llmapi.Reply, error) {
 		if !found {
 			return reply, fmt.Errorf("model input lost the authored public payload")
 		}
-		reply.Tools = []llmapi.ToolCall{{ID: "mcp-call", Name: "partner.ping", Arguments: json.RawMessage(`{"text":"synthetic MCP request"}`)}}
+		reply.Tools = []llmapi.ToolCall{{ID: "mcp-call", Name: "partner_ping", Arguments: json.RawMessage(`{"text":"synthetic MCP request"}`)}}
 	case 2:
 		found := false
 		for _, message := range body.Messages {

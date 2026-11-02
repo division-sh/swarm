@@ -264,6 +264,11 @@ func CompileManagedCapabilityAdmission(actor models.AgentConfig, contract Provid
 	if err := contract.Validate(); err != nil {
 		return nil, err
 	}
+	if contract.Transport == ProviderTransportAPI {
+		if _, err := admitProviderToolNames(tools); err != nil {
+			return nil, err
+		}
+	}
 	nativeNames := nativeCapabilityNames(actor)
 	providerNative, err := managedProviderNativeNames(contract, nativeNames)
 	if err != nil {
@@ -362,7 +367,7 @@ func managedProviderNativeNames(contract ProviderContract, nativeNames []string)
 func managedConcreteCapabilityBindings(contract ProviderContract, name string) []managedcapabilities.DeliveryBinding {
 	name = toolidentity.CanonicalName(name)
 	if contract.Transport == ProviderTransportAPI {
-		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: name, RequiredEvidenceKind: evidenceAPIRequestDelivered}}
+		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: providerToolWireName(name), RequiredEvidenceKind: evidenceAPIRequestDelivered}}
 	}
 	exactName := toolidentity.RuntimeToolsMCPPrefix + name
 	return []managedcapabilities.DeliveryBinding{
@@ -534,6 +539,7 @@ func ValidateCLIProviderCapabilitySurface(surface managedcapabilities.Surface, r
 
 func ObserveAPIRequestCapabilitySurface(surface managedcapabilities.Surface, deliveredTools []ToolDefinition) (managedcapabilities.Surface, error) {
 	planned := map[string]string{}
+	canonical := map[string]string{}
 	for _, tool := range surface.Tools {
 		if !tool.Capability.Visible || !tool.Capability.Callable {
 			continue
@@ -541,13 +547,14 @@ func ObserveAPIRequestCapabilitySurface(surface managedcapabilities.Surface, del
 		for _, binding := range tool.Bindings {
 			if binding.Kind == managedcapabilities.BindingAPIDefinition {
 				planned[binding.ExactName] = tool.DefinitionHash
+				canonical[binding.ExactName] = tool.Name
 			}
 		}
 	}
 	actual := map[string]string{}
 	var mismatches []managedcapabilities.DeliveryMismatch
 	for _, def := range deliveredTools {
-		name := toolidentity.CanonicalName(def.Name)
+		name := strings.TrimSpace(def.Name)
 		if name == "" {
 			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingAPIDefinition, ExactName: "<unnamed>", Kind: "unnamed_api_definition"})
 			continue
@@ -555,6 +562,9 @@ func ObserveAPIRequestCapabilitySurface(surface managedcapabilities.Surface, del
 		if _, duplicate := actual[name]; duplicate {
 			mismatches = append(mismatches, managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingAPIDefinition, ExactName: name, Kind: "duplicate_api_definition"})
 			continue
+		}
+		if original, found := canonical[name]; found {
+			def.Name = original
 		}
 		actual[name] = ToolDefinitionIdentity(def)
 	}

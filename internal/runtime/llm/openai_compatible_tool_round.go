@@ -16,6 +16,10 @@ import (
 // memory redacts its content or arguments. Never hydrate memory from this
 // request-only reconstruction.
 func replayOpenAICompatibleToolRound(ctx context.Context, request *openAICompatibleRequest, session *Session, call *managedProviderCall) error {
+	names, err := admitProviderToolNames(session.Tools)
+	if err != nil {
+		return err
+	}
 	if call.selectedToolRound != nil {
 		if call.toolRound != nil {
 			return fmt.Errorf("openai-compatible tool continuation has conflicting predecessors")
@@ -24,7 +28,7 @@ func replayOpenAICompatibleToolRound(ctx context.Context, request *openAICompati
 		if err != nil {
 			return err
 		}
-		return appendOpenAICompatibleToolRound(request, call, dispatch.request, *call.selectedToolRound, dispatch.projection.Messages[len(dispatch.projection.Messages)-1])
+		return appendOpenAICompatibleToolRound(request, call, dispatch.request, *call.selectedToolRound, dispatch.projection.Messages[len(dispatch.projection.Messages)-1], names)
 	}
 	if call.toolRound == nil {
 		return fmt.Errorf("openai-compatible tool continuation requires its admitted predecessor")
@@ -42,10 +46,10 @@ func replayOpenAICompatibleToolRound(ctx context.Context, request *openAICompati
 		(successor.ParentFrameID() != call.frame.Turn.ParentFrameID || !bytes.Equal(successor.ToolResult(), call.frame.Turn.ToolResult)) {
 		return fmt.Errorf("openai-compatible recovered tool continuation differs from admitted successor")
 	}
-	return appendOpenAICompatibleToolRound(request, call, round.Request, prior.Response, projection.Messages[len(projection.Messages)-2])
+	return appendOpenAICompatibleToolRound(request, call, round.Request, prior.Response, projection.Messages[len(projection.Messages)-2], names)
 }
 
-func appendOpenAICompatibleToolRound(request *openAICompatibleRequest, call *managedProviderCall, rawRequest []byte, prior Response, inputMessage Message) error {
+func appendOpenAICompatibleToolRound(request *openAICompatibleRequest, call *managedProviderCall, rawRequest []byte, prior Response, inputMessage Message, names map[string]string) error {
 	var previousRequest openAICompatibleRequest
 	if err := json.Unmarshal(rawRequest, &previousRequest); err != nil {
 		return fmt.Errorf("decode admitted openai-compatible round request: %w", err)
@@ -62,7 +66,7 @@ func appendOpenAICompatibleToolRound(request *openAICompatibleRequest, call *man
 	if err := json.Unmarshal(prior.Raw, &previousResponse); err != nil {
 		return fmt.Errorf("decode admitted openai-compatible round response: %w", err)
 	}
-	converted, err := convertOpenAICompatibleResponse(previousResponse)
+	converted, err := convertOpenAICompatibleResponse(previousResponse, names)
 	if err != nil || !reflect.DeepEqual(converted.Message, prior.Message) || len(converted.ToolCalls) == 0 {
 		return fmt.Errorf("openai-compatible tool continuation predecessor response differs from admitted message")
 	}
@@ -72,6 +76,16 @@ func appendOpenAICompatibleToolRound(request *openAICompatibleRequest, call *man
 	assistant.Role = "assistant"
 	request.Messages = append(previousRequest.Messages, assistant)
 	request.Messages = append(request.Messages, toOpenAICompatibleMessages(call.message)...)
+	for i := range request.Messages {
+		for j := range request.Messages[i].ToolCalls {
+			function := &request.Messages[i].ToolCalls[j].Function
+			wire := providerToolWireName(function.Name)
+			if err := validateProviderToolWireName(function.Name, wire); err != nil {
+				return err
+			}
+			function.Name = wire
+		}
+	}
 	return nil
 }
 

@@ -117,6 +117,9 @@ func (r *OpenAICompatibleRuntime) PersistConversationSnapshot(ctx context.Contex
 }
 
 func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+	if _, err := admitProviderToolNames(tools); err != nil {
+		return nil, err
+	}
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		if lease != nil {
@@ -256,6 +259,10 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		r.baseURL = baseURL
 	}
 
+	toolNames, err := admitProviderToolNames(s.Tools)
+	if err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -340,7 +347,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		return nil, err
 	}
 
-	resp, err := convertOpenAICompatibleResponse(parsed)
+	resp, err := convertOpenAICompatibleResponse(parsed, toolNames)
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
@@ -457,6 +464,12 @@ func (r *OpenAICompatibleRuntime) buildRequest(s *Session, input Message, model 
 	if len(msgs) == 0 {
 		return openAICompatibleRequest{}, errors.New("at least one message is required")
 	}
+	if _, err := admitProviderToolNames(s.Tools); err != nil {
+		return openAICompatibleRequest{}, err
+	}
+	if err := validateProviderReplayToolNames(s.Messages, input); err != nil {
+		return openAICompatibleRequest{}, err
+	}
 
 	tools := make([]openAICompatibleTool, 0, len(s.Tools))
 	for _, t := range s.Tools {
@@ -470,7 +483,7 @@ func (r *OpenAICompatibleRuntime) buildRequest(s *Session, input Message, model 
 		tools = append(tools, openAICompatibleTool{
 			Type: "function",
 			Function: openAICompatibleFunctionTool{
-				Name:        strings.TrimSpace(t.Name),
+				Name:        providerToolWireName(t.Name),
 				Description: DeliveredToolDescription(t),
 				Parameters:  schema,
 			},
@@ -647,7 +660,7 @@ func openAICompatibleToolCalls(calls []ToolCall) []openAICompatibleToolCall {
 			ID:   strings.TrimSpace(call.ID),
 			Type: "function",
 			Function: openAICompatibleToolCallFunction{
-				Name:      name,
+				Name:      providerToolWireName(name),
 				Arguments: args,
 			},
 		})
@@ -655,7 +668,7 @@ func openAICompatibleToolCalls(calls []ToolCall) []openAICompatibleToolCall {
 	return out
 }
 
-func convertOpenAICompatibleResponse(parsed openAICompatibleResponse) (Response, error) {
+func convertOpenAICompatibleResponse(parsed openAICompatibleResponse, names map[string]string) (Response, error) {
 	if len(parsed.Choices) == 0 {
 		return Response{}, errors.New("openai-compatible response missing choices")
 	}
@@ -672,11 +685,12 @@ func convertOpenAICompatibleResponse(parsed openAICompatibleResponse) (Response,
 		}
 		resp.ToolCalls = append(resp.ToolCalls, ToolCall{
 			ID:        strings.TrimSpace(tc.ID),
-			Name:      strings.TrimSpace(tc.Function.Name),
+			Name:      tc.Function.Name,
 			Arguments: parseOpenAICompatibleToolArguments(tc.Function.Arguments),
 		})
 	}
 	resp.Message.ToolCalls = append([]ToolCall(nil), resp.ToolCalls...)
+	resolveProviderToolNames(&resp, names)
 	return resp, nil
 }
 
