@@ -66,7 +66,7 @@ func TestAgentReadScopePreservesExactRunAndFlowOnPrefixRetry(t *testing.T) {
 				}
 				requests = append(requests, req)
 				if req.Method == "agent.list" {
-					writeJSONRPCResult(t, w, req.ID, map[string]any{"agents": []any{agentSummaryResult("agent-one", "reviewer", "running")}})
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"agents": []any{agentSummaryResult("agent-one", "reviewer", "running"), agentSummaryResult("agent-one", "reviewer", "idle")}})
 					return
 				}
 				if req.Params["agent_id"] == "agent-o" {
