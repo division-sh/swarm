@@ -804,11 +804,20 @@ func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
 }
 
 func TestBoardDirectiveToolSuccessRequiresCanonicalContinuationProjection(t *testing.T) {
-	if toolMessageHasSuccessfulResult(`[{"ok":true,"result":"retired raw result"}]`) {
-		t.Fatal("retired raw tool-result array satisfied a board directive")
+	for _, recorded := range []string{
+		`[{"name":"read_state","tool_call_id":"call-1","ok":true,"result":"handled","provider_content":"handled"}]`,
+		`{"kind":"tool_continuation","tool_result":[{"ok":true,"result":"handled"}]}`,
+	} {
+		if !toolMessageHasSuccessfulResult(recorded) {
+			t.Fatalf("recorded tool result did not satisfy a board directive: %s", recorded)
+		}
 	}
-	if !toolMessageHasSuccessfulResult(`{"kind":"tool_continuation","tool_result":[{"ok":true,"result":"handled"}]}`) {
-		t.Fatal("canonical tool-continuation projection did not satisfy a board directive")
+	for _, refused := range []string{
+		`[{"ok":false}]`, `[]`, `{"kind":"remediation","tool_result":[{"ok":true}]}`, `handled`,
+	} {
+		if toolMessageHasSuccessfulResult(refused) {
+			t.Fatalf("failed or malformed tool result satisfied a board directive: %s", refused)
+		}
 	}
 }
 
@@ -1228,8 +1237,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "Available emit tools") {
 		t.Fatalf("directive input retained prompt-owned emit capability truth: %q", firstOrEmpty(rt.inputs))
 	}
-	if len(rt.inputs) < 2 || !strings.Contains(rt.inputs[1], `"kind":"remediation"`) ||
-		!strings.Contains(rt.inputs[1], `"reason":"directive_completed_without_action"`) ||
+	if len(rt.inputs) < 2 || rt.inputs[1] != "directive_completed_without_action: start a corpus run" ||
 		strings.Contains(rt.inputs[1], "I will trigger the workflow now") {
 		t.Fatalf("remediation input = %q, want typed reason without prior assistant prose", firstOrEmpty(rt.inputs[1:]))
 	}
