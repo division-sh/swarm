@@ -1,10 +1,9 @@
 # fixture: selected-fork-flow-scoped-mcp
-pins:
-  inputs:
-    - task.assigned
-    - task.completed
-  outputs:
-    - task.assigned
+inputs:
+  - task.assigned
+  - task.completed
+outputs:
+  - task.assigned
 connect:
   - event: task.assigned
     from: .

@@ -1,8 +1,7 @@
 stages:
   idle: {}
   compiled: {final: true}
-pins:
-  inputs:
-    - digest.requested
-  outputs:
-    - digest.compiled
+inputs:
+  - digest.requested
+outputs:
+  - digest.compiled

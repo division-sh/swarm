@@ -1,3 +1,2 @@
 stages: []
-pins:
-  inputs: [notice.requested]
+inputs: [notice.requested]

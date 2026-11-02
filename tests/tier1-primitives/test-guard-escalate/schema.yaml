@@ -1,9 +1,8 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - check.requested
-  outputs:
-    - check.escalated
-    - check.passed
+inputs:
+  - check.requested
+outputs:
+  - check.escalated
+  - check.passed

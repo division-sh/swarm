@@ -1,11 +1,10 @@
 # fixture: standing-root-tree
 stages: []
-pins:
-  inputs:
-    - inbound.telegram.raw
-    - inbound.telegram.text_message
-    - inbound.telegram.callback_action
-  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]
+inputs:
+  - inbound.telegram.raw
+  - inbound.telegram.text_message
+  - inbound.telegram.callback_action
+outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]
 connect:
   - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}
   - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}

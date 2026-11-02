@@ -1,8 +1,7 @@
 stages:
   pending: {}
   approved: {final: true}
-pins:
-  inputs:
-    - item.reviewed
-  outputs:
-    - item.approved
+inputs:
+  - item.reviewed
+outputs:
+  - item.approved

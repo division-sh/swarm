@@ -5,8 +5,7 @@ stages:
   investigating: {}
   assessed: {}
   done: {final: true}
-pins:
-  inputs:
-    - company.registered
-  outputs:
-    - company.status
+inputs:
+  - company.registered
+outputs:
+  - company.status

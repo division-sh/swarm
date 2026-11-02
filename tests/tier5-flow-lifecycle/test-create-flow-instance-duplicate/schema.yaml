@@ -2,12 +2,11 @@ stages:
   idle: {}
   spawned: {}
   done: {final: true}
-pins:
-  inputs:
-    - flow.spawn_requested
-    - flow.finished
-  outputs:
-    - flow.spawned
+inputs:
+  - flow.spawn_requested
+  - flow.finished
+outputs:
+  - flow.spawned
 connect:
   - event: flow.spawned
     from: .

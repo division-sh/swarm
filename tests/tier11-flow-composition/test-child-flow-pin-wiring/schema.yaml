@@ -1,9 +1,8 @@
 stages:
   ready: {}
   done: {final: true}
-pins:
-  inputs:
-    - job.submit
+inputs:
+  - job.submit
 connect:
   - event: work.completed
     from: child

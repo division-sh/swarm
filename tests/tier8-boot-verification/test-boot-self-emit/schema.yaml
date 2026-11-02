@@ -1,8 +1,7 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - loop.event
-  outputs:
-    - loop.event
+inputs:
+  - loop.event
+outputs:
+  - loop.event

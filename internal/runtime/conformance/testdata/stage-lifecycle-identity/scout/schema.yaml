@@ -16,7 +16,6 @@ stages:
     final: true
   timed_out:
     final: true
-pins:
-  inputs:
-    - scout.setup
-    - scout.member.done
+inputs:
+  - scout.setup
+  - scout.member.done

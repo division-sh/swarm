@@ -1,2 +1,1 @@
-pins:
-  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]
+inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]

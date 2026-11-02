@@ -1,8 +1,7 @@
 stages:
   waiting: {}
   admitted: {final: true}
-pins:
-  inputs:
-    - admission.requested
-  outputs:
-    - admission.granted
+inputs:
+  - admission.requested
+outputs:
+  - admission.granted

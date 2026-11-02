@@ -4,8 +4,7 @@ stages:
   pending: {}
   reading: {}
   complete: {final: true}
-pins:
-  inputs:
-    - child.requested
-  outputs:
-    - child.completed
+inputs:
+  - child.requested
+outputs:
+  - child.completed

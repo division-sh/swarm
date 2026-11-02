@@ -1,8 +1,7 @@
 # fixture: beta
 stages: []
-pins:
-  inputs:
-    - inbound.telegram.raw
-    - inbound.telegram.text_message
-    - inbound.telegram.callback_action
-  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]
+inputs:
+  - inbound.telegram.raw
+  - inbound.telegram.text_message
+  - inbound.telegram.callback_action
+outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]

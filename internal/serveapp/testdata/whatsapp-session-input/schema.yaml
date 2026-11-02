@@ -1,12 +1,11 @@
 stages:
   active: {}
-pins:
-  inputs:
-    - inbound.whatsapp.raw
-    - inbound.whatsapp.message
-    - work.requested
-  outputs:
-    - inbound.whatsapp.message
-    - work.requested
+inputs:
+  - inbound.whatsapp.raw
+  - inbound.whatsapp.message
+  - work.requested
+outputs:
+  - inbound.whatsapp.message
+  - work.requested
 connect:
   - {event: work.requested, from: ., to: reviews}

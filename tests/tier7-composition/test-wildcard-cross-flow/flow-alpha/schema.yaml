@@ -2,8 +2,7 @@
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - trigger.alpha
-  outputs:
-    - job.alpha_done
+inputs:
+  - trigger.alpha
+outputs:
+  - job.alpha_done

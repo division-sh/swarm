@@ -3,6 +3,5 @@ instance: work_id
 stages:
   pending: {}
   done: {final: true}
-pins:
-  inputs:
-    - task.submitted
+inputs:
+  - task.submitted

@@ -6,4 +6,4 @@ stages:
   s2:
     timers: [{after: 1s, advances_to: s1}]
   closed: {final: true}
-pins: {inputs: [hub.start, hub.bump, hub.close]}
+inputs: [hub.start, hub.bump, hub.close]

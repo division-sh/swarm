@@ -1,8 +1,7 @@
 stages:
   pending: {}
   processing: {final: true}
-pins:
-  inputs:
-    - batch.received
-  outputs:
-    - task.dispatched
+inputs:
+  - batch.received
+outputs:
+  - task.dispatched

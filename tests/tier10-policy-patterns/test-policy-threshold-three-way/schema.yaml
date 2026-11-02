@@ -3,8 +3,7 @@ stages:
   tier_a: {final: true}
   tier_b: {final: true}
   tier_c: {final: true}
-pins:
-  inputs:
-    - eval.submitted
-  outputs:
-    - eval.tier_b
+inputs:
+  - eval.submitted
+outputs:
+  - eval.tier_b
