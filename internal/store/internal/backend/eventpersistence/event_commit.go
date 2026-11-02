@@ -14,6 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -32,6 +33,8 @@ type eventCommitTxStore interface {
 	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement, runlifecycle.LiveRunScope) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	RequireWorkflowJoinAdmissionTx(context.Context, *sql.Tx, []runtimepipeline.WorkflowJoinAdmissionFence) error
+	LockWorkflowPublicationTx(context.Context, *sql.Tx, runtimebus.PublicationCommand) error
+	RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	CommitInitialPipelineScopeTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope) error
 	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
@@ -636,6 +639,14 @@ func commitValidatedPublicationSQL(
 	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	creationAlreadyCommitted := false
 	var err error
+	if command.DynamicFlowCreation != nil {
+		if _, err := store.RequireActiveSourceTx(ctx, tx, request.Event.Event().RunID()); err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
+	if err := store.LockWorkflowPublicationTx(ctx, tx, command); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
 	if command.DynamicFlowCreation != nil {
 		creationAlreadyCommitted, err = store.PrepareDynamicFlowCreationOccurrenceCommitTx(ctx, tx, *command.DynamicFlowCreation)
 		if err != nil {

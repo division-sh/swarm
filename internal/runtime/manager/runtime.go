@@ -1363,6 +1363,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 					Failure:   failureEnvelope(err, "agent-manager", "reset_sessions"),
 				})
 			}
+			return false, fmt.Errorf("reset durable sessions: %w", err)
 		} else if summary.OrphanedCount() > 0 && am.bus != nil {
 			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 				Level:     "warn",
@@ -1788,7 +1789,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 			if releaseErr := am.lifecycle.releaseLoop(token, done); releaseErr != nil && am.bus != nil {
 				failure := runtimefailures.FromError(releaseErr, "agent-manager", "release_agent_loop")
-				_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+				_ = am.bus.LogRuntime(context.WithoutCancel(parent), runtimepipeline.RuntimeLogEntry{
 					Level: "error", Component: "agent-manager", Action: "agent_loop_release_failed",
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
@@ -2106,6 +2107,9 @@ func agentDeliveryExecutionContext(
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
 	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
+	if process, found := worklifetime.ProcessFromContext(loopCtx); found {
+		ctx = worklifetime.WithProcess(ctx, process)
+	}
 	fail := func(err error) (context.Context, func(), error) {
 		cleanup()
 		return nil, nil, err

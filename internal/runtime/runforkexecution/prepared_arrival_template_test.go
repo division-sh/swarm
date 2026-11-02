@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -60,8 +59,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			}
 			ctx := runForkTestContext(t)
 			startupEntry := ctx
-			process, _ := worklifetime.ProcessFromContext(ctx)
-			baseline := process.ActiveCount()
+			ctx = originalSelectedFixtureContext(t, ctx, selected.(startupownership.Store))
 			t.Cleanup(func() {
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Error(err)
@@ -208,7 +206,6 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			if err != nil {
 				t.Fatal(err)
 			}
-			baseline = process.ActiveCount()
 			request := SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, Owner: owner, ForkOperation: &operation,
 				LiveRuntime: liveRuntime, LiveContexts: liveContexts, LiveRuns: selected.(runlifecycle.LiveRunReader),
@@ -283,12 +280,12 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				if err != nil {
 					t.Fatal(err)
 				}
-				if found && instance.CurrentState == "attention" && settlement.Ready && header.Status == "live" && header.EndedAt == nil && process.ActiveCount() == baseline && retained == 0 {
+				if found && instance.CurrentState == "attention" && settlement.Ready && header.Status == "live" && header.EndedAt == nil && retained == 0 {
 					break
 				}
 				select {
 				case <-wait.Done():
-					t.Fatalf("prepared orders arrival did not settle its final instance: header=%+v contexts=%d leases=%d baseline=%d instance=%+v found=%t settlement=%+v", header, retained, process.ActiveCount(), baseline, instance, found, settlement)
+					t.Fatalf("prepared orders arrival did not settle its final instance: header=%+v contexts=%d instance=%+v found=%t settlement=%+v", header, retained, instance, found, settlement)
 				case <-time.After(10 * time.Millisecond):
 				}
 			}

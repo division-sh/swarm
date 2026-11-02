@@ -61,9 +61,9 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 	}
 	var committed bool
 	if s.processLease != nil {
-		committed, err = s.processLease.RunTransactionOutcome(ctx, bootstrap)
+		committed, err = s.processLease.RunSchemaBootstrapOutcome(ctx, bootstrap)
 	} else {
-		committed, err = s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{}, bootstrap)
+		committed, err = s.backend.RunSchemaBootstrapOutcome(ctx, bootstrap)
 	}
 	if committed {
 		s.schemaAdmission.markCurrent()

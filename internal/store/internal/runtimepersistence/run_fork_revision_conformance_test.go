@@ -663,6 +663,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	initialRevision := captureRunForkTestRevision(t, db, runID)
 	tx, err := db.BeginTx(ctx, nil)

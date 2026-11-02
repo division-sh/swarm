@@ -17,6 +17,7 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, entity, foreignRun, foreignEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 			seedEntityToolStorageWitness(t, ctx, fixture, run, entity, true, true)
 			seedEntityToolStorageWitness(t, ctx, fixture, foreignRun, entity, true, true)
@@ -83,6 +84,7 @@ func TestTrackedMutationProjectionRefusesRawInvalidCancelledClosedAndLateFailure
 		for _, cut := range []string{"invalid-run", "invalid-entity", "absent", "cancelled", "closed", "late-unavailable"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				run, entity := uuid.NewString(), uuid.NewString()
 				seedEntityToolStorageWitness(t, ctx, fixture, run, entity, true, true)
 				switch cut {

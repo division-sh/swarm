@@ -1007,7 +1007,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 						continue
 					}
 					if result.result.Disposition != runtimedelivery.ClaimBusy {
-						t.Fatalf("claim race loser disposition = %s, want busy", result.result.Disposition)
+						t.Fatalf("claim race loser disposition = %s, want busy: invariant=%v", result.result.Disposition, result.result.Invariant)
 					}
 				}
 				if wins != 1 {

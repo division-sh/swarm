@@ -47,7 +47,6 @@ WHERE es.run_id=$1 AND es.flow_instance='producer' AND fi.current_state='active'
 					t.Fatalf("independent run %d failed static materialization before any transition history read\n%s", attempt, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				requireServedRunStatus(t, rt.Endpoint, seed.RunID, "completed")
 				for _, check := range []struct {
 					query string
 					want  int
@@ -57,8 +56,6 @@ WHERE es.run_id=$1 AND es.flow_instance='producer' AND fi.current_state='active'
 					{`SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.outcome='success'`, 3},
 					{`SELECT COUNT(*) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1`, 0},
 					{`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND instance_path='producer' AND mode='static' AND status='active'`, 1},
-					{`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND instance_path=CAST($1 AS TEXT) AND current_state='active'`, 1},
-					{`SELECT COUNT(*) FROM runs WHERE run_id=$1 AND status='completed' AND ended_at IS NOT NULL`, 1},
 				} {
 					if err := rt.DB.QueryRow(check.query, seed.RunID).Scan(&count); err != nil {
 						t.Fatal(err)

@@ -81,9 +81,11 @@ func TestReadinessPublicUnpairedQRWaitDiagnosticBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("diagnostic lacks the canonical principal reader")
 				}
-				principal, err := principalOwner.EnsureOperatorPrincipal(t.Context(), time.Now().UTC())
+				runtime := servedTestProcessRuntime(t, process)
+				original := servedRuntimeProofAuthorActivityContext(t, runtime, runtime.Options.SourceArtifactFact.BundleHash())
+				principal, err := principalOwner.EnsureOperatorPrincipal(original, time.Now().UTC())
 				if err != nil || principal.ID != result.Operation.PrincipalID || principal.Validate() != nil {
-					t.Fatal("diagnostic principal differs from authenticated public operation")
+					t.Fatalf("diagnostic principal differs from authenticated public operation: principal=%s operation=%s err=%v", principal.ID, result.Operation.PrincipalID, err)
 				}
 				foreignPrincipal := principal
 				foreignPrincipal.ID = uuid.NewString()

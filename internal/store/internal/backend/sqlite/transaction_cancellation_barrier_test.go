@@ -91,10 +91,8 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 						defer db.Close()
 						defer unblockClose()
 						defer unblockRollback()
-						b, err := New(db)
-						if err != nil {
-							t.Fatal(err)
-						}
+						b := originalTransactionTestBackend(t, db, control.base.path)
+						var err error
 						if _, err := db.Exec("CREATE TABLE counter(value INTEGER); INSERT INTO counter VALUES(0)"); err != nil {
 							t.Fatal(err)
 						}

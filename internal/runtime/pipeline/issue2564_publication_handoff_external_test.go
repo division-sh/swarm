@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
@@ -152,11 +153,18 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 		t.Fatal(err)
 	}
 	process := worklifetime.NewProcess()
+	ctx = nativeOriginalProcessContextFixture(t, worklifetime.WithProcess(ctx, process), original)
 	work, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: f.fact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.ctx = withLiveGateExecution(worklifetime.WithOccurrence(ctx, work))
+	if generation == 1 {
+		bundle, _ := semanticview.Bundle(f.source)
+		storetest.RequireRun(t, f.ctx, f.store.(storetest.RunFixtureStore), storetest.RunFixture{
+			RunID: f.runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
+		})
+	}
 	admitter := swarmruntime.NewRuntimePayloadAdmitter(nil, f.source, f.fact)
 	f.store.(swarmruntime.EventPayloadAdmissionBinder).SetEventPayloadAdmitter(admitter)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(f.fact, runtimeID, generation)
@@ -166,6 +174,13 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 	f.bus, err = newScopedTestEventBus(t, f.store, runtimebus.EventBusOptions{
 		ContractBundle: f.source, SourceArtifactFact: f.fact, RuntimeInstanceID: runtimeID, WorkOwner: work,
 		PayloadAdmitter: admitter, DeliveryAuthority: authority, TestLifecycleProbe: f.observer,
+		MutationContext: func(callCtx context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(callCtx) {
+				callCtx = startupownership.CarryMutationAuthority(callCtx, ctx)
+			}
+			_, err := startupownership.CaptureMutationAuthority(callCtx)
+			return callCtx, err
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

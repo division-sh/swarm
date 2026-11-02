@@ -25,7 +25,7 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, reopen := openPayloadBindingHistoryFixture(t, backend.name)
 			store := fixture.store.(eventRecordContractStore)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
 			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
@@ -62,6 +62,7 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			if err := process.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
+			retireStoreTestWorkFixture(t)
 			if err := fixture.db.Close(); err != nil {
 				t.Fatal(err)
 			}

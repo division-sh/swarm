@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -25,6 +26,13 @@ func acquireLogoutProcessFixture(t *testing.T, f *activeInputFixture, runtimeID 
 		if evidence, err := f.nativeProcess.Evidence(); err == nil {
 			if evidence.RuntimeInstanceID != runtimeID || (len(exact) == 1 && (evidence.OwnerID != exact[0].OwnerID || evidence.BootID != exact[0].BootID)) {
 				t.Fatal("session fixture cannot replace a live native process")
+			}
+			if _, found := worklifetime.ProcessFromContext(f.ctx); !found {
+				f.ctx = worklifetime.WithProcess(f.ctx, f.nativeWork)
+			}
+			f.ctx, err = startupownership.WithProcessMutationAuthority(f.ctx, f.nativeProcess)
+			if err != nil {
+				t.Fatal(err)
 			}
 			return f.nativeProcess
 		}
@@ -40,12 +48,27 @@ func acquireLogoutProcessFixture(t *testing.T, f *activeInputFixture, runtimeID 
 	if err != nil {
 		t.Fatal("acquire real selected process responsibility", err)
 	}
-	f.ctx, err = startupownership.WithProcessMutationAuthority(f.nativeContext, owner)
+	evidence, err := owner.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := worklifetime.NewProcess()
+	if err := process.BindOriginalProcess(evidence.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	f.ctx, err = startupownership.WithProcessMutationAuthority(worklifetime.WithProcess(f.nativeContext, process), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.nativeProcess = owner
+	f.nativeWork = process
 	t.Cleanup(func() {
+		process.Retire()
+		wait, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := process.Join(wait); err != nil {
+			t.Error(err)
+		}
 		if err := owner.Release(context.Background()); err != nil {
 			t.Error("release logout process responsibility", err)
 		}

@@ -67,11 +67,16 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 				case "reset":
 					summary, err = store.ResetAll(ctx, runtimesessions.ResetMetadata{Source: "outcome-proof"})
 				}
-				if phase == "handoff_failure" && !errors.Is(err, injected) || phase == "healthy" && err != nil {
+				wantsHandoffFailure := operation == "reset" && phase == "handoff_failure"
+				if wantsHandoffFailure && !errors.Is(err, injected) || !wantsHandoffFailure && err != nil {
 					t.Fatalf("unexpected handoff error: %v", err)
 				}
-				if submits != 1 {
-					t.Fatalf("handoff submissions=%d want=1", submits)
+				wantSubmits := 0
+				if operation == "reset" {
+					wantSubmits = 1
+				}
+				if submits != wantSubmits {
+					t.Fatalf("handoff submissions=%d want=%d", submits, wantSubmits)
 				}
 				var status, holder, provider, successor string
 				if err := fixture.db.QueryRowContext(ctx, `SELECT status, COALESCE(lease_holder,''), COALESCE(json_extract(runtime_state,'$.provider_session_id'),''), COALESCE(successor_session_id,'') FROM agent_sessions WHERE session_id=?`, fixture.sessionID).Scan(&status, &holder, &provider, &successor); err != nil {

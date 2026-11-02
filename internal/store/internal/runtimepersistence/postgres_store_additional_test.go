@@ -171,7 +171,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "test-flow", "test-flow", "default", "ready", "{}", time.Now().UTC())
@@ -208,10 +208,10 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		status      string
 		eventCount  int
 		entityCount int
-		endedAt     time.Time
+		endedAt     sql.NullTime
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count,
+		SELECT COALESCE(status, ''), (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id), ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -219,7 +219,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("load run row: %v", err)
 	}
 	if status != "completed" {
-		t.Fatalf("run status = %q, want completed", status)
+		t.Fatalf("run status = %q, want completed after finite scenario settlement", status)
 	}
 	if eventCount != 1 {
 		t.Fatalf("event_count = %d, want 1", eventCount)
@@ -227,8 +227,8 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	if entityCount != 1 {
 		t.Fatalf("entity_count = %d, want 1", entityCount)
 	}
-	if endedAt.IsZero() {
-		t.Fatal("ended_at not persisted")
+	if !endedAt.Valid {
+		t.Fatal("settled finite scenario has no end time")
 	}
 }
 
@@ -242,6 +242,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.requested", events.EventProducerAgent, "test", eventEntityA, "", time.Now().UTC())
 	seedPostgresStoreEvent(t, ctx, pg, uuid.NewString(), runID, "scan.replayed", events.EventProducerAgent, "test", eventEntityB, "", time.Now().UTC())
@@ -257,7 +258,7 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 
 	var eventCount, entityCount int
 	if err := db.QueryRowContext(ctx, `
-		SELECT event_count, (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
+		SELECT (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id), (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&eventCount, &entityCount); err != nil {
@@ -276,6 +277,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID,
 		State: storerunlifecycle.StateCompleted,
@@ -283,7 +285,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	var baselineEventCount, baselineEntityCount int
 	if err := db.QueryRowContext(ctx, `
-		SELECT event_count, (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
+		SELECT (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id), (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&baselineEventCount, &baselineEntityCount); err != nil {
@@ -314,7 +316,7 @@ func TestPostgresStore_AppendEventRejectsNewEventForCompletedRun(t *testing.T) {
 		endedAt     sql.NullTime
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count,
+		SELECT COALESCE(status, ''), (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id), ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -345,6 +347,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Microsecond)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: createdAt.Add(-time.Minute),
 	})
@@ -411,7 +414,7 @@ func TestPostgresStore_AppendEvent_DuplicateDoesNotReopenCompletedRun(t *testing
 		endedAt     sql.NullTime
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count,
+		SELECT COALESCE(status, ''), (SELECT c.event_count FROM run_event_counts c WHERE c.run_id = runs.run_id),
 		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id), ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
@@ -1121,7 +1124,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s)
 
 	entityID := uuid.NewString()
 
@@ -1192,7 +1195,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	if !foundNotice {
 		t.Fatalf("reopened pending mailbox list omitted informational notice %s: %#v", noticeID, listed)
 	}
-	if err := noticeAcknowledgmentFixture(t, reopened, noticeID)(testAuthorActivityContext()); err != nil {
+	if err := noticeAcknowledgmentFixture(t, ctx, reopened, noticeID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge informational notice: %v", err)
 	}
 	if unread, err := reopened.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {

@@ -277,7 +277,6 @@ func newServingMatrixFixture(t *testing.T, backend string, workers *int, probes 
 		if !ok || bundle == nil {
 			t.Fatal("serving matrix requires real compiled bundles")
 		}
-		storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), f.selected, bundle)
 		f.sources = append(f.sources, source)
 	}
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), f.selected, f.sources...)

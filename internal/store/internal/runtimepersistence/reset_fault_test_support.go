@@ -25,6 +25,10 @@ func setResetReceiptFaultForTest(ctx context.Context, selected any, phase string
 		if store == nil || store.backend == nil {
 			return fmt.Errorf("reset receipt fault requires a PostgreSQL fixture store")
 		}
+		if !enabled {
+			_, err := store.backend.ConstructionHandle().ExecContext(ctx, `DROP TRIGGER reset_final_receipt_fault ON runtime_reset_operations; DROP FUNCTION reset_final_receipt_fault()`)
+			return err
+		}
 		return store.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			statement := `DROP TRIGGER reset_final_receipt_fault ON runtime_reset_operations; DROP FUNCTION reset_final_receipt_fault()`
 			if enabled {
@@ -38,6 +42,10 @@ func setResetReceiptFaultForTest(ctx context.Context, selected any, phase string
 	case *SQLiteRuntimeStore:
 		if store == nil || store.backend == nil {
 			return fmt.Errorf("reset receipt fault requires a SQLite fixture store")
+		}
+		if !enabled {
+			_, err := store.backend.ConstructionHandle().ExecContext(ctx, `DROP TRIGGER reset_final_receipt_fault`)
+			return err
 		}
 		return store.backend.RunTransaction(ctx, "reset final receipt fault fixture", func(txctx context.Context, tx *sql.Tx) error {
 			statement := `DROP TRIGGER reset_final_receipt_fault`

@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -16,7 +15,7 @@ func TestChannelOnboardingReplacementSelectionBeforeEffectsBothStores(t *testing
 			begun := rig.start(t, channelonboarding.VerbConnect, "old-usable-token", false)
 			rig.confirm(t, begun, "same-operator")
 			rig.complete(t, begun.Operation.OperationID)
-			ctx := context.Background()
+			ctx := rig.fixture.ctx
 			before, err := rig.fixture.store.ListChannelOnboardingOperations(ctx)
 			if err != nil {
 				t.Fatal(err)

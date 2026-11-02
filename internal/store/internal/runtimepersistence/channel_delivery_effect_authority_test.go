@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/packs"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -74,6 +75,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 				} else {
 					sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					ctx := originalStoreFixtureContext(t, ctx, sqlite)
 					selected, db = sqlite, sqlite.backend
 					runTx = func(fn func(context.Context, *sql.Tx) error) error {
 						return sqlite.backend.RunTransaction(ctx, "channel delivery authority test", fn)
@@ -98,7 +100,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					return ok
 				}
 				now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-				onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, selected, now, runtimeeffects.StateAuthorized)
+				onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, ctx, selected, now, runtimeeffects.StateAuthorized)
 				principal, err := selected.EnsureOperatorPrincipal(ctx, now)
 				if err != nil {
 					t.Fatal(err)
@@ -600,7 +602,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						t.Fatalf("current sent receipt = %#v, found=%t err=%v", previous, found, err)
 					}
 					if mode == "reply_matrix" {
-						proveChannelReplyTransfer(t, selected, runTx, current, authority, textFact, actions[0], postgres)
+						proveChannelReplyTransfer(t, ctx, selected, runTx, current, authority, textFact, actions[0], postgres)
 						return
 					}
 					if err := runTx(func(txctx context.Context, tx *sql.Tx) error {

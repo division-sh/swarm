@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -15,8 +14,8 @@ func TestChannelOnboardingCredentialConnectAfterUnbindBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, saveProof := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/proof_%t", backend, saveProof), func(t *testing.T) {
-				ctx := context.Background()
 				rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
+				ctx := rig.fixture.ctx
 				first := rig.start(t, channelonboarding.VerbConnect, "first-provider-value", saveProof)
 				rig.confirm(t, first, "first-account")
 				rig.complete(t, first.Operation.OperationID)

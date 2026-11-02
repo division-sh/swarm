@@ -197,7 +197,8 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 				})
 			} else {
 				rooted, _ := sourceartifactfixture.Rooted(t, "unloaded-context", runtimeContextTestSourceArtifactC)
-				if _, err := fixture.pg.EnsureRootedSource(context.Background(), rooted); err != nil {
+				ctx := apiTestOriginalProcessContext(t, context.Background(), fixture.pg)
+				if _, err := fixture.pg.EnsureRootedSource(ctx, rooted); err != nil {
 					t.Fatal(err)
 				}
 				seedRuntimeContextRunBundle(t, fixture.pg, runID, tt.bundleHash, rooted.Admission())
@@ -303,8 +304,9 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 		&swruntime.Runtime{Bus: fixture.busB, RunControl: selectedControl},
 	)
 	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		AuthTokens:       []string{testToken},
+		ProcessWorkOwner: fixture.process,
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Idempotency:      fixture.pg,
 			RunBundleContext: fixture.pg,
@@ -344,8 +346,9 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 		&swruntime.Runtime{Bus: fixture.busB, Manager: selectedManager},
 	)
 	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		AuthTokens:       []string{testToken},
+		ProcessWorkOwner: fixture.process,
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Idempotency:      fixture.pg,
 			RunBundleContext: fixture.pg,
@@ -410,17 +413,20 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 		&swruntime.Runtime{Bus: fixture.busA, Pipeline: primaryPipeline},
 		&swruntime.Runtime{Bus: fixture.busB, Pipeline: selectedPipeline},
 	)
-	principal, err := fixture.pg.EnsureOperatorPrincipal(context.Background(), now)
+	principal, err := fixture.pg.EnsureOperatorPrincipal(apiTestOriginalProcessContext(t, context.Background(), fixture.pg), now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: testOperatorHandlers(testOperatorCapabilities{
+	requestProcess, found := worklifetime.ProcessFromContext(apiTestOriginalProcessContext(t, context.Background(), fixture.pg))
+	if !found {
+		t.Fatal("decision routing fixture lacks its original process work owner")
+	}
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, ProcessWorkOwner: requestProcess, Handlers: OperatorDecisionCardHandlers(testOperatorCapabilities{
 		Now: func() time.Time { return now.Add(time.Minute) }, Idempotency: fixture.pg,
 		Mailbox: fixture.pg, DecisionCards: fixture.pg, DecisionAuthority: primaryPipeline, Events: fixture.busA,
 		RunBundleContext: fixture.pg, RuntimeContexts: manager, Source: fixture.sourceA,
 		Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
-	})})
-
+	}.decisionCards())})
 	begin := rpcCallWithPlainRequestContext(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":%q,"verdict":"reject","observed_content_hash":%q,"idempotency_key":"selected-begin"}}`, card.CardID, card.CardContentHash))
 	if begin.Error != nil {
 		t.Fatalf("selected mailbox.begin_input error = %#v", begin.Error)
@@ -468,7 +474,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, fixture.admissionA)}},
 			RunForkOperations:   operations,
@@ -531,7 +537,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	executor := &recordingRunForkExecutor{selectedSource: selectedTarget, operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, fixture.admissionA)}},
 			RunForkOperations:   operations,
@@ -578,7 +584,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	ingress := &recordingRuntimeIngress{}
 	runtimeHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:             func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RuntimeIngress:  ingress,
 			Idempotency:     newMutatingProbeIdempotencyStore(),
@@ -618,7 +624,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, fixture.admissionA)}},
 			RunForkOperations:   operations,
@@ -647,7 +653,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	agentControl := &fakeAgentControlController{}
 	agentHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:             func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			AgentControl:    agentControl,
 			Idempotency:     newMutatingProbeIdempotencyStore(),
@@ -673,6 +679,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 type operatorRuntimeContextFixture struct {
 	db         *sql.DB
 	pg         *store.PostgresStore
+	process    *worklifetime.Process
 	sourceA    semanticview.Source
 	sourceB    semanticview.Source
 	admissionA sourceartifact.RootAdmission
@@ -728,9 +735,14 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
+	process, found := worklifetime.ProcessFromContext(apiTestOriginalProcessContext(t, context.Background(), pg))
+	if !found {
+		t.Fatal("runtime context fixture lacks its original process work owner")
+	}
 	return operatorRuntimeContextFixture{
 		db:         db,
 		pg:         pg,
+		process:    process,
 		sourceA:    sourceA,
 		sourceB:    sourceB,
 		admissionA: rootedA.Admission(),
@@ -747,7 +759,8 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 
 func seedRuntimeContextSourceArtifact(t *testing.T, pg *store.PostgresStore, artifact *sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
-	if _, err := pg.EnsureSourceArtifact(context.Background(), artifact); err != nil {
+	ctx := apiTestOriginalProcessContext(t, context.Background(), pg)
+	if _, err := pg.EnsureSourceArtifact(ctx, artifact); err != nil {
 		t.Fatalf("ensure source artifact %s: %v", artifact.BundleHash(), err)
 	}
 }
@@ -787,9 +800,10 @@ func runtimeContextTestDefinition(t *testing.T, definition swruntime.BundleConte
 
 func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	t.Helper()
-	return testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
+	handler := testHandler(t, Options{
+		AuthTokens:       []string{testToken},
+		ProcessWorkOwner: f.process,
+		Handlers: testOperatorHandlers(t, testOperatorCapabilities{
 			Now:                func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 			Ready:              func() bool { return true },
 			Database:           fakePinger{},
@@ -808,6 +822,7 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 			},
 		}),
 	})
+	return handler
 }
 
 func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, bundleHash string, admission sourceartifact.RootAdmission) {
@@ -888,6 +903,10 @@ func runtimeContextTestRuntime(t *testing.T, selected *store.PostgresStore, rt *
 	rt.Options.SourceArtifactFact = runtimeContextTestSourceFact(bundleHash)
 	rt.Options.WorkflowModule = newRunCompletionSystemNodeModule(t, source)
 	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(context.Background(), rt.Options.SourceArtifactFact), root)
+	ctx = apiTestOriginalProcessContext(t, ctx, selected)
+	if rt.Options.ProcessWorkOwner == nil {
+		rt.Options.ProcessWorkOwner, _ = worklifetime.ProcessFromContext(ctx)
+	}
 	process, err := agentfixture.ProcessCapability(t, ctx, selected)
 	if err != nil {
 		t.Fatal(err)

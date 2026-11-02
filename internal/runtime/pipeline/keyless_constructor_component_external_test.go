@@ -52,7 +52,7 @@ func commitKeylessConstructorComponentAt(t *testing.T, ctx context.Context, sele
 		if err := coordinator.FinalizeInitialEntryLifecycle(ctx, value.Lifecycle); err != nil {
 			t.Fatal(err)
 		}
-		markGateRecoveryTopologyReadyFixture(t, selected, value.Plan.Readiness, at)
+		markGateRecoveryTopologyReadyFixture(t, ctx, selected, value.Plan.Readiness, at)
 		for _, child := range value.Children {
 			finish(child)
 		}

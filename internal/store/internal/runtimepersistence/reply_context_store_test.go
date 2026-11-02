@@ -298,6 +298,7 @@ func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurfac
 	t.Helper()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
+		ctx = originalStoreFixtureContext(t, ctx, store)
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"

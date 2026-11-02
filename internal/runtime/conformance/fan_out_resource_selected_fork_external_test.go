@@ -158,7 +158,7 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 	})
 	handler, err := apiv1.NewHandler(apiv1.Options{
 		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken},
-		ProcessWorkOwner: conformanceTestProcessOwner(t), Handlers: methods,
+		ProcessWorkOwner: f.topology.process, Handlers: methods,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +394,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := owner.BindSelectedProcess(f.ctx, conformanceTestProcessOwner(t), f.topology.capability); err != nil {
+	if err := owner.BindSelectedProcess(f.ctx, f.topology.process, f.topology.capability); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := owner.RecoverSelectedForkContexts(f.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {

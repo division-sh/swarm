@@ -12,6 +12,7 @@ import (
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -52,13 +53,13 @@ func newDurableDataFixtureStore(t *testing.T, backend string) (durableDataFixtur
 	t.Helper()
 	if backend == "sqlite" {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		sourceartifactfixture.Require(t, testAuthorActivityContext(), store)
+		sourceartifactfixture.Require(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), store)
 		return store, store.backend.ConstructionHandle()
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	store := newTestPostgresStore(t, db)
-	sourceartifactfixture.Require(t, testAuthorActivityContext(), store)
+	sourceartifactfixture.Require(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), store)
 	return store, db
 }
 
@@ -66,7 +67,7 @@ func TestDurableDataCatalogFixtureRollsBackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db := newDurableDataFixtureStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			if backend == "sqlite" {
 				if _, err := db.ExecContext(ctx, `CREATE TRIGGER reject_fixture_shape BEFORE INSERT ON resource_bundle_import_shapes
 					BEGIN SELECT RAISE(ABORT, 'fixture shape fault'); END`); err != nil {
@@ -103,6 +104,13 @@ func TestDurableDataCatalogFixtureRollsBackBothStores(t *testing.T) {
 			}
 			if err := RegisterDurableDataCatalogForTest(ctx, store, catalog); err != nil {
 				t.Fatalf("failed fixture poisoned subsequent selected operation: %v", err)
+			}
+			original, err := agentfixture.ProcessCapability(t, ctx, store.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := original.Release(ctx); err != nil {
+				t.Fatal(err)
 			}
 			if got := db.Stats().InUse; got != 0 {
 				t.Fatalf("failed fixture retained %d connections", got)
@@ -145,7 +153,7 @@ func TestDurableDataFixturesUseExactSQLiteCoordinator(t *testing.T) {
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 			db := store.backend.ConstructionHandle()
 			db.SetMaxOpenConns(4)
-			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), store), 10*time.Second)
 			defer cancel()
 			catalog := durableDataFixtureCatalog(t)
 			holderEntered, release := make(chan struct{}), make(chan struct{})

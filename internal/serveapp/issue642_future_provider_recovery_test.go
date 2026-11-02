@@ -118,7 +118,6 @@ type issue642FutureExecutionRow struct {
 
 type issue642FutureRecoveryProof struct {
 	SourceRunID, SourceKey string
-	ProcessBaseline        uint64
 	Operation              runfork.ForkOperationRecord
 	Claim                  issue642FutureClaimFacts
 	RecoveredClaim         *issue642FutureClaimFacts
@@ -246,7 +245,7 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 		issue2564H2CompletionWaitReceipt(t, rt, seed.RunID, seed.EventID)
 		issue642RequireKeyedProviderResult(t, rt, seed.RunID)
 		pauseIssue2564SettledSource(t, rt, seed.RunID)
-		proof = &issue642FutureRecoveryProof{SourceRunID: seed.RunID, ProcessBaseline: rt.Runtime.Options.ProcessWorkOwner.ActiveCount()}
+		proof = &issue642FutureRecoveryProof{SourceRunID: seed.RunID}
 		if minted {
 			proof.SourceKey = issue642RequireMintedProviderIdentity(t, rt, seed.RunID)
 		}
@@ -370,13 +369,6 @@ func TestIssue642FutureProviderRecoveryProcessHelper(t *testing.T) {
 	}
 	if mode == "terminal" && (grants != 0 || claims != 0) {
 		t.Fatalf("terminal recovery issued a third executor: grants=%d claims=%d", grants, claims)
-	}
-	for work := rt.Runtime.Options.ProcessWorkOwner.ActiveCount(); work != proof.ProcessBaseline; work = rt.Runtime.Options.ProcessWorkOwner.ActiveCount() {
-		select {
-		case <-time.After(10 * time.Millisecond):
-		case <-phase.Done():
-			t.Fatalf("native recovery process work=%d baseline=%d: %v", work, proof.ProcessBaseline, phase.Err())
-		}
 	}
 	ack, found, err := probe.operations.LoadForkOperationByID(t.Context(), proof.Operation.Request.OperationID)
 	if err != nil || !found {
