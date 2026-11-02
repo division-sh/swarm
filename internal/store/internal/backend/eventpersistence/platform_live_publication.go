@@ -3,10 +3,12 @@ package eventpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	delivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -25,7 +27,7 @@ func (s *EventPostgresOwner) CommitInitialDeliveryObligationsTx(ctx context.Cont
 			if !found {
 				return fmt.Errorf("platform delivery publication is absent")
 			}
-			return requirePlatformDeliveryLiveRuns(ctx, tx, admitted.Event(), routes, true)
+			return requirePlatformDeliveryLandingRuns(ctx, tx, admitted.Event(), routes, true)
 		}); err != nil {
 			return nil, err
 		}
@@ -43,7 +45,7 @@ func (s *EventSQLiteOwner) CommitInitialDeliveryObligationsTx(ctx context.Contex
 			if !found {
 				return fmt.Errorf("platform delivery publication is absent")
 			}
-			return requirePlatformDeliveryLiveRuns(ctx, tx, admitted.Event(), routes, false)
+			return requirePlatformDeliveryLandingRuns(ctx, tx, admitted.Event(), routes, false)
 		}); err != nil {
 			return nil, err
 		}
@@ -51,7 +53,7 @@ func (s *EventSQLiteOwner) CommitInitialDeliveryObligationsTx(ctx context.Contex
 	return s.DeliverySQLiteOwner.CommitInitialDeliveryObligationsTx(ctx, attempt, eventID, runID, routes, authority)
 }
 
-func requirePlatformDeliveryLiveRuns(ctx context.Context, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute, postgres bool) error {
+func requirePlatformDeliveryLandingRuns(ctx context.Context, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute, postgres bool) error {
 	if !event.IsRunlessPlatformPublication() {
 		return fmt.Errorf("run-less executable delivery requires its standalone platform publication")
 	}
@@ -82,8 +84,19 @@ func requirePlatformDeliveryLiveRuns(ctx context.Context, tx *sql.Tx, event even
 	slices.Sort(order)
 	for _, runID := range order {
 		live := selected[runID]
-		if err := requireAPIEventLiveRunTx(ctx, tx, &live, postgres); err != nil {
+		query := `SELECT run_id,bundle_hash,status FROM runs WHERE flow_path=$1 AND landing_run=TRUE`
+		if postgres {
+			query += ` FOR UPDATE`
+		}
+		var selectedID, bundleHash, state string
+		if err := tx.QueryRowContext(ctx, query, live.Scope.FlowPath).Scan(&selectedID, &bundleHash, &state); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return runtimebus.ErrAPIEventLiveRunChanged
+			}
 			return err
+		}
+		if selectedID != live.RunID || bundleHash != live.Source.BundleHash() || (state != "live" && state != "paused") {
+			return runtimebus.ErrAPIEventLiveRunChanged
 		}
 	}
 	return nil

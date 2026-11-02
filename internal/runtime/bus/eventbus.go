@@ -109,6 +109,7 @@ type DurableDependencies struct {
 	ReplyContext             runtimereplycontext.Store
 	RunLifecycle             runtimerunlifecycle.OperationOwner
 	LiveRuns                 runtimerunlifecycle.LiveRunReader
+	LandingRuns              runtimerunlifecycle.LandingRunReader
 	DeliveryLifecycle        runtimedelivery.Store
 
 	ActiveAgents ActiveAgentDescriptorLister

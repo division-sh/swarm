@@ -967,7 +967,7 @@ type runtimeCompositionRequest struct {
 	Cancel               context.CancelFunc
 	BootStartedAt        time.Time
 	RuntimeInstanceID    string
-	OnReady              func(context.Context, string, apiv1.EventPublicationOptions) error
+	OnReady              func(context.Context, string, apiv1.EventPublicationOptions, *runtime.Runtime) error
 	AdmittedBundle       *runtimecontracts.WorkflowContractBundle
 	DataProjectionRoot   string
 }
@@ -2099,7 +2099,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}
 
 	if req.OnReady != nil {
-		err := req.OnReady(ctx, "http://"+apiListener.Addr().String(), serveRuntimePublicationOptions(stores, apiStoreCaps, primaryContext))
+		err := req.OnReady(ctx, "http://"+apiListener.Addr().String(), serveRuntimePublicationOptions(stores, apiStoreCaps, primaryContext), primaryContext.runtime)
 		ready.Store(false)
 		if err != nil {
 			presenter.runtimeFailure("test_execution", err)

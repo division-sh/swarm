@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -33,7 +35,7 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 	}
 	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins: {outputs: [observed]}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "observed:\n")
-	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "boot-observer:\n  execution_type: system_node\n  subscribes_to: [platform.boot]\n  event_handlers:\n    platform.boot:\n      emit: {event: observed}\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "boot-observer:\n  platform.boot:\n    emit: {event: observed}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "other", "agents.yaml"), "observer:\n  role: observer\n  intent: {inline: Observe the boot occurrence.}\n  model: regular\n  subscriptions: [platform.boot]\n  emit_events: []\n")
 	opts, _ := issue2564LiveServeHarness(t, backend, root, "")
 	var persistence serveRuntimePersistence
@@ -133,18 +135,51 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 	if !ok {
 		t.Fatal("served publication lost its original native commit owner")
 	}
+	unavailable := eventtest.RuntimeControlWithRoutingSourceAndMode(uuid.NewString(), journal.Type(), "runtime", "", journal.Payload(), 0, "", "", journal.Envelope(), journal.RoutingSource(), time.Now().UTC(), journal.ExecutionMode())
+	if err := fixture.Runtime.Bus.Publish(ctx, unavailable); err != nil {
+		t.Fatal("platform publication to paused landing run failed", err)
+	}
+	paused, found, err := reader.LoadPreparedPublishEvent(ctx, unavailable.ID())
+	if err != nil || !found {
+		t.Fatal("platform publication to paused landing run was not retained", found, err)
+	}
+	pausedRoute := false
+	for _, route := range paused.DeliveryRoutes {
+		if route.Target.Route().FlowID == "other" && route.Context.RunID == runs["other"] {
+			pausedRoute = true
+		}
+	}
+	if !pausedRoute {
+		t.Fatal("paused platform subscriber did not retain its exact landing run", paused.DeliveryRoutes)
+	}
+	var pausedEvent operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, fixture.Endpoint, "event.get", map[string]any{"event_id": unavailable.ID()}, &pausedEvent)
+	for _, delivery := range pausedEvent.Deliveries {
+		if delivery.Target.FlowID == "other" && (delivery.Status == "delivered" || delivery.Terminal) {
+			t.Fatal("paused platform delivery executed before resume", delivery)
+		}
+	}
+	requireServedJSONRPCResult(t, fixture.Endpoint, "run.stop", map[string]any{"run_id": runs["other"]}, &map[string]any{})
 	if _, err := owner.CommitPublication(ctx, plan.PublicationCommand()); !errors.Is(err, runtimebus.ErrAPIEventLiveRunChanged) {
-		t.Fatal("changed live selection was not refused atomically", err)
+		t.Fatal("stopped landing selection was not refused atomically", err)
 	}
 	if _, found, err := reader.LoadPreparedPublishEvent(ctx, fresh.ID()); err != nil || found {
 		t.Fatal("refused platform occurrence retained partial publication", found, err)
 	}
-	unavailable := eventtest.RuntimeControlWithRoutingSourceAndMode(uuid.NewString(), journal.Type(), "runtime", "", journal.Payload(), 0, "", "", journal.Envelope(), journal.RoutingSource(), time.Now().UTC(), journal.ExecutionMode())
-	var refusal *runtimebus.PlatformLiveRunUnavailableError
-	if err := fixture.Runtime.Bus.Publish(ctx, unavailable); !errors.As(err, &refusal) || refusal.FlowPath != "other" {
-		t.Fatal("platform publication without a subscriber live run did not refuse visibly", err)
+	untargeted := journal.Envelope()
+	untargeted.Target = events.RouteIdentity{}
+	untargeted.TargetSet = nil
+	missing := eventtest.RuntimeControlWithRoutingSourceAndMode(uuid.NewString(), journal.Type(), "runtime", "", journal.Payload(), 0, "", "", untargeted, journal.RoutingSource(), time.Now().UTC(), journal.ExecutionMode())
+	if err := fixture.Runtime.Bus.Publish(ctx, missing); err != nil {
+		t.Fatal("no-run platform publication did not record its outcome", err)
 	}
-	if _, found, err := reader.LoadPreparedPublishEvent(ctx, unavailable.ID()); err != nil || found {
-		t.Fatal("no-live platform refusal retained a publication", found, err)
+	remaining, found, err := reader.LoadPreparedPublishEvent(ctx, missing.ID())
+	if err != nil || !found || len(remaining.DeliveryRoutes) != 1 || remaining.DeliveryRoutes[0].Context.RunID != runs["."] {
+		t.Fatal("no-run outcome lost the other flow's live delivery", found, remaining.DeliveryRoutes, err)
+	}
+	db, _, _ := selectedRuntimeStoreForTest(t, persistence)
+	var failure string
+	if err := db.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1`, missing.ID()).Scan(&failure); err != nil || !strings.Contains(failure, "target_unreachable_terminated") {
+		t.Fatal("no-run subscriber lost its typed dead letter", failure, err)
 	}
 }

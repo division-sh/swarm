@@ -471,11 +471,18 @@ func (p *processCapability) requireLive() error {
 	}
 	select {
 	case <-p.done:
-		return errors.New("process startup/topology capability is terminal")
+		return terminalProcessCapabilityError{}
 	default:
 		return nil
 	}
 }
+
+type terminalProcessCapabilityError struct{}
+
+func (terminalProcessCapabilityError) Error() string {
+	return "process startup/topology capability is terminal"
+}
+func (terminalProcessCapabilityError) ProcessCapabilityTerminal() bool { return true }
 
 func (p *processCapability) retireOnPossessionFailure(err error) error {
 	if err == nil || p.requireLive() != nil {
