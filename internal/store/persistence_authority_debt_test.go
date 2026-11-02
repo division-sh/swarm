@@ -331,16 +331,17 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 			base = debtForwardQuiescenceUncertainty(base, old, current)
 		}
 	}
-	// #2807/6456279584: this one pair is predecessor-source-only, not a selected-fixture landed-source extension.
+	// #2413/6565922169: this exact counted pair also admits its landed source.
 	old, current := debtCatalogRuntimeRowsSignatureTransition()
 	for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
 		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
 			return head, base, source, []string{"both reviewed catalog runtime-row signatures survive: " + old.Declaration}
 		}
 	}
+	sourcePredecessor := source[old.identity()] == old && source[current.identity()].Multiplicity == 0
+	sourceLanded := source[current.identity()] == current && source[old.identity()].Multiplicity == 0
 	if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
-		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
-		source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 && (sourcePredecessor || sourceLanded) {
 		head = debtForwardQuiescenceUncertainty(head, old, current)
 		base = debtForwardQuiescenceUncertainty(base, old, current)
 		source = debtForwardQuiescenceUncertainty(source, old, current)
@@ -1090,6 +1091,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtW4ComparisonCollectorTo && trusted.Collector == base &&
+		current == debtCatalogRuntimeRowsLandedCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2413/6565922169: one exact landed signature, unchanged baseline sites.
 	}
 	if base == debtDeploymentHandlerLandedCollectorTo && trusted.Collector == base &&
 		current == debtRetiredSourceFreezeCollectorTo && reviewedTransition == current && head.Collector == current &&
