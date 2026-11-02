@@ -287,7 +287,7 @@ func writeExternalMCPJourneySource(t *testing.T, root, endpoint string) {
 		"events.yaml":   "external.requested: {text: string}\nexternal.completed: {text: string}\n",
 		"policy.yaml":   fmt.Sprintf("mcp_servers:\n  configured:\n    transport: http\n    url: %q\n    prefix: partner\n    credentials_key: MCP_FIXTURE_KEY\n", endpoint),
 		"agents.yaml":   "worker:\n  role: integration\n  model: regular\n  subscriptions: [external.requested]\n  tools: [partner.ping]\n  emit_events: [external.completed]\n  intent:\n    inline: 'Call partner.ping with the current input text, then emit_external_completed with the exact echo returned by that tool. Do not invent the result or produce prose.'\n",
-		"nodes.yaml":    "observer:\n  execution_type: system_node\n  event_handlers:\n    external.completed:\n      guard: {id: observe, check: true}\n",
+		"nodes.yaml":    "observer:\n  external.completed:\n    guard: true\n",
 	} {
 		writeReleaseFile(t, filepath.Join(root, path), body)
 	}
@@ -405,7 +405,7 @@ func writeOAuthJourneySource(t *testing.T, root, endpoint string, command func(.
 	writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [oauth.requested]\n")
 	writeReleaseFile(t, filepath.Join(root, "events.yaml"), "oauth.requested: {text: string}\n")
-	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), "sender:\n  execution_type: system_node\n  subscribes_to: [oauth.requested]\n  event_handlers:\n    oauth.requested:\n      activity:\n        id: send_slack\n        tool: slack.post_message\n        input:\n          channel: \"C123\"\n          text: payload.text\n")
+	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), "sender:\n  oauth.requested:\n    activity:\n      id: send_slack\n      tool: slack.post_message\n      input:\n        channel: \"C123\"\n        text: payload.text\n")
 	command("import", "slack", root, "--json")
 	path := filepath.Join(root, "slack", "connector.yaml")
 	raw, err := os.ReadFile(path)
