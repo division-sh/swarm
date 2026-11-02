@@ -1,9 +1,11 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -170,8 +172,33 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					}
 				}
 				if condition == "project default" {
-					if strings.Contains(out.String(), "store status") || !strings.Contains(out.String(), sqlitePath) {
-						t.Fatalf("default-store refusal advertised another database or lost the actual path:\n%s", out.String())
+					if !strings.Contains(out.String(), "store status") || !strings.Contains(out.String(), sqlitePath) {
+						t.Fatalf("default-store refusal omitted the reproducible inspection or actual path:\n%s", out.String())
+					}
+					var command string
+					for _, line := range strings.Split(out.String(), "\n") {
+						if after, ok := strings.CutPrefix(strings.TrimSpace(line), "Inspect the selected store: "); ok {
+							command = after
+						}
+					}
+					binaryDir := t.TempDir()
+					build := exec.Command("go", "build", "-o", filepath.Join(binaryDir, "swarm"), "./cmd/swarm")
+					build.Dir = repoRootForTest()
+					if output, err := build.CombinedOutput(); err != nil {
+						t.Fatalf("build public CLI: %v\n%s", err, output)
+					}
+					before, err := os.ReadFile(sqlitePath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					inspect := exec.Command("sh", "-c", command)
+					inspect.Env = append(os.Environ(), "PATH="+binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+					if output, err := inspect.CombinedOutput(); err != nil || !strings.Contains(string(output), "selected-store lease is available") || !strings.Contains(string(output), "last admitted generation") {
+						t.Fatalf("emitted command did not inspect the real project store: %v\n%s", err, output)
+					}
+					after, err := os.ReadFile(sqlitePath)
+					if err != nil || !bytes.Equal(before, after) {
+						t.Fatalf("emitted read-only command changed the project database: %v", err)
 					}
 				} else if !strings.Contains(out.String(), "store status --store '"+backend+"' --config '"+configPath+"'") {
 					t.Fatalf("reproducible store inspection lost its configuration:\n%s", out.String())
