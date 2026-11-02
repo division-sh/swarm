@@ -19364,7 +19364,9 @@ platform_tables:
         and complete normalized DeliveryRoute identity, including subscriber, target, reply context, and payload projection.
         route_identity is produced only by events.DeliveryRoute and is unique per event. run_id matches the immutable
         event's run, except for a run-less standalone platform publication: each delivery records its subscribing flow's
-        exact live run in delivery_context, revalidated by the native commit owner. RouteIdentity equality compares all normalized
+        exact live run in delivery_context, revalidated by the native commit owner and a fresh-schema
+        insert/update constraint. Ordinary delivery event/run equality remains structurally enforced.
+        RouteIdentity equality compares all normalized
         route fields without inferring or completing missing fields. DeliveryTargetOwnership equality additionally includes
         its closed ownership kind; existing_entity and materializing_entity for the same receiver route are contradictory,
         not distinct executable obligations. Validation keys cross-route ownership and payload-projection agreement by one

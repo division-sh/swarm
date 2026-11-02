@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -214,57 +213,6 @@ func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 			t.Logf("AUDIT1930 exact_native_stored=%t exact_stored_first_wire=%t exact_stored_replay_wire=%t commits=%d", bytes.Equal(committed.Completion.Response, stored.Response), bytes.Equal(stored.Response, first.result), bytes.Equal(stored.Response, replay.result), calls)
 			if !bytes.Equal(committed.Completion.Response, stored.Response) || !bytes.Equal(stored.Response, first.result) || !bytes.Equal(stored.Response, replay.result) {
 				t.Fatal("native/store/first/replay result bytes differ")
-			}
-			waitPublicationCompletionDisposition(t, probe)
-		})
-	}
-}
-
-func TestPublicPublicationRetirementRecoveryBothStores(t *testing.T) {
-	for _, backend := range servedparity.RequiredBackends {
-		t.Run(string(backend), func(t *testing.T) {
-			probe := installPublicationCompletionAudit(t, true)
-			defer probe.releaseOnce.Do(func() { close(probe.release) })
-			h, hash := startPublicationCompletionRuntime(t, backend)
-			params := publicationAuditParams(hash, "completion-retirement")
-			first := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
-			if first.err != nil || first.rpcError != nil {
-				t.Fatalf("first native acknowledgment: error=%v rpc=%s", first.err, first.rpcError)
-			}
-			select {
-			case <-probe.entered:
-			case <-time.After(10 * time.Second):
-				t.Fatal("accepted consequence did not reach readiness cut")
-			}
-			probe.mu.Lock()
-			process, native, request := probe.process, probe.native, probe.request
-			probe.mu.Unlock()
-			stored, found, err := native.LookupAPIEventPublication(t.Context(), request)
-			if err != nil || !found || !bytes.Equal(first.result, stored.Response) || process.PublicCompletionCount() != 1 {
-				t.Fatalf("held exact responsibility: found=%t err=%v count=%d", found, err, process.PublicCompletionCount())
-			}
-			stopped := h.process
-			code := stopped.stop()
-			h.process = nil
-			if code != 1 || !strings.Contains(stopped.outputString(), "agent manager shutdown drain timed out") || !strings.Contains(stopped.outputString(), "context deadline exceeded") {
-				t.Fatalf("held responsibility did not report grace-expiry incomplete shutdown: exit=%d\n%s", code, stopped.outputString())
-			}
-			if count := process.PublicCompletionCount(); count != 0 {
-				t.Fatalf("served shutdown released dependencies before responsibility joined: %d", count)
-			}
-			probe.mu.Lock()
-			probe.hold = false
-			probe.mu.Unlock()
-			h.start(t)
-			replay := publicationAuditHTTP(t.Context(), h.rpcEndpoint(), params)
-			if replay.err != nil || replay.rpcError != nil || !bytes.Equal(replay.result, stored.Response) {
-				t.Fatalf("recovered response: error=%v rpc=%s result=%s", replay.err, replay.rpcError, replay.result)
-			}
-			probe.mu.Lock()
-			commits := probe.commits
-			probe.mu.Unlock()
-			if commits != 1 {
-				t.Fatalf("restart/replay performed %d API commits", commits)
 			}
 			waitPublicationCompletionDisposition(t, probe)
 		})

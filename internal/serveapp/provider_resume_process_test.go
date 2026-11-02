@@ -192,6 +192,9 @@ func TestInterruptedReadOnlyProviderTurnResumesOnlyInterruptedCallBothStores(t *
 							seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received",
 								"bundle_hash": servedEventPublishFixtureBundleHash(t, source),
 								"payload":     map[string]any{"item_id": "provider-resume"}, "idempotency_key": "resume-seed"})
+							if selected {
+								waitProviderResumeSeedDelivery(t, endpoint, seed.EventID)
+							}
 							business := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold",
 								"run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"note": "one interrupted tool round"},
 								"idempotency_key": "resume-original-call"})
@@ -337,6 +340,34 @@ func writeProviderResumeConfig(t *testing.T, backend, profile, root, providerURL
 		t.Fatal(err)
 	}
 	return configPath
+}
+
+func waitProviderResumeSeedDelivery(t *testing.T, endpoint, eventID string) {
+	t.Helper()
+	deadline := time.NewTimer(servedEventPublishLifecycleProbeWaitTimeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var event operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+		for _, delivery := range event.Deliveries {
+			if delivery.SubscriberType != "node" {
+				continue
+			}
+			if delivery.Terminal && delivery.Status != "delivered" {
+				t.Fatalf("source seed did not settle: %+v", delivery)
+			}
+			if delivery.Status == "delivered" {
+				return
+			}
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("source seed node delivery did not settle: event=%+v", event)
+		case <-tick.C:
+		}
+	}
 }
 
 func requireProviderResumeDelivery(t *testing.T, endpoint, eventID string, provider *llmapi.Server, original llmapi.Request, toolCalls *atomic.Int32, exhausted bool, wantCalls int, wantTools int32) {

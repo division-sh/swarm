@@ -320,7 +320,7 @@ func TestRuntimeShutdownFanOutDoesNotJoinBufferedOccurrenceBeforeBusRetirement(t
 	t.Cleanup(func() { _ = subscription.Complete(false) })
 	baseline := rt.workOccurrence.ActiveCount()
 	if err := bus.Publish(ctx, eventtest.RuntimeControl(eventtest.UUID("fan-out-shutdown-buffered"),
-		"test.buffered", "tester", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"test.buffered", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatal(err)
 	}
 	if len(subscription.Deliveries()) != 1 || rt.workOccurrence.ActiveCount() <= baseline {

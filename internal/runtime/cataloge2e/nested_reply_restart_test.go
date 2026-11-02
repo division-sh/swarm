@@ -160,32 +160,47 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatalf("identify exact restarted boot run: %+v err=%v", boot, err)
 	}
 	if len(boot.Events) == 1 {
-		if boot.Events[0].RunID == "" || boot.Events[0].RunID == staged.ForkRunID {
+		if boot.Events[0].RunID == staged.ForkRunID {
 			t.Fatalf("identify exact restarted boot run: %+v", boot)
 		}
 		bootReader := selected.(interface {
 			runtimebus.RunLifecycleReadPersistence
 			LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
+			LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 		})
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for {
-			bootRun, err := bootReader.LoadRunLifecycleSnapshot(ctx, boot.Events[0].RunID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bootRun.Status == "completed" && bootRun.EndedAt != nil {
-				work, err := bootReader.LoadRunTestQuiescence(ctx, bootRun.RunID, time.Now().UTC())
+			if boot.Events[0].RunID == "" {
+				current, err := bootReader.LoadOperatorEvent(ctx, boot.Events[0].EventID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if work.Ready {
+				settled := current.NoDelivery != nil || len(current.Deliveries) != 0
+				for _, delivery := range current.Deliveries {
+					settled = settled && delivery.Terminal
+				}
+				if settled {
 					break
+				}
+			} else {
+				bootRun, err := bootReader.LoadRunLifecycleSnapshot(ctx, boot.Events[0].RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if bootRun.Status == "completed" && bootRun.EndedAt != nil {
+					work, err := bootReader.LoadRunTestQuiescence(ctx, bootRun.RunID, time.Now().UTC())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if work.Ready {
+						break
+					}
 				}
 			}
 			select {
 			case <-ctx.Done():
-				t.Fatalf("restarted boot run did not complete and settle: %+v err=%v", bootRun, ctx.Err())
+				t.Fatalf("restarted boot did not settle: %+v err=%v", boot.Events[0], ctx.Err())
 			case <-ticker.C:
 			}
 		}
