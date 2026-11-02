@@ -512,9 +512,6 @@ func joinFieldName(parent, child string) string {
 
 func typeName(contract Contract, typeRef string) string {
 	typeRef = strings.TrimSpace(typeRef)
-	if scalar, ok := contract.Types.Scalars[typeRef]; ok {
-		return strings.TrimSpace(scalar.Base)
-	}
 	return typeRef
 }
 

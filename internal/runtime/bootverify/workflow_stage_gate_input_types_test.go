@@ -213,7 +213,7 @@ func TestStageGateLiteralEmitConsumesExactResolvedEventFieldSchema(t *testing.T)
 		{name: "uuid format", field: runtimecontracts.EventFieldSpec{Type: "uuid"}, valid: "17e1d38a-ed95-49e7-a5e9-6421e15aa503", invalid: "card-1", wantDetail: "must be uuid"},
 		{
 			name: "enum", field: runtimecontracts.EventFieldSpec{Type: "ReviewMode"}, valid: "fast", invalid: "slow", wantDetail: "enum",
-			rootTypes: runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"ReviewMode": {Values: []string{"fast", "deep"}, Default: "fast"}}},
+			rootTypes: runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"ReviewMode": {Values: []string{"fast", "deep"}}}},
 		},
 		{
 			name: "pattern", field: runtimecontracts.EventFieldSpec{Type: "text", Refinements: runtimecontracts.SchemaRefinements{Pattern: "^[a-z]+$"}},

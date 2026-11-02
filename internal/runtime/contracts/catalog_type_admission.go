@@ -29,11 +29,6 @@ func validateFlowCatalogReferences(bundle *WorkflowContractBundle, source FlowSo
 	if err := validateCatalogTypeNamespace(bundle, source, types); err != nil {
 		return err
 	}
-	for _, name := range sortedContractKeys(types.Scalars) {
-		if err := validateScopedCatalogReference(types, types.Scalars[name].Base, source.Types, "scalar "+name); err != nil {
-			return err
-		}
-	}
 	for _, name := range sortedContractKeys(types.Enums) {
 		if err := types.Enums[name].Validate(name); err != nil {
 			return wrapLoaderDiagnosticFile(err, source.Types)

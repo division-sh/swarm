@@ -200,7 +200,7 @@ func TestBuildBaseContext_PropagatesPresentEntityValidationFailure(t *testing.T)
 			},
 			RootTypes: runtimecontracts.TypeCatalogDocument{
 				Enums: map[string]runtimecontracts.EnumTypeDecl{
-					"order_status": {Values: []string{"draft", "open"}, Default: ""},
+					"order_status": {Values: []string{"draft", "open"}},
 				},
 			},
 		}),

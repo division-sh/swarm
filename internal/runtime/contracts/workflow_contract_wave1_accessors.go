@@ -454,17 +454,11 @@ func (b *WorkflowContractBundle) ResolvedEntityContractsForFlow(flowID string) E
 func mergeTypeCatalogDocuments(base, incoming TypeCatalogDocument) TypeCatalogDocument {
 	out := cloneTypeCatalogDocument(base)
 	incoming = cloneTypeCatalogDocument(incoming)
-	if out.Scalars == nil {
-		out.Scalars = map[string]ScalarTypeDecl{}
-	}
 	if out.Enums == nil {
 		out.Enums = map[string]EnumTypeDecl{}
 	}
 	if out.Types == nil {
 		out.Types = map[string]NamedTypeDecl{}
-	}
-	for key, value := range incoming.Scalars {
-		out.Scalars[key] = value
 	}
 	for key, value := range incoming.Enums {
 		out.Enums[key] = value
@@ -488,16 +482,10 @@ func mergeEntityContractsDocuments(base, incoming EntityContractsDocument) Entit
 
 func cloneTypeCatalogDocument(in TypeCatalogDocument) TypeCatalogDocument {
 	out := TypeCatalogDocument{}
-	if len(in.Scalars) > 0 {
-		out.Scalars = make(map[string]ScalarTypeDecl, len(in.Scalars))
-		for key, value := range in.Scalars {
-			out.Scalars[key] = value
-		}
-	}
 	if len(in.Enums) > 0 {
 		out.Enums = make(map[string]EnumTypeDecl, len(in.Enums))
 		for key, value := range in.Enums {
-			out.Enums[key] = EnumTypeDecl{Values: append([]string{}, value.Values...), Default: value.Default}
+			out.Enums[key] = EnumTypeDecl{Values: append([]string{}, value.Values...)}
 		}
 	}
 	if len(in.Types) > 0 {

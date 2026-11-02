@@ -63,9 +63,8 @@ func TestA2CollectionProjectionAdmissionAndOrdering(t *testing.T) {
 }
 
 func TestA2CollectionProjectionCatalogAndDigestWitness(t *testing.T) {
-	ref := CatalogTypeReference{Type: "map[Key]Record", Catalog: TypeCatalogDocument{
-		Scalars: map[string]ScalarTypeDecl{"Key": {Base: "text"}},
-		Types:   map[string]NamedTypeDecl{"Record": {Fields: map[string]TypeFieldSpec{"values": {Type: "[integer]"}}}},
+	ref := CatalogTypeReference{Type: "map[text]Record", Catalog: TypeCatalogDocument{
+		Types: map[string]NamedTypeDecl{"Record": {Fields: map[string]TypeFieldSpec{"values": {Type: "[integer]"}}}},
 	}}
 	p, err := AdmitCollectionProjection(ref)
 	if err != nil {

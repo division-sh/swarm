@@ -1,3 +1,2 @@
-types:
-  CountItem:
-    id: text
+CountItem:
+  id: text

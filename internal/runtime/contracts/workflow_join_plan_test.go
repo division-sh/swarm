@@ -91,7 +91,7 @@ func TestA2JoinClosedGrammarM01M04(t *testing.T) {
 }
 
 func TestA2JoinTypedCompileM05M08M09(t *testing.T) {
-	for name, memberType := range map[string]string{"list": "[MemberID]", "map": "map[MemberID]Result"} {
+	for name, memberType := range map[string]string{"list": "[text]", "map": "map[text]Result"} {
 		t.Run(name, func(t *testing.T) {
 			bundle, handler := a2JoinCompilerFixture(t, memberType)
 			plan, err := bundle.CompileWorkflowJoinPlan(identitytest.RootNode(t, "collector"), "arrived", handler)
@@ -136,7 +136,7 @@ func TestA2JoinTypedCompileM05M08M09(t *testing.T) {
 			}
 		})
 	}
-	for _, outputType := range []string{"text", "integer", "Score", "Decision", "Result"} {
+	for _, outputType := range []string{"text", "integer", "Decision", "Result"} {
 		t.Run("output "+outputType, func(t *testing.T) {
 			bundle, handler := a2JoinCompilerFixture(t, "[text]")
 			bundle.Events["arrived"].Payload.Properties["result"] = EventFieldSpec{Type: outputType}
@@ -219,12 +219,11 @@ func a2JoinCompilerFixture(t *testing.T, membersType string) (*WorkflowContractB
 		RootSchema:   &FlowSchemaDocument{},
 		RootEntities: EntityContractsDocument{"state": {Fields: map[string]EntityFieldDecl{"members": {Type: membersType}}}},
 		RootTypes: TypeCatalogDocument{
-			Scalars: map[string]ScalarTypeDecl{"MemberID": {Base: "text"}, "Score": {Base: "integer"}},
-			Enums:   map[string]EnumTypeDecl{"Decision": {Values: []string{"yes", "no"}}},
-			Types:   map[string]NamedTypeDecl{"Result": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}}},
+			Enums: map[string]EnumTypeDecl{"Decision": {Values: []string{"yes", "no"}}},
+			Types: map[string]NamedTypeDecl{"Result": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}}},
 		},
 		Events: map[string]EventCatalogEntry{
-			"arrived": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"member": {Type: "MemberID"}, "result": {Type: "Result"}}}},
+			"arrived": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"member": {Type: "text"}, "result": {Type: "Result"}}}},
 			"closed":  {},
 		},
 		Nodes: map[string]SystemNodeContract{"collector": {EventHandlers: map[string]SystemNodeEventHandler{"arrived": handler}}},
