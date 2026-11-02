@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -212,6 +213,21 @@ func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
 			redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
 			h, hash := startChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, func(opts *cliapp.ServeOptions) {
 				opts.TestLLMRuntime = nil
+				path := filepath.Join(opts.SourceRoot, "chat", "observers", "agents.yaml")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var agents map[string]any
+				if err := yaml.Unmarshal(raw, &agents); err != nil {
+					t.Fatal(err)
+				}
+				agents["observer"].(map[string]any)["memory"] = true
+				raw, err = yaml.Marshal(agents)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeStandingCandidateFile(t, path, string(raw))
 				credentials, err := runtimecredentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
 				if err != nil {
 					t.Fatal(err)
@@ -223,6 +239,20 @@ func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
 			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 				"event_name": "observer.requested", "bundle_hash": hash,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "anthropic-human-request",
+			})
+			t.Cleanup(func() {
+				if !t.Failed() {
+					return
+				}
+				var list operatorread.OperatorEventListResult
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{"filter": map[string]any{"run_id": seed.RunID, "event_name": "human_task.approved"}, "limit": 10}, &list)
+				for _, header := range list.Events {
+					var event operatorread.OperatorEventFull
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.get", map[string]any{"event_id": header.EventID}, &event)
+					raw, _ := json.Marshal(event)
+					t.Logf("human outcome readback: %s", raw)
+				}
+				t.Logf("human-task provider requests: %d", len(provider.Requests()))
 			})
 			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindHumanTask, "chat/observers")
 			sessionID := requireProviderMemoryTurns(t, h.rpcEndpoint(), seed.RunID, 2)

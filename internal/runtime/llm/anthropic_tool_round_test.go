@@ -80,3 +80,50 @@ func TestAnthropicUserToolMarkupRemainsUserText(t *testing.T) {
 		t.Fatalf("quoted tool markup became a call: request=%+v err=%v", request, err)
 	}
 }
+
+func TestAnthropicIDLessObservationsMatchCompatible(t *testing.T) {
+	conversation := &Conversation{}
+	if err := conversation.InjectAsyncToolResult(t.Context(), "ask_human", true, map[string]any{"answer": "yes"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	const linked = `{"tool_call_id":"linked-id","ok":true,"provider_content":"  linked output  "}`
+	const observation = `{"name":"ask_human","ok":true,"result":{"answer":"yes"}}`
+	for _, tc := range []struct{ name, content string }{
+		{"human_task", conversation.pendingAsync.Content},
+		{"plain_observation", "a legacy observation"},
+		{"empty", ""},
+		{"linked_first", "[" + linked + "," + observation + "]"},
+		{"observation_first", "[" + observation + "," + linked + "]"},
+		{"multiple_observations", "[" + observation + "," + linked + "," + observation + "]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := Message{Role: "tool", Content: tc.content}
+			reference := toOpenAICompatibleMessages(message)
+			actual, included, err := toAnthropicMessage(message)
+			if err != nil || included != (len(reference) > 0) {
+				t.Fatalf("observation inclusion=%t error=%v, compatible=%+v", included, err, reference)
+			}
+			if !included {
+				return
+			}
+			var results, observations []any
+			for _, entry := range reference {
+				if entry.Role == "tool" {
+					results = append(results, anthropicToolResultBlock{Type: "tool_result", ToolUseID: entry.ToolCallID, Content: entry.Content})
+				} else {
+					if entry.Role != "user" || !strings.HasPrefix(entry.Content, "Tool result:\n") {
+						t.Fatalf("unexpected compatible observation: %+v", entry)
+					}
+					observations = append(observations, anthropicTextBlock{Type: "text", Text: entry.Content})
+				}
+			}
+			want := anthropicMessage{Role: "user", Content: append(results, observations...)}
+			if len(results) == 0 && len(observations) == 1 {
+				want.Content = reference[0].Content
+			}
+			if got, expected := providerSchemaJSON(t, actual), providerSchemaJSON(t, want); got != expected {
+				t.Fatalf("Anthropic observation=%s, want %s", got, expected)
+			}
+		})
+	}
+}
