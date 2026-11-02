@@ -14,7 +14,6 @@ func TestAcceptedAliasPublicationJoinedShutdownBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			h := newChannelOnboardingE2EHarness(t, map[string]servedparity.Backend{"sqlite": servedparity.BackendDefaultSQLite, "postgres": servedparity.BackendExplicitPostgres}[backend], true)
 			writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
-			h.opts.AbandonActiveRuns = false
 			registerChannelFixtureAccount(t, h.opts.ConfigPath, "joined-shutdown-bot-token", "420079")
 			h.start(t)
 			requireServedLandingRun(t, servedTestProcessRuntime(t, h.process), ".")

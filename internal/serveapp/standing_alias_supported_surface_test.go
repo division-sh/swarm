@@ -35,7 +35,7 @@ func proveA9ServedAliases(t *testing.T, backend string) {
 	if err := os.Rename(root, selected); err != nil {
 		t.Fatal(err)
 	}
-	h.opts.SourceRoot, h.opts.AbandonActiveRuns = selected, false
+	h.opts.SourceRoot = selected
 	for _, account := range []struct {
 		id    int64
 		token string

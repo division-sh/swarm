@@ -25,7 +25,6 @@ func TestStandingIngressPendingResetProcessDeathBothStores(t *testing.T) {
 					t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 					h := newChannelOnboardingE2EHarness(t, backend, true)
 					writeChannelOnboardingLiveToolCredentials(t, h.credentialPath)
-					h.opts.AbandonActiveRuns = false
 					h.start(t)
 					begun := startChannelOnboardingRPC(t, h, channelonboarding.VerbConnect, "crash-reset-original", nil)
 					retained := int64(0)

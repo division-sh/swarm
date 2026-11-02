@@ -92,7 +92,7 @@ func TestCLIAPITransportDiagnosticRendersUserFacingRuntimeTarget(t *testing.T) {
 					t.Fatalf("diagnostic = %q, want substring %q", got, want)
 				}
 			}
-			for _, forbidden := range []string{"v1 RPC", "v1 WS", "/v1/rpc", "/v1/ws", "Post ", "dial tcp", "connection refused"} {
+			for _, forbidden := range []string{"v1 RPC", "v1 WS", "/v1/rpc", "/v1/ws", "Post ", "dial tcp", "connection refused", "--dev"} {
 				if strings.Contains(got, forbidden) {
 					t.Fatalf("diagnostic = %q, must not leak %q", got, forbidden)
 				}

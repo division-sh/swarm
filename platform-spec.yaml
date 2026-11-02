@@ -7543,17 +7543,6 @@ engine:
         postgres_owner: internal/store.PostgresStore ingress/run-control methods
         excludes:
           - delivery release/abandon and replay behavior owned by #1087
-      - name: serve_active_run_abandon_quiescence_rows
-        owner: runtimerunquiescence.ServeAbandonStore consumed by internal/serveapp for swarm serve --abandon-active-runs and --dev
-        promoted_by: '#1251'
-        sqlite_owner: internal/store.SQLiteRuntimeStore.ApplyServeAbandonActiveRunQuiescence
-        postgres_owner: internal/store.PostgresStore.ApplyServeAbandonActiveRunQuiescence
-        scope: |
-          The selected runtime store owns serve-startup active-run abandon quiescence for its backend. Both SQLite local/dev and Postgres production/external backends apply the same `server_restart_abandon` semantics over active runs, same-run recoverable agent/node deliveries, exact delivery outcomes, and platform pipeline receipts before runtime startup can reclaim work. `swarm serve` consumes this typed selected-store owner and must not infer support from raw Postgres handles or skip the operation on SQLite.
-        excludes:
-          - destructive reset/runtime.nuke container and row-deletion semantics
-          - broader startup recovery/replay policy outside the rows explicitly terminalized by serve abandon
-          - production multi-writer SQLite semantics
       - name: api_idempotency_rows
         owner: internal/apiidempotency Store contract backed by private selected-store owners; runtimebus.APIEventPublicationCommitOwner is the exact event.publish cross-domain operation
         sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency plus its private typed API-event publication operation
@@ -27620,9 +27609,10 @@ cli_specification:
           operators cannot disable that integrity gate. Persisted-hash boot separately rejects active runs outside the
           explicit pinned hash set.
       serve_active_run_abandon:
-        classification: required_current_contract
+        classification: retired
         reason: >
-          Platform spec carries exact `--abandon-active-runs` quiescence and reason-code semantics from #808.
+          Serve does not abandon retained work at startup. Operators explicitly stop active runs with
+          `swarm control stop --all` against the running serve; ordinary startup follows the existing recovery policy.
       serve_shutdown_grace:
         classification: required_current_contract
         reason: >
@@ -31039,43 +31029,13 @@ cli_specification:
           authority is a data-integrity failure. No flag, dev mode, compatibility branch, or operator override can disable
           this gate. When serve loads one or more explicit persisted bundle hashes, it also rejects active non-standing runs
           whose available source artifact is outside that exact pinned set.
-      active_run_abandon_quiescence:
-        implemented_by: '#808/#1251/#2105'
-        flag: --abandon-active-runs
-        owner: internal/runtime/runquiescence plus selected runtime store active-run quiescence owner, consumed by internal/serveapp
-        ordering: >
-          `swarm serve --abandon-active-runs` applies after platform schema/state-store initialization and before source-artifact
-          startup recovery, runtime start, API readiness, or late delivery recovery can reclaim work. Failure to apply
-          the quiescence owner is a serve startup failure; serve MUST NOT continue with partial abandon state.
-        backend_ownership: >
-          The selected runtime store implements this owner for its backend: `PostgresStore` for explicit Postgres and
-          `SQLiteRuntimeStore` for the local SQLite default. Serve calls the selected owner only when
-          `--abandon-active-runs` is explicit; `--dev` does not imply abandon. Serve MUST NOT special-case SQLite as a
-          skip/no-op and MUST NOT use raw Postgres handle presence as the capability decision.
-        active_run_scope: >
-          The owner selects active source runs with `runs.status` in `running` or `paused`. Each selected run is terminalized
-          as `runs.status=cancelled`, with `run_control_state.control_status=stopped`, `reason=server_restart_abandon`, and
-          `controlled_by=swarm.serve.abandon_active_runs`.
-        delivery_scope: >
-          For those selected runs, same-run agent/node deliveries in `pending`, `in_progress`, or retryable `failed` state are
-          terminalized as `dead_letter` with `reason_code=server_restart_abandon`; `active_session_id` is cleared. Retryable failed
-          means the delivery is still eligible for normal runtime retry under the delivery retry policy. Delivered, exhausted,
-          unrelated, or terminal-run deliveries remain untouched.
-        receipt_scope: >
-          The owner writes exact delivery terminalization outcomes through the executable-delivery owner and matching platform
-          pipeline receipts with `outcome=dead_letter` and `reason_code=server_restart_abandon` so neither delivery reclaim nor
-          missing-pipeline-receipt recovery can resurrect abandoned work. Agent/node outcomes never enter `event_receipts`.
-        late_writer_rule: >
-          EventBus, AgentManager, node pipeline, and pipeline-receipt writers MUST treat `server_restart_abandon` as a terminal
-          active-run quiescence reason. They MUST NOT overwrite the delivery/receipt reason, reclaim the delivery, or requeue
-          missing pipeline work after the owner has applied. Before and after agent handler execution, AgentManager MUST consume
-          the selected store's canonical delivery snapshot readback for this exact event/subscriber on both PostgreSQL and SQLite;
-          a backend that omits that capability is not a supported Manager store. The check MUST fail closed on read error and MUST
-          prevent handler outputs after terminalization.
-        destructive_reset_separation: >
-          Destructive reset/runtime.nuke consumes the same active-run quiescence owner with `runtime_nuke_cancelled` reasons and
-          must retain its existing run-scoped cleanup and managed-container deletion semantics. `--abandon-active-runs` does not
-          delete source rows, truncate tables, stop managed workspace containers, or reuse nuke-specific reason codes.
+      active_run_stop:
+        implemented_by: '#2721'
+        command: swarm control stop --all
+        semantics: >
+          Explicit run stop is an operator command against the running serve, not a boot option. Serve refuses the retired
+          --abandon-active-runs spelling with this command as remediation and never terminalizes retained work merely to boot.
+          Destructive reset keeps its separate existing run-scoped cleanup and managed-container deletion semantics.
       shutdown_grace_drain_budget:
         implemented_by: '#825'
         flag: --shutdown-grace <duration>
@@ -31091,16 +31051,24 @@ cli_specification:
           and new agent work remain fail-closed while in-flight work drains.
         drain_scope: >
           The configured budget is consumed by the runtime/manager shutdown owner for agent in-flight quiescence and final
-          manager run goroutine shutdown. Serve MUST NOT keep a hidden manager timeout or a CLI-local timeout as an alternate
-          shutdown policy.
+          manager run goroutine shutdown. Accepted result settlement and continuations retain their original custody and
+          dependencies while new dispatch is fenced. Explicit cancellation and ownership loss still cancel immediately.
+          The existing serving-process deadline bounds actual process death; it never stands in for a successful internal join.
         timeout_outcome: >
           If in-flight work does not quiesce within the configured budget, the manager cancels active loop contexts and returns
-          an explicit timeout error that includes the configured budget. This slice does not persist `platform.shutdown` events
+          an explicit timeout error that includes the configured budget. If accepted work or cleanup remains unjoined at the
+          actual process deadline, serve reports incomplete shutdown and exits nonzero; it MUST NOT report shutdown complete.
+          This slice does not persist `platform.shutdown` events
           or terminalize event deliveries as `interrupted_by_shutdown`; those semantics remain split until promoted by a
           merge-bearing spec contract.
         sibling_boundaries: >
           `--dev`, `platform.shutdown` event persistence, and persisted delivery/receipt interruption reasons remain outside
           this owner and under #750 unless a later child promotes them.
+        operator_guidance: >
+          A container or service wrapper's termination window must exceed --shutdown-grace, allowing the serving process to
+          drain before the wrapper forcibly ends it. Configure PostgreSQL/TCP keepalive or session-idle policy for half-open
+          connections: a disconnected holder can retain its native session until that connection is detected or closed.
+          These settings do not replace native ownership checks or authorize a standby to displace a still-held lease.
       dev_mode_lifecycle_composition:
         implemented_by: '#830/#2010/#2320/#2360/#2364'
         flag: --dev
@@ -31112,10 +31080,9 @@ cli_specification:
         - replaces the predecessor project-local SQLite scratch epoch before opening the selected store
         - recreates deterministic standing semantic IDs when the same flow_path is authored, while predecessor event,
           delivery, card, and other durable history remains absent and the fresh run has a later started_at
-        - does not imply `--abandon-active-runs`; an explicit abandon flag is evaluated only against the fresh epoch
+        - never abandons retained runs; the scratch epoch is separate from retained deployment state
         - consumes concise serve boot/readiness presentation without setting `--verbose`
         conflict_rules:
-        - '`--dev --abandon-active-runs` is explicit and valid, but the fresh epoch contains no predecessor runs to abandon.'
         - '`--dev --verbose` is valid and selects explicit 22-step presentation; it is not redundant.'
         shutdown_ordering: >
           On serve shutdown, runtime shutdown admission and the runtime/manager shutdown-grace drain run first. The ordinary

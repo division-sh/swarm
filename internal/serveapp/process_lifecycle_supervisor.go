@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -142,11 +143,34 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
-	selectedErr := s.retireSelectedContextsLocked(ctx)
-	s.mu.RLock()
+	s.mu.Lock()
+	s.apiReady = false
+	if s.ready != nil {
+		s.ready.Store(false)
+	}
 	manager := s.runtimeContexts
 	current := s.currentRT
-	s.mu.RUnlock()
+	s.mu.Unlock()
+	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
+	if err != nil {
+		return err
+	}
+	drainCtx, cancelDrain := context.WithTimeout(ctx, grace)
+	defer cancelDrain()
+	deadline, _ := drainCtx.Deadline()
+	if manager != nil {
+		for _, loaded := range manager.LoadedContexts() {
+			loaded.Runtime.CloseAdmission()
+		}
+	} else if current != nil {
+		current.CloseAdmission()
+	}
+	var selectedErr error
+	if s.selected != nil {
+		selectedErr = s.selected.DrainSelectedContexts(drainCtx)
+	}
+	selectedErr = errors.Join(selectedErr, s.retireSelectedContextsLocked(context.WithoutCancel(ctx)))
+	opts.Grace = remainingServeShutdownGrace(grace, deadline)
 	shutdownErr := selectedErr
 	var terminalErr error
 	if s.processCapability != nil {

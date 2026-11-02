@@ -169,7 +169,6 @@ func swarmEnvGuardFlagConsumesNext(arg string) bool {
 
 func swarmEnvGuardKnownBoolLongFlags() map[string]bool {
 	return map[string]bool{
-		"abandon-active-runs": true,
 		"all":                 true,
 		"client-secret-stdin": true,
 		"code-stdin":          true,

@@ -429,7 +429,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		SourceRoot: sourceRoot, ConfigPath: configPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
-		PublicWebhookListener: publicListener, SelfCheck: true, AbandonActiveRuns: true,
+		PublicWebhookListener: publicListener, SelfCheck: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 		StoreMode: backend, StoreModeSet: true,
 	}
@@ -448,7 +448,6 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
 	} else {
 		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079", provider)
-		opts.AbandonActiveRuns = false
 	}
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })

@@ -253,6 +253,47 @@ func (o SelectedContractExecutionOwner) RequireResetPredecessor(ctx context.Cont
 	return o.RetireSelectedContexts(ctx)
 }
 
+// DrainSelectedContexts fences preparation and finite selected work without
+// cancelling the accepted operations that still own their result settlement.
+func (o SelectedContractExecutionOwner) DrainSelectedContexts(ctx context.Context) error {
+	ports, err := o.require()
+	if err != nil {
+		return err
+	}
+	contexts := ports.contexts
+	contexts.mu.Lock()
+	contexts.retired = true
+	entries := make([]*selectedForkContext, 0, len(contexts.entries))
+	for _, entry := range contexts.entries {
+		entries = append(entries, entry)
+	}
+	contexts.mu.Unlock()
+	var drainErr error
+	selected := make([]*worklifetime.SelectedForkOccurrence, len(entries))
+	for index, entry := range entries {
+		entry.operation.mu.Lock()
+		selected[index] = entry.operation.selected
+		entry.operation.mu.Unlock()
+		if selected[index] != nil {
+			if err := selected[index].Fence(); err != nil && !errors.Is(err, worklifetime.ErrRetired) {
+				drainErr = errors.Join(drainErr, err)
+			}
+		}
+	}
+	for index, entry := range entries {
+		if selected[index] == nil {
+			select {
+			case <-entry.done:
+			case <-ctx.Done():
+				return errors.Join(drainErr, ctx.Err())
+			}
+			continue
+		}
+		drainErr = errors.Join(drainErr, selected[index].WaitForQuiescence(ctx))
+	}
+	return drainErr
+}
+
 // RetireSelectedContexts rejects further preparation and joins every admitted
 // operation or retained context before process/store retirement can proceed.
 func (o SelectedContractExecutionOwner) RetireSelectedContexts(ctx context.Context) error {

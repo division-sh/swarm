@@ -20,7 +20,6 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -66,8 +65,6 @@ type serveLifecycleReadyFacts struct {
 type serveLifecycleNoticeKind string
 
 const (
-	serveLifecycleNoticeNoActiveWork      serveLifecycleNoticeKind = "no_active_work"
-	serveLifecycleNoticeActiveWorkCleared serveLifecycleNoticeKind = "active_work_cleared"
 	serveLifecycleNoticeUnavailableClosed serveLifecycleNoticeKind = "unavailable_work_closed"
 )
 
@@ -356,33 +353,6 @@ func (p *serveLifecyclePresenter) recordOperatorChannelProofReuse(binding operat
 	p.mu.Unlock()
 }
 
-func (p *serveLifecyclePresenter) recordAbandonedWork(runs, deliveries, pipelineReceipts int) {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	kind := serveLifecycleNoticeNoActiveWork
-	if runs > 0 || deliveries > 0 || pipelineReceipts > 0 {
-		kind = serveLifecycleNoticeActiveWorkCleared
-	}
-	p.notices = append(p.notices, serveLifecycleNotice{Kind: kind})
-}
-
-func recordServeAbandonOutcome(p *serveLifecyclePresenter, result runtimerunquiescence.Result, err error) error {
-	// A postcommit cleanup error must not erase the committed boot report.
-	if result.Acknowledged {
-		p.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
-	} else if err == nil {
-		if len(result.Runs) != 0 || len(result.Deliveries) != 0 || result.PipelineReceiptCount != 0 ||
-			result.SessionCount != 0 || result.TimerCount != 0 || len(result.TimerCancellations) != 0 {
-			return errors.New("serve abandonment returned work without commit acknowledgement")
-		}
-		p.recordAbandonedWork(0, 0, 0)
-	}
-	return err
-}
-
 func (p *serveLifecyclePresenter) recordClosedUnavailableWork() {
 	if p == nil {
 		return
@@ -666,10 +636,14 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 		fmt.Fprintln(p.out, line)
 	}
 	if p.store != nil {
+		state := "retained"
+		if p.dev {
+			state = "scratch; replaced by --dev"
+		}
 		if p.store.Backend == storebackend.BackendSQLite {
-			p.writeResolvedFactLocked("store", "sqlite · "+strings.TrimSpace(p.store.SQLitePath))
+			p.writeResolvedFactLocked("store", "sqlite · "+strings.TrimSpace(p.store.SQLitePath)+" · "+state)
 		} else {
-			p.writeResolvedFactLocked("store", p.store.Backend.String()+" · path not applicable")
+			p.writeResolvedFactLocked("store", p.store.Backend.String()+" · path not applicable · "+state)
 		}
 	}
 	for _, detail := range p.workspaceDetailsLocked() {
@@ -893,10 +867,6 @@ func serveLifecycleWorkspaceDetail(decision cliapp.WorkspaceBackendSelection) st
 
 func serveLifecycleNoticeDetail(notice serveLifecycleNotice) string {
 	switch notice.Kind {
-	case serveLifecycleNoticeNoActiveWork:
-		return "no active work to clear"
-	case serveLifecycleNoticeActiveWorkCleared:
-		return "active work cleared for a clean start"
 	case serveLifecycleNoticeUnavailableClosed:
 		return "unfinished work could not be resumed and was closed"
 	default:

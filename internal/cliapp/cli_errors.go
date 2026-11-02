@@ -374,7 +374,7 @@ func cliAPITransportDiagnosticParts(err error) (cliAPITransportDiagnostic, bool)
 			leaf:    transportErr,
 			problem: problem,
 			remediation: []string{
-				"  Is the runtime running? Start one with `swarm serve` (or `swarm serve --dev` for local development).",
+				"  Is the runtime running? Start the selected retained deployment with `swarm serve`.",
 				"  Check the selected target with `swarm context current`; override with --api-server.",
 			},
 		}, true

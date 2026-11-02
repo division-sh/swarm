@@ -157,12 +157,21 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if err := am.CheckShutdownAdmission(); err != nil {
 		return err
 	}
-	transition := am.lifecycle.requestShutdownTransition()
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
+	defer cancelDrain()
+	transition := am.lifecycle.prepareShutdownTransition(true)
 	if transition == nil {
-		// A prior run may already be joined while exact activation cleanup is
-		// retained after a failed durable settlement.
+		// A joined run can retain exact activation cleanup after a failed settlement.
 		return am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext()))
 	}
+	drainErr := am.lifecycle.drainShutdownWork(drainCtx)
+	if errors.Is(drainErr, worklifetime.ErrRetired) {
+		drainErr = nil
+	}
+	if drainErr != nil && drainCtx.Err() != nil {
+		drainErr = fmt.Errorf("agent manager shutdown drain timed out after %s: %w", grace, drainErr)
+	}
+	am.lifecycle.requestShutdownTransition()
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
 		return err
@@ -170,19 +179,23 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if claimed {
 		go am.completeClaimedShutdownTransition(transition, executor)
 	}
-	return waitForRuntimeLifecycleTransition(transition, grace, "shutdown drain")
+	return errors.Join(drainErr, waitForRuntimeLifecycleTransitionContext(drainCtx, transition, grace, "shutdown drain"))
 }
 
 func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	return waitForRuntimeLifecycleTransitionContext(ctx, transition, grace, operation)
+}
+
+func waitForRuntimeLifecycleTransitionContext(ctx context.Context, transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {
 	if transition == nil {
 		return nil
 	}
-	timer := time.NewTimer(grace)
-	defer timer.Stop()
 	timedOut := false
 	select {
 	case <-transition.done:
-	case <-timer.C:
+	case <-ctx.Done():
 		timedOut = true
 		<-transition.done
 	}

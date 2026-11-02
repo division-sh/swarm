@@ -1106,6 +1106,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	var workspaces cliapp.ServeWorkspaceLifecycle
 	var processCapability runtimestartupownership.ProcessCapability
 	cancelOwnershipWatch := func() {}
+	var runtimeCtx context.Context
+	cancelRuntime := func() {}
+	stopBootCancellation := func() bool { return true }
 	var mcpServer *http.Server
 	var mcpListener net.Listener
 	httpServersStarted := false
@@ -1113,13 +1116,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	var storyFollower *serveAuthorActivityFollower
 	defer func() {
 		cancelServe()
+		stopBootCancellation()
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
 		shutdownErr := publicExposure.Stop(shutdownCtx)
-		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		if !httpServersStarted {
 			// Before Serve owns the listeners, startup failure still needs to
 			// release them. Active listeners belong exclusively to HTTP shutdown.
@@ -1140,6 +1142,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				}
 			}
 		}
+		cancelRuntime()
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
+		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
 		if shutdownErr == nil {
 			shutdownErr = cleanupLoadedSourceArtifacts()
 		}
@@ -1163,9 +1168,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
-	ownershipWatchCtx, watchCancel := context.WithCancel(ctx)
+	runtimeCtx, cancelRuntime = context.WithCancel(context.WithoutCancel(ctx))
+	stopBootCancellation = context.AfterFunc(ctx, cancelRuntime)
+	ownershipWatchCtx, watchCancel := context.WithCancel(runtimeCtx)
 	cancelOwnershipWatch = watchCancel
-	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
+	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, func() {
+		cancelRuntime()
+		cancelServe()
+	})
 	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
@@ -1346,7 +1356,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			ExecutionPosture:    req.Purpose,
 			PublicIngressAbsent: !publicIngressEnabled,
 			DataProjectionRoot:  req.DataProjectionRoot,
-			Ctx:                 ctx,
+			Ctx:                 runtimeCtx,
 			Stores:              runtimePersistence,
 			Config:              cfg,
 			Loaded:              loaded,
@@ -1497,13 +1507,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	if err := runtime.ValidateRuntimeContextSet(preflightContexts...); err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
-	}
-	if opts.AbandonActiveRuns {
-		result, err := stores.RunQuiescence().ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
-		if err := recordServeAbandonOutcome(presenter, result, err); err != nil {
-			presenter.fail(5, "run_quiescence", err)
-			return 3
-		}
 	}
 	if recovery, available := stores.StartupRecovery(); available {
 		if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, stores.SourceArtifactStore(), presenter); exitCode != 0 {
@@ -1846,9 +1849,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			if err := runtimeContextManager.StageRecoveredRuntimeContexts(preflightContexts...); err != nil {
 				return err
 			}
-			releaseRuntimeContexts, err = prepareResetServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
+			releaseRuntimeContexts, err = prepareResetServeRuntimeContexts(runtimeCtx, runtimeContexts, runtimeContextManager)
 		} else {
-			releaseRuntimeContexts, err = prepareServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
+			releaseRuntimeContexts, err = prepareServeRuntimeContexts(runtimeCtx, runtimeContexts, runtimeContextManager)
 		}
 		if err != nil {
 			return err
@@ -1876,6 +1879,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 3
 		}
 	}
+	if ctx.Err() != nil {
+		return serveCancellationExitCode(ownershipLoss)
+	}
+	// Accepted runtime work outlives a stop request, but never ownership loss.
+	stopBootCancellation()
 	if err := releaseRuntimeContexts(); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1

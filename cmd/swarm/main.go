@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -63,6 +64,7 @@ func withServingExitDeadline(stopped <-chan struct{}, grace time.Duration, run f
 		select {
 		case <-done:
 		case <-timer.C:
+			fmt.Fprintln(os.Stderr, "shutdown incomplete: grace expired before accepted work and cleanup joined; retained work will be reconciled on the next start")
 			os.Exit(1)
 		}
 	}()

@@ -23,21 +23,17 @@ func TestPublicCompletionAcknowledgedShutdownBeforeFinalizationBothStores(t *tes
 	for _, backend := range servedparity.RequiredBackends {
 		for _, method := range []string{"event.publish", "run.start"} {
 			t.Run(string(backend)+"/"+method, func(t *testing.T) {
-				provePublicCompletionAcknowledgedShutdownCut(t, backend, method, false, false, false)
+				provePublicCompletionAcknowledgedShutdownCut(t, backend, method, false, false)
 			})
 		}
 	}
 }
 
-func TestPublicCompletionAcknowledgedDefaultAbandonmentBothStores(t *testing.T) {
-	runPublicCompletionShutdownVariants(t, true, false)
-}
-
 func TestPublicCompletionAcknowledgedFenceRecoveryBothStores(t *testing.T) {
-	runPublicCompletionShutdownVariants(t, false, true)
+	runPublicCompletionShutdownVariants(t, true)
 }
 
-func runPublicCompletionShutdownVariants(t *testing.T, abandon, fence bool) {
+func runPublicCompletionShutdownVariants(t *testing.T, fence bool) {
 	t.Helper()
 	for _, backend := range servedparity.RequiredBackends {
 		for _, variant := range []struct {
@@ -49,23 +45,18 @@ func runPublicCompletionShutdownVariants(t *testing.T, abandon, fence bool) {
 			{"run.start/feed-only", "run.start", false},
 		} {
 			t.Run(string(backend)+"/"+variant.name, func(t *testing.T) {
-				provePublicCompletionAcknowledgedShutdownCut(t, backend, variant.method, variant.eventBacked, abandon, fence)
+				provePublicCompletionAcknowledgedShutdownCut(t, backend, variant.method, variant.eventBacked, fence)
 			})
 		}
 	}
 }
 
-func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedparity.Backend, method string, eventBacked, abandon, fence bool) {
+func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedparity.Backend, method string, eventBacked, fence bool) {
 	t.Helper()
 	probe := installPublicationCompletionAudit(t, false)
 	probe.holdBeforeReadiness = true
 	defer probe.releaseOnce.Do(func() { close(probe.release) })
 	h := newChannelOnboardingE2EHarness(t, backend, false)
-	if !abandon {
-		h.opts.AbandonActiveRuns = false
-	} else if !h.opts.AbandonActiveRuns {
-		t.Fatal("default onboarding must exercise serve abandonment")
-	}
 	h.opts.SourceRoot = canonicalrouting.CopyPublicCompletionFeedOnlyActivation(t)
 	runtimes := make(chan *runtimepkg.Runtime, 2)
 	h.opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtimes <- rt }
