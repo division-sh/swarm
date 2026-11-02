@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,53 +16,68 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 	base := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, base)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			root := filepath.Join(base, backend)
-			config, env := clockReleaseConfig(t, root, backend)
-			source := filepath.Join(root, "contracts")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/serveapp/testdata/verify-run-jobflow-registry"), source)
-			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
-			rawConfig, err := os.ReadFile(config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			writeReleaseFile(t, config, string(rawConfig)+fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n", filepath.Join(root, "api-token"), filepath.Join(root, "api-token")))
-			writeReleaseFile(t, filepath.Join(root, "rows.jsonl"), "{\"slug\":\"one\",\"name\":\"One\",\"eng_roles\":8}\n{\"slug\":\"two\",\"name\":\"Two\",\"eng_roles\":2}\n")
-			assertGoldenProcessHasNoExternalExecutables(t, env)
-			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
-			assertFullLifecycleVerifySuccess(t, verify)
-			localID := uuid.NewString()
-			local := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-				"run", "start", "--config", config, "--data", "company.registered=rows.jsonl", "--run-id", localID)
-			if local.err == nil || !strings.Contains(local.output, "No serve running") {
-				t.Fatalf("input-only feed without serve must refuse: %v\n%s", local.err, local.output)
-			}
-			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
-				ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env})
-			ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
-			defer cancel()
-			if err := process.waitReady(ctx); err != nil {
-				t.Fatalf("input-only feed serve: %v\n%s", err, process.output.String())
-			}
-			for _, selector := range []string{"--data", "--pin"} {
-				id := uuid.NewString()
+		for _, selector := range []string{"--data", "--pin"} {
+			t.Run(backend+"/"+strings.TrimPrefix(selector, "--"), func(t *testing.T) {
+				root := filepath.Join(base, backend, strings.TrimPrefix(selector, "--"))
+				config, env := clockReleaseConfig(t, root, backend)
+				source := filepath.Join(root, "contracts")
+				copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/serveapp/testdata/verify-run-jobflow-registry"), source)
+				writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
+				rawConfig, err := os.ReadFile(config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeReleaseFile(t, config, string(rawConfig)+fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n", filepath.Join(root, "api-token"), filepath.Join(root, "api-token")))
+				writeReleaseFile(t, filepath.Join(root, "rows.jsonl"), "{\"slug\":\"one\",\"name\":\"One\",\"eng_roles\":8}\n{\"slug\":\"two\",\"name\":\"Two\",\"eng_roles\":2}\n")
+				assertGoldenProcessHasNoExternalExecutables(t, env)
+				verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
+				assertFullLifecycleVerifySuccess(t, verify)
+				localID := uuid.NewString()
+				local := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
+					"run", "start", "--config", config, "--data", "company.registered=rows.jsonl", "--run-id", localID)
+				if local.err == nil || !strings.Contains(local.output, "No serve running") {
+					t.Fatalf("input-only feed without serve must refuse: %v\n%s", local.err, local.output)
+				}
+				process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
+					ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env})
+				ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
+				defer cancel()
+				if err := process.waitReady(ctx); err != nil {
+					t.Fatalf("input-only feed serve: %v\n%s", err, process.output.String())
+				}
+				id := waitForFullLifecycleStandingRun(t, process.rpc, goldenServedBundleHash(t, process.rpc, "live"), "").RunID
+				if selector == "--pin" {
+					rows, err := os.ReadFile(filepath.Join(root, "rows.jsonl"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					var imported struct {
+						Outcome string `json:"outcome"`
+					}
+					if err := process.rpc.call(ctx, "data.import", map[string]any{
+						"source_invocation_id": uuid.NewString(), "bundle_hash": goldenServedBundleHash(t, process.rpc, "live"),
+						"declaration":   map[string]any{"flow_path": ".", "event": "company.registered"},
+						"expected_head": map[string]any{"state": "absent"}, "input": map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString(rows)},
+					}, &imported); err != nil || imported.Outcome != "accepted" {
+						t.Fatalf("pin source import: %+v error=%v", imported, err)
+					}
+				}
 				value := "company.registered=rows.jsonl"
 				if selector == "--pin" {
 					value = "company.registered@head"
 				}
 				connected := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-					"run", "start", "--connect", process.apiBase, selector, value, "--run-id", id, "--no-follow")
+					"run", "start", "--connect", process.apiBase, selector, value, "--run-id", id, "--idempotency-key", uuid.NewString(), "--no-follow")
 				if connected.err != nil {
 					t.Fatalf("connected input-only feed %s: %v\n%s", selector, connected.err, connected.output)
 				}
 				waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, id, goldenStartupTimeout)
 				assertRootInputFeedBinaryRows(t, process, id, binary, root, config, env)
-				pauseFullLifecycleRun(t, process.rpc, id)
-			}
-			if err := process.stopAndWait(goldenShutdownGrace); err != nil {
-				t.Fatalf("input-only feed shutdown: %v\n%s", err, process.output.String())
-			}
-		})
+				if err := process.stopAndWait(goldenShutdownGrace); err != nil {
+					t.Fatalf("input-only feed shutdown: %v\n%s", err, process.output.String())
+				}
+			})
+		}
 	}
 }
 

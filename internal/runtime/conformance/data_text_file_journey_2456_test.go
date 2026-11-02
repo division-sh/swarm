@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -85,7 +86,8 @@ func textFileVersion2456(t *testing.T, f *deploymentResourceFixture, rows []map[
 
 func startTextFileRun2456(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID string, operands ...string) string {
 	t.Helper()
-	args := []string{"run", "start", "--connect", server.URL, "--run-id", runID}
+	prepareDeploymentRowsFixtureRun(t, f, runID, ".")
+	args := []string{"run", "start", "--connect", server.URL, "--run-id", runID, "--idempotency-key", runID}
 	args = append(args, operands...)
 	args = append(args, "--no-follow")
 	var stdout, stderr bytes.Buffer
@@ -129,7 +131,9 @@ func assertTextFileRun2456(t *testing.T, f *deploymentResourceFixture, server *h
 		t.Fatalf("deployment feed remains unsettled: %+v", summary)
 	}
 	var pin, intentVersion string
-	if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pin); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m
+		JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+		WHERE p.run_id=$1 AND m.flow_path='.' AND m.event_name='root.ready' HAVING COUNT(*)=1`, runID).Scan(&pin); err != nil {
 		t.Fatalf("read exact run pin: %v", err)
 	}
 	if err := f.db.QueryRowContext(f.ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&intentVersion); err != nil {
@@ -245,7 +249,7 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 				t.Fatalf("external deployment data mutation changed bundle hash: %s -> %s", before, after)
 			}
 			var replayOut, replayErr bytes.Buffer
-			replayArgs := []string{"run", "start", "--connect", server.URL, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
+			replayArgs := []string{"run", "start", "--connect", server.URL, "--run-id", runID, "--idempotency-key", runID, "--data", "root.ready.body=" + path, "--no-follow"}
 			if code := cliapp.Execute(f.ctx, replayArgs, &replayOut, &replayErr, nil, nil); code == 0 {
 				t.Fatalf("changed file silently replayed old operation: stdout=%s stderr=%s", replayOut.String(), replayErr.String())
 			}
@@ -266,11 +270,13 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 			forked, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, map[string]any{
 				"source_run_id": runID, "bundle_hash": before, "idempotency_key": uuid.NewString(),
 			})
-			if len(rpcErr) != 0 || forked.ForkRunID == "" || forked.ForkRunID == runID || len(forked.DataPins) != 1 || forked.DataPins[0].VersionID != version.VersionID {
-				t.Fatalf("old-version selected fork changed source pin: fork=%+v error=%s want=%s", forked, rpcErr, version.VersionID)
+			if len(rpcErr) != 0 || forked.ForkRunID == "" || forked.ForkRunID == runID || len(forked.DataPins) != 0 {
+				t.Fatalf("publication fork invented a creation pin: fork=%+v error=%s", forked, rpcErr)
 			}
 			var forkPin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, forked.ForkRunID).Scan(&forkPin); err != nil {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m
+				JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+				WHERE p.run_id=$1 AND m.flow_path='.' AND m.event_name='root.ready' HAVING COUNT(*)=1`, forked.ForkRunID).Scan(&forkPin); err != nil {
 				t.Fatalf("read selected fork pin: %v", err)
 			}
 			if forkPin != string(version.VersionID) {
@@ -327,14 +333,11 @@ func TestFileRow2456Keyed37DeltaOldPinBothStores(t *testing.T) {
 			if !ok {
 				t.Fatalf("selected store %T lacks durable operation readback", f.selected)
 			}
-			record, err := dataStore.LoadDataRunCreationOperation(f.ctx, changedRun)
-			if err != nil {
-				t.Fatal(err)
+			binding := textFileRequestBinding2456(t, server, changedRun)
+			if len(binding.Imports) != 1 {
+				t.Fatalf("changed-two publication has no exact child request binding: %+v", binding)
 			}
-			if record.RequestBinding == nil || len(record.RequestBinding.Imports) != 1 {
-				t.Fatalf("changed-two run has no exact child request binding: %+v", record.RequestBinding)
-			}
-			child, err := dataStore.LoadDataSourceOperation(f.ctx, record.RequestBinding.Imports[0].SourceInvocationID)
+			child, err := dataStore.LoadDataSourceOperation(f.ctx, binding.Imports[0].SourceInvocationID)
 			if err != nil {
 				t.Fatalf("read changed-two child evaluation: %v", err)
 			}
@@ -398,7 +401,9 @@ func TestDataTextFile2456Keyed37DynamicReceiversBothStores(t *testing.T) {
 				}
 			}
 			var pinned string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pinned); err != nil || pinned != string(version.VersionID) {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m
+				JOIN resource_feed_publications p ON p.publication_id=m.publication_id
+				WHERE p.run_id=$1 AND m.flow_path='.' AND m.event_name='root.ready' HAVING COUNT(*)=1`, runID).Scan(&pinned); err != nil || pinned != string(version.VersionID) {
 				t.Fatalf("dynamic receiver pin=%s, %v; want %s", pinned, err, version.VersionID)
 			}
 			seen := map[string]bool{}
@@ -476,22 +481,24 @@ func TestDataTextFile2456MultiFieldAndLimitsBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			largeRowRunID := uuid.NewString()
-			args = []string{"run", "start", "--connect", server.URL, "--run-id", largeRowRunID, "--data", "root.ready.body=" + largeRowDir, "--no-follow"}
+			pauseDeploymentFixtureRun(t, f, runID)
+			prepareDeploymentRowsFixtureRun(t, f, largeRowRunID, ".")
+			args = []string{"run", "start", "--connect", server.URL, "--run-id", largeRowRunID, "--idempotency-key", largeRowRunID, "--data", "root.ready.body=" + largeRowDir, "--no-follow"}
 			stdout.Reset()
 			stderr.Reset()
 			if code := cliapp.Execute(f.ctx, args, &stdout, &stderr, nil, nil); code == 0 {
 				t.Fatalf("oversize canonical row escaped 128KiB limit: stdout=%s stderr=%s", stdout.String(), stderr.String())
 			}
-			dataStore, ok := f.selected.(apiv1.DurableDataStore)
-			if !ok {
-				t.Fatalf("selected store %T lacks rejected operation readback", f.selected)
+			rejected := textFileRPCParams2456(t, server, "data.show", map[string]any{
+				"view": "operation", "operation_ref": map[string]any{"kind": "rows_publication", "idempotency_key": largeRowRunID}, "detail": "child_defects",
+				"page": map[string]any{"limit": 100},
+			})
+			var defects durabledata.PageResult[durabledata.FusedChildDefect]
+			if err := json.Unmarshal(rejected.Result, &defects); len(rejected.Error) != 0 || err != nil || defects.Validate() != nil {
+				t.Fatalf("canonical-row failure lacks durable rejection: error=%s result=%s decode=%v", rejected.Error, rejected.Result, err)
 			}
-			rejected, err := dataStore.LoadDataRunCreationOperation(f.ctx, largeRowRunID)
-			if err != nil {
-				t.Fatalf("canonical-row failure lacks durable rejection: %v", err)
-			}
-			if len(rejected.Evidence.ChildDefects) != 1 || rejected.Evidence.ChildDefects[0].Defect.Code != "row_too_large" {
-				t.Fatalf("canonical-row failure has wrong durable defect: %+v", rejected.Evidence.ChildDefects)
+			if len(defects.Items) != 1 || defects.Items[0].Defect.Code != "row_too_large" {
+				t.Fatalf("canonical-row failure has wrong durable defect: %+v", defects.Items)
 			}
 		})
 	}
@@ -537,7 +544,7 @@ func textFileRPCParams2456(t *testing.T, server *httptest.Server, method string,
 func textFileRequestBinding2456(t *testing.T, server *httptest.Server, runID string) durabledata.RunCreationRequestBinding {
 	t.Helper()
 	result := textFileRPCParams2456(t, server, "data.show", map[string]any{
-		"view": "operation", "operation_ref": map[string]any{"kind": "run_creation", "run_id": runID}, "detail": "request_binding",
+		"view": "operation", "operation_ref": map[string]any{"kind": "rows_publication", "idempotency_key": runID}, "detail": "request_binding",
 	})
 	if len(result.Error) != 0 {
 		t.Fatalf("public request binding for %s: %s", runID, result.Error)
@@ -608,9 +615,9 @@ func textFileSnapshot2456(t *testing.T, f *deploymentResourceFixture, runID stri
 		value *int
 	}{
 		{`SELECT COUNT(*) FROM runs WHERE run_id=$1`, &snapshot.runs},
-		{`SELECT COUNT(*) FROM resource_run_creation_operations WHERE run_id=$1`, &snapshot.operations},
+		{`SELECT COUNT(*) FROM resource_feed_publications WHERE run_id=$1`, &snapshot.operations},
 		{`SELECT COUNT(*) FROM resource_versions WHERE flow_path='.' AND event_name='root.ready'`, &snapshot.versions},
-		{`SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1`, &snapshot.pins},
+		{`SELECT COUNT(*) FROM resource_feed_publication_members m JOIN resource_feed_publications p ON p.publication_id=m.publication_id WHERE p.run_id=$1`, &snapshot.pins},
 		{`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, &snapshot.feeds},
 		{`SELECT COUNT(*) FROM events WHERE run_id=$1`, &snapshot.events},
 	} {
@@ -802,6 +809,7 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 	publication := apiv1.EventPublicationOptions{
 		Idempotency: idempotency, Events: f.runtime.bus, Acknowledged: f.runtime.bus,
 		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner,
+		Runs: runs, LiveRuns: f.selected.(runlifecycle.LiveRunReader),
 		RuntimeContexts: contexts, Source: f.source, Bundle: newIdentity,
 		ScenarioExecutionProfiles: profiles,
 	}
@@ -841,7 +849,8 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			rows := []map[string]any{{"body": body}}
 			original := textFileVersion2456(t, f, rows)
 			runID := uuid.NewString()
-			args := []string{"run", "start", "--connect", proxy.URL, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
+			prepareDeploymentRowsFixtureRun(t, f, runID, ".")
+			args := []string{"run", "start", "--connect", proxy.URL, "--run-id", runID, "--idempotency-key", runID, "--data", "root.ready.body=" + path, "--no-follow"}
 			lost := textFileSwarmProcess2456(f.ctx, binary, repo, args...)
 			if lost.err == nil {
 				t.Fatalf("first CLI received a response that the proxy was required to drop: stdout=%s stderr=%s", lost.stdout, lost.stderr)
@@ -909,9 +918,10 @@ func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 			}
 			pauseDeploymentFixtureRun(t, f, changedRun)
 			newRunID := uuid.NewString()
+			prepareDeploymentRowsFixtureRun(t, f, newRunID, ".")
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo,
 				"run", "start", "--connect", server.URL,
-				"--run-id", newRunID, "--data", "root.ready.body="+path, "--no-follow"), newRunID)
+				"--run-id", newRunID, "--idempotency-key", newRunID, "--data", "root.ready.body="+path, "--no-follow"), newRunID)
 			assertTextFileRun2456(t, f, server, newRunID, original, rows)
 			if newRunID == runID || textFileRequestBinding2456(t, server, newRunID).RequestHash == binding.RequestHash {
 				t.Fatal("new run ID reused the old permanent operation")
@@ -943,12 +953,14 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			rows := []map[string]any{{"body": body}}
 			version := textFileVersion2456(t, f, rows)
 			importRunID := uuid.NewString()
-			importArgs := []string{"run", "start", "--connect", server.URL, "--run-id", importRunID, "--data", "root.ready.body=" + path, "--no-follow"}
+			prepareDeploymentRowsFixtureRun(t, f, importRunID, ".")
+			importArgs := []string{"run", "start", "--connect", server.URL, "--run-id", importRunID, "--idempotency-key", importRunID, "--data", "root.ready.body=" + path, "--no-follow"}
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, importArgs...), importRunID)
 			assertTextFileRun2456(t, f, server, importRunID, version, rows)
 			pauseDeploymentFixtureRun(t, f, importRunID)
 			pinRunID := uuid.NewString()
-			pinArgs := []string{"run", "start", "--connect", server.URL, "--run-id", pinRunID, "--pin", "root.ready@head", "--no-follow"}
+			prepareDeploymentRowsFixtureRun(t, f, pinRunID, ".")
+			pinArgs := []string{"run", "start", "--connect", server.URL, "--run-id", pinRunID, "--idempotency-key", pinRunID, "--pin", "root.ready@head", "--no-follow"}
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, pinArgs...), pinRunID)
 			assertTextFileRun2456(t, f, server, pinRunID, version, rows)
 			pinBinding := textFileRequestBinding2456(t, server, pinRunID)
@@ -1031,7 +1043,7 @@ func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			}
 			originalImport := importBinding.Imports[0]
 			conflict := textFileRPCParams2456(t, server, "run.start", map[string]any{
-				"run_id": importRunID, "bundle_hash": fact.BundleHash(),
+				"run_id": changedRun, "bundle_hash": fact.BundleHash(),
 				"data": map[string]any{"imports": []any{map[string]any{
 					"source_invocation_id": originalImport.SourceInvocationID,
 					"declaration":          originalImport.Declaration, "expected_head": originalImport.ExpectedHead,
@@ -1093,7 +1105,7 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 				seedRun := startDeploymentResourceRun(t, f, server, "--data", item.name+"="+path)
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, seedRun, 30*time.Second)
 				var version string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='portfolio' AND event_name=$2`, seedRun, item.name).Scan(&version); err != nil {
+				if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m JOIN resource_feed_publications p ON p.publication_id=m.publication_id WHERE p.run_id=$1 AND m.flow_path='portfolio' AND m.event_name=$2 HAVING COUNT(*)=1`, seedRun, item.name).Scan(&version); err != nil {
 					t.Fatal(err)
 				}
 				versions[item.name] = version
@@ -1101,8 +1113,14 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 			}
 			const missingVersion = "resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			runID := uuid.NewString()
+			prepareDeploymentRowsFixtureRun(t, f, runID, "portfolio")
+			runReader := f.selected.(apiv1.RunReadStore)
+			beforeRun, err := runReader.LoadRunHeader(f.ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			params := map[string]any{
-				"run_id": runID, "bundle_hash": bundleHash, "idempotency_key": uuid.NewString(),
+				"run_id": runID, "bundle_hash": bundleHash, "idempotency_key": runID,
 				"data": map[string]any{
 					"imports": []any{}, "pins": []any{
 						map[string]any{"declaration": map[string]any{"flow_path": "portfolio", "event": "portfolio/account.notify.requested"}, "version_id": missingVersion},
@@ -1137,9 +1155,10 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 				}
 				return got
 			}
-			if count("resource_run_creation_operations") != 1 || count("runs") != 0 || count("resource_version_pins") != 0 || count("fan_out_intents") != 0 || count("events") != 0 {
-				t.Fatal("rejected multi-pin operation created a run, pin, feed, or event")
+			if after, err := runReader.LoadRunHeader(f.ctx, runID); err != nil || !reflect.DeepEqual(after, beforeRun) || count("resource_feed_publications") != 1 || count("runs") != 1 || count("resource_version_pins") != 0 || count("fan_out_intents") != 0 || count("events") != 0 {
+				t.Fatal("rejected multi-pin publication changed its prepared run or created a pin, feed, or event", after, err)
 			}
+			pauseDeploymentFixtureRun(t, f, runID)
 			changedPath := filepath.Join(t.TempDir(), "changed.jsonl")
 			if err := os.WriteFile(changedPath, []byte(`{"account_id":"registered-again"}`+"\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -1158,7 +1177,6 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 			assertServingJoinComplete(t, join, oldRuntime, nil)
 			f.boot(t)
 			server = f.operatorServer(t)
-			params["idempotency_key"] = uuid.NewString()
 			var replayWire map[string]any
 			if err := json.Unmarshal(wire, &replayWire); err != nil {
 				t.Fatal(err)
@@ -1169,7 +1187,7 @@ func TestDataTextFile2456RejectedMultiPinServedReplayBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			replay := textFileRPCWire2456(t, server, independentWire)
-			if len(replay.Error) == 0 || !bytes.Equal(replay.Error, first.Error) || count("resource_run_creation_operations") != 1 || count("runs") != 0 || count("resource_version_pins") != 0 || count("fan_out_intents") != 0 || count("events") != 0 {
+			if len(replay.Error) == 0 || !bytes.Equal(replay.Error, first.Error) || count("resource_feed_publications") != 1 || count("runs") != 1 || count("resource_version_pins") != 0 || count("fan_out_intents") != 0 || count("events") != 0 {
 				t.Fatalf("rejected multi-pin replay changed permanent outcome: first=%s replay=%s", first.Error, replay.Error)
 			}
 			if after := textFileRequestBinding2456(t, server, runID); !reflect.DeepEqual(after, binding) {
@@ -1198,7 +1216,8 @@ func textFileAbsentBindingBarrier2456(t *testing.T, target *httptest.Server, run
 			Params struct {
 				Detail       string `json:"detail"`
 				OperationRef struct {
-					RunID string `json:"run_id"`
+					Kind           string `json:"kind"`
+					IdempotencyKey string `json:"idempotency_key"`
 				} `json:"operation_ref"`
 			} `json:"params"`
 		}
@@ -1220,7 +1239,7 @@ func textFileAbsentBindingBarrier2456(t *testing.T, target *httptest.Server, run
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if request.Method == "data.show" && request.Params.Detail == "request_binding" && request.Params.OperationRef.RunID == runID {
+		if request.Method == "data.show" && request.Params.Detail == "request_binding" && request.Params.OperationRef.Kind == "rows_publication" && request.Params.OperationRef.IdempotencyKey == runID {
 			mu.Lock()
 			if arrived < 2 {
 				arrived++
@@ -1271,8 +1290,9 @@ func TestDataTextFile2456ConcurrentFirstAttemptBothStores(t *testing.T) {
 			rows := []map[string]any{{"body": body}}
 			version := textFileVersion2456(t, f, rows)
 			runID := uuid.NewString()
+			prepareDeploymentRowsFixtureRun(t, f, runID, ".")
 			proxy, barrier := textFileAbsentBindingBarrier2456(t, server, runID)
-			args := []string{"run", "start", "--connect", proxy.URL, "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
+			args := []string{"run", "start", "--connect", proxy.URL, "--run-id", runID, "--idempotency-key", runID, "--data", "root.ready.body=" + path, "--no-follow"}
 			results := make(chan textFileProcessResult2456, 2)
 			start := make(chan struct{})
 			for i := 0; i < 2; i++ {

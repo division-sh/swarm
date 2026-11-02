@@ -19,17 +19,17 @@ type flowRunMutation interface {
 
 func (s *RunLifecyclePostgresOwner) ReconcileFlowRun(ctx context.Context, scope runtimerunlifecycle.LiveRunScope, source runtimecorrelation.SourceArtifactFact) (runtimerunlifecycle.FlowRunReconciliation, error) {
 	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.FlowRunReconciliation, error) {
-		return reconcileFlowRunTx(ctx, mutation.tx, mutation, scope, source)
+		return reconcileFlowRunTx(ctx, mutation.tx, mutation, scope, source, true)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) ReconcileFlowRun(ctx context.Context, scope runtimerunlifecycle.LiveRunScope, source runtimecorrelation.SourceArtifactFact) (runtimerunlifecycle.FlowRunReconciliation, error) {
 	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimerunlifecycle.FlowRunReconciliation, error) {
-		return reconcileFlowRunTx(ctx, mutation.tx, mutation, scope, source)
+		return reconcileFlowRunTx(ctx, mutation.tx, mutation, scope, source, false)
 	})
 }
 
-func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutation, scope runtimerunlifecycle.LiveRunScope, source runtimecorrelation.SourceArtifactFact) (runtimerunlifecycle.FlowRunReconciliation, error) {
+func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutation, scope runtimerunlifecycle.LiveRunScope, source runtimecorrelation.SourceArtifactFact, postgres bool) (runtimerunlifecycle.FlowRunReconciliation, error) {
 	if err := source.Validate(); err != nil {
 		return runtimerunlifecycle.FlowRunReconciliation{}, err
 	}
@@ -50,7 +50,17 @@ func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutatio
 	out := runtimerunlifecycle.FlowRunReconciliation{LandingRun: current, CommittedMutation: runtimerunlifecycle.MutationExactNoop}
 	if found {
 		if !current.Source.Matches(source) && current.State.Active() {
-			out.CommittedMutation, err = mutation.ReviseSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: current.RunID, Source: source, RootAdmission: root})
+			prior, err := LoadRunRootedSourceTx(ctx, tx, current.RunID, postgres)
+			if err != nil {
+				return runtimerunlifecycle.FlowRunReconciliation{}, err
+			}
+			if prior.Admission().BundleHash() != current.Source.BundleHash() {
+				return runtimerunlifecycle.FlowRunReconciliation{}, fmt.Errorf("live flow source changed before its rooted revision")
+			}
+			// The mutation admits the retained prior root before installing the
+			// independently admitted incoming root carried by the request.
+			priorContext := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, current.Source), prior.Admission())
+			out.CommittedMutation, err = mutation.ReviseSource(priorContext, runtimerunlifecycle.SourceRevisionRequest{RunID: current.RunID, Source: source, RootAdmission: root})
 			if err != nil {
 				return runtimerunlifecycle.FlowRunReconciliation{}, err
 			}

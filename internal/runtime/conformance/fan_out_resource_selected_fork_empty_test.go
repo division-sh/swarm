@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -22,16 +23,15 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 		for _, selector := range []string{"deployment", "start"} {
 			t.Run(backend+"/"+selector, func(t *testing.T) {
 				f := selectedDeploymentResourceFixture(t, backend, "singleton")
-				server := f.operatorServer(t)
-				path := filepath.Join(t.TempDir(), "empty.jsonl")
-				if err := os.WriteFile(path, nil, 0o600); err != nil {
-					t.Fatal(err)
-				}
 				empty := selectedDeploymentVersion(t, f, nil)
 				if len(empty.Rows) != 0 {
 					t.Fatalf("empty import compiled %d rows", len(empty.Rows))
 				}
-				sourceRunID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
+				ref, err := durabledata.ParseDeclarationRef(".", selectedDeploymentEvent)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sourceRunID := createDeploymentResourceFixtureRun(t, f, durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl"}}})
 				var sourcePin string
 				if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, sourceRunID).Scan(&sourcePin); err != nil {
 					t.Fatal(err)

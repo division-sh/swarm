@@ -32,7 +32,7 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 		t.Fatalf("runtime identity = %#v, want one source artifact", identity)
 	}
 	bundleHash := identity.SourceArtifacts[0].BundleHash
-	pauseServedLandingForCreation(t, endpoint+"/v1/rpc", bundleHash, ".")
+	landing := requireServedLiveLandingRunID(t, endpoint+"/v1/rpc", bundleHash, ".")
 	var started struct {
 		RunID string `json:"run_id"`
 	}
@@ -41,8 +41,8 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 		"event_name":  "fulfillment.requested",
 		"payload":     map[string]any{"order_id": "dev-scratch-source"},
 	}, &started)
-	if strings.TrimSpace(started.RunID) == "" {
-		t.Fatal("run.start returned no run_id")
+	if started.RunID != landing {
+		t.Fatalf("run.start changed the live run: got=%s want=%s", started.RunID, landing)
 	}
 
 	db := openDevScratchReadback(t, repo)
@@ -77,7 +77,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("runtime identity = %#v, want one source", identity)
 	}
-	pauseServedLandingForCreation(t, endpoint, identity.SourceArtifacts[0].BundleHash, ".")
+	landing := requireServedLiveLandingRunID(t, endpoint, identity.SourceArtifacts[0].BundleHash, ".")
 	var started struct {
 		RunID string `json:"run_id"`
 	}
@@ -86,8 +86,8 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 		"event_name":  "item.received",
 		"payload":     map[string]any{"item_id": "dev-scratch-fork"},
 	}, &started)
-	if strings.TrimSpace(started.RunID) == "" {
-		t.Fatal("run.start returned no run_id")
+	if started.RunID != landing {
+		t.Fatalf("run.start changed the live run: got=%s want=%s", started.RunID, landing)
 	}
 	db := openDevScratchReadback(t, repo)
 	defer db.Close()

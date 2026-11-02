@@ -536,8 +536,12 @@ func listFullLifecycleRuns(ctx context.Context, rpc *releaseRPCClient, bundleHas
 	return result.Runs, nil
 }
 
-func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundleHash, runID string) fullLifecycleRun {
+func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundleHash, runID string, flowPath ...string) fullLifecycleRun {
 	t.Helper()
+	wantFlow := "."
+	if len(flowPath) != 0 {
+		wantFlow = flowPath[0]
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
 	var match fullLifecycleRun
@@ -548,7 +552,7 @@ func waitForFullLifecycleStandingRun(t *testing.T, rpc *releaseRPCClient, bundle
 		}
 		matches := make([]fullLifecycleRun, 0, 1)
 		for _, run := range runs {
-			if run.Origin.Kind != "deployment" || run.FlowPath == "" || (runID != "" && run.RunID != runID) {
+			if run.Origin.Kind != "deployment" || run.FlowPath != wantFlow || (runID != "" && run.RunID != runID) {
 				continue
 			}
 			matches = append(matches, run)

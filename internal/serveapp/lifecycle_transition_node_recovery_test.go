@@ -115,12 +115,16 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					return ctx.Err()
 				}
 				first, rt := start()
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "node-recovery-seed"})
+				seed := servedEventPublishRPCResult{RunID: requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)}
 				entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, seed.RunID, "waiting")
 				params := func(event, key string, payload map[string]any) map[string]any {
-					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
+					params := map[string]any{"event_name": event, "run_id": seed.RunID, "payload": payload, "idempotency_key": key}
+					if seed.EventID != "" {
+						params["source_event_id"] = seed.EventID
+					}
+					return params
 				}
-				requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
+				seed.EventID = requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true})).EventID
 				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "drafting")
 				attempts := 1
 				if escape {

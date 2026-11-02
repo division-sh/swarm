@@ -263,7 +263,8 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			var cards []servedNativeMessage
 			// Every source fixture declares the initial retirement gate. Join
 			// its exact send before the ordinary-restart no-redispatch cut.
-			cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader))
+			pairingRunID := requireServedNativePairingRun(t, endpoint, result.Operation.Coordinate.BundleHash)
+			cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader, pairingRunID))
 			if code := process.stop(); code != 0 {
 				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
 			}
@@ -759,9 +760,9 @@ waiting:
 	return nil
 }
 
-func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) servedNativeMessage {
+func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation, runID string) servedNativeMessage {
 	t.Helper()
-	cardID := waitServedNativePendingCard(t, endpoint)
+	cardID := waitServedNativePendingCard(t, endpoint, runID)
 	var sent servedNativeMessage
 	select {
 	case sent = <-peer.sent:
@@ -852,20 +853,28 @@ func requireServedNativeQuotedRetirement(t *testing.T, endpoint string, peer *se
 	t.Fatal("durable encrypted reply did not decide the exact public retirement card", detail)
 }
 
-func waitServedNativePendingCard(t *testing.T, endpoint string) string {
+func waitServedNativePendingCard(t *testing.T, endpoint string, runID ...string) string {
 	t.Helper()
+	params := map[string]any{"status": "pending", "limit": 200}
+	if len(runID) != 0 {
+		params["run_id"], params["entity_id"], params["anchor_kind"] = runID[0], runID[0], "stage_gate"
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		var page struct {
 			Items []struct {
 				Kind string `json:"kind"`
 				Card struct {
-					ID string `json:"card_id"`
+					ID    string `json:"card_id"`
+					RunID string `json:"run_id"`
 				} `json:"decision_card"`
 			} `json:"items"`
 		}
-		requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{"status": "pending", "limit": 200}, &page)
+		requireServedJSONRPCResult(t, endpoint, "mailbox.list", params, &page)
 		if len(page.Items) == 1 && page.Items[0].Kind == "decision_card" && page.Items[0].Card.ID != "" {
+			if len(runID) != 0 && page.Items[0].Card.RunID != runID[0] {
+				t.Fatal("native stage gate belongs to another run", page)
+			}
 			return page.Items[0].Card.ID
 		}
 		if len(page.Items) > 1 {

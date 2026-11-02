@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -79,10 +80,43 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 				return process
 			}
 			process := start()
-			runID := uuid.NewString()
+			hash := goldenServedBundleHash(t, process.rpc, "live")
+			landing := waitForFullLifecycleStandingRun(t, process.rpc, hash, "")
+			ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+			defer cancel()
+			declaration := map[string]any{"flow_path": "worker", "event": "worker/records.loaded"}
+			var imported struct {
+				Outcome   string `json:"outcome"`
+				Candidate struct {
+					VersionID string `json:"version_id"`
+				} `json:"candidate"`
+			}
+			if err := process.rpc.call(ctx, "data.import", map[string]any{
+				"source_invocation_id": uuid.NewString(), "bundle_hash": hash, "declaration": declaration,
+				"expected_head": map[string]any{"state": "absent"}, "input": map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString([]byte(rows))},
+			}, &imported); err != nil || imported.Outcome != "accepted" || imported.Candidate.VersionID == "" {
+				t.Fatalf("public pinned-resource setup: %+v error=%v", imported, err)
+			}
+			var fork struct {
+				RunID string `json:"fork_run_id"`
+				Pins  []struct {
+					VersionID string `json:"version_id"`
+				} `json:"data_pins"`
+			}
+			if err := process.rpc.call(ctx, "run.fork", map[string]any{
+				"source_run_id": landing.RunID, "bundle_hash": hash, "idempotency_key": "resource-read-pinned-fixture",
+				"data_pin_overrides": []any{map[string]any{"declaration": declaration, "version_id": imported.Candidate.VersionID}},
+			}, &fork); err != nil || fork.RunID == "" || fork.RunID == landing.RunID || len(fork.Pins) != 1 || fork.Pins[0].VersionID != imported.Candidate.VersionID {
+				t.Fatalf("public creation-pin fork: %+v error=%v\n%s", fork, err, process.output.String())
+			}
+			runID := fork.RunID
+			payload, err := os.ReadFile(filepath.Join(root, "payload.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
 			var firstEvidence fullLifecycleEvidenceSnapshot
 			for turn := 1; turn <= 2; turn++ {
-				args := []string{"run", "start", "--connect", process.apiBase, "--run-id", runID, "--idempotency-key", runID, "--event", "task.assigned", "--payload", "payload.json", "--data", "worker/records.loaded=rows.jsonl", "--no-follow"}
+				args := []string{"event", "publish", "task.assigned", "--api-server", process.apiBase, "--api-token-file", "api-token", "--run-id", runID, "--idempotency-key", runID, "--payload-json", string(payload)}
 				if turn == 2 {
 					args = []string{"agent", "directive", "release-worker", "read the same pinned references again", "--api-server", process.apiBase, "--run-id", runID, "--flow-instance", "worker", "--idempotency-key", uuid.NewString()}
 				}
@@ -167,7 +201,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 			if len(receipts) != 2 || receipts[0].Resume != "" || receipts[1].Resume != receipts[0].Session || receipts[1].Session == receipts[0].Session || receipts[0].Definition != receipts[1].Definition || !reflect.DeepEqual(receipts[0].Row, receipts[1].Row) || !reflect.DeepEqual(receipts[0].Page, receipts[1].Page) {
 				t.Fatalf("public MCP identities/pinned rows across restart %+v", receipts)
 			}
-			t.Log("proof_surface=public compiled serve/exact-tree restart/run start + turn-authorized HTTP MCP; deterministic provider, not genuine Claude/Telegram")
+			t.Log("proof_surface=public compiled serve/exact-tree restart/pinned fork + turn-authorized HTTP MCP; deterministic provider, not genuine Claude/Telegram")
 		})
 	}
 }

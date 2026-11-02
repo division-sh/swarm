@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -10,30 +9,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
-
-type nestedSeedReadinessBarrier struct {
-	observer lifecycleprobe.Observer
-	release  chan struct{}
-	once     sync.Once
-}
-
-func (b *nestedSeedReadinessBarrier) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
-	b.observer.NotifyLifecycle(ctx, signal)
-	if signal.Kind == lifecycleprobe.PostCommitDispatchStarted && signal.EventType == "left.work.requested" {
-		b.once.Do(func() {
-			select {
-			case <-b.release:
-			case <-ctx.Done():
-			}
-		})
-	}
-}
 
 func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T) {
 	for _, variant := range []struct {
@@ -49,11 +29,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 		t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 			configureStandingLifecycleCredentials(t)
 			probe := lifecycletest.New(t)
-			readiness := &nestedSeedReadinessBarrier{observer: probe, release: make(chan struct{})}
-			releaseReadiness := sync.OnceFunc(func() { close(readiness.release) })
-			t.Cleanup(releaseReadiness)
-			defer releaseReadiness()
-			configureOwnedMockLifecycleProbe(t, readiness)
+			configureOwnedMockLifecycleProbe(t, probe)
 			root := canonicalrouting.CopyLifecycleNestedCascade(t)
 			if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
 				t.Fatal(err)
@@ -68,11 +44,8 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				entered = make(chan string, 1)
 				rt.Runtime.Bus.SetLoggerHook(&snapshotPublicationLogBarrier{logger: rt.Runtime.Logger, entered: entered, release: release})
 			}
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
-			runID := seed.RunID
-			// Activation precedes this exact milestone; hold delivery so the
-			// complete initial-tree assertion cannot observe a later handler state.
-			probe.Expect(seed.EventID).PostCommitDispatchStarted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+			runID := requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)
+			// Read the acknowledged boot tree before its first real input.
 			wantStages := map[string]string{
 				runID: "pending", "outer": "pending",
 				"outer/left": "waiting", "outer/left/sink": "waiting", "outer/left/sink/final": "waiting",
@@ -105,7 +78,8 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			if !reflect.DeepEqual(gotStages, wantStages) {
 				t.Fatalf("one constructor did not create the complete initial tree: got=%v want=%v", gotStages, wantStages)
 			}
-			releaseReadiness()
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.loop.start", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "left-start"})
+			probe.Expect(seed.EventID).PostCommitDispatchStarted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			captured := make(chan map[string][][]string, 1)
 			var otherRunID string
@@ -124,7 +98,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				}
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "held-tree-pause"})
 				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "right.work.requested", "bundle_hash": rt.BundleHash,
+					"event_name": "right.loop.start", "bundle_hash": rt.BundleHash, "run_id": seedServedPublicationRun(t, rt.Runtime),
 					"payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed",
 				})
 				if other.RunID == seed.RunID || other.EventID == seed.EventID {
@@ -162,11 +136,18 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			var gateEntities []string
 			for _, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, "waiting")
+				state := "waiting"
+				if side == "left" {
+					state = "drafting"
+				}
+				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, state)
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
 				}
-				started := publish("loop.start", "start", map[string]any{"seed": true})
+				started := seed
+				if side != "left" {
+					started = publish("loop.start", "start", map[string]any{"seed": true})
+				}
 				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {

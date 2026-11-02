@@ -2,12 +2,11 @@ package conformance
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -26,11 +25,11 @@ func TestIssue642EventlessEmptyStartCompletesWithoutInventedIngressBothStores(t 
 				t.Fatal(err)
 			}
 			f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
-			path := filepath.Join(t.TempDir(), "empty.jsonl")
-			if err := os.WriteFile(path, nil, 0o600); err != nil {
+			ref, err := durabledata.ParseDeclarationRef(".", "root.ready")
+			if err != nil {
 				t.Fatal(err)
 			}
-			source := startDeploymentResourceRun(t, f, f.operatorServer(t), "--data", "root.ready="+path)
+			source := createDeploymentResourceFixtureRun(t, f, durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl"}}})
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, source, 30*time.Second)
 			before, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, source)
 			if err != nil {
