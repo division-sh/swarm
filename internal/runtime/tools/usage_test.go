@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -53,6 +54,12 @@ func TestValidateUsageHintCoverage_ExternalMCPMissingHintIsLintOnly(t *testing.T
 }
 
 func TestValidateUsageHintCoverage_GeneratedEmitUsesModelDescription(t *testing.T) {
+	const authorLine = "The title is the business summary."
+	contract := entityruntime.Contract{Entity: runtimecontracts.EntityContract{Description: authorLine}}
+	read := roleScopedEntityToolSpec{Kind: roleScopedEntityToolReadWhole, EntityType: "state"}
+	if got := roleScopedEntityToolDescription(contract, read); got != "Read the fields of this state\n"+authorLine {
+		t.Fatalf("provided description line was not appended unchanged: %q", got)
+	}
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent": {

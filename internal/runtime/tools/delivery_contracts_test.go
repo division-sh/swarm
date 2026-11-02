@@ -76,11 +76,11 @@ metadata: metadata
 
 	readSchema := defByName["read_state"]
 	if readSchema == nil {
-		t.Fatalf("expected read_review_subject definition, got %v", toolDefinitionNames(defs))
+		t.Fatalf("expected read_state definition, got %v", toolDefinitionNames(defs))
 	}
 	props, _ := readSchema["properties"].(map[string]any)
 	if len(props) != 0 {
-		t.Fatalf("read_review_subject should not accept selector/entity_id input, got schema %#v", readSchema)
+		t.Fatalf("read_state should not accept selector/entity_id input, got schema %#v", readSchema)
 	}
 
 	for name := range defByName {
