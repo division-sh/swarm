@@ -139,7 +139,7 @@ func loadOptionalTypeDeclarationsFromSource(artifact *sourceartifact.AdmittedSou
 	if err != nil {
 		return TypeCatalogDocument{}, wrapLoaderDiagnosticFile(err, label)
 	}
-	count := len(document.Scalars) + len(document.Enums) + len(document.Types)
+	count := len(document.Enums) + len(document.Types)
 	return document, admission.RequireLive(count)
 }
 
@@ -241,7 +241,7 @@ func loadOptionalTypeDeclarations(path string) (TypeCatalogDocument, error) {
 	if err != nil {
 		return TypeCatalogDocument{}, wrapLoaderDiagnosticFile(err, path)
 	}
-	count := len(document.Scalars) + len(document.Enums) + len(document.Types)
+	count := len(document.Enums) + len(document.Types)
 	return document, admission.RequireLive(count)
 }
 

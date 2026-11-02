@@ -38,16 +38,16 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	}
 	outputs, connects := "", ""
 	for _, event := range results {
-		outputs += "    - " + event + "\n"
+		outputs += "  - " + event + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", event, flow)
 	}
-	schema := "# fixture: publication-activity\npins:\n  inputs:\n    - activity.requested\n  outputs:\n" + outputs
+	schema := "# fixture: publication-activity\ninputs:\n  - activity.requested\noutputs:\n" + outputs
 	if template {
 		schema = strings.Replace(schema, "# fixture: publication-activity\n", "# fixture: publication-activity\ninstance: case_id\n", 1)
 		writeClosedVariantFile(t, root, "events.yaml", request+"activity.dispatch:\n  key: case_id\n  case_id: text\n  message: text\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  activity.requested:\n    emit: {event: activity.dispatch, fields: {case_id: payload.case_id, message: payload.message}}\n")
 		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested, resolution: select-or-create}\n", flow)
-		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.dispatch\nconnect:\n"+connects)
+		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\ninputs:\n  - activity.requested\noutputs:\n  - activity.dispatch\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"state.yaml", "case_id: text\n")
 		if mode == "nested_template" {
 			writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
@@ -59,7 +59,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 			schema += "connect:\n" + connects
 		} else {
 			writeClosedVariantFile(t, root, "events.yaml", request)
-			writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.requested\nconnect:\n  - {event: activity.requested, from: ., to: source}\n"+connects)
+			writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\ninputs:\n  - activity.requested\noutputs:\n  - activity.requested\nconnect:\n  - {event: activity.requested, from: ., to: source}\n"+connects)
 		}
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
@@ -103,7 +103,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
     url: %q
     body: {message: "{{input.message}}"}
 `, providerURL))
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n"+outputs)
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\ninputs:\n"+outputs)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// Reused names with an incompatible schema must not supply source authority.
 	siblingInputs, siblingSchemas, siblingTriggerSchemas, siblingConnects := "", "", "", ""
@@ -111,19 +111,19 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	siblingProducers := ""
 	for _, event := range results {
 		trigger := "sibling." + event + ".requested"
-		siblingInputs += "    - " + trigger + "\n"
+		siblingInputs += "  - " + trigger + "\n"
 		siblingTriggerSchemas += trigger + ":\n  activity_id: integer\n"
 		siblingConnects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", trigger)
 		siblingProducers += fmt.Sprintf("produce-%s:\n  %s:\n    emit: {event: %s, fields: {activity_id: payload.activity_id}}\n", event, trigger, event)
 		siblingSchemas += event + ":\n  activity_id: integer\n"
 		siblingNode += "  " + event + ":\n    guard: payload.activity_id > 0\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "# fixture: sibling\npins:\n  inputs:\n"+siblingInputs)
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "# fixture: sibling\ninputs:\n"+siblingInputs)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingSchemas)
 	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+siblingNode)
 	rootSchema := filepath.Join(root, "schema.yaml")
-	applyClosedReplacement(t, rootSchema, "  inputs:\n", "  inputs:\n"+siblingInputs)
-	applyClosedReplacement(t, rootSchema, "  outputs:\n", "  outputs:\n"+siblingInputs)
+	applyClosedReplacement(t, rootSchema, "inputs:\n", "inputs:\n"+siblingInputs)
+	applyClosedReplacement(t, rootSchema, "outputs:\n", "outputs:\n"+siblingInputs)
 	applyClosedReplacement(t, rootSchema, "connect:\n", "connect:\n"+siblingConnects)
 	rootEvents := filepath.Join(root, "events.yaml")
 	content, err := os.ReadFile(rootEvents)

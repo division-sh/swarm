@@ -8,14 +8,13 @@ import (
 
 func TestCatalogAdmissionLeafDomains(t *testing.T) {
 	contract := Contract{Types: contracts.TypeCatalogDocument{
-		Scalars: map[string]contracts.ScalarTypeDecl{"Label": {Base: "text"}, "ID": {Base: "uuid"}, "Time": {Base: "timestamp"}},
-		Enums:   map[string]contracts.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}, Default: "open"}},
-		Types:   map[string]contracts.NamedTypeDecl{"Item": {Fields: map[string]contracts.TypeFieldSpec{"label": {Type: "Label"}}}},
+		Enums: map[string]contracts.EnumTypeDecl{"Status": {Values: []string{"open", "closed"}}},
+		Types: map[string]contracts.NamedTypeDecl{"Item": {Fields: map[string]contracts.TypeFieldSpec{"label": {Type: "text"}}}},
 	}}
 	for _, tc := range []struct{ ref, kind string }{
-		{"Label", "scalar"}, {"ID", "scalar"}, {"Time", "scalar"}, {"Status", "enum"},
+		{"uuid", "scalar"}, {"timestamp", "scalar"}, {"Status", "enum"},
 		{"text", "scalar"}, {"integer", "scalar"}, {"numeric", "scalar"}, {"boolean", "scalar"},
-		{"json", "json"}, {"[Label]", "list"}, {"map[Label]Item", "map"}, {"Item", "object"},
+		{"json", "json"}, {"[text]", "list"}, {"map[text]Item", "map"}, {"Item", "object"},
 	} {
 		t.Run(tc.ref, func(t *testing.T) {
 			contract.Entity.Fields = map[string]contracts.EntityFieldDecl{"value": {Type: tc.ref}, "nested": {Type: "Item"}}
@@ -27,8 +26,8 @@ func TestCatalogAdmissionLeafDomains(t *testing.T) {
 			if (err == nil) != (tc.kind == "scalar" || tc.kind == "enum") {
 				t.Fatalf("scalar/enum role for %s: %v", tc.ref, err)
 			}
-			if nested, err := ResolveLeafField(contract, "nested.label"); err != nil || nested.Type != "Label" || nested.LeafKind != "scalar" {
-				t.Fatalf("nested text alias refused: %+v %v", nested, err)
+			if nested, err := ResolveLeafField(contract, "nested.label"); err != nil || nested.Type != "text" || nested.LeafKind != "scalar" {
+				t.Fatalf("nested text field refused: %+v %v", nested, err)
 			}
 		})
 	}

@@ -47,9 +47,8 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 stages:
   active: {}
   archived: {final: true}
-pins:
-  inputs:
-    - opco.spend_requested
+inputs:
+  - opco.spend_requested
 `)
 	writeClosedVariantFile(t, root, "treasury/events.yaml", `opco.spend_recorded:
   vertical_id: string
@@ -89,11 +88,10 @@ func CopyRootDefaultStaticInput(t testing.TB, handler RootStaticHandler, entityI
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root-default-static-fixture
 stages:
   active: {}
-pins:
-  inputs:
-    - subject.created
-  outputs:
-    - subject.observed
+inputs:
+  - subject.created
+outputs:
+  - subject.observed
 `)
 	entityIDField := ""
 	switch entityID {
@@ -152,12 +150,11 @@ stages:
     final: true
   attention:
     final: true
-pins:
-  inputs:
-    - order.started
-    - order.dispatched
-    - item.completed
-    - fork.probe
+inputs:
+  - order.started
+  - order.dispatched
+  - item.completed
+  - fork.probe
 `,
 		"state.yaml": `expected: [text]
 dispatch_id: text
@@ -273,16 +270,14 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 
 		"schema.yaml": "# fixture: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: select-or-create}\n",
 		"producer/schema.yaml": `# fixture: producer
-pins:
-  outputs:
-    - deploy.done
+outputs:
+  - deploy.done
 `,
 		"producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
 		"consumer/schema.yaml": `# fixture: consumer
 instance: vertical_id
-pins:
-  inputs:
-    - deploy.done
+inputs:
+  - deploy.done
 `,
 		"consumer/state.yaml": "vertical_id: string\n",
 		"consumer/nodes.yaml": "consumer-node:\n  deploy.done: {}\n",
@@ -302,7 +297,7 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 	files := map[string]string{
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":             "# fixture: empire-outbox\npins:\n  outputs:\n    - opco.create_requested\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
+		"schema.yaml":             "# fixture: empire-outbox\noutputs:\n  - opco.create_requested\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
 
 		"events.yaml": `approval.completed:
   entity_id: string?
@@ -336,9 +331,8 @@ instance: instance_id
 stages:
   initializing: {}
   ready: {final: true}
-pins:
-  inputs:
-    - opco.create_requested
+inputs:
+  - opco.create_requested
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
@@ -381,12 +375,11 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 platform_version: ">=0.7.0 <0.8.0"
 `,
 		"schema.yaml": `# fixture: provider-rollback-proof
-pins:
-  inputs:
-    - inbound.telegram.raw
-    - inbound.telegram.text_message
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.raw
+  - inbound.telegram.text_message
+outputs:
+  - inbound.telegram.text_message
 connect:
   - event: inbound.telegram.text_message
     from: .
@@ -404,9 +397,8 @@ normalized_events:
 `,
 		"consumer/schema.yaml": `# fixture: consumer
 instance: chat_id
-pins:
-  inputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
 `,
 		"consumer/state.yaml": "chat_id: {type: text, indexed: true}\n",
 		"consumer/nodes.yaml": nodes,

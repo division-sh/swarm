@@ -46,8 +46,7 @@ func TestCatalogStructuralTypeFactoring(t *testing.T) {
 
 func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 	catalog := catalogFactoringCatalog()
-	catalog.Scalars["Retired"] = ScalarTypeDecl{Base: "list<text>"}
-	for _, ref := range []string{"list", "list<text>", "[list<text>]", "map[integer]list<Missing>", "map[Missing]list<text>", "Retired"} {
+	for _, ref := range []string{"list", "list<text>", "[list<text>]", "map[integer]list<Missing>", "map[Missing]list<text>"} {
 		t.Run("retirement_before_nested_resolution/"+ref, func(t *testing.T) {
 			input := CatalogTypeReference{Type: ref, Catalog: catalog}
 			for name, resolve := range map[string]func() (ResolvedCatalogType, error){
@@ -59,11 +58,7 @@ func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 			} {
 				t.Run(name, func(t *testing.T) {
 					resolved, err := resolve()
-					retired := ref
-					if ref == "Retired" {
-						retired = "list<text>"
-					}
-					want := ErrInvalidField.Error() + ": catalog type list type " + strconv.Quote(retired) + " is not supported; use [T]"
+					want := ErrInvalidField.Error() + ": catalog type list type " + strconv.Quote(ref) + " is not supported; use [T]"
 					if err == nil || err.Error() != want || !errors.Is(err, ErrInvalidField) || !reflect.DeepEqual(resolved, ResolvedCatalogType{}) {
 						t.Fatalf("ordered retirement refusal = %#v / %v, want %q", resolved, err, want)
 					}
@@ -160,13 +155,12 @@ func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 
 func catalogFactoringCatalog() TypeCatalogDocument {
 	return TypeCatalogDocument{
-		Scalars: map[string]ScalarTypeDecl{"Label": {Base: "text"}, "ID": {Base: "uuid"}, "Time": {Base: "timestamp"}},
 		Enums: map[string]EnumTypeDecl{
-			"State": {Values: []string{"ready", "done"}, Default: "ready"},
-			"Other": {Values: []string{"ready", "done"}, Default: "ready"},
+			"State": {Values: []string{"ready", "done"}},
+			"Other": {Values: []string{"ready", "done"}},
 		},
 		Types: map[string]NamedTypeDecl{
-			"Leaf": {Fields: map[string]TypeFieldSpec{"value": {Type: "Label"}}},
+			"Leaf": {Fields: map[string]TypeFieldSpec{"value": {Type: "text"}}},
 			"Pair": {Fields: map[string]TypeFieldSpec{"first": {Type: "Leaf"}, "second": {Type: "Leaf", IsOptional: true}}},
 		},
 	}
@@ -468,14 +462,15 @@ func catalogFactoringEmpty(t *testing.T) {
 func catalogFactoringResolveScope(t *testing.T) {
 	left := catalogFactoringCatalog()
 	right := catalogFactoringCatalog()
-	right.Scalars["Label"] = ScalarTypeDecl{Base: "integer"}
+	right.Types["Leaf"].Fields["value"] = TypeFieldSpec{Type: "integer"}
 	for _, tc := range []struct {
 		catalog TypeCatalogDocument
 		want    CatalogTypeKind
-	}{{left, CatalogTypeText}, {right, CatalogTypeInteger}} {
+		wantRef string
+	}{{left, CatalogTypeText, "text"}, {right, CatalogTypeInteger, "integer"}} {
 		resolved := catalogFactoringResolved(t, "Leaf", tc.catalog)
 		field, found := resolved.Field("value")
-		if !found || field.Type.Kind != tc.want || field.TypeRef != "Label" {
+		if !found || field.Type.Kind != tc.want || field.TypeRef != tc.wantRef {
 			t.Fatalf("receiver catalog was replaced: %#v/%v", field, found)
 		}
 	}
@@ -486,7 +481,7 @@ func catalogFactoringResolveScope(t *testing.T) {
 func catalogFactoringResolveReference(t *testing.T) {
 	ref := CatalogTypeReference{Type: "integer", Catalog: catalogFactoringCatalog()}
 	ref.Catalog.Types["Cycle"] = NamedTypeDecl{Fields: map[string]TypeFieldSpec{"child": {Type: "Cycle"}}}
-	resolved, err := ref.ResolveReference(" Label ")
+	resolved, err := ref.ResolveReference(" text ")
 	if err != nil || !resolved.PlainText() {
 		t.Fatalf("explicit reference did not override receiver.Type: %#v/%v", resolved, err)
 	}
@@ -502,7 +497,7 @@ func catalogFactoringResolveReference(t *testing.T) {
 
 func catalogFactoringMapKey(t *testing.T) {
 	catalog := catalogFactoringCatalog()
-	for _, ref := range []string{"text", "Label", "uuid", "ID", "State"} {
+	for _, ref := range []string{"text", "uuid", "State"} {
 		key, err := (CatalogTypeReference{Type: ref, Catalog: catalog}).ResolveMapKey()
 		if err != nil || !reflect.DeepEqual(key, catalogFactoringResolved(t, ref, catalog)) {
 			t.Fatalf("key domain %s was erased: %#v/%v", ref, key, err)
@@ -513,7 +508,7 @@ func catalogFactoringMapKey(t *testing.T) {
 			t.Fatalf("map schema lost key domain %s: %#v", ref, schema)
 		}
 	}
-	for _, ref := range []string{"integer", "numeric", "boolean", "timestamp", "Time", "Leaf", "[Label]", "json"} {
+	for _, ref := range []string{"integer", "numeric", "boolean", "timestamp", "Leaf", "[text]", "json"} {
 		_, err := (CatalogTypeReference{Type: ref, Catalog: catalog}).ResolveMapKey()
 		catalogFactoringRefusal(t, err, "map key type \""+ref+"\" is unsupported; map keys must be text, enum or uuid")
 	}
@@ -523,15 +518,15 @@ func catalogFactoringMapKey(t *testing.T) {
 
 func catalogFactoringMapKeyMembership(t *testing.T) {
 	catalog := catalogFactoringCatalog()
-	for _, ref := range []string{"Label", "ID", "State"} {
+	for _, ref := range []string{"text", "uuid", "State"} {
 		if err := validateCatalogMapKey(catalogFactoringResolved(t, ref, catalog), ref, catalog); err != nil {
 			t.Fatal(err)
 		}
 	}
-	foreign := TypeCatalogDocument{Enums: map[string]EnumTypeDecl{"Foreign": {Values: []string{"ready"}, Default: "ready"}}}
+	foreign := TypeCatalogDocument{Enums: map[string]EnumTypeDecl{"Foreign": {Values: []string{"ready"}}}}
 	key := catalogFactoringResolved(t, "Foreign", foreign)
 	catalogFactoringRefusal(t, validateCatalogMapKey(key, "Foreign", catalog), `map key type "Foreign" is unsupported; map keys must be text, enum or uuid`)
-	for _, ref := range []string{"Time", "integer", "Leaf"} {
+	for _, ref := range []string{"timestamp", "integer", "Leaf"} {
 		catalogFactoringRefusal(t, validateCatalogMapKey(catalogFactoringResolved(t, ref, catalog), ref, catalog), "map key type \""+ref+"\" is unsupported; map keys must be text, enum or uuid")
 	}
 }
@@ -541,7 +536,7 @@ func catalogFactoringPlainText(t *testing.T) {
 	for _, tc := range []struct {
 		ref  string
 		want bool
-	}{{"text", true}, {"Label", true}, {"uuid", false}, {"ID", false}, {"timestamp", false}, {"Time", false}, {"State", false}, {"[Label]", false}, {"Leaf", false}, {"json", false}} {
+	}{{"text", true}, {"uuid", false}, {"timestamp", false}, {"State", false}, {"[text]", false}, {"Leaf", false}, {"json", false}} {
 		resolved := catalogFactoringResolved(t, tc.ref, catalog)
 		if got := resolved.PlainText(); got != tc.want {
 			t.Fatalf("plain-text domain %s = %v", tc.ref, got)
@@ -549,26 +544,11 @@ func catalogFactoringPlainText(t *testing.T) {
 		if got := compiledFileTextField(ResolvedCatalogField{TypeRef: tc.ref, Type: resolved}, catalog); got != tc.want {
 			t.Fatalf("file-text consumer %s = %v", tc.ref, got)
 		}
-		if got := criteriaCitationTypeAllowed(CatalogTypeReference{Type: tc.ref, Catalog: catalog}); got != (tc.want || tc.ref == "[Label]") {
-			t.Fatalf("citation consumer %s = %v", tc.ref, got)
-		}
 	}
 }
 
 func catalogFactoringComparableDomain(t *testing.T) {
 	catalog := catalogFactoringCatalog()
-	for _, pair := range [][2]string{{"Label", "text"}, {"ID", "uuid"}, {"Time", "timestamp"}, {"[Label]", "[text]"}, {"map[ID]Leaf", "map[uuid]Leaf"}} {
-		left := (CatalogTypeReference{Type: pair[0], Catalog: catalog}).ComparableDomain()
-		right := (CatalogTypeReference{Type: pair[1], Catalog: catalog}).ComparableDomain()
-		if left == "" || left != right {
-			t.Fatalf("equivalent domains %v diverged: %q/%q", pair, left, right)
-		}
-		if errs := validateSchemaRefinementFields("factoring", catalog, map[string]schemaRefinementField{
-			"left": {Name: "left", TypeRef: pair[0], Refinements: SchemaRefinements{EqualTo: "right"}}, "right": {Name: "right", TypeRef: pair[1]},
-		}); len(errs) != 0 {
-			t.Fatalf("actual equality consumer refused equivalent domains %v: %v", pair, errs)
-		}
-	}
 	for _, pair := range [][2]string{{"State", "Other"}, {"State", "text"}, {"uuid", "text"}, {"timestamp", "uuid"}, {"integer", "numeric"}, {"json", "object"}} {
 		left := (CatalogTypeReference{Type: pair[0], Catalog: catalog}).ComparableDomain()
 		right := (CatalogTypeReference{Type: pair[1], Catalog: catalog}).ComparableDomain()
@@ -589,10 +569,10 @@ func catalogFactoringComparableDomain(t *testing.T) {
 func catalogFactoringDomainTokens(t *testing.T) {
 	catalog := catalogFactoringCatalog()
 	for _, tc := range []struct{ ref, want string }{
-		{"Label", "string"}, {"ID", "uuid"}, {"Time", "timestamp"}, {"State", "enum:State"},
+		{"text", "string"}, {"uuid", "uuid"}, {"timestamp", "timestamp"}, {"State", "enum:State"},
 		{"integer", "integer"}, {"numeric", "number"}, {"boolean", "boolean"}, {"jsonb", "json"},
 		{"object", "object"}, {"array", "array"}, {"Leaf", "type:Leaf"},
-		{"[ID]", "list:uuid"}, {"map[State][Time]", "map:enum:State:list:timestamp"},
+		{"[uuid]", "list:uuid"}, {"map[State][timestamp]", "map:enum:State:list:timestamp"},
 	} {
 		resolved := catalogFactoringResolved(t, tc.ref, catalog)
 		if got := catalogComparableDomain(resolved); got != tc.want {
@@ -606,7 +586,7 @@ func catalogFactoringDomainTokens(t *testing.T) {
 
 func catalogFactoringResolver(t *testing.T) {
 	catalog := catalogFactoringCatalog()
-	for _, ref := range []string{"Label", "State", "Pair", "[Pair]", "map[Label]Pair"} {
+	for _, ref := range []string{"text", "State", "Pair", "[Pair]", "map[text]Pair"} {
 		resolving := map[string]struct{}{"unrelated": {}}
 		if _, err := resolveCatalogTypeReference(ref, catalog, resolving); err != nil || len(resolving) != 1 {
 			t.Fatalf("canonical resolution %s = %v, recursion state %#v", ref, err, resolving)
@@ -638,10 +618,10 @@ func catalogFactoringScopedBundle(t *testing.T) *WorkflowContractBundle {
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "# fixture: catalog-factoring\nstages: {done: {final: true}}\n",
-		"types.yaml":          "scalars: {Label: text}\ntypes:\n  Box:\n    value: Label\n",
+		"types.yaml":          "Box:\n  value: text\n",
 		"events.yaml":         "record.ready:\n  item: Box\n  items: [Box]\n",
 		"child/schema.yaml":   "# fixture: child\nstages: {done: {final: true}}\n",
-		"child/types.yaml":    "scalars: {Label: integer}\n",
+		"child/types.yaml":    "Box:\n  value: integer\n",
 		"child/events.yaml":   "record.ready:\n  item: Box\n  items: [Box]\n",
 		"child/nodes.yaml":    "consumer:\n  record.ready: {}\n",
 	} {
@@ -669,7 +649,7 @@ func catalogFactoringEventField(t *testing.T) {
 		if field, _ := resolved.Field("value"); field.Type.Kind != tc.want {
 			t.Fatalf("wrong declaring catalog for %s: %#v", tc.flow, field)
 		}
-		ref.Catalog.Scalars["Label"] = ScalarTypeDecl{Base: "uuid"}
+		ref.Catalog.Types["Box"].Fields["value"] = TypeFieldSpec{Type: "uuid"}
 		fresh, found := ResolveEventFieldType(bundle, tc.flow, "record.ready", "item")
 		field, _ := catalogFactoringResolved(t, fresh.Type, fresh.Catalog).Field("value")
 		if !found || field.Type.Kind != tc.want {
@@ -694,7 +674,7 @@ func catalogFactoringNodeField(t *testing.T) {
 	if field.Type.Kind != CatalogTypeInteger {
 		t.Fatal("node lookup chose root declaration rather than its flow")
 	}
-	ref.Catalog.Scalars["Label"] = ScalarTypeDecl{Base: "uuid"}
+	ref.Catalog.Types["Box"].Fields["value"] = TypeFieldSpec{Type: "uuid"}
 	fresh, found := ResolveExecutableNodeEventFieldType(bundle, node, "record.ready", "item")
 	field, _ = catalogFactoringResolved(t, fresh.Type, fresh.Catalog).Field("value")
 	if !found || field.Type.Kind != CatalogTypeInteger {

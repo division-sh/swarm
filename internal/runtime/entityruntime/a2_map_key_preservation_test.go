@@ -22,14 +22,11 @@ func a2ExactTextMapValues() map[string]any {
 }
 
 func TestA2TextMapFieldPreservesExactNonemptyKeys(t *testing.T) {
-	for _, keyType := range []string{"text", "string", "BusinessKey"} {
+	for _, keyType := range []string{"text", "string"} {
 		t.Run(keyType, func(t *testing.T) {
 			contract := Contract{
 				Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{
 					"items": {Type: "map[" + keyType + "][integer]"},
-				}},
-				Types: rc.TypeCatalogDocument{Scalars: map[string]rc.ScalarTypeDecl{
-					"BusinessKey": {Base: "text"},
 				}},
 			}
 			source := a2ExactTextMapValues()
@@ -185,7 +182,7 @@ func TestA2WholeMapRejectsDuplicateNormalizedKeysAtomically(t *testing.T) {
 	} {
 		contract := Contract{
 			Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{"items": {Type: "map[" + tc.keyType + "]integer"}}},
-			Types:  rc.TypeCatalogDocument{Enums: map[string]rc.EnumTypeDecl{"Status": {Values: []string{"Ready", "Done"}, Default: "Ready"}}},
+			Types:  rc.TypeCatalogDocument{Enums: map[string]rc.EnumTypeDecl{"Status": {Values: []string{"Ready", "Done"}}}},
 		}
 		for _, second := range []int64{1, 2} {
 			t.Run(fmt.Sprintf("%s/second=%d", tc.keyType, second), func(t *testing.T) {

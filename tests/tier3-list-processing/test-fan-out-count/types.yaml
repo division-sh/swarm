@@ -1,3 +1,2 @@
-types:
-  FanOutItem:
-    id: text
+FanOutItem:
+  id: text

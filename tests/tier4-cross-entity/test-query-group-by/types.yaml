@@ -1,4 +1,3 @@
-types:
-  GroupedDigest:
-    key: text
-    count: integer
+GroupedDigest:
+  key: text
+  count: integer

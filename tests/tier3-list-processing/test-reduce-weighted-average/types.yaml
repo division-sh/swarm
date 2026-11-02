@@ -1,4 +1,3 @@
-types:
-  WeightedScore:
-    score: integer
-    weight: integer
+WeightedScore:
+  score: integer
+  weight: integer

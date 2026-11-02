@@ -249,14 +249,43 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 	}
 }
 
-func TestEventFieldSpecDecodeRejectsMalformedSchemaRefinement(t *testing.T) {
-	_, err := admitEventCatalogEntryForTest(t, `
-value:
-  type: text
-  pattern: "["
-`)
-	if err == nil || !strings.Contains(err.Error(), "pattern") {
-		t.Fatalf("event catalog admission error = %v, want pattern failure", err)
+func TestDeclaredFieldTypesRejectRetiredMetadata(t *testing.T) {
+	for _, family := range []string{"types", "state", "events"} {
+		for _, key := range []string{"description", "pattern", "length", "range", "equal_to", "immutable", "citation"} {
+			t.Run(family+"/"+key, func(t *testing.T) {
+				field := "value: {type: text, " + key + ": null}\n"
+				var err error
+				switch family {
+				case "types":
+					var doc TypeCatalogDocument
+					err = decodeNodeTestYAML([]byte("Item:\n  "+field), &doc)
+				case "state":
+					var doc EntityContractsDocument
+					err = decodeNodeTestYAML([]byte(field), &doc)
+				case "events":
+					_, err = admitEventCatalogEntryForTest(t, field)
+				}
+				if err == nil || !strings.Contains(err.Error(), key) {
+					t.Fatalf("retired %s metadata %s: %v", family, key, err)
+				}
+			})
+		}
+		t.Run(family+"/_description", func(t *testing.T) {
+			var err error
+			switch family {
+			case "types":
+				var doc TypeCatalogDocument
+				err = decodeNodeTestYAML([]byte("Item:\n  _description: text\n"), &doc)
+			case "state":
+				var doc EntityContractsDocument
+				err = decodeNodeTestYAML([]byte("_description: text\n"), &doc)
+			case "events":
+				_, err = admitEventCatalogEntryForTest(t, "_description: text\n")
+			}
+			if err == nil || !strings.Contains(err.Error(), "_description") || !strings.Contains(err.Error(), "comment") {
+				t.Fatalf("retired declaration description in %s: %v", family, err)
+			}
+		})
 	}
 }
 

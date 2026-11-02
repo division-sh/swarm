@@ -338,6 +338,8 @@ func goFunctionExists(t testing.TB, path, name string) bool {
 func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 	for name, source := range map[string]string{
 		"pins":             "pins: {inputs: {events: []}}\n",
+		"schema-inputs":    "inputs: [work.ready]\n",
+		"schema-outputs":   "outputs: [work.ready]\n",
 		"connect":          "connect: [{from: a.out, to: b.in}]\n",
 		"emit":             "node: {emit: {event: result.ready}}\n",
 		"subscription":     "node: {subscribes_to: [work.ready]}\n",
@@ -354,6 +356,8 @@ func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 			file := "routing.yaml"
 			if name == "direct-handler" {
 				file = "nodes.yaml"
+			} else if strings.HasPrefix(name, "schema-") {
+				file = "schema.yaml"
 			}
 			if err := routingOverlayError(file, source); err == nil {
 				t.Fatalf("routing overlay %q was accepted", source)
@@ -362,6 +366,9 @@ func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 	}
 	if err := routingOverlayError("types.yaml", "types:\n  Account:\n    score: number\n"); err != nil {
 		t.Fatalf("non-routing overlay was rejected: %v", err)
+	}
+	if err := routingOverlayError("state.yaml", "inputs: [text]\noutputs: [text]\n"); err != nil {
+		t.Fatalf("business field names became routing authority: %v", err)
 	}
 }
 

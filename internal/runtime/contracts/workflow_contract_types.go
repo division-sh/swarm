@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -916,36 +915,25 @@ type ProviderTriggerEventImport struct {
 }
 
 type TypeCatalogDocument struct {
-	Scalars map[string]ScalarTypeDecl `yaml:"scalars"`
-	Enums   map[string]EnumTypeDecl   `yaml:"enums"`
-	Types   map[string]NamedTypeDecl  `yaml:"types"`
-}
-
-type ScalarTypeDecl struct {
-	Base string `yaml:"-"`
+	Enums map[string]EnumTypeDecl  `yaml:"enums"`
+	Types map[string]NamedTypeDecl `yaml:"types"`
 }
 
 type EnumTypeDecl struct {
-	Values  []string `yaml:"values"`
-	Default string   `yaml:"default"`
+	Values []string `yaml:"-"`
 }
 
-// Validate enforces the explicit-default enum invariant: every enum declares
-// its members and an explicit default member (#1532). It is the shared
-// invariant owner called from the catalog decode loop and the runtime default
-// guard, so the loader verdict and the runtime verdict can never diverge.
-// Each defect has a distinct message naming the offending value or the
-// declared members as appropriate.
 func (e EnumTypeDecl) Validate(name string) error {
 	name = strings.TrimSpace(name)
 	if len(e.Values) == 0 {
-		return fmt.Errorf("enum %s is declared without values; declare the mapping form {values: [...], default: <member>}", name)
+		return fmt.Errorf("enum %s requires at least one quoted text member", name)
 	}
-	if strings.TrimSpace(e.Default) == "" {
-		return fmt.Errorf("enum %s has no declared default; add default: %s to preserve current behavior", name, e.Values[0])
-	}
-	if !slices.Contains(e.Values, strings.TrimSpace(e.Default)) {
-		return fmt.Errorf("enum %s default %q is not a declared member; declared members: %s", name, e.Default, strings.Join(e.Values, ", "))
+	seen := make(map[string]struct{}, len(e.Values))
+	for _, member := range e.Values {
+		if _, exists := seen[member]; exists {
+			return fmt.Errorf("enum %s repeats member %q", name, member)
+		}
+		seen[member] = struct{}{}
 	}
 	return nil
 }

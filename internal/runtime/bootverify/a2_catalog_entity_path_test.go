@@ -17,7 +17,7 @@ func TestA2CatalogEntityPathPreservesAdmittedLeafShapes(t *testing.T) {
 	}{
 		{name: "text", path: "state.name", kind: "scalar", typeRef: "text"},
 		{name: "integer", path: "state.total", kind: "scalar", typeRef: "integer"},
-		{name: "scalar alias", path: "state.score", kind: "scalar", typeRef: "Score"},
+		{name: "scalar", path: "state.score", kind: "scalar", typeRef: "integer"},
 		{name: "enum", path: "state.decision", kind: "enum", typeRef: "Decision"},
 		{name: "named record", path: "state.profile", kind: "named", typeRef: "Profile"},
 		{name: "list", path: "state.ids", kind: "list", typeRef: "[text]"},
@@ -34,7 +34,7 @@ func TestA2CatalogEntityPathPreservesAdmittedLeafShapes(t *testing.T) {
 		{name: "optional root list size", path: "state.optional_ids.size", kind: "scalar", typeRef: "integer", optional: true},
 		{name: "record map", path: "state.profile.items", kind: "map", typeRef: "map[text][integer]"},
 		{name: "optional ancestor scalar", path: "state.profile.maybe.label", kind: "scalar", typeRef: "text", optional: true},
-		{name: "optional ancestor map", path: "state.profile.maybe.items", kind: "map", typeRef: "map[text]Score", optional: true},
+		{name: "optional ancestor map", path: "state.profile.maybe.items", kind: "map", typeRef: "map[text]integer", optional: true},
 		{name: "optional ancestor list size", path: "state.profile.maybe.ids.size", kind: "scalar", typeRef: "integer", optional: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,11 +63,6 @@ func TestA2CatalogEntityPathRejectsMissingDeclaredTypes(t *testing.T) {
 	}{
 		{name: "empty root type", path: "state.name", typeRef: ""},
 		{name: "unknown root type", path: "state.name", typeRef: "Missing"},
-		{name: "empty scalar alias", path: "state.name", typeRef: "Empty"},
-		{name: "empty list element alias", path: "state.name", typeRef: "[Empty]"},
-		{name: "empty list element alias size", path: "state.name.size", typeRef: "[Empty]"},
-		{name: "empty map value alias", path: "state.name", typeRef: "map[text]Empty"},
-		{name: "cyclic scalar alias", path: "state.name", typeRef: "Cycle"},
 		{name: "empty list element", path: "state.name", typeRef: "[]"},
 		{name: "unknown list element", path: "state.name.size", typeRef: "[Missing]"},
 		{name: "missing map value", path: "state.name", typeRef: "map[text]"},
@@ -78,8 +73,6 @@ func TestA2CatalogEntityPathRejectsMissingDeclaredTypes(t *testing.T) {
 			bundle := a2CatalogPathBundle()
 			contract := bundle.RootEntities["state"]
 			contract.Fields["name"] = runtimecontracts.EntityFieldDecl{Type: tc.typeRef}
-			bundle.RootTypes.Scalars["Empty"] = runtimecontracts.ScalarTypeDecl{}
-			bundle.RootTypes.Scalars["Cycle"] = runtimecontracts.ScalarTypeDecl{Base: "Cycle"}
 			profile := bundle.RootTypes.Types["Profile"]
 			profile.Fields["blank"] = runtimecontracts.TypeFieldSpec{}
 			before := a2CatalogPathSnapshot(t, bundle)
@@ -133,7 +126,7 @@ func TestA2CatalogEntityPathConsumersRetainMapOwner(t *testing.T) {
 	}{
 		{name: "root map reader", path: "state.items", field: "items", typeRef: "map[text][integer]"},
 		{name: "record map", path: "state.profile.items", field: "profile", typeRef: "map[text][integer]"},
-		{name: "optional ancestor", path: "state.profile.maybe.items", field: "profile", typeRef: "map[text]Score", optional: true},
+		{name: "optional ancestor", path: "state.profile.maybe.items", field: "profile", typeRef: "map[text]integer", optional: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := a2CatalogPathBundle()
@@ -170,7 +163,7 @@ func a2CatalogPathBundle() *runtimecontracts.WorkflowContractBundle {
 			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"name":           {Type: "text"},
 				"total":          {Type: "integer"},
-				"score":          {Type: "Score"},
+				"score":          {Type: "integer"},
 				"decision":       {Type: "Decision"},
 				"profile":        {Type: "Profile"},
 				"ids":            {Type: "[text]"},
@@ -183,9 +176,8 @@ func a2CatalogPathBundle() *runtimecontracts.WorkflowContractBundle {
 			}},
 		},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
-			Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}},
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"Decision": {Values: []string{"accept", "reject"}, Default: "accept"},
+				"Decision": {Values: []string{"accept", "reject"}},
 			},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"Record": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "integer"}}},
@@ -198,7 +190,7 @@ func a2CatalogPathBundle() *runtimecontracts.WorkflowContractBundle {
 				}},
 				"Nested": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 					"label": {Type: "text"},
-					"items": {Type: "map[text]Score"},
+					"items": {Type: "map[text]integer"},
 					"ids":   {Type: "[integer]"},
 				}},
 			},

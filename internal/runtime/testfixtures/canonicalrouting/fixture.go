@@ -130,11 +130,10 @@ func CopyTelegramChatWithoutIngress(t testing.TB) string {
 	}
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: telegram-agent
-pins:
-  inputs:
-    - inbound.telegram.text_message
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
+outputs:
+  - inbound.telegram.text_message
 connect:
   - {event: inbound.telegram.text_message, from: ., to: telegram-chat, resolution: select-or-create}
 `)
@@ -360,13 +359,12 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 		t.Fatalf("unsupported retired static mutation %q", mutation)
 	}
 	writeClosedNegativeFile(t, root, "schema.yaml", `# fixture: template-select-or-create
-pins:
-  inputs:
-    - account.requested
-    - legacy.seen
-  outputs:
-    - account.requested
-    - legacy.seen
+inputs:
+  - account.requested
+  - legacy.seen
+outputs:
+  - account.requested
+  - legacy.seen
 connect:
   - {event: account.requested, from: ., to: producer}
   - {event: account.ready, from: producer, to: account, resolution: select-or-create}
@@ -378,9 +376,8 @@ connect:
 stages:
   active: {}
   archived: {final: true}
-pins:
-  inputs:
-    - legacy.seen
+inputs:
+  - legacy.seen
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/state.yaml", `legacy_id: {type: text, indexed: true}
 amount: 0
@@ -406,9 +403,8 @@ func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	writeClosedNegativeFile(t, root, "schema.yaml", `# fixture: template-select-or-create
 stages:
   active: {}
-pins:
-  inputs:
-    - subject.created
+inputs:
+  - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
   subject.created:
@@ -569,10 +565,10 @@ func yamlNodeContainsAuthoredRouting(path string, node *yaml.Node) bool {
 	if filepath.Base(path) == "nodes.yaml" && node != nil && node.Kind == yaml.MappingNode && len(node.Content) != 0 {
 		return true
 	}
-	return yamlNodeContainsAuthoredRoutingAt(node, "")
+	return yamlNodeContainsAuthoredRoutingAt(node, "", filepath.Base(path) == "schema.yaml")
 }
 
-func yamlNodeContainsAuthoredRoutingAt(node *yaml.Node, parentKey string) bool {
+func yamlNodeContainsAuthoredRoutingAt(node *yaml.Node, parentKey string, schemaRoot bool) bool {
 	if node == nil {
 		return false
 	}
@@ -591,7 +587,7 @@ func yamlNodeContainsAuthoredRoutingAt(node *yaml.Node, parentKey string) bool {
 					return true
 				}
 			case "inputs", "outputs":
-				if parentKey == "pins" || parentKey == "requires" || parentKey == "bind" {
+				if schemaRoot || parentKey == "pins" || parentKey == "requires" || parentKey == "bind" {
 					return true
 				}
 			case "mode":
@@ -608,14 +604,14 @@ func yamlNodeContainsAuthoredRoutingAt(node *yaml.Node, parentKey string) bool {
 				"broadcast", "bind", "requires":
 				return true
 			}
-			if yamlNodeContainsAuthoredRoutingAt(value, key) {
+			if yamlNodeContainsAuthoredRoutingAt(value, key, false) {
 				return true
 			}
 		}
 		return false
 	}
 	for _, child := range node.Content {
-		if yamlNodeContainsAuthoredRoutingAt(child, parentKey) {
+		if yamlNodeContainsAuthoredRoutingAt(child, parentKey, schemaRoot) {
 			return true
 		}
 	}

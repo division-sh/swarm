@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
-func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
+func TestPolicySheetLookupAdmittedScalarDomains(t *testing.T) {
 	for _, tc := range []struct {
 		name, base string
 		literal    c.ComputeLookupLiteral
@@ -22,14 +22,13 @@ func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := &c.WorkflowContractBundle{
-				RootTypes: c.TypeCatalogDocument{Scalars: map[string]c.ScalarTypeDecl{"Alias": {Base: tc.base}}},
-				Events:    map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: "Alias"}}}}},
+				Events: map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: tc.base}}}}},
 			}
 			source := compileBootverifyRootSource(bundle)
 			ref := policySheetLookupRef{Node: identitytest.RootNode(t, "lookup"), EventType: "requested"}
 			spec := &c.ComputeLookupSpec{On: []string{"payload.key"}, OnPaths: []paths.Path{paths.Parse("payload.key")}, Entries: []c.ComputeLookupEntry{{Key: []c.ComputeLookupLiteral{tc.literal}}}}
 			if got := validatePolicySheetLookupKeyTypes(source, ref, spec); len(got) != 0 {
-				t.Fatalf("correct aliased literal refused: %#v", got)
+				t.Fatalf("correct typed literal refused: %#v", got)
 			}
 			wrong := c.ComputeLookupLiteral{Kind: "string", Canonical: "string:wrong", Value: "wrong"}
 			if tc.literal.Kind == "string" {
@@ -37,7 +36,7 @@ func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
 			}
 			spec.Entries[0].Key[0] = wrong
 			if got := validatePolicySheetLookupKeyTypes(source, ref, spec); len(got) == 0 {
-				t.Fatal("wrong aliased literal accepted")
+				t.Fatal("wrong typed literal accepted")
 			}
 			if tc.base == "boolean" {
 				spec.Entries = []c.ComputeLookupEntry{{Key: []c.ComputeLookupLiteral{tc.literal}}}
@@ -46,7 +45,7 @@ func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
 				}
 				spec.Entries = append(spec.Entries, c.ComputeLookupEntry{Key: []c.ComputeLookupLiteral{{Kind: "bool", Canonical: "bool:false", Value: false}}})
 				if !policySheetLookupDomainsClosedAndExhaustive(source, ref, spec, nil) {
-					t.Fatal("complete aliased bool table refused")
+					t.Fatal("complete bool table refused")
 				}
 			}
 		})
@@ -61,26 +60,11 @@ func TestPolicySheetLookupAdmittedAliasDomains(t *testing.T) {
 	}
 }
 
-func TestLoopValidationAdmittedTextAlias(t *testing.T) {
-	bundle := loopValidationBundle()
-	bundle.RootTypes = c.TypeCatalogDocument{Scalars: map[string]c.ScalarTypeDecl{"Revision": {Base: "text"}}}
-	for name, entry := range bundle.Events {
-		if field, ok := entry.Payload.Properties["revision_id"]; ok {
-			field.Type = "Revision"
-			entry.Payload.Properties["revision_id"] = field
-			bundle.Events[name] = entry
-		}
-	}
-	if findings := checkLoopValidation(newCheckerContext(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})); len(findings) != 0 {
-		t.Fatalf("text alias verification: %#v", findings)
-	}
-}
-
 func TestLoopValidationRevisionDomainsRemainExact(t *testing.T) {
 	for _, ref := range []string{"integer", "numeric", "uuid", "timestamp", "Status"} {
 		t.Run(ref, func(t *testing.T) {
 			bundle := loopValidationBundle()
-			bundle.RootTypes = c.TypeCatalogDocument{Enums: map[string]c.EnumTypeDecl{"Status": {Values: []string{"ready"}, Default: "ready"}}}
+			bundle.RootTypes = c.TypeCatalogDocument{Enums: map[string]c.EnumTypeDecl{"Status": {Values: []string{"ready"}}}}
 			field := bundle.Events["draft.ready"].Payload.Properties["revision_id"]
 			field.Type = ref
 			bundle.Events["draft.ready"].Payload.Properties["revision_id"] = field
@@ -91,7 +75,7 @@ func TestLoopValidationRevisionDomainsRemainExact(t *testing.T) {
 	}
 }
 
-func TestPolicySheetLookupAliasedBooleanNoDefault(t *testing.T) {
+func TestPolicySheetLookupBooleanNoDefault(t *testing.T) {
 	handler := bootverifyLookupHandler(false, true)
 	lookup := handler.Rules[0].Compute.Lookup
 	lookup.On = []string{"payload.key"}
@@ -101,13 +85,12 @@ func TestPolicySheetLookupAliasedBooleanNoDefault(t *testing.T) {
 		{Key: []c.ComputeLookupLiteral{{Kind: "bool", Value: false, Canonical: "bool:false"}}, Value: "templates/service/go", ValueKind: "string"},
 	}
 	bundle := &c.WorkflowContractBundle{
-		RootTypes: c.TypeCatalogDocument{Scalars: map[string]c.ScalarTypeDecl{"Flag": {Base: "boolean"}}},
-		Events:    map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: "Flag"}}}}},
-		Nodes:     map[string]c.SystemNodeContract{"lookup": {EventHandlers: map[string]c.SystemNodeEventHandler{"requested": handler}}},
+		Events: map[string]c.EventCatalogEntry{"requested": {Payload: c.EventPayloadSpec{Properties: map[string]c.EventFieldSpec{"key": {Type: "boolean"}}}}},
+		Nodes:  map[string]c.SystemNodeContract{"lookup": {EventHandlers: map[string]c.SystemNodeEventHandler{"requested": handler}}},
 	}
 	source := compileBootverifyRootSource(bundle)
 	if findings := checkPolicySheetLookupValueRows(newCheckerContext(context.Background(), source, Options{})); len(findings) != 0 {
-		t.Fatalf("exhaustive aliased boolean row refused: %#v", findings)
+		t.Fatalf("exhaustive boolean row refused: %#v", findings)
 	}
 	lookup.Entries = lookup.Entries[:1]
 	if findings := checkPolicySheetLookupValueRows(newCheckerContext(context.Background(), source, Options{})); !bootverifyLookupFindingContains(findings, "lookup.default: fail is required") {

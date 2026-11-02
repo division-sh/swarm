@@ -13,7 +13,7 @@ func WriteManagerSubscriptionAdmission(t testing.TB) string {
 		"nodes.yaml": `root-observer:
   root.ready: {}
 `,
-		"review/schema.yaml": "instance: review_id\npins:\n  inputs: [task.ready]\n",
+		"review/schema.yaml": "instance: review_id\ninputs: [task.ready]\n",
 		"review/state.yaml":  "review_id: text\n",
 		"review/events.yaml": "task.ready:\n",
 		"review/agents.yaml": `reviewer:

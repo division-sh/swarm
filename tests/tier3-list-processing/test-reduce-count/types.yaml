@@ -1,4 +1,3 @@
-types:
-  CountedItem:
-    id: text
-    active: boolean
+CountedItem:
+  id: text
+  active: boolean

@@ -1454,7 +1454,7 @@ func testFlowBundle(t *testing.T, autoEmit string, edits ...func(string)) *runti
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
-	schema := "instance: instance_key\npins: {inputs: [task.started]}\n"
+	schema := "instance: instance_key\ninputs: [task.started]\n"
 	if autoEmit != "" {
 		schema += fmt.Sprintf("auto_emit_on_create: {event: %s}\n", autoEmit)
 	}
@@ -4787,15 +4787,11 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 				"template_id":      {Type: "string"},
 				"flow_path":        {Type: "string"},
 				"parent_entity_id": {Type: "string"},
-				"sources":          {Type: "[SourceID]"},
+				"sources":          {Type: "[text]"},
 			},
 			Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "sources"},
 		},
-	}, runtimecontracts.TypeCatalogDocument{
-		Scalars: map[string]runtimecontracts.ScalarTypeDecl{
-			"SourceID": {Base: "text"},
-		},
-	})
+	}, runtimecontracts.TypeCatalogDocument{})
 
 	err := validateAutoEmitPayload(semanticview.Wrap(bundle), "review", "task.started", map[string]any{
 		"instance_id":      "inst-1",

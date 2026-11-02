@@ -210,9 +210,6 @@ func nodeStateListNamedType(typeRef string, types runtimecontracts.TypeCatalogDo
 	if item == "" {
 		return ""
 	}
-	if scalar, ok := types.Scalars[item]; ok {
-		item = strings.TrimSpace(scalar.Base)
-	}
 	if _, ok := types.Types[item]; ok {
 		return item
 	}

@@ -455,7 +455,7 @@ func TestExplicitEnumInitializerIsOrderInert(t *testing.T) {
 			},
 			Types: runtimecontracts.TypeCatalogDocument{
 				Enums: map[string]runtimecontracts.EnumTypeDecl{
-					"order_status": {Values: values, Default: "draft"},
+					"order_status": {Values: values},
 				},
 			},
 		}
@@ -507,7 +507,7 @@ func TestEnumInitializerNonMemberFailsFast(t *testing.T) {
 		},
 		Types: runtimecontracts.TypeCatalogDocument{
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"order_status": {Values: []string{"archived", "draft"}, Default: "urgent"},
+				"order_status": {Values: []string{"archived", "draft"}},
 			},
 		},
 	}
