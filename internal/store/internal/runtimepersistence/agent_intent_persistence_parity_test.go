@@ -95,6 +95,7 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t *testing.T, ctx 
 	}
 	fact := mustStoreTestSourceArtifactFact(rooted.Admission().BundleHash())
 	ctx = runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(fact.BundleHash()), rooted.Admission())
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	if _, err := store.EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}

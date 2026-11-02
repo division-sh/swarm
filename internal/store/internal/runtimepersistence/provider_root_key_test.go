@@ -16,7 +16,7 @@ func TestS1ProviderBodyRetainedKeyBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend)
-			ctx := context.Background()
+			ctx := originalStoreFixtureContext(t, context.Background(), selected)
 			var sources []sourceartifact.RootedSource
 			var bodyHash string
 			for _, key := range []string{"team-bot", "team_bot"} {

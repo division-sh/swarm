@@ -50,6 +50,29 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				selected = openSelectedPostgresOwner(t, dsn, db, cfg)
 			}
 			t.Cleanup(func() { closeUnactivatedSelectedStore(t, selected) })
+			process := worklifetime.NewProcess()
+			runtimeInstanceID := uuid.NewString()
+			var runtimes []*runtimepkg.Runtime
+			capability, err := selected.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+				OwnerID: "paused-startup-context-proof", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				for _, rt := range runtimes {
+					if err := rt.Shutdown(); err != nil {
+						t.Error(err)
+					}
+				}
+				if err := closeSelectedStoreTestProcess(process, capability); err != nil {
+					t.Error(err)
+				}
+			})
+			sourceCtx, err := runtimestartupownership.WithProcessMutationAuthority(runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeInstanceID), capability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			var modules []runtimepipeline.WorkflowModule
 			var artifacts []*sourceartifact.AdmittedSourceArtifact
 			var facts []runtimecorrelation.SourceArtifactFact
@@ -71,7 +94,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				if _, err := initializeStateStores(context.Background(), selected.Schema(), bundle); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := prepareServeSourceArtifact(context.Background(), selected.SourceArtifactWriter(), bundle); err != nil {
+				if _, err := prepareServeSourceArtifact(sourceCtx, selected.SourceArtifactWriter(), bundle); err != nil {
 					t.Fatal(err)
 				}
 				modules = append(modules, module)
@@ -86,10 +109,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 			if facts[0].BundleHash() == facts[1].BundleHash() {
 				t.Fatal("mixed startup requires two distinct compiled source artifacts")
 			}
-			process := worklifetime.NewProcess()
-			runtimeInstanceID := uuid.NewString()
 			deps := selected.RuntimeDeps()
-			var runtimes []*runtimepkg.Runtime
 			var coordinates []runtimeagenttopology.SourceCoordinate
 			var desired []runtimeagenttopology.DesiredAgent
 			for index, fact := range facts {
@@ -113,22 +133,6 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				coordinates = append(coordinates, coordinate)
 				desired = append(desired, agents...)
 			}
-			capability, err := selected.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
-				OwnerID: "paused-startup-context-proof", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				for _, rt := range runtimes {
-					if err := rt.Shutdown(); err != nil {
-						t.Error(err)
-					}
-				}
-				if err := closeSelectedStoreTestProcess(process, capability); err != nil {
-					t.Error(err)
-				}
-			})
 			plan, err := runtimeagenttopology.NewSourceSetPlan(coordinates, desired)
 			if err != nil {
 				t.Fatal(err)

@@ -23,6 +23,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -840,6 +841,10 @@ type renewalTrackingManagerDeliveryStore struct {
 	renewals atomic.Int64
 }
 
+func (s *renewalTrackingManagerDeliveryStore) managerTestOriginalProcess() *worklifetime.Process {
+	return managerTestOriginalProcessFromStore(s.Store)
+}
+
 func (s *renewalTrackingManagerDeliveryStore) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
 	return s.Store.(interface {
 		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
@@ -857,6 +862,7 @@ func (s *shortLeaseManagerDeliveryStore) ClaimDelivery(
 	evt events.Event,
 	route events.DeliveryRoute,
 ) (result runtimedelivery.ClaimResult, err error) {
+	ctx = worklifetime.WithProcess(ctx, s.managerTestOriginalProcess())
 	if s.leaseTTL != 1500*time.Millisecond {
 		return runtimedelivery.ClaimResult{}, errors.New("manager heartbeat proof requires its fixed native lease")
 	}
@@ -896,6 +902,10 @@ func (a singleOutputAgent) OnEvent(_ context.Context, inbound events.Event) ([]e
 
 type failingSettlementManagerDeliveryStore struct {
 	runtimedelivery.Store
+}
+
+func (s *failingSettlementManagerDeliveryStore) managerTestOriginalProcess() *worklifetime.Process {
+	return managerTestOriginalProcessFromStore(s.Store)
 }
 
 func (s *failingSettlementManagerDeliveryStore) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {

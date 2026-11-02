@@ -38,7 +38,7 @@ func TestExecutableEventCommitRequiresCurrentPublicationClaimOnSQLiteAndPostgres
 			owner := selected.PipelineObligations()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			t.Run("missing", func(t *testing.T) {
 				event := reviewClosureEvent(runID, time.Now().UTC())
@@ -113,7 +113,7 @@ func TestMockOnlyPipelineScanRejectsPersistedLiveWorkBeforeClaimOnSQLiteAndPostg
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC())
 
 			blocked, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.MockOnly))
@@ -165,7 +165,7 @@ func TestMockOnlyPipelinePreflightRejectsLiveQueuesWithoutClaimOnSQLiteAndPostgr
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 				var routeBefore decisionRoutePreflightSnapshot
 				if family != "raw_event" {
@@ -224,7 +224,7 @@ func TestMockOnlyPipelinePreflightAdmitsExactMockQueueWithoutClaimOnSQLiteAndPos
 				ctx := testAuthorActivityContext()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				entityID := uuid.NewString()
 				event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
 					uuid.NewString(), "test.mock_queue", "runtime", "", []byte(`{}`), 0, runID,
@@ -289,7 +289,7 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 			owner := selected.PipelineObligations()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			base := time.Now().UTC().Add(-time.Hour)
 
 			const heldCount = 5
@@ -374,7 +374,7 @@ func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAnd
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
 			base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			recoveryID := commitPipelineParityEvent(t, ctx, selected, runID, base)
 			for i := 1; i <= 3; i++ {
@@ -448,7 +448,7 @@ func TestPostgresPipelineScanSnapshotRetainsRouteAfterPostBoundaryDeferral(t *te
 	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 	firstID := commitPipelineParityEvent(t, ctx, selected, runID, base)
 	targetID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Microsecond))
@@ -536,7 +536,7 @@ func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
 			at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
 
@@ -595,7 +595,7 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				runID := uuid.NewString()
 				at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
 
@@ -708,7 +708,7 @@ func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(
 			owner := selected.PipelineObligations()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 
 			for _, mode := range []string{"cancel", "abandon"} {
@@ -787,7 +787,7 @@ func TestClaimEventReturnsTypedCorruptDecisionWorkForAcknowledgedAndUnacknowledg
 				owner := selected.PipelineObligations()
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				runID := uuid.NewString()
-				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				at := time.Now().UTC().Add(-time.Minute)
 				eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
@@ -842,7 +842,7 @@ func TestPipelineScanRechecksDecisionEligibilityAfterEachMutationOnSQLiteAndPost
 			owner := selected.PipelineObligations()
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			at := time.Now().UTC().Add(-time.Minute)
 			firstID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 			secondID := commitPipelineParityEvent(t, ctx, selected, runID, at.Add(time.Microsecond))
@@ -887,7 +887,7 @@ func TestInactiveProcessedDecisionRouteClosesAtParentTerminalizationOnSQLiteAndP
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, time.Now().UTC().Add(-time.Minute))
 
@@ -949,7 +949,7 @@ func TestPostgresParentTerminalizationLinearizesClaimRegistration(t *testing.T) 
 	ctx := testAuthorActivityContext()
 	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 
 	registry := selected.pipelinePostgresOwner.PostgresPipelineClaimsForTest()
@@ -1006,7 +1006,7 @@ func TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease(t *testi
 	}
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), primary)
 	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, primary, runID, time.Now().UTC().Add(-time.Minute))
 
 	secondaryDB, err := sql.Open("postgres", dsn)

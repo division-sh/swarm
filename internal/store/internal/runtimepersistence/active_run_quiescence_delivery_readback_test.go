@@ -35,7 +35,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			now := time.Date(2026, 7, 22, 18, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			eventID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.ExistingRunRootIngress(
 				eventID, events.EventType("quiescence.requested"), "gateway", "", nil, 0,
 				runID, events.EventEnvelope{}, now,

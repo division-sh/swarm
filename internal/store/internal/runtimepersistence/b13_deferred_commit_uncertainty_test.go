@@ -8,9 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -27,13 +25,6 @@ func TestB13DeferredSingletonCommitUncertaintyBothStores(t *testing.T) {
 				if err := f.bus.SetDeliveryContinuationOwner(signals); err != nil {
 					t.Fatal(err)
 				}
-				sink := &b10CandidateSink{runID: f.runID}
-				scope, _ := authoractivity.ScopeFromContext(f.ctx)
-				registration, err := f.raw.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(f.ctx, runlifecycle.CandidateScope{BundleHash: scope.BundleHash}, sink)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(registration.Release)
 				collector, restore, err := InstallTransactionProbeForTest(f.raw, transactiontest.Options{})
 				if err != nil {
 					t.Fatal(err)
@@ -90,12 +81,12 @@ func TestB13DeferredSingletonCommitUncertaintyBothStores(t *testing.T) {
 					t.Fatalf("Deferred changed historical cut: got=%d want=%d", got, revisions+1)
 				}
 				counts := collector.Snapshot().ByOperation[transactiontest.PipelineSettlement]
-				wantCommits, wantFailures, wantSubmits := uint64(2), uint64(0), 2
+				wantCommits, wantFailures := uint64(2), uint64(0)
 				if phase != "healthy" {
-					wantCommits, wantFailures, wantSubmits = 1, 1, 1
+					wantCommits, wantFailures = 1, 1
 				}
-				if counts.CommitAttempts != 2 || counts.WriteCommits != wantCommits || counts.CommitFailures != wantFailures || sink.submits != wantSubmits {
-					t.Fatalf("uncertainty retried or fabricated commit/candidate: counts=%+v submits=%d", counts, sink.submits)
+				if counts.CommitAttempts != 2 || counts.WriteCommits != wantCommits || counts.CommitFailures != wantFailures {
+					t.Fatalf("uncertainty retried or fabricated commit: counts=%+v", counts)
 				}
 			})
 		}

@@ -27,7 +27,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	ctx = originalEventBusFixtureContext(t, ctx, pg)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	ctx = originalEventBusFixtureContext(t, ctx, pg)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 		triggerType:  eventType,
 		deferredType: deferredType,
 	}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{recorder},
 	})
@@ -251,7 +251,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 		triggerType:  eventType,
 		deferredType: deferredType,
 	}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{recorder},
 	})
@@ -332,6 +332,7 @@ func seedRunControlPublicationRoot(t *testing.T, ctx context.Context, selected i
 	componentFlowConstructionStore
 }, bus *runtimebus.EventBus, source semanticview.Source, runID string) {
 	t.Helper()
+	ctx = nativeBusProcessContext(t, ctx, selected)
 	var err error
 	ctx, err = bus.AdmitSourceArtifactFact(ctx)
 	if err != nil {

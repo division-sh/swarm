@@ -21,16 +21,24 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "retry.db")
 			store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 			db := store.backend.ConstructionHandle()
-			db.SetMaxOpenConns(1)
+			// Retain the original ownership proof plus one workload connection.
+			db.SetMaxOpenConns(2)
 			db.SetMaxIdleConns(1)
-			s := exactFactStore{db: db, selected: store}
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			s := exactFactStore{ctx: ctx, db: db, selected: store}
 			f := newExactFactFixture(t, s)
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, false)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,created_at,updated_at) VALUES ($1,$2,'retry','retry','Before Retry',$3,$3)`, f.runID, f.entityID, f.at)
 				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, f.eventID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), f.initialRevision+1, true)
 			})
-			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+			if phase == "commit" {
+				var mode string
+				if err := db.QueryRowContext(ctx, `PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
+					t.Fatalf("rollback journal mode=%s err=%v", mode, err)
+				}
+			}
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=1`); err != nil {
 				t.Fatal(err)
@@ -38,10 +46,6 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 			var blocker *sql.Tx
 			if phase == "commit" {
 				// A real shared reader lock blocks physical COMMIT, not callback SQL.
-				var mode string
-				if err := db.QueryRowContext(ctx, `PRAGMA journal_mode=DELETE`).Scan(&mode); err != nil || mode != "delete" {
-					t.Fatalf("rollback journal mode=%s err=%v", mode, err)
-				}
 				other, err := sql.Open("sqlite", "file:"+path)
 				if err != nil {
 					t.Fatal(err)

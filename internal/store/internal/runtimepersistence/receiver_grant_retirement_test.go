@@ -214,6 +214,7 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
 				if !selectedFork {
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 						Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 						Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),

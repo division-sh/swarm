@@ -78,11 +78,16 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 			if err := owner.BootstrapSchema(ctx, schema); err != nil {
 				t.Fatal(err)
 			}
-			fact := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
 			runtimeID := uuid.NewString()
-			ctx = correlation.WithSourceArtifactFact(ctx, fact)
+			ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact()))
 			ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 			ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
+			ctx, err := agentfixture.ProcessContext(t, ctx, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
+			ctx = correlation.WithSourceArtifactFact(ctx, fact)
 			ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
 			oldOptions := manager.AgentManagerOptions{LLMBackend: llmselection.BackendOpenAIResponses, ExecutionPosture: executionposture.Live, RequireModelResolution: true}

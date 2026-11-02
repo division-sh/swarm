@@ -13,6 +13,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -46,10 +47,6 @@ func commitWorkflowEngineState(
 		if postgres {
 			if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
 				return err
-			}
-			lockIdentity := fmt.Sprintf("%d:%s%s", len(record.Identity.RunID), record.Identity.RunID, record.Identity.Route.InstancePath)
-			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
-				return fmt.Errorf("lock workflow engine state route: %w", err)
 			}
 			if record.Transition.PreservesState() {
 				_, err := requireWorkflowHeaderProjection(ctx, tx, true, record, record.ExpectedRevision)
@@ -504,6 +501,18 @@ func commitWorkflowEngineMutation(
 				if !current.Matches(command.WriterSource) {
 					return fmt.Errorf("entity mutation source does not match active run source")
 				}
+			}
+			owners := []flowidentity.RunScopedFlowInstance{command.State.Identity}
+			publications := make([]runtimebus.PublicationCommand, 0, len(command.Publications))
+			for index, value := range command.Publications {
+				plan, ok := value.(runtimebus.EnginePublicationPlan)
+				if !ok {
+					return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
+				}
+				publications = append(publications, plan.PublicationCommand())
+			}
+			if err := lockWorkflowPublicationFootprintTx(txctx, tx, postgres, owners, publications); err != nil {
+				return err
 			}
 			if !command.State.Transition.PreservesState() {
 				transactiontest.Mark(txctx, transactiontest.WorkflowMutation)

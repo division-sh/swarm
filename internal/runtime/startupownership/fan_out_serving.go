@@ -262,8 +262,10 @@ func (p *processCapability) stopFanOutServing(ctx context.Context) error {
 }
 
 func (s *fanOutServingService) refill() {
+	var visited []fanoutobligation.IntentKey
 	for s.ctx.Err() == nil {
 		grants, registrations, excluded := s.snapshot(false)
+		excluded = append(excluded, visited...)
 		if len(grants) == 0 {
 			return
 		}
@@ -286,6 +288,9 @@ func (s *fanOutServingService) refill() {
 		if !found {
 			return
 		}
+		// An armed barrier can remain after the final chunk while its deliveries
+		// settle. Visit it once in this pass; the existing recovery tick retries it.
+		visited = append(visited, candidate.Key)
 		r := registrations[candidate.GrantID]
 		if r == nil {
 			reporter.executor.ReportFanOutServingError(s.ctx, errors.New("fan-out selector returned an unregistered generation"))

@@ -31,7 +31,7 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			payload := json.RawMessage("{\n  \"directive\": \"continue\", \"attempt\": 1.0\n}")
 			event := eventtest.DiagnosticDirect(
 				uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", payload,
@@ -84,7 +84,7 @@ func TestRuntimeLogEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			for _, run := range []string{"", runID} {
 				event := eventtest.DiagnosticDirect(
 					uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"settled"}`),
@@ -106,7 +106,7 @@ func TestOperatorEventReadbackProjectsTypedDeliveryTargetOwnership(t *testing.T)
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			entityID := eventtest.UUID("review-instance-1")
 			tests := []struct {
 				name  string
@@ -151,7 +151,7 @@ func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *te
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.unmatched", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixture(ctx, fixture.store, event); err != nil {
 				t.Fatal(err)
@@ -217,7 +217,7 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			base := time.Now().UTC().Truncate(time.Microsecond)
 			delivered := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.delivered", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base)
 			matchedEmpty := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.empty", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base.Add(time.Second))

@@ -155,6 +155,9 @@ func recordRunControlTransition(ctx context.Context, attempt *mutationprotocol.A
 }
 
 func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {
+	if _, err := mutationprotocol.RunRowLock(ctx, tx, runID, true); err != nil {
+		return runtimeruncontrol.State{}, err
+	}
 	var state runtimeruncontrol.State
 	var controlStatus, reason, controlledBy sql.NullString
 	var updatedAt sql.NullTime

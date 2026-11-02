@@ -59,7 +59,7 @@ func TestMailboxReadCapabilitiesNeverFallBackToUntaggedProtocol(t *testing.T) {
 			case "effects":
 				opts.DecisionCards = cursorUncalledCards{Store: opts.DecisionCards}
 			}
-			handlers := testOperatorHandlers(opts)
+			handlers := testOperatorHandlers(t, opts)
 			for _, method := range []string{"mailbox.list", "mailbox.get"} {
 				if handlers[method] != nil {
 					t.Fatalf("%s survived missing %s", method, missing)

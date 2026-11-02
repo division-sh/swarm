@@ -9,7 +9,6 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -19,9 +18,6 @@ import (
 func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 	for _, owner := range []string{"llm_acquire", "directive_renew", "directive_expiry", "operator_principal"} {
 		phases := []string{"healthy", "entry_cancel", "write_cancel", "commit_admitted_cancel", "uncertain_commit"}
-		if owner == "llm_acquire" {
-			phases = append(phases, "handoff_failure")
-		}
 		for _, phase := range phases {
 			t.Run(owner+"/"+phase, func(t *testing.T) {
 				fixture, store, probe := openPipelineGracefulFixture(t)
@@ -33,32 +29,12 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 				var needle string
 				var lease *runtimesessions.Lease
 				var deleted int
-				var submits atomic.Int32
 				injected := errors.New("injected writer migration cut")
 				switch owner {
 				case "llm_acquire":
 					seedSpecAgent(t, base, store, "a1", "", "")
 					seedSpecMemoryRun(t, base, fixture.db)
 					identity := specMemoryIdentity("a1", "global")
-					var bundleHash string
-					if err := fixture.db.QueryRowContext(base, `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`, identity.RunID).Scan(&bundleHash); err != nil {
-						t.Fatal(err)
-					}
-					sink := &completionHandoffEvidenceProbeSink{submit: func(candidate runtimerunlifecycle.Candidate) error {
-						submits.Add(1)
-						if candidate.RunID != identity.RunID {
-							t.Errorf("foreign handoff: %+v", candidate)
-						}
-						if phase == "handoff_failure" {
-							return injected
-						}
-						return nil
-					}}
-					registration, err := store.RegisterCompletionCandidateSink(base, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}, sink)
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer registration.Release()
 					needle = "insert into agent_sessions"
 					invoke = func(ctx context.Context) error {
 						var err error
@@ -161,7 +137,7 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 					if !errors.Is(err, context.Canceled) {
 						t.Fatalf("expected cancellation, got %v", err)
 					}
-				case "uncertain_commit", "handoff_failure":
+				case "uncertain_commit":
 					if !errors.Is(err, injected) {
 						t.Fatalf("lost injected failure: %v", err)
 					}
@@ -186,8 +162,8 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 				}
 				acknowledged := wantCommitted && phase != "uncertain_commit"
 				if owner == "llm_acquire" {
-					if (lease != nil) != acknowledged || submits.Load() != boolCount(acknowledged) {
-						t.Fatalf("lease=%+v handoffs=%d acknowledged=%t", lease, submits.Load(), acknowledged)
+					if (lease != nil) != acknowledged {
+						t.Fatalf("lease=%+v acknowledged=%t", lease, acknowledged)
 					}
 				}
 				if owner == "directive_expiry" && deleted != int(boolCount(acknowledged)) {

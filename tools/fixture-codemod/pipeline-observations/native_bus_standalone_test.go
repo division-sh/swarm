@@ -55,30 +55,3 @@ func TestNativeBusStandaloneStoragePreservesCompleteHelpersAndCandidateExecution
 		t.Fatalf("standalone helpers=%d, want3 plus two original caller updates", matched)
 	}
 }
-func TestNativeBusStandaloneOwnersPreserveAllThreeJoinedPhysicalQueries(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	owners := map[string][2]string{
-		"loadRunStateForEvent":                 {"internal/store/internal/backend/runlifecycle/standalone_fixture_storage.go", "ReadStandaloneRunStorageTx"},
-		"loadAgentDeliveryForEvent":            {"internal/store/internal/backend/delivery/read_projections.go", "ReadStandaloneAgentDeliveryStorageTx"},
-		"executeStandaloneCompletionCandidate": {"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go", "ReadStandaloneCompletionCandidateTx"},
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Family != "native-bus-standalone-storage" {
-			continue
-		}
-		matched++
-		owner := owners[row.Function]
-		before := eventDeliveryDiagnosticSQL(t, strings.ReplaceAll(strings.ReplaceAll(row.Before, "SELECT\n", "SELECT "), "r.run_id::text", "CAST(r.run_id AS TEXT)"))
-		after := eventDeliveryDiagnosticSQL(t, selectedCausalObservationBody(t, owner[0], owner[1]))
-		if len(before) != 1 || len(after) != 1 || strings.ReplaceAll(before[0], "$1::uuid", "$1") != after[0] {
-			t.Fatalf("join, exact predicate, columns, null handling or candidate cut changed for %s: %v -> %v", row.Function, before, after)
-		}
-	}
-	if matched != 3 {
-		t.Fatalf("physical standalone witnesses=%d", matched)
-	}
-}

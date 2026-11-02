@@ -1022,6 +1022,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 2
 	}
 	processWorkOwner := worklifetime.NewProcess()
+	ctx = worklifetime.WithProcess(ctx, processWorkOwner)
 	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
 		cancelServe()
 		presenter.runtimeFailure(subject, failure)
@@ -1171,6 +1172,15 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}
 	ctx, err = bindCompositionProcessCapability(ctx, selectedLifecycle, processCapability)
 	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	processEvidence, err := processCapability.Evidence()
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	if err := processWorkOwner.BindOriginalProcess(processEvidence.LeaseStamp()); err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}

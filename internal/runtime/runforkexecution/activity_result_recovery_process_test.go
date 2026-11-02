@@ -176,7 +176,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 	sourceEvent := fixture.seedSource(t, ctx, loaded, sourceRun, entityID, requestID, at, route, source, request)
 	seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
 	storetest.CaptureSelectedRunForkRevision(t, ctx, selected, sourceRun)
-	seedSelectedContractActivityAttempt(t, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
+	seedSelectedContractActivityAttempt(t, ctx, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
 	t.Logf("ACTIVITY_CRASH_SOURCE_READY source=%s request=%s", sourceRun, requestID)
 	after := func(ctx context.Context, event events.Event, consumed attemptgeneration.Generation) {
 		t.Logf("ACTIVITY_CRASH_PUBLICATION_ACK event=%s type=%s run=%s", event.ID(), event.Type(), event.RunID())
@@ -340,6 +340,7 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			})
 			ctx := runForkTestContext(t)
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
+			ctx = runForkOriginalContextForTest(t, ctx, capability)
 			owner := construct()
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {

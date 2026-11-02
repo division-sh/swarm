@@ -37,6 +37,7 @@ func (p *logoutAPIAdmissionProbe) Logout(_ context.Context, id string, revision 
 
 func TestChannelLogoutAPIPrincipalAndRevisionAdmission(t *testing.T) {
 	selected := storetest.StartSQLiteRuntimeStore(t)
+	ctx := apiTestOriginalProcessContext(t, context.Background(), selected)
 	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +47,7 @@ func TestChannelLogoutAPIPrincipalAndRevisionAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
-	principal, _, err := channels.Bootstrap(context.Background(), now)
+	principal, _, err := channels.Bootstrap(ctx, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +69,7 @@ func TestChannelLogoutAPIPrincipalAndRevisionAdmission(t *testing.T) {
 	handlers := OperatorChannelHandlers(opts)
 	const rotated = "logout-api-rotated-token"
 	handler := testHandler(t, Options{AuthTokens: []string{testToken, rotated}, OperatorPrincipalID: principal.ID, Handlers: handlers})
+	bindAPITestHandlerOriginalProcess(t, handler, ctx)
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"logout","method":"channel.logout","params":{"operation_id":%q,"expected_revision":7,"idempotency_key":"exact-logout"}}`, operationID)
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body)))

@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func seedStandingRuntimeContextBundle(t *testing.T, writer sourceArtifactDataWriter, bundle *runtimecontracts.WorkflowContractBundle) {
+func seedStandingRuntimeContextBundle(t *testing.T, ctx context.Context, writer sourceArtifactDataWriter, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
@@ -21,7 +21,7 @@ func seedStandingRuntimeContextBundle(t *testing.T, writer sourceArtifactDataWri
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writer.EnsureRootedSourceWithData(context.Background(), rooted, catalog); err != nil {
+	if _, err := writer.EnsureRootedSourceWithData(ctx, rooted, catalog); err != nil {
 		t.Fatalf("persist standing runtime-context bundle: %v", err)
 	}
 }

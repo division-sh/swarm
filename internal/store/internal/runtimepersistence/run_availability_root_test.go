@@ -65,7 +65,7 @@ func TestS1RunAvailabilityRefusesUnretainedOrMalformedRootBothStores(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			selected := selectedRootAdmissionStore(t, backend).(rootedRunAvailabilityStore)
 			source, _ := admittedRootForStorage(t, "first")
-			ctx := testAuthorActivityContextForBundle(source.Artifact().BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.Artifact().BundleHash()), selected)
 			if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
 				t.Fatal(err)
 			}

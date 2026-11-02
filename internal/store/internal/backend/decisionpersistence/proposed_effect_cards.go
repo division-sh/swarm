@@ -363,8 +363,7 @@ func (s *DecisionPostgresOwner) CompleteProposedEffectRoute(ctx context.Context,
 		if err != nil || !changed {
 			return proposedEffectRouteResult{continuation, changed}, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
-		return proposedEffectRouteResult{continuation, changed}, err
+		return proposedEffectRouteResult{continuation, changed}, nil
 	})
 	value, acknowledged := result.Value()
 	return value.continuation, errors.Join(result.Err(), s.publishChannelChange(acknowledged, value.changed))
@@ -381,8 +380,7 @@ func (s *DecisionSQLiteOwner) CompleteProposedEffectRoute(ctx context.Context, c
 		if err != nil || !changed {
 			return proposedEffectRouteResult{continuation, changed}, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
-		return proposedEffectRouteResult{continuation, changed}, err
+		return proposedEffectRouteResult{continuation, changed}, nil
 	})
 	value, acknowledged := result.Value()
 	return value.continuation, errors.Join(result.Err(), s.publishChannelChange(acknowledged, value.changed))
@@ -493,8 +491,7 @@ func (s *DecisionPostgresOwner) SupersedeProposedEffectsForLoopGenerations(ctx c
 		if err != nil || !changed {
 			return changed, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
-		return changed, err
+		return changed, nil
 	})
 }
 
@@ -506,8 +503,7 @@ func (s *DecisionSQLiteOwner) SupersedeProposedEffectsForLoopGenerations(ctx con
 		if err != nil || !changed {
 			return changed, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
-		return changed, err
+		return changed, nil
 	})
 }
 

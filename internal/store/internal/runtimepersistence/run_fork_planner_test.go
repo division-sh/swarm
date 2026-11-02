@@ -474,6 +474,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 		t.Fatal(err)
 	}
 	unrelatedRunID := uuid.NewString()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: at.Add(-time.Minute)})
 	constructUnrelated := func() {
 		commitPreparedWorkflowAggregateFixture(t, ctx, pg, unrelatedRunID, pipeline.WorkflowInstance{

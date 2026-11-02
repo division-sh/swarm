@@ -19,7 +19,7 @@ func TestEmptyDeclaredEffectsSkipRevisionFinalizerWithoutSkippingEvidence(t *tes
 			wantStories  int
 		}{
 			{name: "revision_only", evidence: RevisionOnly},
-			{name: "authority_fence", evidence: AuthorityFence, wantSequence: sql.NullInt64{Int64: 0, Valid: true}},
+			{name: "authority_fence", evidence: AuthorityFence},
 			{name: "story", evidence: Story, wantSequence: sql.NullInt64{Int64: 1, Valid: true}, wantStories: 1},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestEmptyDeclaredEffectsSkipRevisionFinalizerWithoutSkippingEvidence(t *tes
 				err = db.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&sequence)
 				if !tc.wantSequence.Valid {
 					if err != sql.ErrNoRows {
-						t.Fatalf("revision-only mutation acquired activity order: %v", err)
+						t.Fatalf("non-story mutation acquired activity order: %v", err)
 					}
 				} else if err != nil || sequence != tc.wantSequence {
 					t.Fatalf("activity order=%+v err=%v, want %+v", sequence, err, tc.wantSequence)

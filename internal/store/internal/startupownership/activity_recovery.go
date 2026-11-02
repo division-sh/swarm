@@ -85,6 +85,10 @@ func (s *postgresSession) ReconcileDisplacedHTTPActivities(ctx context.Context) 
 	if role == nil {
 		return pipeline.ActivityRecoverySummary{}, errors.New("retained PostgreSQL activity recovery role is not bound")
 	}
+	ctx, err = s.mutationContext(ctx, false)
+	if err != nil {
+		return pipeline.ActivityRecoverySummary{}, err
+	}
 	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.owner.lifecycleCandidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (pipeline.ActivityRecoverySummary, error) {
 		cut, err := newDisplacedHTTPActivityCut(ctx, mutation, authority.LeaseStamp(), false)
 		if err != nil {
@@ -110,6 +114,10 @@ func (s *sqliteSession) ReconcileDisplacedHTTPActivities(ctx context.Context) (p
 	role := s.owner.activityJournal
 	if role == nil {
 		return pipeline.ActivityRecoverySummary{}, errors.New("retained SQLite activity recovery role is not bound")
+	}
+	ctx, err = s.mutationContext(ctx, false)
+	if err != nil {
+		return pipeline.ActivityRecoverySummary{}, err
 	}
 	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "recover displaced HTTP activities", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.owner.lifecycleCandidates, func(ctx context.Context, mutation *mutationprotocol.Attempt) (pipeline.ActivityRecoverySummary, error) {
 		cut, err := newDisplacedHTTPActivityCut(ctx, mutation, authority.LeaseStamp(), true)

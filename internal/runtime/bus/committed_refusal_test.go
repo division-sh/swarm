@@ -53,7 +53,7 @@ func TestCommittedTargetRefusalDirectAndEngineBothStores(t *testing.T) {
 						WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), CreatedAt: at, EnteredStageAt: at,
 					})
 				}
-				bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+				bus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -106,10 +106,7 @@ func TestSelectedRotationCheckpointIsAcquiredBaseBothStores(t *testing.T) {
 func TestSelectedTurnRotationCheckpointReachesManagedHTTPBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 		store := selected.selected.(completionSettlementTestStore)
-		if selected.postgres {
-			store = admitTestPostgresStore(t, selected.db)
-		}
-		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres, selected.ctx)
 		requests := make(chan string, 1)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
@@ -132,7 +129,7 @@ func TestSelectedTurnRotationCheckpointReachesManagedHTTPBothStores(t *testing.T
 		settlement := completionSettlementForTest(t, fixture.authority.Target, fixture, "openai_responses", "", "")
 		conversation := managedConsumerWithRuntime(t, fixture, settlement, runtime)
 		conversation.SetToolExecutor(blockedProviderNoTools{})
-		ctx := runtimeeffects.WithLifecycleToken(runtimedelivery.WithClaim(testAuthorActivityContext(), fixture.origin), fixture.authority.Normal)
+		ctx := runtimeeffects.WithLifecycleToken(runtimedelivery.WithClaim(selected.ctx, fixture.origin), fixture.authority.Normal)
 		ctx = originalStoreFixtureContext(t, ctx, store)
 		ctx = managedExecutionStoreTestContext(t, ctx)
 		ctx = storeTestWorkContext(t, ctx)

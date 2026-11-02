@@ -6,18 +6,16 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"strings"
-	"testing"
-
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/lib/pq"
+	"strings"
+	"sync/atomic"
+	"testing"
 )
-
-const nativeFenceSQL = `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`
 
 // This connector interleaves real transactions before the real fence statement;
 // it never fabricates serialization errors or successful SQL results.
@@ -29,6 +27,7 @@ type fenceConflictConnector struct {
 	fences, rollbacks, commits     int
 	txIDs                          []int64
 	onConflict                     func() error
+	afterFence                     func()
 	rollbackFailure, commitFailure error
 	afterRollback                  func() error
 	conflictQueryPrefix            string
@@ -60,10 +59,10 @@ func (c *fenceConflictConn) QueryContext(ctx context.Context, query string, args
 		_, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, `DO $$ BEGIN RAISE EXCEPTION 'revision conflict' USING ERRCODE='40001'; END $$`, nil)
 		return nil, err
 	}
-	if query == nativeFenceSQL {
+	if strings.Contains(strings.ReplaceAll(query, " ", ""), "FROMruntime_process_generationWHEREsingleton_id=1") && strings.HasSuffix(query, " FOR SHARE") {
 		p := c.probe
 		p.fences++
-		rows, err := native.QueryContext(ctx, `SELECT txid_current(), last_sequence FROM author_activity_order WHERE singleton_id=1`, nil)
+		rows, err := native.QueryContext(ctx, `SELECT txid_current(), generation FROM runtime_process_generation WHERE singleton_id=1`, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +73,7 @@ func (c *fenceConflictConn) QueryContext(ctx context.Context, query string, args
 		}
 		p.txIDs = append(p.txIDs, values[0].(int64))
 		if p.conflicts < 0 || p.fences <= p.conflicts {
-			if _, err := p.competitor.ExecContext(ctx, `UPDATE author_activity_order SET last_sequence=last_sequence+1 WHERE singleton_id=1`); err != nil {
+			if _, err := p.competitor.ExecContext(ctx, `UPDATE runtime_process_generation SET generation=generation WHERE singleton_id=1`); err != nil {
 				return nil, err
 			}
 			if p.onConflict != nil {
@@ -83,6 +82,11 @@ func (c *fenceConflictConn) QueryContext(ctx context.Context, query string, args
 				}
 			}
 		}
+		rows, err = native.QueryContext(ctx, query, args)
+		if p.afterFence != nil {
+			p.afterFence()
+		}
+		return rows, err
 	}
 	return native.QueryContext(ctx, query, args)
 }
@@ -131,6 +135,15 @@ func nativeFenceBackend(t *testing.T, prepare NativeFenceAuthorityFixtureForTest
 		t.Fatal(err)
 	}
 	p := &fenceConflictConnector{driver: original.Driver(), dsn: dsn, competitor: original, conflicts: 1}
+	setup, err := postgresbackend.New(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := setup.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return privateactivity.FenceMutationOrder(ctx, tx, privateactivity.DialectPostgres)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := original.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&p.baseSequence); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +185,7 @@ func VerifyNativeRetainedPostgresFenceConflictRetriesBeforeDomainForTest(t *test
 			}); err != nil {
 				return "", err
 			}
-			if sequence != p.baseSequence+1 {
+			if sequence != p.baseSequence {
 				return "", fmt.Errorf("stale authority sequence %d", sequence)
 			}
 			if err := faultMatrixInsert(ctx, attempt, "selected-fork-output"); err != nil {
@@ -200,7 +213,7 @@ func VerifyNativeRetainedPostgresFenceConflictRetriesBeforeDomainForTest(t *test
 		t.Fatal("output was not exactly once")
 	}
 	var occurrences, sequence int64
-	if err := p.competitor.QueryRow(`SELECT COUNT(*), MAX(sequence) FROM author_activity_occurrences WHERE dedup_key='selected-fork-history'`).Scan(&occurrences, &sequence); err != nil || occurrences != 1 || sequence != p.baseSequence+2 {
+	if err := p.competitor.QueryRow(`SELECT COUNT(*), MAX(sequence) FROM author_activity_occurrences WHERE dedup_key='selected-fork-history'`).Scan(&occurrences, &sequence); err != nil || occurrences != 1 || sequence != p.baseSequence+1 {
 		t.Fatalf("history did not use fresh ordering exactly once: occurrences=%d sequence=%d err=%v", occurrences, sequence, err)
 	}
 	if err := lease.ProveCurrent(context.Background()); err != nil {
@@ -256,11 +269,10 @@ func VerifyNativeRetainedPostgresPersistentFenceConflictCancellationForTest(t *t
 	p.conflicts = -1
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
-	p.onConflict = func() error {
+	p.afterFence = func() {
 		if p.fences == 8 {
 			cancel()
 		}
-		return nil
 	}
 	calls := 0
 	result := RunRetainedPostgresWithOptions(ctx, lease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, nil, nil,
@@ -380,10 +392,13 @@ func VerifyNativeRetainedPostgresPostFenceConflictsNeverReplayForTest(t *testing
 type fenceBackoffCancellation struct {
 	context.Context
 	cancel context.CancelFunc
+	armed  *atomic.Bool
 }
 
 func (c fenceBackoffCancellation) Done() <-chan struct{} {
-	c.cancel()
+	if c.armed.Load() {
+		c.cancel()
+	}
 	return c.Context.Done()
 }
 
@@ -394,8 +409,9 @@ func VerifyNativeRetainedPostgresFenceRetryRechecksAdmissionForTest(t *testing.T
 			session := lease.Session()
 			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
+			armed := &atomic.Bool{}
 			if scenario == "backoff_cancel" {
-				ctx = fenceBackoffCancellation{Context: ctx, cancel: cancel}
+				ctx = fenceBackoffCancellation{Context: ctx, cancel: cancel, armed: armed}
 			}
 			nativeCalls, domainCalls := 0, 0
 			independent := errors.New("independent wrapper failure")
@@ -415,6 +431,8 @@ func VerifyNativeRetainedPostgresFenceRetryRechecksAdmissionForTest(t *testing.T
 						if revokeErr := session.ForceDiscard(); revokeErr != nil {
 							t.Fatal(revokeErr)
 						}
+					case "backoff_cancel":
+						armed.Store(true)
 					}
 				}
 				return ack, err

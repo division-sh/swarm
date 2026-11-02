@@ -89,7 +89,7 @@ func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req run
 	authority := req.Topology.Authority.Static
 	query := `SELECT revision, plan FROM agent_topology_source_set_head WHERE singleton_id = 1`
 	if !sqlite {
-		query += ` FOR UPDATE`
+		query += ` FOR SHARE`
 	}
 	var revision string
 	var raw []byte

@@ -44,6 +44,10 @@ func TestPostgresOrderExistingRowNeedsNoInitializationWrite(t *testing.T) {
 	ctx, releaseOrdering := BindTransaction(ctx, ctx, tx, DialectPostgres)
 	defer releaseOrdering()
 	m, err := Begin(ctx, tx, DialectPostgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = m.Finalize(ctx)
 	if err != nil || m.last != 17 {
 		t.Fatalf("existing order: mutation=%+v error=%v", m, err)
 	}
@@ -82,6 +86,9 @@ func TestPostgresOrderConcurrentInitializationAndFreshLock(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if err := m.lock(firstCtx); err != nil {
+					t.Fatal(err)
+				}
 				if err := m.updateLast(ctx, 19); err != nil {
 					t.Fatal(err)
 				}
@@ -96,14 +103,19 @@ func TestPostgresOrderConcurrentInitializationAndFreshLock(t *testing.T) {
 				if err := second.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
 					t.Fatal(err)
 				}
+				// Story reservation must not wait for another transaction's tail.
+				secondMutation, err := Begin(secondCtx, second, DialectPostgres)
+				if err != nil {
+					t.Fatal(err)
+				}
 				type result struct {
 					mutation *Mutation
 					err      error
 				}
 				done := make(chan result, 1)
 				go func() {
-					m, err := Begin(secondCtx, second, DialectPostgres)
-					done <- result{m, err}
+					err := secondMutation.lock(secondCtx)
+					done <- result{secondMutation, err}
 				}()
 				// Observe the actual database lock wait, not a scheduling sleep.
 				for {
@@ -162,7 +174,11 @@ func TestPostgresOrderReadFailureDoesNotInitialize(t *testing.T) {
 	defer tx.Rollback()
 	ctx, releaseOrdering := BindTransaction(ctx, ctx, tx, DialectPostgres)
 	defer releaseOrdering()
-	if _, err := Begin(ctx, tx, DialectPostgres); err == nil {
+	m, err := Begin(ctx, tx, DialectPostgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Finalize(ctx); err == nil {
 		t.Fatal("invalid schema was accepted")
 	}
 	if err := tx.Rollback(); err != nil {

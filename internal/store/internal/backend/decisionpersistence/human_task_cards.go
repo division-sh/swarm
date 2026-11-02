@@ -210,8 +210,7 @@ func (s *DecisionPostgresOwner) CompleteHumanTaskOutcome(ctx context.Context, ca
 		if err != nil || !changed {
 			return continuation, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
-		return continuation, err
+		return continuation, nil
 	})
 	continuation, _ := result.Value()
 	return continuation, result.Err()
@@ -228,8 +227,7 @@ func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcome(ctx context.Context, card
 		if err != nil || !changed {
 			return continuation, err
 		}
-		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
-		return continuation, err
+		return continuation, nil
 	})
 	continuation, _ := result.Value()
 	return continuation, result.Err()

@@ -45,12 +45,6 @@ func testLiveExecutionContext(ctx context.Context) context.Context {
 
 func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	if runtimestartupownership.HasMutationAuthority(ctx) {
-		if _, err := runtimestartupownership.CaptureMutationAuthority(ctx); err != nil {
-			t.Fatal(err)
-		}
-		return ctx
-	}
 	owner, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("fixture requires its original selected lifecycle owner: %T", selected)
@@ -62,11 +56,7 @@ func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected a
 		}
 		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
 	}
-	process, err := agentfixture.ProcessCapability(t, ctx, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	ctx, err := agentfixture.ProcessContext(t, ctx, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,6 +290,10 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 			t.Fatalf("activity source coordinate differs from its admitted fact: %v", err)
 		}
 		ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+		ctx, err = agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, owner.process), store)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := sourceartifactfixture.EnsureArtifact(ctx, writer, bundle.SourceArtifact); err != nil {
 			t.Fatal(err)
 		}
@@ -689,6 +683,12 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if _, present := worklifetime.ProcessFromContext(ctx); !present {
+		ctx = worklifetime.WithProcess(ctx, worklifetime.NewProcess())
+	}
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
@@ -738,8 +738,11 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }
 
-func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions, held ...context.Context) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if len(held) > 1 {
+		return nil, fmt.Errorf("runtime bus fixture requires at most one held original context")
+	}
 	if opts.CarryMutationContext == nil {
 		opts.CarryMutationContext = runtimestartupownership.CarryMutationAuthority
 	}
@@ -771,6 +774,21 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.WorkOwner == nil {
 		process := worklifetime.NewProcess()
+		if native, ok := store.(agentfixture.Store); ok {
+			ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), opts.RuntimeInstanceID)
+			if len(held) == 1 {
+				ctx = runtimestartupownership.CarryMutationAuthority(ctx, held[0])
+			} else if opts.MutationContext != nil {
+				var err error
+				ctx, err = opts.MutationContext(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if _, err := agentfixture.ProcessContext(t, worklifetime.WithProcess(ctx, process), native); err != nil {
+				return nil, err
+			}
+		}
 		owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 			RuntimeInstanceID: opts.RuntimeInstanceID,
 			BundleHash:        opts.SourceArtifactFact.BundleHash(),

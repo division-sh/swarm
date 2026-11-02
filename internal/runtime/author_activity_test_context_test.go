@@ -892,7 +892,20 @@ func newScopedTestRuntimeWithCapability(t testing.TB, ctx context.Context, deps 
 		deps.Options.SourceArtifactFact = testSourceArtifactFact(t, runtimeTestBundleHash)
 	}
 	if deps.Options.ProcessWorkOwner == nil {
-		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
+		if original, found := worklifetime.ProcessFromContext(ctx); found && (capability != nil || deps.StartupGrant != nil) {
+			deps.Options.ProcessWorkOwner = original
+		} else {
+			process := worklifetime.NewProcess()
+			deps.Options.ProcessWorkOwner = process
+			t.Cleanup(func() {
+				process.Retire()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if _, err := process.Join(ctx); err != nil {
+					t.Errorf("join runtime fixture process: %v", err)
+				}
+			})
+		}
 	}
 	installTestGrant := deps.StartupGrant == nil
 	var retainedSession *runtimeTestRetainedSession

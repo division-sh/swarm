@@ -19,6 +19,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -587,6 +588,10 @@ func TestRecordingFanOutFinalizationRequiresExactCommittedGroup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (*singleTurnFanOutOwner) AdvanceFanOutBarriers(context.Context, fanoutobligation.IntentKey) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	return nil, fmt.Errorf("single-turn unit fixture does not advance barriers")
 }
 
 func (o *singleTurnFanOutOwner) ClaimFanOutIntent(_ context.Context, request FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {

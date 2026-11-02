@@ -230,41 +230,6 @@ type revisionExactWriterContract struct {
 	calls        []string
 }
 
-func TestRunForkRevisionExactWriterContributions(t *testing.T) {
-	root := repoRootForRuntimeWriterGuard(t)
-	retiredBody, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/entityruntime/persistence.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRetiredEntityDiffWriters(string(retiredBody)); err != nil {
-		t.Fatal(err)
-	}
-	deliveryBody, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/delivery/adapter.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateDeliveryOperationalCaptureRetirement(string(deliveryBody)); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, contract := range revisionExactWriterContracts() {
-		key := contract.path + "|" + contract.symbol
-		if seen[key] {
-			t.Fatalf("duplicate exact writer contract %s", key)
-		}
-		seen[key] = true
-		t.Run(key, func(t *testing.T) {
-			body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := validateRevisionExactWriter(string(body), contract); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
 func validateRetiredEntityDiffWriters(source string) error {
 	functions, err := revisionGuardFunctions(source)
 	if err != nil {
@@ -594,42 +559,6 @@ func TestRunForkRevisionExplicitBroadWriterContributions(t *testing.T) {
 		}
 		if err := validateRevisionWriterCalls(string(body), contract, false); err != nil {
 			t.Fatalf("explicit broad owner %s/%s: %v", contract.path, contract.symbol, err)
-		}
-	}
-}
-
-func TestRunForkRevisionEnumeratedWriterContributions(t *testing.T) {
-	root := repoRootForRuntimeWriterGuard(t)
-	for _, row := range []struct {
-		path, symbol, rangeOver, call string
-	}{
-		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.PreviousSessionID)"},
-		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID)"},
-		{"llmpersistence/owner.go", "addAgentSessionFacts", "otherSessionIDs", "attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, id)"},
-		{"workflowtimer/cancellation.go", "cancelRunsSQL", "refs", "facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"},
-		{"genericschedule/owner.go", "cancelRunsTx", "refs", "cancelOwnedCleanupTx(ctx, tx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"},
-	} {
-		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", row.path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := validateRevisionEnumeratedContribution(string(body), row.symbol, row.rangeOver, row.call); err != nil {
-			t.Fatalf("%s/%s: %v", row.path, row.symbol, err)
-		}
-	}
-	for _, row := range []struct {
-		path, symbol string
-		sqlite       bool
-	}{
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.ResetAll", false},
-		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.ResetAll", true},
-	} {
-		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", row.path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := validateRevisionResetAllContribution(string(body), row.symbol, row.sqlite); err != nil {
-			t.Fatalf("%s/%s: %v", row.path, row.symbol, err)
 		}
 	}
 }

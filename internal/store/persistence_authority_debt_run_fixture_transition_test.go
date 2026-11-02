@@ -28,6 +28,8 @@ const debtCatalogRuntimeRowsLandedCollectorTo = "1edc5bbde2f1f4200e4b602fb4433e1
 const debtR77PrivateBridgeCollectorTo = "d8059d3ac96421566df4aff1af56127405a60a42332190a0709808f048ebba6a"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
+const debtS2OriginalContextCollectorTo = "b9cc07d820372e373f0971aa9961c8e9a233ee52908b17f865efbf0fdb1b6656"
+
 // #2727/6388897450: source-pin validation for an already-landed composed endpoint.
 const debtSelectedFixtureLandedCollectorTo = "1b48c6bd1c1b6d6100ee6df74bb9fe3d239372befa4c8f96f02243602fa9f646"
 

@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"sort"
 	"strings"
@@ -170,31 +169,6 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 	if err := storeactivityjournal.RecordPersistedEvent(ctx, rejectedAuthorActivityMutation{}, dynamicAuthoredEventDescriptorResolver{registry: registry}, admitted, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("descriptor conflict error = %v", err)
 	}
-}
-
-func openAuthorActivityAdapterDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+uuid.NewString()+"?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	for _, ddl := range []string{
-		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1), last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0))`,
-		`CREATE TABLE author_activity_occurrences (
-			occurrence_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0), kind TEXT NOT NULL,
-			version INTEGER NOT NULL CHECK (version = 2), transition TEXT NOT NULL, source_owner TEXT NOT NULL,
-			source_identity TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE, run_id TEXT, entity_id TEXT, agent_id TEXT,
-			flow_id TEXT, scope_kind TEXT NOT NULL, runtime_instance_id TEXT, bundle_hash TEXT, author_safe_summary TEXT,
-			projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
-		)`,
-	} {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return db
 }
 
 func authorActivityRegistryRepoRoot(t *testing.T) string {

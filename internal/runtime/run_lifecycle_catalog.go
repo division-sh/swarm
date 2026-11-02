@@ -21,8 +21,6 @@ func runLifecycleRequiresGenericSchedules(source semanticview.Source) bool {
 	return false
 }
 
-// RunLifecycleTerminalCatalog supplies the same compiled, flow-scoped stage
-// classification to ordinary and selected execution.
 func RunLifecycleTerminalCatalog(source semanticview.Source) (runtimerunlifecycle.FinalCatalog, error) {
 	classifier, err := selectedWorkflowStageClassifier(source)
 	if err != nil {

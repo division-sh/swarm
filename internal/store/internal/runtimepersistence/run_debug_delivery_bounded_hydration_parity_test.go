@@ -30,7 +30,7 @@ func TestRunDebugReportBoundsDeliveryHydrationParity(t *testing.T) {
 			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 23, 5, 0, 0, 0, time.UTC)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			selectedFailure := seedBoundedRunDebugDelivery(
 				t, ctx, fixture, selected, runID, "diagnostic.selected", "selected-agent",

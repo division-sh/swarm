@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -35,31 +34,21 @@ type httpSettlementSelectedStore interface {
 	storetest.RunFixtureStore
 	runtimeeffects.Store
 	runtimeeffects.OutcomeStore
-	runtimerunlifecycle.CandidateRegistrar
 }
-
-type failingHTTPCompletionSink struct {
-	err     error
-	submits int
-}
-
-func (s *failingHTTPCompletionSink) ReserveCompletionCandidate(context.Context) (runtimerunlifecycle.CandidateAdmission, error) {
-	return s, nil
-}
-
-func (s *failingHTTPCompletionSink) Submit(runtimerunlifecycle.Candidate) error {
-	s.submits++
-	return s.err
-}
-
-func (*failingHTTPCompletionSink) Cancel() error { return nil }
 
 type refusingHTTPSettlementStore struct {
 	runtimeeffects.Store
-	err error
+	err          error
+	acknowledged bool
 }
 
-func (s refusingHTTPSettlementStore) SettleExternalAttempt(context.Context, runtimeeffects.Settlement) error {
+func (s refusingHTTPSettlementStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
+	if s.acknowledged {
+		if err := s.Store.SettleExternalAttempt(ctx, settlement); err != nil {
+			return err
+		}
+		return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationSettlement, runtimeeffects.Attempt{OperationID: settlement.OperationID, AttemptID: settlement.AttemptID}, s.err)
+	}
 	return s.err
 }
 
@@ -171,13 +160,8 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 				selected = native
 			}
 			ctx, actor := selectedHTTPSettlementContext(t, selected, "http-tool-settlement-ack")
-			fault := errors.New("injected post-commit completion handoff failure")
-			sink := &failingHTTPCompletionSink{err: fault}
-			registration, err := selected.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: sourceartifactfixture.BundleHash}, sink)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(registration.Release)
+			fault := errors.New("injected cleanup failure after native settlement acknowledgement")
+			ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(refusingHTTPSettlementStore{Store: selected, err: fault, acknowledged: true}).WithExecutionPosture(executionposture.Live))
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
@@ -189,8 +173,8 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 			executor := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{WorkflowSource: settledHTTPToolSource(server.URL)})
 			out, err := executor.Execute(ctx, "settlement-proof", map[string]any{})
 			response, ok := out.(map[string]any)
-			if err != nil || !ok || len(response) != 1 || response["receipt"] != "provider-42" || calls.Load() != 1 || sink.submits != 1 {
-				t.Fatalf("acknowledged HTTP result=%#v err=%v calls=%d handoffs=%d", out, err, calls.Load(), sink.submits)
+			if err != nil || !ok || len(response) != 1 || response["receipt"] != "provider-42" || calls.Load() != 1 {
+				t.Fatalf("acknowledged HTTP result=%#v err=%v calls=%d", out, err, calls.Load())
 			}
 			attempts, err := storetest.ReadExternalAttemptStorage(context.Background(), selected)
 			if err != nil || len(attempts) != 1 {
@@ -225,8 +209,8 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 			if !diagnosticFound {
 				t.Fatalf("missing internal settlement diagnostic: %+v", bus.logs)
 			}
-			if replayed, replayErr := executor.Execute(ctx, "settlement-proof", map[string]any{}); replayed != nil || replayErr == nil || calls.Load() != 1 || sink.submits != 1 {
-				t.Fatalf("same-operation replay=%#v err=%v calls=%d handoffs=%d", replayed, replayErr, calls.Load(), sink.submits)
+			if replayed, replayErr := executor.Execute(ctx, "settlement-proof", map[string]any{}); replayed != nil || replayErr == nil || calls.Load() != 1 {
+				t.Fatalf("same-operation replay=%#v err=%v calls=%d", replayed, replayErr, calls.Load())
 			}
 			requireHTTPSettlementOutcome(t, selected, operationID, runtimeeffects.StateSettled, 1)
 
@@ -234,8 +218,8 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 			unackCtx := runtimeeffects.WithLogicalOperationIdentity(ctx, "http-tool-settlement-unack")
 			unackCtx = runtimeeffects.WithController(unackCtx, runtimeeffects.NewController(refusingHTTPSettlementStore{Store: selected, err: unack}).WithExecutionPosture(executionposture.Live))
 			unackOut, unackErr := executor.Execute(unackCtx, "settlement-proof", map[string]any{})
-			if unackOut != nil || unackErr == nil || !errors.Is(unackErr, unack) || calls.Load() != 2 || sink.submits != 1 {
-				t.Fatalf("unacknowledged settlement=%#v err=%v calls=%d handoffs=%d", unackOut, unackErr, calls.Load(), sink.submits)
+			if unackOut != nil || unackErr == nil || !errors.Is(unackErr, unack) || calls.Load() != 2 {
+				t.Fatalf("unacknowledged settlement=%#v err=%v calls=%d", unackOut, unackErr, calls.Load())
 			}
 			requireHTTPSettlementOutcome(t, selected, operationID, runtimeeffects.StateSettled, 2)
 			var settledCount int

@@ -259,7 +259,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 					OperationName: destructivereset.DefaultOperationName, AppliedAt: now.Add(-30 * time.Second),
 				},
 			}
-			_, err := store.ApplyDestructiveResetCleanup(testAuthorActivityContext(), request)
+			_, err := store.ApplyDestructiveResetCleanup(ctx, request)
 			if !candidate.terminal {
 				if !errors.Is(err, destructivereset.ErrInvalidRequest) || !strings.Contains(err.Error(), "nonterminal provider authority") {
 					t.Fatalf("pending provider cleanup error=%v, want provider-authority refusal", err)
@@ -546,6 +546,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeSourceArtifactsReject
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seedDestructiveResetSourceArtifactRows(t, ctx, pg)
 	outOfPlanRun := uuid.NewString()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: outOfPlanRun, State: storerunlifecycle.StateCompleted,
 		BundleHash: destructiveResetCleanupBundleHashA,
@@ -713,6 +714,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("agent identity fields: %v", err)
 	}
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: preservedRunID, State: storerunlifecycle.StateCompleted,
 	})
@@ -908,6 +910,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	preservedSourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	for _, runID := range []string{cleanupRunID, preservedSourceRunID, preservedForkRunID} {
+		ctx = originalStoreFixtureContext(t, ctx, pg)
 		ctx = requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 	seededAt := time.Date(2026, 5, 16, 19, 0, 0, 0, time.UTC)
@@ -1252,7 +1255,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	rootA, _ := sourceartifactfixture.Rooted(t, "cleanup", destructiveResetCleanupArtifactA)
 	rootB, _ := sourceartifactfixture.Rooted(t, "cleanup", destructiveResetCleanupArtifactB)
-	parent := ctx
+	parent := originalStoreFixtureContext(t, ctx, pg)
 	ctxA, _, err := semanticRunFixtureContext(parent, rootA.Admission().BundleHash())
 	if err != nil {
 		t.Fatal(err)

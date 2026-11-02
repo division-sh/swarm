@@ -32,6 +32,10 @@ func rebindFlowReadinessSourceSetTx(ctx context.Context, attempt *mutationprotoc
 }
 
 func (s *postgresSession) RebindFlowReadinessSourceSet(ctx context.Context, req manager.FlowReadinessSourceSetRebindRequest, binding manager.ProcessExecutionBinding) (manager.FlowReadinessSourceSetRebindResult, error) {
+	ctx, err := s.mutationContext(ctx, false)
+	if err != nil {
+		return manager.FlowReadinessSourceSetRebindResult{}, err
+	}
 	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (manager.FlowReadinessSourceSetRebindResult, error) {
 		return rebindFlowReadinessSourceSetTx(ctx, attempt, true, req, binding, s.owner.agents.CommitFlowReadinessSourceSetTransitionsTx)
 	})
@@ -43,6 +47,10 @@ func (s *postgresSession) RebindFlowReadinessSourceSet(ctx context.Context, req 
 }
 
 func (s *sqliteSession) RebindFlowReadinessSourceSet(ctx context.Context, req manager.FlowReadinessSourceSetRebindRequest, binding manager.ProcessExecutionBinding) (manager.FlowReadinessSourceSetRebindResult, error) {
+	ctx, err := s.mutationContext(ctx, false)
+	if err != nil {
+		return manager.FlowReadinessSourceSetRebindResult{}, err
+	}
 	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "sqlite readiness source-set rebind", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (manager.FlowReadinessSourceSetRebindResult, error) {
 		return rebindFlowReadinessSourceSetTx(ctx, attempt, false, req, binding, s.owner.agents.CommitFlowReadinessSourceSetTransitionsTx)
 	})

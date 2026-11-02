@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -47,6 +48,20 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
 	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, executionposture.Live, stores...)
+	if bus != nil {
+		occurrence := runtimeTestEventBusWorkOwner(t, bus)
+		gateway.SetAdmissionGuard(func(ctx context.Context) (context.Context, func(), bool) {
+			lease, err := occurrence.Begin(ctx)
+			if err != nil {
+				return ctx, nil, false
+			}
+			return lease.Context(), func() {
+				if err := lease.Done(); err != nil {
+					t.Errorf("settle inbound test admission: %v", err)
+				}
+			}, true
+		})
+	}
 	owner, err := runtimecredentials.NewSnapshotOwner(boundedProviderCredentialStore{})
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +188,14 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 	}
 	root = captured.Admission()
 	ctx = runtimecorrelation.WithRootAdmission(ctx, root)
+	native, ok := persistence.(agentfixture.Store)
+	if !ok {
+		t.Fatal("bounded component binding requires its original native process owner")
+	}
+	ctx, err = agentfixture.ProcessContext(t, ctx, native)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sourceartifactfixture.RequireArtifact(t, ctx, writer, captured.Artifact())
 
 	owner, ok := persistence.(storetest.RunFixtureStore)
