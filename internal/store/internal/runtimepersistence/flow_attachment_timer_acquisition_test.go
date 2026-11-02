@@ -255,8 +255,8 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 		want = "scheduler stopped"
 	}
 	if disposition == "shutdown" {
-		if err != nil {
-			t.Fatal(err)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("shutdown lost its verified grace-expiry disposition: %v", err)
 		}
 	} else if disposition == "caller_cancel" {
 		if err != nil && !errors.Is(err, context.Canceled) {

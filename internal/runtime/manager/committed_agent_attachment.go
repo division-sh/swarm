@@ -72,7 +72,7 @@ func (am *AgentManager) observeInstallingAgentAttachment(ctx context.Context, id
 	am.dynamicFlowReadinessMu.Lock()
 	defer am.dynamicFlowReadinessMu.Unlock()
 	observed = ownerCtx.Err() == nil && am.dynamicFlowActiveAttempts[key] == active && am.dynamicFlowReadinessAttempts[key] == executor &&
-		active.receipt == receipt && active.planHash == hash && agentAttachmentInstalling(active, executor)
+		active.receipt == receipt && active.planHash == hash && agentAttachmentMatches(active, executor, required)
 	return observed, observed && readinessPlanOwnsAgent(row.Plan, identity), nil
 }
 
@@ -104,11 +104,18 @@ func (am *AgentManager) agentAttachment(identity agentidentity.Identity, require
 			continue
 		}
 		executor := am.dynamicFlowReadinessAttempts[key]
-		if required == nil && agentAttachmentInstalling(active, executor) || executor == required && agentAttachmentRetained(active, executor) {
+		if agentAttachmentMatches(active, executor, required) {
 			return key, active, executor, active.receipt, active.planHash
 		}
 	}
 	return dynamicFlowRuntimeReadinessKey{}, nil, nil, pipeline.DynamicFlowRuntimeActivationAttempt{}, ""
+}
+
+func agentAttachmentMatches(active *dynamicFlowActiveAttempt, executor, required *dynamicFlowRuntimeReadinessAttempt) bool {
+	if required == nil {
+		return agentAttachmentInstalling(active, executor)
+	}
+	return executor == required && agentAttachmentRetained(active, executor)
 }
 
 func agentAttachmentInstalling(active *dynamicFlowActiveAttempt, executor *dynamicFlowRuntimeReadinessAttempt) bool {
