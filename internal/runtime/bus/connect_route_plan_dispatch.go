@@ -46,10 +46,8 @@ func withClosedPublicationPlanning(ctx context.Context) context.Context {
 }
 
 type connectRoutePlanResolver struct {
-	source     semanticview.Source
 	routeTable *RouteTable
 	graph      runtimepinrouting.CompiledConnectGraph
-	issues     []runtimepinrouting.ConnectRoutePlanIssue
 	loadAgents connectAgentDescriptorLoader
 	lifecycle  connectInstanceSelector
 	replyStore runtimereplycontext.Store
@@ -77,12 +75,9 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		return connectRoutePlanResolver{routeTable: routeTable, replyStore: replyStore}
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
-	issues := graph.Issues()
 	return connectRoutePlanResolver{
-		source:     source,
 		routeTable: routeTable,
 		graph:      graph,
-		issues:     append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		lifecycle:  connectInstanceSelector{source: source, plan: planner, index: index},
 		replyStore: replyStore,
 	}
@@ -90,7 +85,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 
 func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (connectRoutePlanDispatch, error) {
 	if evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
-		if _, err := runtimepinrouting.AdmitDeploymentFeedDeclaration(r.source, evt.Type(), evt.RoutingSource()); err != nil {
+		if _, err := runtimepinrouting.AdmitDeploymentFeedDeclaration(r.lifecycle.source, evt.Type(), evt.RoutingSource()); err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
 	}
@@ -102,11 +97,12 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
-	if len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
+	issues := r.graph.Issues()
+	if len(r.graph.Plans()) == 0 && len(issues) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
 	{
-		for _, issue := range r.issues {
+		for _, issue := range issues {
 			if r.graph.IssueMatchesEvent(issue, evt) && issue.AcceptsReceiverTarget(explicitRootPublicationTarget(evt), evt.RunID()) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
 				return connectRoutePlanDispatch{
 					Matched:    true,
@@ -598,7 +594,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 					deliveryContext.Joins = append(deliveryContext.Joins, receipt)
 				}
 			}
-			for _, joinPlan := range runtimepipeline.WorkflowJoinAdmissionPlans(r.source, node, returnEvent) {
+			for _, joinPlan := range runtimepipeline.WorkflowJoinAdmissionPlans(r.lifecycle.source, node, returnEvent) {
 				declaration, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID())
 				if err != nil {
 					return nil, nil, nil, 0, nil, err
@@ -665,7 +661,7 @@ func (r connectRoutePlanResolver) installFlowConstructionPreview(ctx context.Con
 		if err := construction.Validate(); err != nil {
 			return err
 		}
-		if err := construction.Identity.ValidateConstruction(r.source, runID); err != nil {
+		if err := construction.Identity.ValidateConstruction(r.lifecycle.source, runID); err != nil {
 			return err
 		}
 		if err := selectConnectionConstruction(ctx, construction.Identity); err != nil {
@@ -695,7 +691,7 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 // This scope supplies lookup candidates, never execution permission. Native
 // headers supply actual paths; later target admission still checks ownership.
 func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt events.Event) (selectedTargetOwnerLookupScope, bool, error) {
-	if r.source == nil {
+	if r.lifecycle.source == nil {
 		return selectedTargetOwnerLookupScope{}, false, nil
 	}
 	flows := make(map[string]struct{})
@@ -717,7 +713,7 @@ func (r connectRoutePlanResolver) targetLookupCoordinates(evt events.Event) ([]r
 	routes := []events.RouteIdentity{evt.RoutingSource().Route(), evt.SourceRoute(), evt.TargetRoute()}
 	routes = append(routes, evt.TargetRoutes()...)
 	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
-		routes = append(routes, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.source), FlowInstance: evt.RunID()})
+		routes = append(routes, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.lifecycle.source), FlowInstance: evt.RunID()})
 	}
 	return r.exactLookupCoordinates(evt.RunID(), routes)
 }
@@ -728,7 +724,7 @@ func (r connectRoutePlanResolver) exactLookupCoordinates(runID string, routes []
 		if route.FlowInstance == "" {
 			continue
 		}
-		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
+		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(r.lifecycle.source, route.FlowID), "", route.FlowInstance))
 		if err != nil {
 			return nil, err
 		}
@@ -824,7 +820,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 	matches := make([]agentidentity.Identity, 0, 1)
 	available := false
 	runID := runtimecorrelation.RunIDFromContext(ctx)
-	root := rootExecutionCoordinate(r.source, runID)
+	root := rootExecutionCoordinate(r.lifecycle.source, runID)
 	if r.loadAgents != nil {
 		descriptors, loaded, err := r.loadAgents(ctx)
 		if err != nil {
@@ -973,7 +969,7 @@ func (r connectRoutePlanResolver) admitSelectedReceiverCarriers(evaluation runti
 			continue
 		}
 		handler, err := runtimepipeline.AdmitDeliveryTargetHandler(
-			r.source, subscriber.handlerNode,
+			r.lifecycle.source, subscriber.handlerNode,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("resolve connect receiver target handler: %w", err)

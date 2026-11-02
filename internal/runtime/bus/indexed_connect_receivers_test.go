@@ -286,7 +286,7 @@ func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t 
 		t.Fatal(err)
 	}
 	storeFailure := errors.New("independent reply-origin read failure")
-	resolver := connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: constructionIndexTestReader{err: storeFailure}}}
+	resolver := connectRoutePlanResolver{lifecycle: connectInstanceSelector{source: source, index: constructionIndexTestReader{err: storeFailure}}}
 	previewCtx := withConnectRoutePlanPreview(ctx)
 	previewCtx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes).plans = plans
 	instance, found, err := resolver.indexedReceiverWorkflowInstance(previewCtx, request)

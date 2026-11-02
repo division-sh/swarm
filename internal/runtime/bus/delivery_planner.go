@@ -457,7 +457,7 @@ func (p deliveryPlanner) materializedPublicationTargetOwners(ctx context.Context
 	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	var lookups []runtimepipeline.DeliveryTargetLookup
-	if p.connectPlanner.source != nil {
+	if p.connectPlanner.lifecycle.source != nil {
 		lookups = make([]runtimepipeline.DeliveryTargetLookup, len(plan.DeliveryIntents))
 		var targets []events.RouteIdentity
 		var owners []runtimeflowidentity.RunScopedFlowInstance
@@ -483,7 +483,7 @@ func (p deliveryPlanner) materializedPublicationTargetOwners(ctx context.Context
 			if intent.Recipient.IsNode() {
 				var err error
 				lookups[index], err = runtimepipeline.AdmitDeliveryTargetLookup(runtimepipeline.DeliveryTargetOwnershipRequest{
-					Source: p.connectPlanner.source, Event: evt, Recipient: intent.Recipient, Blueprint: target, Handler: intent.Handler,
+					Source: p.connectPlanner.lifecycle.source, Event: evt, Recipient: intent.Recipient, Blueprint: target, Handler: intent.Handler,
 				})
 				if err != nil {
 					return publicationTargetOwnerEvidence{}, err

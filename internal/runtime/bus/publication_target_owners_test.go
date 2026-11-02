@@ -40,7 +40,7 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 				FlowInstance: root.InstancePath,
 				EntityID:     root.EntityID},
 		}},
-		planner: deliveryPlanner{connectPlanner: connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: reader}}},
+		planner: deliveryPlanner{connectPlanner: connectRoutePlanResolver{lifecycle: connectInstanceSelector{source: source, index: reader}}},
 	}
 	plan := RoutePlan{Event: event, ReplyCreations: []replycontext.Record{record}}
 	base.instances = constructionIndexTestReader{err: errors.New("expired ordinary snapshot")}
@@ -137,7 +137,7 @@ func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 		constructionIndexObservation(t, source, event.RunID(), child, ""),
 	}}}
 	planner := deliveryPlanner{
-		connectPlanner:  connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: reader}},
+		connectPlanner:  connectRoutePlanResolver{lifecycle: connectInstanceSelector{source: source, index: reader}},
 		recipientPolicy: testSelectedOwnerPolicy(),
 	}
 	planner.recipientPolicy.semanticSource = source
@@ -200,8 +200,9 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 		activations = append(activations, plan)
 	}
 	planner := deliveryPlanner{
-		connectPlanner: connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{
-			index: constructionIndexTestReader{err: errors.New("native evidence read before proposed run commit")}, runProposal: proposal,
+		connectPlanner: connectRoutePlanResolver{lifecycle: connectInstanceSelector{
+			source: source,
+			index:  constructionIndexTestReader{err: errors.New("native evidence read before proposed run commit")}, runProposal: proposal,
 		}},
 		recipientPolicy: deliveryRecipientPolicy{semanticSource: source, requireTargetOwners: true, runProposal: proposal},
 	}

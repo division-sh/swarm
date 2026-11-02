@@ -18,18 +18,18 @@ import (
 // A terminal receiver can produce a diagnostic, never a construction proposal.
 func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context, event events.Event) (bool, error) {
 	target := explicitRootPublicationTarget(event)
-	if target.Empty() || r.source == nil || target.FlowID == semanticview.RootExecutionFlowID(r.source) {
+	if target.Empty() || r.lifecycle.source == nil || target.FlowID == semanticview.RootExecutionFlowID(r.lifecycle.source) {
 		return false, nil
 	}
 	fact, present := correlation.SourceArtifactFactFromContext(ctx)
 	if !present || r.lifecycle.index == nil {
 		return false, fmt.Errorf("explicit receiver requires its admitted source and native index")
 	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.lifecycle.source, target.FlowID), "", target.FlowInstance))
 	if err != nil {
 		return false, err
 	}
-	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	request, err := pipeline.NewExactFlowInstanceLookup(r.lifecycle.source, fact, owner)
 	if err != nil {
 		return false, err
 	}
@@ -44,13 +44,13 @@ func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context
 		return false, fmt.Errorf("explicit receiver contradicts its stored entity identity")
 	}
 	if instance.Status == "terminated" || !instance.TerminatedAt.IsZero() {
-		return pipeline.StandingConstructionIsKeyless(r.source, instance.WorkflowName)
+		return pipeline.StandingConstructionIsKeyless(r.lifecycle.source, instance.WorkflowName)
 	}
 	stage := ""
 	if instance.StageDefined {
 		stage = instance.CurrentState
 	}
-	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.source, instance.WorkflowName)
+	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.lifecycle.source, instance.WorkflowName)
 	var terminal *pipeline.NoHandlerError
 	if errors.As(err, &terminal) {
 		terminal.FlowInstance = instance.StorageRef
@@ -66,11 +66,11 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 	if !present || r.lifecycle.index == nil {
 		return false, fmt.Errorf("reply origin requires its admitted source and native index")
 	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.lifecycle.source, target.FlowID), "", target.FlowInstance))
 	if err != nil {
 		return false, err
 	}
-	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	request, err := pipeline.NewExactFlowInstanceLookup(r.lifecycle.source, fact, owner)
 	if err != nil {
 		return false, err
 	}
@@ -88,7 +88,7 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 	if instance.StageDefined {
 		stage = instance.CurrentState
 	}
-	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(r.source, instance.WorkflowName)
+	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(r.lifecycle.source, instance.WorkflowName)
 	var terminal *pipeline.NoHandlerError
 	if errors.As(err, &terminal) {
 		return false, nil
@@ -127,7 +127,7 @@ func (r connectRoutePlanResolver) lookupTargetScope(ctx context.Context, runID s
 	for flowID := range flows {
 		flowIDs = append(flowIDs, flowID)
 	}
-	scope, err := pipeline.NewFlowInstanceLookupScope(r.source, fact, runID, flowIDs, owners)
+	scope, err := pipeline.NewFlowInstanceLookupScope(r.lifecycle.source, fact, runID, flowIDs, owners)
 	if err != nil {
 		return selectedTargetOwnerLookupScope{}, err
 	}
@@ -163,7 +163,7 @@ func (r connectRoutePlanResolver) prospectiveConnectInstances(ctx context.Contex
 			if err := plan.Validate(); err != nil {
 				return nil, err
 			}
-			if plan.Readiness.RunID != runID || plan.Readiness.BundleHash != fact.BundleHash() || plan.Readiness.WorkflowVersion != r.source.WorkflowVersion() {
+			if plan.Readiness.RunID != runID || plan.Readiness.BundleHash != fact.BundleHash() || plan.Readiness.WorkflowVersion != r.lifecycle.source.WorkflowVersion() {
 				return nil, fmt.Errorf("prospective receiver crosses its selected source or run")
 			}
 			instances = append(instances, plan.Identity)
@@ -177,11 +177,11 @@ func (r connectRoutePlanResolver) indexedConnectIdentity(ctx context.Context, ru
 	if !present || r.lifecycle.index == nil {
 		return flowidentity.Instance{}, fmt.Errorf("connect receiver requires its admitted source and index owner")
 	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.lifecycle.source, target.FlowID), "", target.FlowInstance))
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
-	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	request, err := pipeline.NewExactFlowInstanceLookup(r.lifecycle.source, fact, owner)
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
@@ -231,7 +231,7 @@ func (r connectRoutePlanResolver) materializeKeylessConnect(ctx context.Context,
 	if !present {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, fmt.Errorf("keyless receiver requires its admitted source")
 	}
-	request, err := pipeline.NewDeclaredFlowInstanceLookup(r.source, fact, event.RunID(), flowID, parent, nil)
+	request, err := pipeline.NewDeclaredFlowInstanceLookup(r.lifecycle.source, fact, event.RunID(), flowID, parent, nil)
 	if err != nil {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
 	}
