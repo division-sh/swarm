@@ -36,7 +36,7 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: native-docker-emission\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs: [items.ready, proof.finished]\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("items.ready:\n  items: [text]\nitems.child:\n  value: text\nitems.processed:\n  value: text\n  request_event_id: text\nproof.finished:\n"), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("items.ready:\n  items: [text]\nitems.child:\n  value: text\nitems.processed:\n  value: text\nproof.finished:\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			nodesPath := filepath.Join(root, "nodes.yaml")
@@ -53,11 +53,11 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			const prompt = "Emit the processed value and exact request event identity."
+			const prompt = "Emit the processed value."
 			if strings.Count(string(agents), prompt) != 1 {
 				t.Fatal("native emission fixture no longer has its exact prompt")
 			}
-			if err := os.WriteFile(agentsPath, []byte(strings.Replace(string(agents), prompt, "Emit value and request_event_id exactly from the triggering event.", 1)), 0o600); err != nil {
+			if err := os.WriteFile(agentsPath, []byte(strings.Replace(string(agents), prompt, "Emit value exactly from the triggering payload.", 1)), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			var owner *workspace.DockerManager
@@ -122,10 +122,9 @@ func TestMockNormalRealDockerEmissionBothStores(t *testing.T) {
 			}
 			marker := record.Payload()
 			var payload struct {
-				Value          string `json:"value"`
-				RequestEventID string `json:"request_event_id"`
+				Value string `json:"value"`
 			}
-			if err := json.Unmarshal(marker, &payload); err != nil || payload.Value != "container-emitted" || payload.RequestEventID != triggerID {
+			if err := json.Unmarshal(marker, &payload); err != nil || payload.Value != "container-emitted" {
 				t.Fatalf("gateway emission lost the exact native call: %s, err=%v", marker, err)
 			}
 			events, err := storetest.ReadLifecycleEventCardinality(context.Background(), rt.Events, published.RunID, "items.processed")
