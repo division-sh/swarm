@@ -1682,7 +1682,7 @@ func fakeMCPCall(client *http.Client, endpoint string, headers map[string]string
 
 func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 	tools, _ := result["tools"].([]any)
-	wantNames := []string{"emit_agent_completed", "notify_human", "read_state", "read_state_requests"}
+	wantNames := []string{"emit_agent_completed", "notify_human", "read_state"}
 	names := listedToolNames(tools)
 	sort.Strings(names)
 	if !equalStrings(names, wantNames) {
@@ -1698,7 +1698,7 @@ func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 				"type": "object", "additionalProperties": false, "required": []any{"summary"},
 				"properties": map[string]any{"summary": map[string]any{"type": "string", "minLength": float64(1)}, "context": map[string]any{}},
 			}
-			wantDescription := "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human.\n\nUsage:\nUse for an informational operator notice only. Provide summary and optional context. The flow continues without waiting for a reply; use ask_human when a human verdict must gate the flow."
+			wantDescription := "Send a notice to the human operator. The conversation continues without waiting for a reply.\n\nUsage:\nProvide a summary and optional context for the notice."
 			if tool["description"] != wantDescription || !jsonValuesEqual(tool["inputSchema"], wantSchema) {
 				return "", fmt.Errorf("MCP notify_human definition = %#v, want exact description/schema", tool)
 			}
@@ -1709,7 +1709,7 @@ func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 			continue
 		}
 		description, _ := tool["description"].(string)
-		if description != "Emit worker/agent.completed event\n\nUsage:\n"+releaseE2EEmitToolUsage {
+		if description != "Send a worker/agent.completed event" {
 			return "", fmt.Errorf("MCP flow emit description = %q, want exact actor/flow-scoped definition", description)
 		}
 		wantSchema := map[string]any{
@@ -1733,8 +1733,6 @@ func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 	}
 	return emitName, nil
 }
-
-const releaseE2EEmitToolUsage = "Call this emit_* tool only to publish the named workflow event. Provide concrete JSON payload values matching the input schema. Do not include envelope-owned fields unless the schema declares them. Arguments are concrete payload values, not workflow expressions."
 
 func jsonValuesEqual(left, right any) bool {
 	leftJSON, leftErr := json.Marshal(left)

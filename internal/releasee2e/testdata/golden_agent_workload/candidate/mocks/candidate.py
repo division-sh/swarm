@@ -7,7 +7,7 @@ def handle(input):
             "text": "Candidate completed.",
             "usage": {"input_tokens": 8, "output_tokens": 3},
         }
-    payload = json.loads(input["messages"][-1]["content"])["event"]["payload"]
+    payload = json.loads(input["messages"][-1]["content"])
     candidate_id = payload["candidate_id"]
     return {
         "calls": [{

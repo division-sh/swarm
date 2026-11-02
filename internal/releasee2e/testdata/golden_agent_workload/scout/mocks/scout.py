@@ -7,7 +7,7 @@ def handle(input):
             "text": "Scout completed.",
             "usage": {"input_tokens": 8, "output_tokens": 3},
         }
-    payload = json.loads(input["messages"][-1]["content"])["event"]["payload"]
+    payload = json.loads(input["messages"][-1]["content"])
     return {
         "calls": [{
             "name": "emit_scout_completed",

@@ -200,6 +200,7 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 					} `json:"input_schema"`
 				} `json:"tools"`
 				Messages []struct {
+					Role    string          `json:"role"`
 					Content json.RawMessage `json:"content"`
 				} `json:"messages"`
 			}
@@ -217,23 +218,19 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 					continue
 				}
 				for _, message := range turn.Messages {
-					var text string
-					if json.Unmarshal(message.Content, &text) == nil && strings.HasPrefix(text, "Tool result:\n") && strings.Contains(text, "selected-only-mcp-resource") {
-						_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
-						return
-					}
-					var blocks []struct {
-						Type    string          `json:"type"`
-						Content json.RawMessage `json:"content"`
-					}
-					if json.Unmarshal(message.Content, &blocks) != nil {
+					if message.Role != "user" {
 						continue
 					}
-					for _, block := range blocks {
-						if block.Type == "tool_result" && strings.Contains(string(block.Content), "selected-only-mcp-resource") {
-							_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
-							return
-						}
+					var text string
+					if json.Unmarshal(message.Content, &text) != nil {
+						continue
+					}
+					var result struct {
+						Content string `json:"content"`
+					}
+					if json.Unmarshal([]byte(text), &result) == nil && strings.TrimSpace(result.Content) == "selected-only-mcp-resource" {
+						_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
+						return
 					}
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{

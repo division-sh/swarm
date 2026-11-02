@@ -1938,7 +1938,7 @@ expected_notify_schema = {
     "required": ["summary"],
     "additionalProperties": False,
 }
-expected_notify_description = "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human.\n\nUsage:\nUse for an informational operator notice only. Provide summary and optional context. The flow continues without waiting for a reply; use ask_human when a human verdict must gate the flow."
+expected_notify_description = "Send a notice to the human operator. The conversation continues without waiting for a reply.\n\nUsage:\nProvide a summary and optional context for the notice."
 if notify is None or notify.get("description") != expected_notify_description or notify.get("inputSchema") != expected_notify_schema:
     raise SystemExit(f"selected-fork notify_human mismatch: {notify!r}")
 expected_schema = {
@@ -1947,7 +1947,7 @@ expected_schema = {
     "required": ["fork_result"],
     "additionalProperties": False,
 }
-expected_description = "Emit worker/task.completed event\n\nUsage:\nCall this emit_* tool only to publish the named workflow event. Provide concrete JSON payload values matching the input schema. Do not include envelope-owned fields unless the schema declares them. Arguments are concrete payload values, not workflow expressions."
+expected_description = "Send a worker/task.completed event"
 if emit is None or emit.get("description") != expected_description or emit.get("inputSchema") != expected_schema:
     raise SystemExit(f"selected-fork flow emit mismatch: {emit!r}")
 call = {
