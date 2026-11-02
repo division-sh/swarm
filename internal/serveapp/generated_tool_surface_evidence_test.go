@@ -335,10 +335,10 @@ func writeGeneratedToolEvidenceSource(t *testing.T, cell string) string {
 		{"event": "evidence.requested", "from": ".", "to": "worker", "resolution": "select-or-create"}, {"event": "evidence.completed", "from": "worker", "to": "."},
 	}})
 	write("nodes.yaml", map[string]any{
-		"input-gate": map[string]any{"execution_type": "system_node", "event_handlers": map[string]any{"evidence.submitted": map[string]any{"emit": map[string]any{
+		"input-gate": map[string]any{"evidence.submitted": map[string]any{"emit": map[string]any{
 			"event": "evidence.requested", "fields": map[string]any{"conversation": "payload.conversation", "sequence": "payload.sequence", "task": "payload.task"},
-		}}}},
-		"observer": map[string]any{"execution_type": "system_node", "event_handlers": map[string]any{"evidence.completed": map[string]any{"guard": map[string]any{"id": "observe", "check": true}}}},
+		}}},
+		"observer": map[string]any{"evidence.completed": map[string]any{"guard": true}},
 	})
 	var valueType any = "string"
 	switch cell {
