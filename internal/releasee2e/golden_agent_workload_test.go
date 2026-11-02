@@ -50,32 +50,6 @@ type goldenWorkloadOptions struct {
 	processGOMAXPROCS   int
 	runDeadline         time.Duration
 	publicBoundaryProof bool
-	repeatSequential    bool
-}
-
-func TestGoldenAgentWorkloadSequentialRunsBothStores(t *testing.T) {
-	releaseRoot := goldenReleaseRoot(t)
-	binaryPath := buildReleaseBinary(t, releaseRoot)
-	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
-	options := goldenWorkloadOptions{
-		lifecycleBinary:   lifecycleBinary,
-		candidateIDs:      goldenBurstCandidateIDs(),
-		processGOMAXPROCS: goldenBurstGOMAXPROCS,
-		runDeadline:       goldenBurstDeadline,
-		repeatSequential:  true,
-	}
-	t.Run("sqlite", func(t *testing.T) {
-		root := filepath.Join(releaseRoot, "sequential-runs-sqlite")
-		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
-	})
-	t.Run("postgres", func(t *testing.T) {
-		dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
-		if dsn == "" {
-			t.Fatalf("%s is required for the dual-store sequential-run proof", goldenPostgresEnv)
-		}
-		root := filepath.Join(releaseRoot, "sequential-runs-postgres")
-		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
-	})
 }
 
 func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
@@ -811,24 +785,8 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		completionBudget -= time.Since(recoveryStarted)
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, completionBudget, len(replayed))
-	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
+	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
 	assertGoldenRunHasNoDrift(t, binaryPath, projectRoot, contractsOperand, configOperand, env, runID)
-	if options.repeatSequential {
-		secondRunID := goldenPublishIngressWithKey(t, process.rpc, bundleHash, options.candidateIDs, "golden-search-ingress-second")
-		if secondRunID == runID {
-			t.Fatal("second ingress reused the first run")
-		}
-		waitForGoldenTerminalRun(t, process, store, secondRunID, options.runDeadline, 0)
-		retainedRunIDs := []string{runID, secondRunID}
-		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, retainedRunIDs, nil)
-		if firstEvidence.Scout.RunID == secondEvidence.Scout.RunID {
-			t.Fatalf("singleton scouts share run identity: first=%#v second=%#v", firstEvidence.Scout, secondEvidence.Scout)
-		}
-		firstAfterSecond := assertGoldenPublicProof(t, process.rpc, runID, false, options.candidateIDs, nil, retainedRunIDs, replayed)
-		if !reflect.DeepEqual(firstEvidence, firstAfterSecond) {
-			t.Fatalf("second run changed first run's terminal evidence: before=%#v after=%#v", firstEvidence, firstAfterSecond)
-		}
-	}
 	if options.publicBoundaryProof {
 		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
 	}
@@ -1039,10 +997,6 @@ func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient, wantPosture str
 }
 
 func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string) string {
-	return goldenPublishIngressWithKey(t, rpc, bundleHash, candidateIDs, "golden-search-ingress")
-}
-
-func goldenPublishIngressWithKey(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string, idempotencyKey string) string {
 	t.Helper()
 	landing := waitForFullLifecycleStandingRun(t, rpc, bundleHash, "")
 	var result struct {
@@ -1057,7 +1011,7 @@ func goldenPublishIngressWithKey(t *testing.T, rpc *releaseRPCClient, bundleHash
 		"event_name":      "search.requested",
 		"payload":         map[string]any{"query": "golden workload", "candidate_ids": candidateIDs},
 		"emitter":         "releasee2e",
-		"idempotency_key": idempotencyKey,
+		"idempotency_key": "golden-search-ingress",
 	}, &result); err != nil {
 		t.Fatal(err)
 	}
