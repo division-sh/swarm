@@ -29,7 +29,7 @@ func TestAgentContentCapturesExactPlatformSubscriptions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeFlowActivationFixtureFile(t, path, string(raw)+"  content: |-\n    {\"task\": event.type.endsWith(\"observer.requested\") ? \"request\" : \"outcome\", \"payload\": payload}\n")
+			writeFlowActivationFixtureFile(t, path, string(raw)+"  content: |-\n    {\"task\": (event.type).endsWith(\"observer.requested\") ? \"request\" : \"outcome\", \"payload\": payload}\n")
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 			if err != nil {

@@ -16,7 +16,7 @@ func CopyMailboxNoticeCompletion(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\nnotice.requested:\n  seed: boolean\n")
 	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [notice.requested, observer.requested,")
-	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), `event.type.endsWith("observer.requested") ? "request"`, `event.type.endsWith("notice.requested") ? "notice" : event.type.endsWith("observer.requested") ? "request"`)
+	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), `(event.type).endsWith("observer.requested") ? "request"`, `(event.type).endsWith("notice.requested") ? "notice" : (event.type).endsWith("observer.requested") ? "request"`)
 	applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), `        if frame["task"] == "request":`, `        if frame["task"] == "notice":
             return {"calls": [{"name": "notify_human", "arguments": {"summary": "Observed notice", "context": {"proof": "mailbox-completion"}}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
         if frame["task"] == "request":`)
@@ -72,7 +72,7 @@ pins:
   permissions: [ask_human]
   subscriptions: [observer.requested, human_task.approved, human_task.rejected, human_task.deferred, human_task.expired]
   content: |-
-    {"task": event.type.endsWith("observer.requested") ? "request" : "outcome", "payload": payload}
+    {"task": (event.type).endsWith("observer.requested") ? "request" : "outcome", "payload": payload}
   mock:
     kind: python
     module: mocks/observer.py
