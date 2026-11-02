@@ -1703,7 +1703,7 @@ func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 				"type": "object", "additionalProperties": false, "required": []any{"summary"},
 				"properties": map[string]any{"summary": map[string]any{"type": "string", "minLength": float64(1)}, "context": map[string]any{}},
 			}
-			wantDescription := "Send a notice to the human operator. The conversation continues without waiting for a reply.\n\nUsage:\nProvide a summary and optional context for the notice."
+			wantDescription := "Send a notice to the human operator. The conversation continues without waiting for a reply."
 			if tool["description"] != wantDescription || !jsonValuesEqual(tool["inputSchema"], wantSchema) {
 				return "", fmt.Errorf("MCP notify_human definition = %#v, want exact description/schema", tool)
 			}

@@ -157,7 +157,11 @@ func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, 
 
 func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[string]any {
 	fieldProps := make(map[string]any, len(contract.Entity.Fields))
+	instanceField := entityruntime.InstanceField(contract)
 	for _, field := range entityruntime.FieldNames(contract) {
+		if field == instanceField {
+			continue
+		}
 		decl, err := entityruntime.FieldDecl(contract, field)
 		if err != nil {
 			continue
@@ -423,7 +427,9 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
 		}
 		fields, _ := materialized["fields"].(map[string]any)
-		return entityruntime.DeclaredValues(contract, fields), nil
+		values := entityruntime.DeclaredValues(contract, fields)
+		delete(values, entityruntime.InstanceField(contract))
+		return values, nil
 	case roleScopedEntityToolSaveField:
 		value, ok := payload["value"]
 		if !ok {

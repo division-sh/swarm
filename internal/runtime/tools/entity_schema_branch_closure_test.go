@@ -1,10 +1,14 @@
 package tools
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestEntityOperationSchemaClosurePreservesMapsAndBranchPresence(t *testing.T) {
@@ -43,6 +47,62 @@ func TestEntityOperationSchemaClosurePreservesMapsAndBranchPresence(t *testing.T
 }
 
 func TestRoleScopedEntityWholeReadSchemaPreservesDeclaredFieldClosure(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		keyed, keyOnly bool
+	}{{"keyed", true, false}, {"keyless", false, false}, {"key_only", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := "case_key: text\n"
+			if !tc.keyOnly {
+				state += "case_key_note: text\nother_key: text\n"
+			}
+			schema := "stages: []\n"
+			if tc.keyed {
+				schema = "instance: case_key\n" + schema
+			}
+			root := t.TempDir()
+			manifest := "version: 1.0.0\nplatform_version: '*'\n"
+			for name, body := range map[string]string{
+				"manifest.yaml": manifest, "schema.yaml": "stages: []\n",
+				tc.name + "/manifest.yaml": manifest, tc.name + "/schema.yaml": schema, tc.name + "/state.yaml": state,
+				"other/manifest.yaml": manifest, "other/schema.yaml": "instance: other_key\nstages: []\n", "other/state.yaml": "other_key: text\n",
+			} {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo := runtimepipeline.WorkflowRepoRoot()
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			contract, ok := entityruntime.ResolveForFlow(semanticview.Wrap(bundle), tc.name)
+			if !ok {
+				t.Fatal("missing exact flow-owned state contract")
+			}
+			output := roleScopedEntityWholeReadOutputSchema(contract)
+			properties := output["properties"].(map[string]any)
+			if _, present := properties["case_key"]; present == tc.keyed {
+				t.Fatalf("instance-key schema presence = %t, keyed = %t", present, tc.keyed)
+			}
+			if tc.keyOnly && len(properties) != 0 {
+				t.Fatal("key-only read schema is not empty")
+			}
+			if !tc.keyOnly && (properties["case_key_note"] == nil || properties["other_key"] == nil) {
+				t.Fatal("same-named ordinary or foreign-key field was suppressed")
+			}
+			if err := ValidatePayloadAgainstSchema(output, map[string]any{}); err != nil {
+				t.Fatal("empty read object refused", err)
+			}
+			if err := ValidatePayloadAgainstSchema(output, map[string]any{"case_key": "value"}); (err == nil) == tc.keyed {
+				t.Fatalf("key output admission changed: keyed=%t err=%v", tc.keyed, err)
+			}
+		})
+	}
 	contract := entityruntime.Contract{EntityType: "case", Entity: runtimecontracts.EntityContract{
 		Fields: map[string]runtimecontracts.EntityFieldDecl{"current_state": {Type: "text"}},
 	}}

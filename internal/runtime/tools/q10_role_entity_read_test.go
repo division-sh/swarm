@@ -87,10 +87,13 @@ func TestQ10RoleScopedReadLifecycleBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					row := output.(map[string]any)
-					if len(row) != 2 || row["current_state"] != "business-"+tc.posture || row["fixture_key"] != tc.posture {
+					if len(row) != 1 || row["current_state"] != "business-"+tc.posture {
 						t.Fatalf("role read changed declared business fields: %#v", row)
 					}
-					for _, private := range []string{"entity_id", "flow_instance", "entity_type", "stage_defined", "revision", "entered_state_at", "fields", "bookkeeping", "loops"} {
+					if key := persistedEntityField(t, ctx, entityID, "fixture_key"); key != `"`+tc.posture+`"` {
+						t.Fatalf("role read changed the retained instance key: %s", key)
+					}
+					for _, private := range []string{"fixture_key", "entity_id", "flow_instance", "entity_type", "stage_defined", "revision", "entered_state_at", "fields", "bookkeeping", "loops"} {
 						if _, present := row[private]; present {
 							t.Fatalf("role read exposed %s", private)
 						}
