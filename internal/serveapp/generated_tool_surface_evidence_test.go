@@ -27,7 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var generatedToolEvidenceCells = []string{"argument_free", "flat_string", "nested_object", "array", "markup_natural", "markup_complete_tag", "markup_broken_tag", "markup_replay"}
+var generatedToolEvidenceCells = []string{"argument_free", "key_only", "flat_string", "nested_object", "array", "markup_natural", "markup_complete_tag", "markup_broken_tag", "markup_replay"}
 
 func TestGeneratedToolSurfacePublicJourneyBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
@@ -110,7 +110,7 @@ func runGeneratedToolEvidence(t *testing.T, backend servedparity.Backend, cell, 
 			if strings.HasPrefix(cell, "markup_") {
 				return llmapi.Reply{ID: "synthetic-markup", Model: "deepseek-flash", Text: "We open at nine. </tool_call>"}, nil
 			}
-			if cell == "argument_free" && request.Number == 1 {
+			if (cell == "argument_free" || cell == "key_only") && request.Number == 1 {
 				return llmapi.Reply{ID: "synthetic-read", Model: "deepseek-flash", Tools: []llmapi.ToolCall{{ID: "synthetic-read", Name: "read_state", Arguments: json.RawMessage(`{}`)}}}, nil
 			}
 			arguments, _ := json.Marshal(map[string]any{"sequence": 1, "value": generatedToolEvidenceValue(cell)})
@@ -140,6 +140,9 @@ func runGeneratedToolEvidence(t *testing.T, backend servedparity.Backend, cell, 
 	task := "Report sequence 1 and value " + string(value) + "."
 	if cell == "argument_free" {
 		task = "Read the current evidence record before reporting sequence 1 and its title as value."
+	}
+	if cell == "key_only" {
+		task = "Read the current evidence record, then report sequence 1 and value 'synthetic value'."
 	}
 	switch cell {
 	case "markup_natural":
@@ -351,7 +354,11 @@ func writeGeneratedToolEvidenceSource(t *testing.T, cell string) string {
 		valueType = []string{"string"}
 	}
 	write("worker/events.yaml", map[string]any{"evidence.completed": map[string]any{"sequence": "integer", "value": valueType}})
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "worker/state.yaml"), "conversation: text\ntitle: \"synthetic value\"\n")
+	state := "conversation: text\ntitle: \"synthetic value\"\n"
+	if cell == "key_only" {
+		state = "conversation: text\n"
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "worker/state.yaml"), state)
 	write("worker/agents.yaml", map[string]any{"witness": map[string]any{
 		"role": "evidence", "model": "regular", "memory": true, "subscriptions": []string{"evidence.requested"}, "emit_events": []string{"evidence.completed"},
 		"intent": map[string]any{"inline": "Resolve the synthetic task and publish evidence.completed with the requested sequence and value. For a record-reading task, inspect the current evidence record first."},
@@ -424,8 +431,9 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 	t.Helper()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	read, emitted := false, false
-	for _, row := range r.rows {
+	read, emitted, notice := false, false, false
+	readCalls, readResults := map[string]bool{}, 0
+	for index, row := range r.rows {
 		var request struct {
 			Tools []struct {
 				Function struct {
@@ -433,6 +441,11 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 					Parameters        map[string]any
 				}
 			} `json:"tools"`
+			Messages []struct {
+				Role       string
+				Content    json.RawMessage
+				ToolCallID string `json:"tool_call_id"`
+			} `json:"messages"`
 		}
 		if err := json.Unmarshal(row.Request, &request); err != nil {
 			t.Fatal("synthetic request did not contain valid JSON")
@@ -440,6 +453,12 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 		schemas := map[string]map[string]any{}
 		for _, tool := range request.Tools {
 			schemas[tool.Function.Name] = tool.Function.Parameters
+			if tool.Function.Name == runtimetools.NotifyHumanToolName {
+				notice = true
+				if tool.Function.Description != "Send a notice to the human operator. The conversation continues without waiting for a reply." {
+					t.Errorf("notice description is not exact: %q", tool.Function.Description)
+				}
+			}
 			if strings.Contains(tool.Function.Description, "ask_human") {
 				t.Error("delivered description names ungranted ask_human")
 			}
@@ -460,11 +479,31 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 				t.Error("emit description still contains authoring protocol")
 			}
 		}
+		for _, message := range request.Messages {
+			if message.Role != "tool" || !readCalls[message.ToolCallID] {
+				continue
+			}
+			readResults++
+			var content string
+			var fields map[string]any
+			if json.Unmarshal(message.Content, &content) != nil || json.Unmarshal([]byte(content), &fields) != nil || fields == nil {
+				t.Error("read continuation is not a plain JSON object")
+				continue
+			}
+			want := map[string]any{"title": "synthetic value"}
+			if cell == "key_only" {
+				want = map[string]any{}
+			}
+			if !reflect.DeepEqual(fields, want) {
+				t.Errorf("read continuation fields=%#v, want %#v without the instance key", fields, want)
+			}
+		}
 		var response struct {
 			Choices []struct {
 				Message struct {
 					Content string
 					Calls   []struct {
+						ID       string
 						Function struct{ Name, Arguments string }
 					} `json:"tool_calls"`
 				}
@@ -490,10 +529,22 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 				t.Fatal("provider returned an ungranted call or invalid argument shape")
 			}
 			read = read || call.Function.Name == "read_state"
+			if call.Function.Name == "read_state" {
+				readCalls[call.ID] = true
+				if index != 0 {
+					t.Error("record read was not requested in the first provider response")
+				}
+			}
 			emitted = emitted || call.Function.Name == "emit_evidence_completed"
 		}
 	}
-	if !emitted || (cell == "argument_free" && !read) {
+	if !notice {
+		t.Error("operator-notice tool was not delivered")
+	}
+	if (cell == "argument_free" || cell == "key_only") && readResults == 0 {
+		t.Error("no actual read continuation was sent to the provider")
+	}
+	if !emitted || ((cell == "argument_free" || cell == "key_only") && !read) {
 		t.Fatal("matrix did not exercise its requested generated tool")
 	}
 }
