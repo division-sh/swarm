@@ -606,10 +606,10 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 	}
 	ctx = c.withToolCapabilities(ctx)
 	results := make([]map[string]any, 0, len(calls))
-	providerContents := make([]string, 0, len(calls))
+	providerContents := make([]providerToolContent, 0, len(calls))
 	executed := make([]executedToolCall, 0, len(calls))
 	for callIndex, tc := range calls {
-		var providerContent string
+		var providerContent providerToolContent
 		terminal := toolIsTerminalInContext(ctx, tc.Name)
 		callIdentity := completionToolCallIdentity(c.TurnCount, callIndex, tc)
 		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
@@ -631,7 +631,7 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 			} else {
 				entry["ok"] = true
 				entry["result"] = projected
-				content, contentErr := renderToolOutput(out, terminal)
+				content, contentErr := renderToolOutput(out, projected, terminal)
 				if contentErr != nil {
 					return "", executed, contentErr
 				}
@@ -655,7 +655,7 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 			if contentErr != nil {
 				return "", executed, contentErr
 			}
-			providerContent = content
+			providerContent = providerToolContent{text: content}
 		}
 		results = append(results, entry)
 		providerContents = append(providerContents, providerContent)

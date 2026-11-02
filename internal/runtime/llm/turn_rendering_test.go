@@ -74,7 +74,8 @@ func TestProviderTurnRendering(t *testing.T) {
 			{map[string]any{"value": "business"}, false, `{"value":"business"}`},
 			{map[string]any{"dispatch_id": "private", "event_id": "private"}, true, "ok"},
 		} {
-			got, err := renderToolOutput(test.value, test.emit)
+			content, err := renderToolOutput(test.value, test.value, test.emit)
+			got := content.render(maxToolResultBytes)
 			if err != nil || got != test.want {
 				t.Fatalf("got=%q err=%v", got, err)
 			}
@@ -88,7 +89,7 @@ func TestProviderTurnRendering(t *testing.T) {
 	t.Run("bounded head and tail with complete receipt", func(t *testing.T) {
 		original := "HEAD" + strings.Repeat("\u00e9", 27000) + "TAIL"
 		entries := []map[string]any{{"name": "read_example", "tool_call_id": "call-1", "ok": true, "result": original}}
-		raw, err := attachProviderToolContents(entries, []string{truncateProviderToolOutput(original)}, maxToolMessageBytes)
+		raw, err := attachProviderToolContents(entries, []providerToolContent{{text: original}}, maxToolMessageBytes)
 		if err != nil || len(raw) > maxToolMessageBytes {
 			t.Fatalf("batch bytes=%d err=%v", len(raw), err)
 		}
@@ -102,6 +103,45 @@ func TestProviderTurnRendering(t *testing.T) {
 		legacy := `{"kind":"tool_continuation","tool_result":[{"tool_call_id":"old","ok":true,"result":"old"}]}`
 		if got := providerToolResults(legacy); len(got) != 1 || got[0].Payload != legacy {
 			t.Fatal("old stored rendering changed")
+		}
+	})
+	t.Run("relay instructions survive batch truncation", func(t *testing.T) {
+		original := "HEAD" + strings.Repeat("\u00e9", 27000) + "TAIL"
+		for _, followUp := range []map[string]any{
+			{"tool": "read_file", "path": "/workspace/synthetic-result.json", "kind": "runtime_read_file"},
+			{"tool": "read_file", "chunks": []string{"/workspace/synthetic-1.json", "/workspace/synthetic-2.json"}, "kind": "runtime_read_file_chunks"},
+		} {
+			receipt := map[string]any{"truncated": true, "follow_up": followUp}
+			before, _ := json.Marshal(receipt)
+			content, err := renderToolOutput(original, receipt, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries := []map[string]any{{"name": "sql_execute", "tool_call_id": "sql-1", "ok": true, "result": receipt}, {"name": "other", "ok": true, "result": "unchanged"}}
+			const batchLimit = 2048
+			raw, err := attachProviderToolContents(entries, []providerToolContent{content, {text: original}}, batchLimit)
+			if err != nil || len(raw) > batchLimit {
+				t.Fatalf("batch bytes=%d err=%v", len(raw), err)
+			}
+			provider := providerToolResults(string(raw))
+			metadata, _ := json.Marshal(followUp)
+			if len(provider) != 2 || provider[0].CallID != "sql-1" || !strings.HasPrefix(provider[0].Payload, "HEAD") || !strings.HasSuffix(provider[0].Payload, "TAIL") || !utf8.ValidString(provider[0].Payload) || !strings.Contains(provider[0].Payload, "follow_up: "+string(metadata)) || !strings.Contains(provider[0].Payload, "[... tool output truncated ...]") {
+				t.Fatalf("batch lost complete ordered retrieval instructions: %#v", provider)
+			}
+			after, _ := json.Marshal(entries[0]["result"])
+			if string(after) != string(before) {
+				t.Fatal("relay receipt changed")
+			}
+			for _, limit := range []int{len(raw) / 8, maxToolMessageBytes} {
+				oversized := content
+				if limit == maxToolMessageBytes {
+					oversized.followUp = strings.Repeat("x", maxToolResultBytes)
+				}
+				_, err := attachProviderToolContents([]map[string]any{{"result": receipt}}, []providerToolContent{oversized}, limit)
+				if err == nil || runtimefailures.Normalize(err, "test", "render").Detail.Code != "aggregate_tool_result_limit_exceeded" {
+					t.Fatalf("unfittable retrieval instructions must refuse: %v", err)
+				}
+			}
 		}
 	})
 	t.Run("speaker is projected without a participant field", func(t *testing.T) {
