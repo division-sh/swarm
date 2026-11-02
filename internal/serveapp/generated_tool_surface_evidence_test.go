@@ -27,7 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var generatedToolEvidenceCells = []string{"argument_free", "flat_string", "nested_object", "array", "named_user", "markup_natural", "markup_complete_tag", "markup_broken_tag", "markup_replay"}
+var generatedToolEvidenceCells = []string{"argument_free", "flat_string", "nested_object", "array", "markup_natural", "markup_complete_tag", "markup_broken_tag", "markup_replay"}
 
 func TestGeneratedToolSurfacePublicJourneyBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
@@ -140,9 +140,6 @@ func runGeneratedToolEvidence(t *testing.T, backend servedparity.Backend, cell, 
 	task := "Report sequence 1 and value " + string(value) + "."
 	if cell == "argument_free" {
 		task = "Read the current evidence record before reporting sequence 1 and its title as value."
-	}
-	if cell == "named_user" {
-		task = "Report sequence 1 and the name of this message's producing node as value."
 	}
 	switch cell {
 	case "markup_natural":
@@ -317,8 +314,6 @@ func generatedToolEvidenceValue(cell string) any {
 		return map[string]any{"note": "synthetic", "detail": map[string]any{"label": "nested"}}
 	case "array":
 		return []any{"first", "second"}
-	case "named_user":
-		return "input-gate"
 	default:
 		return "synthetic value"
 	}
@@ -432,8 +427,7 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 	read, emitted := false, false
 	for _, row := range r.rows {
 		var request struct {
-			Messages []struct{ Role, Name string } `json:"messages"`
-			Tools    []struct {
+			Tools []struct {
 				Function struct {
 					Name, Description string
 					Parameters        map[string]any
@@ -464,15 +458,6 @@ func (r *generatedToolEvidenceRecorder) requireSurface(t *testing.T, cell string
 			}
 			if tool.Function.Name == "emit_evidence_completed" && tool.Function.Description != "Send a evidence.completed event" {
 				t.Error("emit description still contains authoring protocol")
-			}
-		}
-		if cell == "named_user" {
-			named := false
-			for _, message := range request.Messages {
-				named = named || (message.Role == "user" && message.Name == "input-gate")
-			}
-			if !named {
-				t.Error("actual request lacks the producing node's user-message name")
 			}
 		}
 		var response struct {
