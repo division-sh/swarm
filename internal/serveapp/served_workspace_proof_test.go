@@ -221,16 +221,22 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 					if message.Role != "user" {
 						continue
 					}
-					var text string
-					if json.Unmarshal(message.Content, &text) != nil {
+					var blocks []anthropicRoundBlock
+					if json.Unmarshal(message.Content, &blocks) != nil {
 						continue
 					}
-					var result struct {
-						Content string `json:"content"`
-					}
-					if json.Unmarshal([]byte(text), &result) == nil && strings.TrimSpace(result.Content) == "selected-only-mcp-resource" {
-						_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
-						return
+					for _, block := range blocks {
+						if block.Type != "tool_result" || block.ToolUseID != "workspace-native-read" {
+							continue
+						}
+						var text string
+						var result struct {
+							Content string `json:"content"`
+						}
+						if json.Unmarshal(block.Content, &text) == nil && json.Unmarshal([]byte(text), &result) == nil && strings.TrimSpace(result.Content) == "selected-only-mcp-resource" {
+							_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"selected-only-mcp-resource verified"}]}`))
+							return
+						}
 					}
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
