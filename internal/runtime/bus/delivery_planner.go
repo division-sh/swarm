@@ -245,40 +245,40 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if connectPlan.Matched {
-		projection, err = projection.withActivationPlans(connectPlan.ActivationPlans)
+	if !connectPlan.Matched {
+		routePlan, err = p.planIndependentPubsubBranch(ctx, evt, false)
 		if err != nil {
 			return RoutePlan{}, err
 		}
-		ctx = withPublicationTargetOwners(ctx, projection)
-		connectPlan.ActivationPlans = append(rootPlans, connectPlan.ActivationPlans...)
-		routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
-		if routePlan.canonicalRouteFailedClosed() {
-			localPlan, localErr := p.planIndependentPubsubBranch(ctx, evt, true)
-			if localErr != nil {
-				return RoutePlan{}, localErr
-			}
-			if len(localPlan.LiveRecipients) > 0 || len(localPlan.DeliveryIntents) > 0 {
-				return RoutePlan{}, mixedPubsubConnectCompositionFailure{failure: routePlan.TargetFailure}
-			}
-			return p.resolvePreparedRoutePlan(projection, routePlan)
-		}
-		if routePlan.ReplyContextConsumed {
-			return p.resolvePreparedRoutePlan(projection, routePlan)
-		}
-		localPlan, err := p.planIndependentPubsubBranch(ctx, evt, true)
-		if err != nil {
-			return RoutePlan{}, err
-		}
-		routePlan = composeIndependentPubsubBranch(routePlan, localPlan)
+		routePlan.ConnectEvaluation = connectPlan.Evaluation
+		routePlan.ActivationPlans = rootPlans
 		return p.resolvePreparedRoutePlan(projection, routePlan)
 	}
-	routePlan, err = p.planIndependentPubsubBranch(ctx, evt, false)
+	projection, err = projection.withActivationPlans(connectPlan.ActivationPlans)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	routePlan.ConnectEvaluation = connectPlan.Evaluation
-	routePlan.ActivationPlans = rootPlans
+	ctx = withPublicationTargetOwners(ctx, projection)
+	connectPlan.ActivationPlans = append(rootPlans, connectPlan.ActivationPlans...)
+	routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
+	if routePlan.canonicalRouteFailedClosed() {
+		localPlan, localErr := p.planIndependentPubsubBranch(ctx, evt, true)
+		if localErr != nil {
+			return RoutePlan{}, localErr
+		}
+		if len(localPlan.LiveRecipients) > 0 || len(localPlan.DeliveryIntents) > 0 {
+			return RoutePlan{}, mixedPubsubConnectCompositionFailure{failure: routePlan.TargetFailure}
+		}
+		return p.resolvePreparedRoutePlan(projection, routePlan)
+	}
+	if routePlan.ReplyContextConsumed {
+		return p.resolvePreparedRoutePlan(projection, routePlan)
+	}
+	localPlan, err := p.planIndependentPubsubBranch(ctx, evt, true)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	routePlan = composeIndependentPubsubBranch(routePlan, localPlan)
 	return p.resolvePreparedRoutePlan(projection, routePlan)
 }
 
