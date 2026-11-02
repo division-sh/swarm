@@ -109,8 +109,6 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	defer presenter.finish()
 	var executionErr error
 	called := false
-	var scenarioMu sync.Mutex
-	scenarioRuns := map[string]struct{}{}
 	code := buildPrivateTestComposition(ctx, runtimeCompositionRequest{
 		Purpose: executionposture.MockOnly, ProviderIngress: false,
 		WorkspacePreference: preference,
@@ -129,56 +127,9 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 		DataProjectionRoot: filepath.Join(privateRoot, "data-projections"),
 		OnReady: func(readyCtx context.Context, server string, publication apiv1.EventPublicationOptions, rt *runtimepkg.Runtime) error {
 			called = true
-			executionErr = execute(readyCtx, cliapp.TestSessionEndpoint{APIServer: server, Token: token,
-				StartScenario: func(ctx context.Context, params map[string]any) (string, error) {
-					var output *providertriggers.PublicationAdmission
-					if eventName, _ := params["event_name"].(string); strings.HasPrefix(eventName, "inbound.") {
-						payload, ok := params["payload"].(map[string]any)
-						if !ok {
-							return "", fmt.Errorf("private provider input requires an object payload")
-						}
-						_, admission, handled, err := rt.Options.ProviderTriggerCatalog.IssuePrivateTestPublication(ctx, publication.Bundle.BundleHash, ".", uuid.NewString(), eventName, privateTestOperatorAccount(in.Bundle, payload), payload, time.Now().UTC())
-						if err != nil {
-							return "", err
-						}
-						if handled {
-							output = &admission
-						}
-					}
-					runID, err := apiv1.StartPrivateScenario(ctx, publication, params, time.Now().UTC(), output)
-					if err == nil {
-						scenarioMu.Lock()
-						scenarioRuns[runID] = struct{}{}
-						scenarioMu.Unlock()
-					}
-					return runID, err
-				},
-				PublishProviderInput: func(ctx context.Context, params map[string]any) (cliapp.TestProviderPublication, bool, error) {
-					var empty cliapp.TestProviderPublication
-					eventName, _ := params["event_name"].(string)
-					if !strings.HasPrefix(eventName, "inbound.") {
-						return empty, false, nil
-					}
-					runID, _ := params["run_id"].(string)
-					scenarioMu.Lock()
-					_, owned := scenarioRuns[runID]
-					scenarioMu.Unlock()
-					if !owned {
-						return empty, true, fmt.Errorf("private provider input requires this test host's scenario run")
-					}
-					payload, ok := params["payload"].(map[string]any)
-					if !ok {
-						return empty, true, fmt.Errorf("private provider input requires an object payload")
-					}
-					key, _ := params["idempotency_key"].(string)
-					ctx, release, err := apiv1.AdmitPrivateProviderScenarioRun(ctx, publication, runID, params)
-					if err != nil {
-						return empty, true, err
-					}
-					defer release()
-					eventID, handled, err := rt.InboundGateway.PublishPrivateTestProviderOutput(ctx, rt.Options.ProviderTriggerCatalog, publication.Bundle.BundleHash, ".", runID, eventName, privateTestOperatorAccount(in.Bundle, payload), payload, key, time.Now().UTC())
-					return cliapp.TestProviderPublication{EventID: eventID, RunID: runID}, handled, err
-				},
+			issuer := &privateTestSessionIssuer{runtime: rt, publication: publication, bundle: in.Bundle, runs: map[string]struct{}{}}
+			executionErr = execute(readyCtx, cliapp.TestSessionEndpoint{
+				APIServer: server, Token: token, StartScenario: issuer.startScenario, PublishProviderInput: issuer.publishProviderInput,
 			})
 			return executionErr
 		},
@@ -194,6 +145,65 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 		return errors.Join(executionErr, startupErr, cleanupErr, fmt.Errorf("private test session failed (exit %d)", code))
 	}
 	return errors.Join(executionErr, cleanupErr)
+}
+
+type privateTestSessionIssuer struct {
+	runtime     *runtimepkg.Runtime
+	publication apiv1.EventPublicationOptions
+	bundle      *runtimecontracts.WorkflowContractBundle
+	mu          sync.Mutex
+	runs        map[string]struct{}
+}
+
+func (issuer *privateTestSessionIssuer) startScenario(ctx context.Context, params map[string]any) (string, error) {
+	var output *providertriggers.PublicationAdmission
+	if eventName, _ := params["event_name"].(string); strings.HasPrefix(eventName, "inbound.") {
+		payload, ok := params["payload"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("private provider input requires an object payload")
+		}
+		_, admission, handled, err := issuer.runtime.Options.ProviderTriggerCatalog.IssuePrivateTestPublication(ctx, issuer.publication.Bundle.BundleHash, ".", uuid.NewString(), eventName, privateTestOperatorAccount(issuer.bundle, payload), payload, time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+		if handled {
+			output = &admission
+		}
+	}
+	runID, err := apiv1.StartPrivateScenario(ctx, issuer.publication, params, time.Now().UTC(), output)
+	if err == nil {
+		issuer.mu.Lock()
+		issuer.runs[runID] = struct{}{}
+		issuer.mu.Unlock()
+	}
+	return runID, err
+}
+
+func (issuer *privateTestSessionIssuer) publishProviderInput(ctx context.Context, params map[string]any) (cliapp.TestProviderPublication, bool, error) {
+	var empty cliapp.TestProviderPublication
+	eventName, _ := params["event_name"].(string)
+	if !strings.HasPrefix(eventName, "inbound.") {
+		return empty, false, nil
+	}
+	runID, _ := params["run_id"].(string)
+	issuer.mu.Lock()
+	_, owned := issuer.runs[runID]
+	issuer.mu.Unlock()
+	if !owned {
+		return empty, true, fmt.Errorf("private provider input requires this test host's scenario run")
+	}
+	payload, ok := params["payload"].(map[string]any)
+	if !ok {
+		return empty, true, fmt.Errorf("private provider input requires an object payload")
+	}
+	key, _ := params["idempotency_key"].(string)
+	ctx, release, err := apiv1.AdmitPrivateProviderScenarioRun(ctx, issuer.publication, runID, params)
+	if err != nil {
+		return empty, true, err
+	}
+	defer release()
+	eventID, handled, err := issuer.runtime.InboundGateway.PublishPrivateTestProviderOutput(ctx, issuer.runtime.Options.ProviderTriggerCatalog, issuer.publication.Bundle.BundleHash, ".", runID, eventName, privateTestOperatorAccount(issuer.bundle, payload), payload, key, time.Now().UTC())
+	return cliapp.TestProviderPublication{EventID: eventID, RunID: runID}, handled, err
 }
 
 func privateTestOperatorAccount(bundle *runtimecontracts.WorkflowContractBundle, payload map[string]any) string {

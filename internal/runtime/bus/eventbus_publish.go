@@ -1801,45 +1801,8 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	defer func() { err = errors.Join(postCommitErr, err) }()
 
 	if interception.EventPassthrough {
-		liveRecipients := inboundPlan.LiveRecipients
-		deliveryRoutes := inboundPlan.liveDispatchDeliveryRoutes()
-		if !interception.NodePassthrough {
-			liveRecipients = nonCollidingAgentRecipientsAfterNodeConsume(liveRecipients, deliveryRoutes)
-			if evt.IsRunlessPlatformPublication() {
-				for _, recipient := range inboundPlan.LiveRecipients {
-					if recipient.isInternal() {
-						liveRecipients = append(liveRecipients, recipient)
-					}
-				}
-				liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)
-			}
-			deliveryRoutes = agentDeliveryRoutesForLiveRecipients(deliveryRoutes, liveRecipients)
-		}
-		recipients := routePlanLiveRecipientIDs(liveRecipients)
-		if len(recipients) > 0 {
-			dispatch, dispatchErr := eb.dispatchLiveRecipientsWithRoutes(workCtx, evt, liveRecipients, deliveryRoutes)
-			if dispatchErr == nil && !dispatch.complete() {
-				dispatchErr = eb.logAuthoritativeDeliveryIncomplete(workCtx, evt, dispatch.expected, dispatch.delivered, dispatch.missing, dispatch.timedOut, dispatch.cause)
-			}
-			decision := classifyPipelineDispatch(runtimepipelineobligation.Continue(), dispatchErr, false, purpose, pipelineDispatchPublishRoutes)
-			if decision.action != pipelineDispatchContinue {
-				return errors.Join(dispatchErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
-			}
-			if len(dispatch.delivered) > 0 {
-				delivered := deliveryTargetKeySubscriberIDs(dispatch.delivered)
-				eb.logQueuedDeliveries(ctx, evt, delivered, "matched_agent_subscription", inboundPlan.ExtraDetail)
-				eb.logDelivery(ctx, evt, delivered, inboundPlan.ExtraDetail)
-			}
-		}
-		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
-			deferredErr := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation)
-			decision := classifyPipelineDispatch(runtimepipelineobligation.Continue(), deferredErr, false, purpose, pipelineDispatchPublishDeferred)
-			if decision.action != pipelineDispatchContinue {
-				return errors.Join(deferredErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
-			}
-		}
-		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
-			_ = eb.emitContradiction(workCtx, evt, inboundPlan.ContradictionReason)
+		if err := eb.dispatchCommittedPassthrough(ctx, workCtx, evt, inboundPlan, publicationClaim, interception.NodePassthrough, purpose); err != nil {
+			return err
 		}
 	}
 	eb.logPublished(ctx, evt, 0)
@@ -1851,6 +1814,50 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	}
 	decision = classifyPipelineDispatch(runtimepipelineobligation.Continue(), nil, false, purpose, pipelineDispatchPublishFinal)
 	return eb.applyCommittedPublishDecision(ctx, publicationClaim, decision)
+}
+
+func (eb *EventBus) dispatchCommittedPassthrough(ctx, workCtx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim, nodePassthrough bool, purpose runtimepipelineobligation.Purpose) error {
+	liveRecipients := inboundPlan.LiveRecipients
+	deliveryRoutes := inboundPlan.liveDispatchDeliveryRoutes()
+	if !nodePassthrough {
+		liveRecipients = nonCollidingAgentRecipientsAfterNodeConsume(liveRecipients, deliveryRoutes)
+		if evt.IsRunlessPlatformPublication() {
+			for _, recipient := range inboundPlan.LiveRecipients {
+				if recipient.isInternal() {
+					liveRecipients = append(liveRecipients, recipient)
+				}
+			}
+			liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)
+		}
+		deliveryRoutes = agentDeliveryRoutesForLiveRecipients(deliveryRoutes, liveRecipients)
+	}
+	recipients := routePlanLiveRecipientIDs(liveRecipients)
+	if len(recipients) > 0 {
+		dispatch, dispatchErr := eb.dispatchLiveRecipientsWithRoutes(workCtx, evt, liveRecipients, deliveryRoutes)
+		if dispatchErr == nil && !dispatch.complete() {
+			dispatchErr = eb.logAuthoritativeDeliveryIncomplete(workCtx, evt, dispatch.expected, dispatch.delivered, dispatch.missing, dispatch.timedOut, dispatch.cause)
+		}
+		decision := classifyPipelineDispatch(runtimepipelineobligation.Continue(), dispatchErr, false, purpose, pipelineDispatchPublishRoutes)
+		if decision.action != pipelineDispatchContinue {
+			return errors.Join(dispatchErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
+		}
+		if len(dispatch.delivered) > 0 {
+			delivered := deliveryTargetKeySubscriberIDs(dispatch.delivered)
+			eb.logQueuedDeliveries(ctx, evt, delivered, "matched_agent_subscription", inboundPlan.ExtraDetail)
+			eb.logDelivery(ctx, evt, delivered, inboundPlan.ExtraDetail)
+		}
+	}
+	if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
+		deferredErr := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation)
+		decision := classifyPipelineDispatch(runtimepipelineobligation.Continue(), deferredErr, false, purpose, pipelineDispatchPublishDeferred)
+		if decision.action != pipelineDispatchContinue {
+			return errors.Join(deferredErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
+		}
+	}
+	if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
+		_ = eb.emitContradiction(workCtx, evt, inboundPlan.ContradictionReason)
+	}
+	return nil
 }
 
 func (eb *EventBus) applyCommittedPublishDecision(ctx context.Context, claim *pipelinePublicationClaim, decision pipelineDispatchDecision) error {

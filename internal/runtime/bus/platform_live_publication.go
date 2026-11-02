@@ -65,36 +65,13 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 	combined := routePlanFromManifest(event, deliveryRecipientManifest{LiveRecipients: internal})
 	var unavailable []string
 	for _, flow := range ordered {
-		scope := runlifecycle.LiveRunScope{FlowPath: flowidentity.ScopeKey(eb.semanticSource, flow)}
-		landing, found, err := eb.durable.LandingRuns.LoadLandingRun(ctx, scope)
+		plan, missing, err := eb.planPlatformSubscriber(ctx, event, flow, fact, planner)
 		if err != nil {
 			return RoutePlan{}, err
 		}
-		if !found || (landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
-			unavailable = append(unavailable, scope.FlowPath)
+		if missing != "" {
+			unavailable = append(unavailable, missing)
 			continue
-		}
-		live := landing.LiveRun
-		if live.Scope != scope || !live.Source.Matches(fact) {
-			return RoutePlan{}, runlifecycle.ErrLiveRunChanged
-		}
-		view, err := events.NewDeliveryEvent(event, events.DeliveryRoute{Context: events.DeliveryContext{RunID: live.RunID}})
-		if err != nil {
-			return RoutePlan{}, err
-		}
-		bounded := planner
-		bounded.connectPlanner.publicationFlow = flow
-		bounded.routeResolver.resolveRoutedSubscribers = bounded.connectPlanner.resolvePubsubSubscribers
-		bounded.preparedOwners = &publicationTargetOwnerEvidence{event: view.Event(), planner: bounded}
-		plan, err := eb.planSubscribedRoutePlanWithPlanner(correlation.WithRunID(ctx, live.RunID), view.Event(), false, bounded)
-		if err != nil {
-			return RoutePlan{}, err
-		}
-		if !plan.TargetFailure.Empty() {
-			return RoutePlan{}, (PublishRecipientPlan{TargetFailure: plan.TargetFailure.Code(), targetFailureCause: plan.unavailableReceiverError}).TargetFailureError("eventbus", "platform_publish", map[string]any{"flow_path": scope.FlowPath})
-		}
-		for index := range plan.DeliveryIntents {
-			plan.DeliveryIntents[index].Context.RunID = live.RunID
 		}
 		combined.AuthorityOwner = plan.AuthorityOwner
 		combined.AddLiveRecipients(plan.LiveRecipients...)
@@ -120,4 +97,38 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 		eb.recordPublishDiagnostic(ctx, event, combined)
 	}
 	return combined, combined.ValidatePersistentDeliveries()
+}
+
+func (eb *EventBus) planPlatformSubscriber(ctx context.Context, event events.Event, flow string, fact correlation.SourceArtifactFact, planner deliveryPlanner) (RoutePlan, string, error) {
+	scope := runlifecycle.LiveRunScope{FlowPath: flowidentity.ScopeKey(eb.semanticSource, flow)}
+	landing, found, err := eb.durable.LandingRuns.LoadLandingRun(ctx, scope)
+	if err != nil {
+		return RoutePlan{}, "", err
+	}
+	if !found || (landing.State != runlifecycle.StateLive && landing.State != runlifecycle.StatePaused) {
+		return RoutePlan{}, scope.FlowPath, nil
+	}
+	live := landing.LiveRun
+	if live.Scope != scope || !live.Source.Matches(fact) {
+		return RoutePlan{}, "", runlifecycle.ErrLiveRunChanged
+	}
+	view, err := events.NewDeliveryEvent(event, events.DeliveryRoute{Context: events.DeliveryContext{RunID: live.RunID}})
+	if err != nil {
+		return RoutePlan{}, "", err
+	}
+	bounded := planner
+	bounded.connectPlanner.publicationFlow = flow
+	bounded.routeResolver.resolveRoutedSubscribers = bounded.connectPlanner.resolvePubsubSubscribers
+	bounded.preparedOwners = &publicationTargetOwnerEvidence{event: view.Event(), planner: bounded}
+	plan, err := eb.planSubscribedRoutePlanWithPlanner(correlation.WithRunID(ctx, live.RunID), view.Event(), false, bounded)
+	if err != nil {
+		return RoutePlan{}, "", err
+	}
+	if !plan.TargetFailure.Empty() {
+		return RoutePlan{}, "", (PublishRecipientPlan{TargetFailure: plan.TargetFailure.Code(), targetFailureCause: plan.unavailableReceiverError}).TargetFailureError("eventbus", "platform_publish", map[string]any{"flow_path": scope.FlowPath})
+	}
+	for index := range plan.DeliveryIntents {
+		plan.DeliveryIntents[index].Context.RunID = live.RunID
+	}
+	return plan, "", nil
 }
