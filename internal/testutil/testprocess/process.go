@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -142,10 +143,17 @@ func inheritedFiles(files []*os.File) ([]*os.File, func(), error) {
 	if _, err := os.Stat("/proc/self/fd"); err == nil {
 		directory = "/proc/self/fd"
 	}
-	entries, err := os.ReadDir(directory)
+	reader, err := os.Open(directory)
 	if err != nil {
 		return nil, func() {}, err
 	}
+	// /dev/fd entries need not support stat; only their descriptor names matter.
+	names, err := reader.Readdirnames(-1)
+	_ = reader.Close()
+	if err != nil {
+		return nil, func() {}, err
+	}
+	sort.Strings(names)
 	result := append([]*os.File(nil), files...)
 	var duplicates []*os.File
 	closeFiles := func() {
@@ -153,8 +161,8 @@ func inheritedFiles(files []*os.File) ([]*os.File, func(), error) {
 			_ = file.Close()
 		}
 	}
-	for _, entry := range entries {
-		fd, err := strconv.Atoi(entry.Name())
+	for _, name := range names {
+		fd, err := strconv.Atoi(name)
 		if err != nil || fd < 3+len(files) {
 			continue
 		}
