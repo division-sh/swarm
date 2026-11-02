@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -246,7 +247,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 			hashC := selectedC.BundleHash
 			liveC := requireServedLiveLandingRunID(t, selectedC.Endpoint, hashC, ".")
 			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.pause", map[string]any{"run_id": liveC, "idempotency_key": "2376-pause-live-c"})
-			retainedC := publish2376CreationRootedFixture(t, selectedC, "2376-retained-target-c", nil)
+			retainedC := publish2376CreationRootedFixture(t, selectedC.Runtime, selectedC.BundleHash, "2376-retained-target-c", nil)
 			waitServedRunDeliveryQuiescence(t, selectedC.ReadRunDeliveries, retainedC.RunID)
 			requireServedOKJSONRPC(t, selectedC.Endpoint, "run.pause", map[string]any{
 				"run_id": retainedC.RunID, "idempotency_key": "2376-pause-target-c",
@@ -306,7 +307,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					pins = []durabledata.ExplicitPin{{Declaration: ref, VersionID: imported.Candidate.VersionID}}
 					key = "2376-pin-parent"
 				}
-				seed := publish2376CreationRootedFixture(t, selectedA, key, pins)
+				seed := publish2376CreationRootedFixture(t, selectedA.Runtime, selectedA.BundleHash, key, pins)
 				var exact string
 				if err := selectedA.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", seed.RunID).Scan(&exact); err != nil || exact != hashA {
 					t.Fatalf("new-work source=%s want=%s: %v", exact, hashA, err)
@@ -432,10 +433,10 @@ func (p sourceForkErrorProbe) ExecuteRunFork(ctx context.Context, req apiv1.RunF
 	return result, err
 }
 
-func publish2376CreationRootedFixture(t *testing.T, rt servedControlProofRuntime, key string, pins []durabledata.ExplicitPin) servedEventPublishRPCResult {
+func publish2376CreationRootedFixture(t *testing.T, rt *runtimepkg.Runtime, bundleHash, key string, pins []durabledata.ExplicitPin) servedEventPublishRPCResult {
 	t.Helper()
 	runID, eventID := uuid.NewString(), uuid.NewString()
-	source := rt.Runtime.Pipeline.SemanticSource()
+	source := rt.Pipeline.SemanticSource()
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("creation fixture requires its compiled rooted bundle")
@@ -444,10 +445,10 @@ func publish2376CreationRootedFixture(t *testing.T, rt servedControlProofRuntime
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := effects.WithExecutionMode(correlation.WithRootAdmission(correlation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID), rooted.Admission()), rt.Runtime.ExecutionPosture.RootMode())
+	ctx := effects.WithExecutionMode(correlation.WithRootAdmission(correlation.WithRunID(servedRuntimeProofAuthorActivityContext(t, rt, bundleHash), runID), rooted.Admission()), rt.ExecutionPosture.RootMode())
 	request := apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("2376-fixture"), IdempotencyKey: key, RequestHash: "2376-" + eventID}
 	if len(pins) != 0 {
-		plan, err := rt.Runtime.Manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+		plan, err := rt.Manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 			ContractBundle: source, OccurredAt: time.Now().UTC(), Instance: flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, ""),
 		})
 		if err != nil {
@@ -455,15 +456,15 @@ func publish2376CreationRootedFixture(t *testing.T, rt servedControlProofRuntime
 		}
 		request.Method, request.Now, request.TTL = "run.start", plan.OccurredAt, time.Hour
 		command := bus.DeploymentRunCreationCommand{
-			RunCreation: durabledata.RunCreationCommand{RunID: runID, Actor: "2376-fixture", BundleHash: rt.BundleHash, Data: durabledata.RunCreationDataEnvelope{Pins: pins}},
+			RunCreation: durabledata.RunCreationCommand{RunID: runID, Actor: "2376-fixture", BundleHash: bundleHash, Data: durabledata.RunCreationDataEnvelope{Pins: pins}},
 			Idempotency: request, Root: bus.FlowInstanceActivationCommand{Plan: plan},
 		}
-		committed, err := rt.Runtime.Bus.Store().(bus.DeploymentRunCreationCommitOwner).CommitDeploymentRunCreation(ctx, command)
+		committed, err := rt.Bus.Store().(bus.DeploymentRunCreationCommitOwner).CommitDeploymentRunCreation(ctx, command)
 		if err != nil || !committed.Acknowledged || committed.Replay {
 			t.Fatalf("native creation-pinned source fixture: result=%+v err=%v", committed, err)
 		}
 		for _, activation := range committed.Activations {
-			if err := rt.Runtime.Manager.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
+			if err := rt.Manager.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -474,14 +475,14 @@ func publish2376CreationRootedFixture(t *testing.T, rt servedControlProofRuntime
 		t.Fatal(err)
 	}
 	payload := json.RawMessage(`{"seed":true}`)
-	event := eventtest.RunCreatingRootIngressWithMode(eventID, "work.requested", "api.v1", "", payload, 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), rt.Runtime.ExecutionPosture.RootMode())
+	event := eventtest.RunCreatingRootIngressWithMode(eventID, "work.requested", "api.v1", "", payload, 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), rt.ExecutionPosture.RootMode())
 	initial, err := json.Marshal(map[string]any{"event_name": event.Type(), "payload": payload, "emitter": "api.v1", "entity_id": "", "flow_instance": "", "source_event_id": ""})
 	if err != nil {
 		t.Fatal(err)
 	}
 	completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-	creation := durabledata.RunCreationCommand{RunID: runID, Actor: "2376-fixture", BundleHash: rt.BundleHash, EventID: eventID, InitialEvent: initial, Data: durabledata.RunCreationDataEnvelope{Pins: pins}}
-	result, replay, err := rt.Runtime.Bus.PublishAPIEventWithRunCreationAcknowledged(ctx, event, &endpoint, request, completion, &creation)
+	creation := durabledata.RunCreationCommand{RunID: runID, Actor: "2376-fixture", BundleHash: bundleHash, EventID: eventID, InitialEvent: initial, Data: durabledata.RunCreationDataEnvelope{Pins: pins}}
+	result, replay, err := rt.Bus.PublishAPIEventWithRunCreationAcknowledged(ctx, event, &endpoint, request, completion, &creation)
 	if err != nil || replay || result.ResourceID != eventID {
 		t.Fatalf("native creation-rooted source fixture: result=%+v replay=%t err=%v", result, replay, err)
 	}
