@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -85,6 +86,18 @@ func TestMailboxHumanBudgetAndCrossCredentialDraftBothStores(t *testing.T) {
 					}
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
+				if outcome == "reject_with_draft" {
+					var events operatorread.OperatorEventListResult
+					requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": f.base.RunID, "event_name": "human_task.rejected"}, "limit": 2}, &events)
+					if len(events.Events) != 1 {
+						t.Fatalf("rejected callback count = %d, want 1", len(events.Events))
+					}
+					var event operatorread.OperatorEventFull
+					requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": events.Events[0].EventID}, &event)
+					if len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberType != "agent" || event.Deliveries[0].SubscriberID != "observer" || event.Deliveries[0].Status != "delivered" || !event.Deliveries[0].Terminal || event.Deliveries[0].Failure != nil {
+						t.Fatalf("rejected callback did not complete its captured content program: %+v", event.Deliveries)
+					}
+				}
 				completed = append(completed, retained{params: params, result: result, runID: f.base.RunID})
 			}
 			rt, _ = restart()
