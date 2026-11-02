@@ -36,7 +36,7 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, _, _ := newP16RaceStore(t, backend)
-			ctx, creation := c4DeploymentStartCommand(t, selected, true)
+			ctx, creation, construction := c4DeploymentStartCommand(t, selected, true)
 			created, err := selected.(bus.DeploymentRunCreationCommitOwner).CommitDeploymentRunCreation(ctx, creation)
 			if err != nil || !created.Acknowledged || created.Replay || len(creation.Root.Plan.Lifecycle.Timers) != 1 {
 				t.Fatalf("real timer-bearing deployment creation: %+v err=%v", created, err)
@@ -106,7 +106,6 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			if recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil || len(recovered) != 0 {
 				t.Fatalf("fresh selected process has unexpected recovery debt: %+v err=%v", recovered, err)
 			}
-			baseline := work.process.ActiveCount()
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash}
 			root, present, err := correlation.RootAdmissionFromContext(ctx)
 			if err != nil || !present {
@@ -146,7 +145,15 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 					}
 				})
 			}
-			ordinary, contexts := c4LiveTimerRuntime(t, ctx, selected, loaded, capability)
+			if err := construction.manager.Shutdown(); err != nil {
+				t.Fatalf("join exact C4 construction work: %v", err)
+			}
+			if err := construction.grant.Retire(ctx); err != nil {
+				t.Fatalf("retire exact C4 construction generation: %v", err)
+			}
+			baseline := work.process.ActiveCount()
+			ordinary, contexts, processContext := c4LiveTimerRuntime(t, ctx, selected, loaded, capability)
+			ctx = correlation.WithRunID(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(processContext, loaded.SourceArtifactFact), root), sourceRun)
 			executionRequest.LiveRuntime, executionRequest.LiveContexts = ordinary, contexts
 			executionRequest.LiveRuns = selected.(runlifecycle.LiveRunReader)
 			prepared, err := owner.Prepare(ctx, executionRequest)
