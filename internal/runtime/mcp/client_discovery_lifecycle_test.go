@@ -11,13 +11,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/testutil/mcpapi"
 )
 
 func TestMCPAdmissionHelperProcess(t *testing.T) {
@@ -177,34 +177,7 @@ func TestMCPStdioCancellationJoinsOwnedReaders(t *testing.T) {
 }
 
 func TestMCPDiscoveryHTTPUsesOnlyDiscoveryMethods(t *testing.T) {
-	var mu sync.Mutex
-	var methods []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request RPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mu.Lock()
-		methods = append(methods, request.Method)
-		mu.Unlock()
-		var result any
-		switch request.Method {
-		case "initialize":
-			result = map[string]any{"capabilities": map[string]any{}}
-		case "notifications/initialized":
-			w.WriteHeader(http.StatusAccepted)
-			return
-		case "tools/list":
-			result = map[string]any{"tools": []any{}}
-		default:
-			t.Errorf("forbidden observation method %s", request.Method)
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
-	}))
+	server := mcpapi.New(t, "")
 	defer server.Close()
 	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 		"mcp_servers": {Value: map[string]any{"configured": map[string]any{"url": server.URL, "prefix": "configured"}}},
@@ -216,8 +189,10 @@ func TestMCPDiscoveryHTTPUsesOnlyDiscoveryMethods(t *testing.T) {
 	if err := client.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
+	var methods []string
+	for _, call := range server.Calls() {
+		methods = append(methods, call.Method)
+	}
 	if strings.Join(methods, ",") != "initialize,notifications/initialized,tools/list" {
 		t.Fatalf("methods=%v", methods)
 	}

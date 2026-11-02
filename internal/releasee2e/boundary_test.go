@@ -96,6 +96,10 @@ func releaseE2EImportAllowed(file, name, alias string) bool {
 	if file == "provider_connector_journey_test.go" && name == "github.com/division-sh/swarm/internal/testutil/connectorapi" && alias == "" {
 		return true
 	}
+	if file == "external_integrations_journey_test.go" && alias == "" &&
+		(name == "github.com/division-sh/swarm/internal/testutil/connectorapi" || name == "github.com/division-sh/swarm/internal/testutil/llmapi" || name == "github.com/division-sh/swarm/internal/testutil/mcpapi") {
+		return true
+	}
 	if name == "github.com/division-sh/swarm/internal/testpostgres" && alias == "" &&
 		(file == "golden_agent_workload_test.go" || file == "postgres_capacity_admission_test.go") {
 		return true
@@ -138,6 +142,14 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		{"provider_connector_journey_test.go", "github.com/division-sh/swarm/internal/testutil/connectorapi", "other", false},
 		{"provider_connector_journey_test.go", "github.com/division-sh/swarm/internal/testutil/connectorapi/other", "", false},
 		{"provider_connector_journey_test.go", "github.com/division-sh/swarm/internal/testutil/connectorapiother", "", false},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/connectorapi", "", true},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", "", true},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi", "", true},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi", ".", false},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi", "fixture", false},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi/other", "", false},
+		{"external_integrations_journey_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapiother", "", false},
+		{"other_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi", "", false},
 	} {
 		t.Run(tc.file+"/"+tc.name+"/"+tc.alias, func(t *testing.T) {
 			if got := releaseE2EImportAllowed(tc.file, tc.name, tc.alias); got != tc.allowed {
