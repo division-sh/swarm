@@ -82,7 +82,7 @@ func serveRuntimePublicationOptions(stores *storeselected.Owner, caps selectedAP
 		ExecutionPosture: rt.ExecutionPosture,
 		Idempotency:      stores.Idempotency(), Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
 		Runs: caps.Runs, LiveRuns: stores.LiveRuns(), Entities: caps.Entities, Observability: caps.Observability,
-		Instances: stores.RuntimeDeps().WorkflowPersistence,
+		Instances:        stores.RuntimeDeps().WorkflowPersistence,
 		RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts,
 		SelectedForkControls: caps.SelectedForkControls,
 		Source:               primary.loaded.source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
