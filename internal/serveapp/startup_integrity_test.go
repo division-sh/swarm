@@ -137,6 +137,16 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				if !strings.Contains(out.String(), runID) || !strings.Contains(out.String(), artifact.BundleHash()) {
 					t.Fatalf("boot did not identify the invalid run and source: %s", out.String())
 				}
+				for _, want := range []string{
+					"ERROR: startup recovery refused",
+					"step 5 (startup recovery)",
+					"store status --store '" + backend + "' --config '" + configPath + "'",
+					"doctor --config '" + configPath + "'",
+				} {
+					if !strings.Contains(out.String(), want) {
+						t.Fatalf("recovery diagnostic missing %q:\n%s", want, out.String())
+					}
+				}
 				if backend == "sqlite" {
 					selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
 					if err != nil {
