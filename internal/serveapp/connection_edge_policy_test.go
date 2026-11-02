@@ -73,7 +73,7 @@ func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
 					}
 					_, start := lifecycleRestartHarness(t, backend, root)
 					process, rt := start()
-					seed := publishMixedConnectionRequest(t, rt, "", "mixed-create")
+					seed := publishMixedConnectionRequest(t, rt, seedServedPublicationRun(t, rt.Runtime), "mixed-create")
 					waitPublicationSiteCompletion(t, rt, seed)
 					before := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 1)
 					if code := process.stop(); code != 0 {

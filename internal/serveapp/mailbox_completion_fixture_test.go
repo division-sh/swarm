@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -133,17 +132,11 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 
 func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntime, owner cursorMailboxStore) cursorMailboxFixture {
 	t.Helper()
-	var runs struct {
-		Runs []operatorread.RunHeader `json:"runs"`
+	runID := seedServedPublicationRun(t, rt.Runtime)
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
+	if seed.RunID != runID || seed.NewRunCreated {
+		t.Fatalf("mailbox publication escaped its exact native fixture run: %+v", seed)
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.list", map[string]any{"limit": 500}, &runs)
-	for _, run := range runs.Runs {
-		if run.BundleHash == rt.BundleHash && run.Status == "live" {
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, run.RunID)
-			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": run.RunID, "idempotency_key": "matrix-pause-" + uuid.NewString()})
-		}
-	}
-	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	var id string

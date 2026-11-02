@@ -32,7 +32,7 @@ func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing
 				return persistence
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
+			endpoint, db, bundleHash, _ := startPublicInputRollbackRuntime(t, backend)
 			params := map[string]any{
 				"bundle_hash": bundleHash, "event_name": publicTelegramMockApprovalInput,
 				"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account": "42", "provider_message_reference": 1, "text": "acknowledgment proof"},

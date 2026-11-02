@@ -159,8 +159,8 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 			t.Fatalf("decode RPC: %v", err)
 		}
 		calls = append(calls, rpc)
-		if rpc.Method != "run.start" {
-			t.Fatalf("method = %q, want run.start", rpc.Method)
+		if rpc.Method != eventPublishMethod {
+			t.Fatalf("method = %q, want event.publish", rpc.Method)
 		}
 		if rpc.Params["event_name"] != "item.received" || rpc.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", rpc.Params)
@@ -175,14 +175,14 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash}
+	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash, startScenario: scenarioProtocolStart}
 	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
 	step := scenarioStep{Action: "publish", PublishEvent: "item.received", GeneratePayload: true}
 	if err := runner.runPublishStep(context.Background(), scenarioTestFile{FlowID: "."}, mustScenarioExpressionEvaluatorWithSeed(t, "public-rpc"), state, step); err != nil {
 		t.Fatalf("run generated publish step: %v", err)
 	}
 	if len(calls) != 1 {
-		t.Fatalf("RPC calls = %#v, want one public run.start", calls)
+		t.Fatalf("RPC calls = %#v, want one publication into the private run", calls)
 	}
 }
 
@@ -231,7 +231,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 		if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
 			t.Fatalf("decode RPC: %v", err)
 		}
-		if call.Method != "run.start" || call.Params["event_name"] != "telegram-chat/"+eventName || call.Params["bundle_hash"] != bundleHash {
+		if call.Method != eventPublishMethod || call.Params["event_name"] != "telegram-chat/"+eventName || call.Params["bundle_hash"] != bundleHash {
 			t.Fatalf("event.publish params = %#v", call.Params)
 		}
 		if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
@@ -244,7 +244,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	runner := scenarioRunner{client: client, bundle: bundle, source: source, bundleHash: bundleHash}
+	runner := scenarioRunner{client: client, bundle: bundle, source: source, bundleHash: bundleHash, startScenario: scenarioProtocolStart}
 	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
 	step := scenarioStep{Action: "publish", PublishEvent: eventName, GeneratePayload: true}
 	if err := runner.runPublishStep(context.Background(), scenarioTestFile{FlowID: "telegram-chat"}, mustScenarioExpressionEvaluatorWithSeed(t, "telegram-normalized"), state, step); err != nil {
@@ -304,7 +304,7 @@ text: authored fixture
 				if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
 					t.Fatalf("decode RPC: %v", err)
 				}
-				if call.Method != "run.start" || call.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
+				if call.Method != eventPublishMethod || call.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
 					t.Fatalf("event.publish params = %#v", call.Params)
 				}
 				if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
@@ -318,11 +318,12 @@ text: authored fixture
 				t.Fatalf("client: %v", err)
 			}
 			runner := scenarioRunner{
-				client:     client,
-				bundle:     bundle,
-				source:     source,
-				bundleHash: bundleHash,
-				sourceRoot: sourceRoot,
+				startScenario: scenarioProtocolStart,
+				client:        client,
+				bundle:        bundle,
+				source:        source,
+				bundleHash:    bundleHash,
+				sourceRoot:    sourceRoot,
 			}
 			step := scenarioStep{Action: "publish", PublishEvent: "inbound.telegram.text_message", Payload: test.payload}
 			state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
@@ -369,7 +370,7 @@ steps:
 		switch rpc.Method {
 		case "runtime.identity":
 			writeScenarioRuntimeIdentity(t, w, rpc.ID, bundleHash)
-		case "run.start":
+		case eventPublishMethod:
 			if rpc.Params["event_name"] != "telegram-chat/inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", rpc.Params)
 			}
@@ -395,7 +396,7 @@ steps:
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	assertScenarioTestMethods(t, calls, []string{"runtime.identity", "run.start", "run.diagnose", "run.diagnose"})
+	assertScenarioTestMethods(t, calls, []string{"runtime.identity", eventPublishMethod, "run.diagnose", "run.diagnose"})
 	if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}

@@ -19,7 +19,7 @@ func (b *snapshotPublicationLogBarrier) ProjectLifecycleDiagnostic(ctx context.C
 }
 
 func (b *snapshotPublicationLogBarrier) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
-	if component == "eventbus" && action == "published" && eventType == "left.work.requested" {
+	if component == "eventbus" && action == "published" && eventType == "left.loop.start" {
 		b.entered <- eventID
 		select {
 		case <-b.release:

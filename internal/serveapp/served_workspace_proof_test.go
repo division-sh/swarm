@@ -77,12 +77,15 @@ func readServedLandingRuns(ctx context.Context, rt *runtimepkg.Runtime) ([]runli
 	if !ok {
 		return nil, fmt.Errorf("served store %T lacks native landing readback", rt.Bus.Store())
 	}
-	scopes, err := rt.PlanLiveFlowScopes()
+	source := rt.Options.WorkflowModule.SemanticSource()
+	declarations, err := runtimepkg.ResolveStandingTargetDeclarations(source, rt.Options.ProviderTriggerCatalog)
 	if err != nil {
 		return nil, err
 	}
 	var rows []runlifecycle.LandingRun
-	for _, scope := range scopes {
+	// Producer proofs observe their declared bindings, not every boot-created flow.
+	for _, declaration := range declarations {
+		scope := runlifecycle.LiveRunScope{FlowPath: flowidentity.ScopeKey(source, declaration.FlowPath)}
 		row, found, err := reader.LoadLandingRun(ctx, scope)
 		if err != nil || !found {
 			return nil, fmt.Errorf("flow %s landing found=%t: %w", scope.FlowPath, found, err)

@@ -23,13 +23,14 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 			var firstProducer string
 			var firstSnapshot map[string][][]string
 			for attempt := 1; attempt <= 2; attempt++ {
+				runID := seedServedPublicationRun(t, rt.Runtime)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
+					"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "run_id": runID,
 					"payload":         map[string]any{"work_id": fmt.Sprintf("work-%d", attempt)},
 					"idempotency_key": fmt.Sprintf("baseline-static-%d", attempt),
 				})
-				if seed.RunID == firstRun {
-					t.Fatal("second public root did not create an independent run")
+				if seed.RunID != runID || seed.NewRunCreated || seed.RunID == firstRun {
+					t.Fatal("public root did not retain its independent native fixture run", seed)
 				}
 				count := 0
 				for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {

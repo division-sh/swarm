@@ -4,14 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -63,12 +62,12 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			}))
 			t.Cleanup(provider.Close)
 			f := selectedExternalResourceFixture(t, backend, provider.URL)
-			server := f.operatorServer(t)
-			path := filepath.Join(t.TempDir(), "row.jsonl")
-			if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			ref, err := durabledata.ParseDeclarationRef(".", "task.assigned")
+			if err != nil {
 				t.Fatal(err)
 			}
-			sourceRun := startDeploymentResourceRun(t, f, server, "--data", "task.assigned="+path)
+			sourceRun := createDeploymentResourceFixtureRun(t, f, durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{}\n")}}})
+			pauseDeploymentFixtureRun(t, f, sourceRun)
 			atCutVersion := issue2655RunPinnedVersion(t, f, sourceRun)
 			postCutEvent := uuid.NewString()
 			probe := &admittedRevisionForkFixture{SelectedContractForkLifecycle: f.selected.(runforkexecution.SelectedContractForkLifecycle)}

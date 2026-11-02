@@ -94,36 +94,25 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, root, false, posture, hook)
 				t.Cleanup(func() { close(release) })
 				t.Cleanup(publication.unblock)
+				runID := requireServedBootConstructedRun(t, rt.Endpoint, rt.BundleHash, rt.Runtime)
 				var seedEventID string
-				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				if !fieldless {
-					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
-					if admitted {
-						var rootEventOwner any = rt.SQLite
-						if rt.Postgres != nil {
-							rootEventOwner = rt.Postgres
-						}
-						requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
-					}
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 					seedEventID = seed.EventID
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
-					if admitted {
-						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-						requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "receiver-fork-pause"})
-					}
-					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
-				} else {
-					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
+					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, runID, "active")
+				}
+				params := map[string]any{"event_name": "work.requested", "run_id": runID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
+				if seedEventID != "" {
+					params["source_event_id"] = seedEventID
+				}
+				request := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+				if admitted {
 					var rootEventOwner any = rt.SQLite
 					if rt.Postgres != nil {
 						rootEventOwner = rt.Postgres
 					}
-					requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, seed.EventID), seed.RunID)
-					seedEventID = seed.EventID
-					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
+					requireServedLiveRootMode(t, rt.Runtime.ExecutionPosture, storetest.LoadCanonicalEventRecord(t, t.Context(), rootEventOwner, request.EventID), request.RunID)
 				}
-				request := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if surface == "pending_refusal" {
 					select {
 					case <-publication.entered:
@@ -136,7 +125,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					case <-time.After(10 * time.Second):
 						t.Fatal("missing fork frontier barrier")
 					}
-				} else if !admitted {
+				} else {
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.RunID)
 				}
 				if fieldless {
@@ -174,7 +163,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						forkPoint = outputID
 					}
 				}
-				if surface == "historical_refusal" {
+				if surface == "historical_refusal" || admitted {
 					// Terminal deliveries alone do not join deferred publication settlement.
 					deadline := time.Now().Add(servedProofPollDeadline)
 					for {
@@ -195,12 +184,17 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				// Join the exact publications, not the independently held node.
 				// Completed publication includes its diagnostic tail.
 				deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
-				probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+				if seedEventID != "" {
+					probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+				}
 				remaining := time.Until(deadline)
 				if remaining <= 0 {
 					t.Fatal("source publication consumed the complete fingerprint deadline")
 				}
 				probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
+				if admitted && !fieldless {
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": request.RunID, "idempotency_key": "receiver-fork-pause"})
+				}
 				forkCtx := servedControlProofAuthorActivityContext(t, rt)
 				if surface == "admitted_http" {
 					// Branch isolation needs later business history, not excluded runtime logs.
