@@ -439,7 +439,7 @@ func postConnectorSlackWebhook(t *testing.T, process *releaseServeProcess, origi
 		t.Fatalf("Slack signed callback HTTP=%d receipt=%s", status, response)
 	}
 	result := waitConnectorPublicResult(t, process, runID, "send_slack_webhook.succeeded", 1, append(secrets, "redacted-slack-token"))
-	requireConnectorCall(t, slack.SideEffects, "POST", "/api/chat.postMessage", "Bearer after-401-token", map[string]any{"channel": "C-INBOUND", "text": "signed Slack callback"})
+	requireConnectorCall(t, slack.SideEffects, "POST", "/api/chat.postMessage", "Bearer after-401-token", map[string]any{"channel": "C-INBOUND", "text": "signed-slack-delivery"})
 	var published []goldenEvent
 	for _, event := range snapshot() {
 		if event.EventName == "inbound.slack.message" {
@@ -556,7 +556,8 @@ func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]
 		writeReleaseFile(t, path, string(raw))
 	}
 	nodes["github-webhook-worker"] = map[string]any{"inbound.github.issue_opened": map[string]any{"activity": map[string]any{"id": "send_github_webhook", "tool": "github.create_issue", "input": githubValues}}}
-	nodes["slack-webhook-worker"] = map[string]any{"inbound.slack.message": map[string]any{"activity": map[string]any{"id": "send_slack_webhook", "tool": "slack.post_message", "input": map[string]any{"channel": "payload.payload.event.channel", "text": "payload.payload.event.text"}}}}
+	// The shipped raw body is opaque JSON; acknowledge its typed delivery ID without selecting body members.
+	nodes["slack-webhook-worker"] = map[string]any{"inbound.slack.message": map[string]any{"activity": map[string]any{"id": "send_slack_webhook", "tool": "slack.post_message", "input": map[string]any{"channel": literal("C-INBOUND"), "text": "payload.provider_event_id"}}}}
 	for path, document := range map[string]any{"events.yaml": inputs, "nodes.yaml": nodes} {
 		raw, err := yaml.Marshal(document)
 		if err != nil {
