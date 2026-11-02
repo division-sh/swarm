@@ -775,7 +775,16 @@ func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.Continu
 		c.rescanNeeded = true
 		return nil
 	}
-	lease, err := c.beginDispatchWork(ctx)
+	var lease *worklifetime.Lease
+	var err error
+	if runtime, ok := c.workOwner.(*worklifetime.RuntimeOccurrence); ok {
+		lease, err = runtime.BeginContinuationDispatch(ctx)
+	} else {
+		lease, err = c.beginDispatchWork(ctx)
+	}
+	if errors.Is(err, worklifetime.ErrDispatchClosed) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("admit delivery continuation dispatch %s: %w", item.DeliveryID, err)
 	}
@@ -805,6 +814,9 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration,
 	for {
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
+		}
+		if runtime, ok := c.workOwner.(*worklifetime.RuntimeOccurrence); ok && runtime.DispatchClosed() {
+			return 0, false, nil
 		}
 		beforeScan := c.heldEntries()
 		page, err := c.store.ScanDeliveryContinuations(context.WithoutCancel(ctx), c.authority, cursor, scanPageSize)

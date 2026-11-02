@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -279,5 +280,131 @@ func TestOrdinaryDispatchStopsBeforeSelectedHandoffBothStores(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSelectedIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			root := canonicalrouting.CopyRootIngressServedSessionCleanup(t)
+			path := filepath.Join(root, "hold/schema.yaml")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = []byte(strings.Replace(string(body), "  active: {}", "  active:\n    timers:\n      - {id: selected.idle, after: 1h, advances_to: done}", 1))
+			if err := os.WriteFile(path, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			supervisors := make(chan *processLifecycleSupervisor, 1)
+			operations := make(chan string, 1)
+			var selected *selectedStoreOwner
+			var captured sync.Once
+			oldCaps := buildSelectedAPICapabilities
+			buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+				captured.Do(func() { selected = owner; supervisors <- req.RuntimeSupervisor })
+				caps, err := oldCaps(owner, req)
+				if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); ok {
+					execute := executor.ExecuteSelectedContractRunFork
+					executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+						operations <- request.ForkOperation.OperationID
+						return execute(ctx, request)
+					}
+					caps.RunFork = executor
+				}
+				return caps, err
+			}
+			t.Cleanup(func() { buildSelectedAPICapabilities = oldCaps })
+			rt := startWorkspaceLiveGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
+			supervisor := <-supervisors
+			entered, release := make(chan struct{}), make(chan struct{})
+			finish := sync.OnceFunc(func() { close(release) })
+			defer finish()
+			provider := llmapi.New(t, llmapi.Anthropic, "/v1/messages", "workspace-live-proof-key", func(req llmapi.Request) (llmapi.Reply, error) {
+				if req.Number == 2 {
+					close(entered)
+					<-release
+				}
+				return llmapi.Reply{ID: fmt.Sprint(req.Number), Model: "claude-test", Text: "Completed", InputTokens: 1, OutputTokens: 1}, nil
+			})
+			redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "item.agent_hold", "bundle_hash": rt.BundleHash, "payload": map[string]any{"note": "selected idle"}, "idempotency_key": "selected-idle-seed"})
+			waitWorkspaceProofPipelineHandoff(t, rt, seed.RunID)
+			deadline := time.Now().Add(serveRuntimeReadyTimeout)
+			for {
+				event, err := rt.Events.(operatorread.ObservabilityReader).LoadOperatorEvent(t.Context(), seed.EventID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settled := false
+				for _, delivery := range event.Deliveries {
+					settled = settled || (delivery.SubscriberType == "agent" && delivery.Status == "delivered")
+				}
+				if settled {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("source provider did not settle")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			forkDone := make(chan servedJSONRPCEnvelope, 1)
+			go func() {
+				result := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "at_start": true, "bundle_hash": rt.BundleHash, "idempotency_key": "selected-idle-fork"}, serveRuntimeStopTimeout)
+				forkDone <- result
+			}()
+			select {
+			case <-entered:
+			case result := <-forkDone:
+				t.Fatalf("selected provider not reached: %+v", result)
+			case <-time.After(serveRuntimeReadyTimeout):
+				t.Fatal("selected provider not reached")
+			}
+			family, ok := selected.RunFork()
+			if !ok {
+				t.Fatal("selected fork owner missing")
+			}
+			op, found, err := family.Operations().LoadForkOperationByID(t.Context(), <-operations)
+			if err != nil || !found || op.ForkRunID == "" {
+				t.Fatalf("selected operation: %+v found=%t err=%v", op, found, err)
+			}
+			timers := rt.Events.(pipeline.WorkflowTimerActivationPersistence)
+			var arms []pipeline.WorkflowTimerActivation
+			deadline = time.Now().Add(serveRuntimeReadyTimeout)
+			for {
+				arms, err = timers.ListWorkflowTimerActivations(t.Context(), op.ForkRunID, "", true)
+				if err != nil || time.Now().After(deadline) {
+					t.Fatalf("selected idle timer: %+v err=%v", arms, err)
+				}
+				if len(arms) == 1 {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			stopped := make(chan error, 1)
+			go func() {
+				stopped <- supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
+			}()
+			for {
+				supervisor.mu.RLock()
+				stopping := supervisor.stopping
+				supervisor.mu.RUnlock()
+				if stopping {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			finish()
+			if result := <-forkDone; result.Error != nil {
+				t.Errorf("selected accepted work: %+v", result.Error)
+			}
+			if err := <-stopped; err != nil {
+				t.Errorf("idle selected projection held process drain: %v", err)
+			}
+			arm, found, err := timers.LoadWorkflowTimerActivation(t.Context(), arms[0].Ref.ActivationID)
+			if err != nil || !found || arm.Status != "active" || !arm.FireAt.Equal(arms[0].FireAt) {
+				t.Errorf("selected idle withdrawal changed durable arm: %+v found=%t err=%v", arm, found, err)
+			}
+		})
 	}
 }
