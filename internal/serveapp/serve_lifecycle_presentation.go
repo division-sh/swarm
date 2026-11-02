@@ -228,6 +228,9 @@ func (p *serveLifecyclePresenter) writeFailureContextLocked(out io.Writer) {
 			fmt.Fprintf(out, "  store                      %s · path not applicable\n", p.store.Backend.String())
 		}
 	}
+	if p.bypassedStorePath != "" {
+		fmt.Fprintf(out, "  store mode                 scratch store; retained store %s is not used\n", p.bypassedStorePath)
+	}
 	for _, detail := range p.workspaceDetailsLocked() {
 		if detail == "not required" {
 			continue
