@@ -13,6 +13,7 @@ import (
 
 var (
 	ErrAdmissionFenced = errors.New("work admission is fenced")
+	ErrDispatchClosed  = fmt.Errorf("ordinary dispatch is closed: %w", ErrAdmissionFenced)
 	ErrRetired         = errors.New("work occurrence is retired")
 	ErrAlreadySettled  = errors.New("work lease is already settled")
 )
@@ -30,6 +31,7 @@ const (
 type gate struct {
 	mu                sync.Mutex
 	state             gateState
+	dispatchClosed    bool
 	active            uint64
 	activeTransient   uint64
 	publicCompletions uint64
@@ -110,10 +112,10 @@ func (g *gate) beginAcceptedDescendant(parent context.Context) (*Lease, error) {
 }
 
 func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor *Lease) (*Lease, error) {
-	return g.beginOwned(parent, transient, ancestor, false)
+	return g.beginOwned(parent, transient, ancestor, false, false)
 }
 
-func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Lease, publicCompletion bool) (*Lease, error) {
+func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Lease, publicCompletion, dispatch bool) (*Lease, error) {
 	if g == nil {
 		return nil, errors.New("work occurrence is required")
 	}
@@ -134,6 +136,10 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 	case gateRetired:
 		g.mu.Unlock()
 		return nil, ErrRetired
+	}
+	if dispatch && g.dispatchClosed {
+		g.mu.Unlock()
+		return nil, ErrDispatchClosed
 	}
 	if publicCompletion && g.publicCompletions >= PublicCompletionLimit {
 		g.mu.Unlock()
@@ -596,17 +602,22 @@ func NewManagerRunOccurrence(ctx context.Context, parent Occurrence, identity Ma
 // Begin admits Manager work and optionally composes the ambient standing or
 // selected-fork owner into the same exactly-once settlement.
 func (m *ManagerRunOccurrence) Begin(ctx context.Context, companion Occurrence) (*Lease, error) {
-	return m.beginClass(ctx, companion, false)
+	return m.beginClass(ctx, companion, false, false)
+}
+
+// BeginDispatch retains ordinary runtime admission before starting a delivery.
+func (m *ManagerRunOccurrence) BeginDispatch(ctx context.Context, companion Occurrence) (*Lease, error) {
+	return m.beginClass(ctx, companion, false, true)
 }
 
 // BeginStanding admits generation-long process-local work. Standing work is
 // joined by retirement but does not prevent callers from observing that all
 // finite operations admitted by the generation have completed.
 func (m *ManagerRunOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
-	return m.beginClass(ctx, nil, true)
+	return m.beginClass(ctx, nil, true, false)
 }
 
-func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurrence, standing bool) (*Lease, error) {
+func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurrence, standing, dispatch bool) (*Lease, error) {
 	if m == nil {
 		return nil, errors.New("manager run occurrence is required")
 	}
@@ -631,6 +642,8 @@ func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurre
 	var err error
 	if standing {
 		companionLease, err = companion.BeginStanding(ctx)
+	} else if runtime, ok := companion.(*RuntimeOccurrence); dispatch && ok {
+		companionLease, err = runtime.BeginDispatch(ctx)
 	} else {
 		companionLease, err = companion.Begin(ctx)
 	}
@@ -674,7 +687,7 @@ func (m *ManagerWorkOccurrence) BeginStanding(ctx context.Context) (*Lease, erro
 	if m == nil || m.manager == nil {
 		return nil, errors.New("manager work occurrence is required")
 	}
-	return m.manager.beginClass(ctx, m.companion, true)
+	return m.manager.beginClass(ctx, m.companion, true, false)
 }
 
 func (m *ManagerWorkOccurrence) Wait(ctx context.Context) error {
@@ -923,6 +936,32 @@ func (r *RuntimeOccurrence) Begin(ctx context.Context) (*Lease, error) {
 		return nil, errors.New("runtime occurrence is required")
 	}
 	return r.occurrence.begin(WithOccurrence(WithProcess(ctx, r.process), r))
+}
+
+// CloseDispatch seals fresh deliveries without retiring accepted work or the
+// context uses needed by an already-accepted selected-to-ordinary handoff.
+func (r *RuntimeOccurrence) CloseDispatch() {
+	if r != nil {
+		r.occurrence.gate.mu.Lock()
+		r.occurrence.gate.dispatchClosed = true
+		r.occurrence.gate.mu.Unlock()
+	}
+}
+
+func (r *RuntimeOccurrence) DispatchClosed() bool {
+	if r == nil {
+		return false
+	}
+	r.occurrence.gate.mu.Lock()
+	defer r.occurrence.gate.mu.Unlock()
+	return r.occurrence.gate.dispatchClosed
+}
+
+func (r *RuntimeOccurrence) BeginDispatch(ctx context.Context) (*Lease, error) {
+	if r == nil {
+		return nil, errors.New("runtime occurrence is required")
+	}
+	return r.occurrence.gate.beginOwned(WithOccurrence(WithProcess(ctx, r.process), r), true, nil, false, true)
 }
 
 // BeginAcceptedDescendant preserves already-admitted work through a shutdown

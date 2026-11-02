@@ -334,6 +334,19 @@ func (rt *Runtime) CloseAdmission() {
 	}
 }
 
+// CloseFreshDispatch preserves context custody for accepted handoffs while
+// stopping new ordinary delivery attempts and idle timer callbacks.
+func (rt *Runtime) CloseFreshDispatch() {
+	if rt != nil {
+		if rt.workOccurrence != nil {
+			rt.workOccurrence.CloseDispatch()
+		}
+		if rt.Scheduler != nil {
+			rt.Scheduler.CloseDispatch()
+		}
+	}
+}
+
 func (rt *Runtime) WorkOccurrence() *worklifetime.RuntimeOccurrence {
 	if rt == nil {
 		return nil

@@ -94,5 +94,8 @@ func (rt *Runtime) ReconcileAcknowledgedLiveFork(ctx context.Context, runID stri
 	if err != nil || !current {
 		return err
 	}
+	if rt.workOccurrence != nil && rt.workOccurrence.DispatchClosed() {
+		return nil
+	}
 	return rt.ReconcileLiveRun(ctx, runID)
 }
