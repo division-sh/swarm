@@ -71,7 +71,7 @@ func prepareAgentContent(source semanticview.Source, cfg *runtimeactors.AgentCon
 			continue
 		}
 		typ, found := source.ResolveFlowEventStructuralType(cfg.FlowID, key)
-		options := workflowexpr.ValueExpressionOptions{AllowEventAt: true}
+		options := workflowexpr.ValueExpressionOptions{}
 		if found {
 			options.PayloadType = &typ
 		}

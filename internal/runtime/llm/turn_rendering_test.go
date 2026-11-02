@@ -47,7 +47,7 @@ func TestProviderTurnRendering(t *testing.T) {
 				seed.ContentPrograms = map[string]cel.Program{string(event.Type()): program}
 			}
 			message, err := renderManagedMessage(frame, seed, event)
-			if err != nil || message.Role != "user" || message.Content != test.want || message.Name != "" {
+			if err != nil || message.Role != "user" || message.Content != test.want {
 				t.Fatalf("expression %q: message=%#v err=%v", test.expression, message, err)
 			}
 			wire, err := json.Marshal(toOpenAICompatibleMessages(message))
@@ -104,16 +104,33 @@ func TestProviderTurnRendering(t *testing.T) {
 			t.Fatal("old stored rendering changed")
 		}
 	})
-	t.Run("named Chat Completions user only", func(t *testing.T) {
-		message := Message{Role: "user", Name: "request_gate", Content: "  hello  "}
+	t.Run("speaker is projected without a participant field", func(t *testing.T) {
+		program, err := workflowexpr.PrepareAgentContentExpression("event.producer", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := workflowexpr.EvalAgentContentExpression(program, workflowexpr.ValueContext{Event: map[string]any{"producer": "request_gate"}})
+		if err != nil || value != "request_gate" {
+			t.Fatalf("producer projection = %#v, err=%v", value, err)
+		}
+		if _, err := workflowexpr.PrepareAgentContentExpression("event.producer.id", nil); err == nil {
+			t.Fatal("producer projection admitted a non-scalar reference")
+		}
+		if _, err := workflowexpr.EvalAgentContentExpression(program, workflowexpr.ValueContext{Event: map[string]any{}}); err == nil {
+			t.Fatal("producer projection invented a missing node name")
+		}
+		if err := workflowexpr.ValidateEventReferences("event.producer"); err == nil {
+			t.Fatal("agent-only producer context leaked into handler expressions")
+		}
+		message := Message{Role: "user", Content: "  hello  "}
 		wire, err := json.Marshal(toOpenAICompatibleMessages(message))
-		if err != nil || !strings.Contains(string(wire), `"name":"request_gate"`) || !strings.Contains(string(wire), `"content":"  hello  "`) {
+		if err != nil || strings.Contains(string(wire), `"name"`) || !strings.Contains(string(wire), `"content":"  hello  "`) {
 			t.Fatalf("wire=%s err=%v", wire, err)
 		}
 		for _, value := range []any{toOpenAIResponsesInputItems(message)} {
 			raw, _ := json.Marshal(value)
 			if strings.Contains(string(raw), `"name"`) {
-				t.Fatal("Chat Completions name invented on another adapter")
+				t.Fatal("participant name invented on another adapter")
 			}
 		}
 	})

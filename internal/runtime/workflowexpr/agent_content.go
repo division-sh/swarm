@@ -10,7 +10,7 @@ import (
 // The derived actor descriptor carries only the existing immutable CEL program,
 // avoiding a dependency from the core actor/frame models back to contracts.
 func PrepareAgentContentExpression(expression string, payload *contracts.ResolvedCatalogType) (cel.Program, error) {
-	_, program, err := prepareCheckedValueExpression(expression, ValueExpressionOptions{AllowEventAt: true, PayloadType: payload})
+	_, program, err := prepareCheckedValueExpression(expression, ValueExpressionOptions{AllowAgentEventContext: true, PayloadType: payload})
 	return program, err
 }
 

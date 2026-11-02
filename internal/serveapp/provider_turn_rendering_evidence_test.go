@@ -25,14 +25,17 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 )
 
-var turnRenderingCells = []string{"payload", "string", "object", "results", "read", "long", "environment", "emit_refusal", "leak_reply", "leak_error", "leak_ok"}
+var turnRenderingCells = []string{"payload", "string", "object", "results", "read", "long", "environment", "emit_refusal", "producer", "leak_reply", "leak_error", "leak_ok"}
 
 var renderingEvidenceKeyPattern = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}`)
 
 func TestProviderTurnRenderingJourneyBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			for _, cell := range turnRenderingCells[:8] {
+			for _, cell := range turnRenderingCells {
+				if strings.HasPrefix(cell, "leak_") {
+					continue
+				}
 				t.Run(cell, func(t *testing.T) { runTurnRenderingJourney(t, backend, cell, false) })
 			}
 		})
@@ -153,6 +156,22 @@ func runTurnRenderingJourney(t *testing.T, backend servedparity.Backend, cell st
 		}
 		sessionID = current
 		requireProviderEvidenceOutput(t, h, runID, inputID, sequence)
+		if cell == "producer" {
+			var output operatorread.OperatorEventListResult
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 100}, &output)
+			matches := 0
+			for _, event := range output.Events {
+				if event.SourceEventID == inputID && event.Payload["sequence"] == float64(sequence) {
+					matches++
+					if event.Payload["speaker"] != "speaker" {
+						t.Fatalf("provider did not return the projected producing node: %v", event.Payload["speaker"])
+					}
+				}
+			}
+			if matches != 1 {
+				t.Fatalf("projected-speaker outputs = %d, want 1", matches)
+			}
+		}
 		var turns operatorread.OperatorConversationTurnListResult
 		requireServedJSONRPCResult(t, h.rpcEndpoint(), "conversation.list_turns", map[string]any{"session_id": sessionID}, &turns)
 		for _, turn := range turns.Turns {
@@ -230,6 +249,10 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 		extra = "  content: payload.text\n"
 	case "object":
 		extra = "  content: |-\n    {\"text\": payload.text, \"at\": event.at}\n"
+	case "producer":
+		extra = "  content: |-\n    {\"text\": payload.text, \"speaker\": event.producer}\n"
+		intent = "For each input call emit_evidence_completed once with sequence 1 for synthetic turn 1 or sequence 2 for synthetic turn 2, and copy the input's speaker exactly into the speaker argument. Produce no prose."
+		files["worker/events.yaml"] = "evidence.completed: {sequence: integer, speaker: string}\n"
 	case "results", "leak_error":
 		extra = "  flow_data_access: [evidence.txt]\n"
 		intent = "For synthetic turn 1, first try read_flow_data with kind static_file and static_id missing, then read the allowed evidence.txt using its exact static_id from the tool schema, then emit_evidence_completed with sequence 1. For synthetic turn 2 emit sequence 2. Produce no prose."
@@ -349,8 +372,8 @@ func (b *turnRenderingBody) Read(out []byte) (int, error) {
 func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, error) {
 	var body struct {
 		Messages []struct {
-			Role, Content, Name string
-			ToolCalls           []struct {
+			Role, Content string
+			ToolCalls     []struct {
 				ID string `json:"id"`
 			} `json:"tool_calls"`
 			CallID string `json:"tool_call_id"`
@@ -360,6 +383,7 @@ func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, erro
 		return llmapi.Reply{}, err
 	}
 	sequence := 0
+	speaker := ""
 	results := 0
 	for _, message := range body.Messages {
 		if message.Role == "user" && strings.Contains(message.Content, "synthetic turn 1") {
@@ -373,12 +397,21 @@ func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, erro
 		if message.Role == "tool" {
 			results++
 		}
+		if cell == "producer" && message.Role == "user" {
+			var projected struct{ Speaker string }
+			if json.Unmarshal([]byte(message.Content), &projected) == nil {
+				speaker = projected.Speaker
+			}
+		}
 	}
 	if sequence == 0 {
 		return llmapi.Reply{}, fmt.Errorf("synthetic input lost its projected content")
 	}
 	name := "emit_evidence_completed"
 	args := map[string]any{"sequence": sequence}
+	if cell == "producer" {
+		args["speaker"] = speaker
+	}
 	if cell == "emit_refusal" && sequence == 1 && results == 0 {
 		args = map[string]any{}
 	}
@@ -427,8 +460,11 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 	seenError, seenRead, seenLong, seenOK := false, false, false, false
 	for _, pair := range r.pairs {
 		var request struct {
-			User     json.RawMessage                        `json:"user"`
-			Messages []struct{ Role, Name, Content string } `json:"messages"`
+			User     json.RawMessage `json:"user"`
+			Messages []struct {
+				Role, Content string
+				Name          json.RawMessage `json:"name"`
+			} `json:"messages"`
 		}
 		if err := json.Unmarshal(pair.Request, &request); err != nil {
 			t.Fatal("invalid recorded synthetic request")
@@ -446,8 +482,8 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 				continue
 			}
 			if message.Role == "user" {
-				if message.Name != "speaker" {
-					t.Fatalf("exact producing-node name=%q", message.Name)
+				if len(message.Name) != 0 {
+					t.Fatal("user-frame name was sent")
 				}
 				if strings.Contains(message.Content, `"routing_source"`) || strings.Contains(message.Content, `"payload_bytes_base64"`) {
 					t.Fatal("provider saw internal frame")
@@ -459,6 +495,12 @@ func (r *turnRenderingRecorder) requireRendering(t *testing.T, cell string) {
 					var content map[string]any
 					if json.Unmarshal([]byte(message.Content), &content) != nil || len(content) != 2 || content["at"] != r.eventTimes[fmt.Sprint(content["text"])] {
 						t.Fatal("object/time projection lost exact authored fields")
+					}
+				}
+				if cell == "producer" {
+					var content map[string]any
+					if json.Unmarshal([]byte(message.Content), &content) != nil || len(content) != 2 || content["speaker"] != "speaker" {
+						t.Fatal("content projection lost the exact producing-node name")
 					}
 				}
 			}
