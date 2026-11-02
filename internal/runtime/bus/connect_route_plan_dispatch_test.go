@@ -36,6 +36,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner, index runtimepipeline.FlowInstanceIndexReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
+	if source == nil {
+		return connectRoutePlanResolver{routeTable: routeTable, replyStore: replyStore}
+	}
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	return connectRoutePlanResolver{
+		routeTable: routeTable,
+		graph:      graph,
+		lifecycle:  connectInstanceSelector{source: source, plan: planner, index: index},
+		replyStore: replyStore,
+	}
+}
+
 type providerOutputAuthorizedTestSource struct {
 	semanticview.Source
 	declaringFlow  string

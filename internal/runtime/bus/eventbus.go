@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -482,7 +483,7 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 		return nil, err
 	}
 	eb.ephemeral = true
-	eb.rebuildRoutePlanners()
+	eb.rebuildRoutePlanners(eb.connectRoutePlanner.graph)
 	return eb, nil
 }
 
@@ -510,14 +511,16 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		}
 	}
 	routeTable := opts.RouteTable
-	if routeTable != nil {
-	}
+	var graph runtimepinrouting.CompiledConnectGraph
 	if routeTable == nil {
 		derived, err := DeriveRouteTable(semanticSource)
 		if err != nil {
 			return nil, err
 		}
 		routeTable = derived
+		graph = derived.connectGraph
+	} else if semanticSource != nil {
+		graph = runtimepinrouting.CompileConnectGraph(semanticSource)
 	}
 	eb := &EventBus{
 		channels:                    make(map[events.EventType]map[subscriberKey]chan *LocalDelivery),
@@ -565,7 +568,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		}
 		eb.deliveryContinuations = transfers
 	}
-	eb.rebuildRoutePlanners()
+	eb.rebuildRoutePlanners(graph)
 	return eb, nil
 }
 
@@ -596,12 +599,21 @@ func (eb *EventBus) providerOutputAuthorizationVerifier() ProviderOutputAuthoriz
 	return eb.providerOutputVerifier
 }
 
-func (eb *EventBus) rebuildRoutePlanners() {
+func (eb *EventBus) rebuildRoutePlanners(graph runtimepinrouting.CompiledConnectGraph) {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.templateInstancePlanner, eb.durable.Instances, eb.durable.ReplyContext)
-	eb.connectRoutePlanner.loadAgents = eb.activeAgentDescriptors
+	eb.connectRoutePlanner = connectRoutePlanResolver{
+		routeTable: eb.routeTable,
+		replyStore: eb.durable.ReplyContext,
+		loadAgents: eb.activeAgentDescriptors,
+	}
+	if eb.semanticSource != nil {
+		eb.connectRoutePlanner.graph = graph
+		eb.connectRoutePlanner.lifecycle = connectInstanceSelector{
+			source: eb.semanticSource, plan: eb.templateInstancePlanner, index: eb.durable.Instances,
+		}
+	}
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }
 
@@ -722,7 +734,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 		eb.mu.Unlock()
 		return errors.New("event bus reset is already in progress")
 	}
-	routeTable, err := eb.deriveBootRouteTableLocked()
+	routeTable, err := DeriveRouteTable(eb.semanticSource)
 	if err != nil {
 		eb.mu.Unlock()
 		return err
@@ -754,7 +766,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	eb.retiringAgentRoutes = nil
 	eb.retiringInternalHandles = nil
 	eb.routeTable = routeTable
-	eb.rebuildRoutePlanners()
+	eb.rebuildRoutePlanners(routeTable.connectGraph)
 	eb.notifyInternalSubscriptionChangedLocked()
 	eb.mu.Unlock()
 
@@ -1280,12 +1292,4 @@ func (eb *EventBus) removeRetiringInternalHandle(handle *internalSubscriptionHan
 			return
 		}
 	}
-}
-
-func (eb *EventBus) deriveBootRouteTableLocked() (*RouteTable, error) {
-	derived, err := DeriveRouteTable(eb.semanticSource)
-	if err != nil {
-		return nil, err
-	}
-	return derived, nil
 }

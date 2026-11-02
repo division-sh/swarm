@@ -152,7 +152,7 @@ func TestMaterializedTargetProjectionUsesExactIndexScope(t *testing.T) {
 	observed := constructionIndexObservation(t, source, event.RunID(), identity, "42")
 	reader := &unscopedConnectIndexTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observed}}}
 	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
-	bus.rebuildRoutePlanners()
+	bus.rebuildRoutePlanners(pinrouting.CompileConnectGraph(source))
 	plan := newRoutePlan(event)
 	node := testFlowNode(t, "account", "account-node")
 	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{Recipient: events.MustNodeDeliveryRecipient(node), Handler: pipeline.MustDeliveryTargetHandler(node).ForEvent("account.ready"), TargetBlueprint: events.RouteIdentity{
@@ -212,7 +212,7 @@ func TestMaterializedTargetProjectionKeepsRuntimeTargetlessOutsideConstructionSc
 	}
 	reader := &unscopedConnectIndexTestReader{}
 	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
-	bus.rebuildRoutePlanners()
+	bus.rebuildRoutePlanners(pinrouting.CompileConnectGraph(source))
 	bus.deliveryPlanner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 		return map[agentidentity.Identity]ActiveAgentDescriptor{actor: {Identity: actor}}, true, nil
 	}
