@@ -54,7 +54,11 @@ func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, 
 	sort.Strings(owners)
 	var out []Subscriber
 	for _, owner := range owners {
-		bound, err := r.routeTable.PubsubReceiverDefinitions(event.RunID(), instances[owner], keys)
+		instanceKeys := keys
+		if r.publicationFlow != "" {
+			instanceKeys = append(append([]string(nil), keys...), instances[owner].InstancePath+"/"+string(event.Type()))
+		}
+		bound, err := r.routeTable.PubsubReceiverDefinitions(event.RunID(), instances[owner], instanceKeys)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +125,11 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 			exact = append(exact, owner)
 		}
 	}
-	return pipeline.NewFlowInstanceLookupScope(r.lifecycle.source, fact, event.RunID(), nil, exact)
+	var flows []string
+	if r.publicationFlow != "" {
+		flows = []string{r.publicationFlow}
+	}
+	return pipeline.NewFlowInstanceLookupScope(r.lifecycle.source, fact, event.RunID(), flows, exact)
 }
 
 func pubsubScopeIncludes(scope pipeline.FlowInstanceLookupScope, owner flowidentity.RunScopedFlowInstance, flowID string) bool {

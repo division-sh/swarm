@@ -294,7 +294,11 @@ func ValidateReceiverMaterializations(event Event, routes []DeliveryRoute) error
 			}
 			continue
 		}
-		if err := route.Initialization.ValidateEvent(event); err != nil {
+		delivery, err := NewDeliveryEvent(event, route)
+		if err != nil {
+			return err
+		}
+		if err := route.Initialization.ValidateEvent(delivery.Event()); err != nil {
 			return err
 		}
 		if err := route.Initialization.ValidateRoute(route); err != nil {

@@ -398,44 +398,7 @@ func replaceOperatorBatchFixtureCell(t *testing.T, ctx context.Context, fixture 
 
 func corruptOperatorBatchDeliveryRun(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, deliveryID, originalRun, foreignRun string) {
 	t.Helper()
-	// Normal writes cannot create this state. Exercise read admission against a
-	// preexisting broken event/run join, restoring enforcement before leaving.
-	if fixture.dialect == "postgres" {
-		const constraint = "event_deliveries_event_id_run_id_fkey"
-		var definition string
-		if err := fixture.db.QueryRowContext(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='event_deliveries'::regclass AND conname=$1`, constraint).Scan(&definition); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := fixture.db.ExecContext(ctx, `ALTER TABLE event_deliveries DROP CONSTRAINT `+constraint); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if _, err := fixture.db.ExecContext(context.WithoutCancel(ctx), `ALTER TABLE event_deliveries ADD CONSTRAINT `+constraint+` `+definition); err != nil {
-				t.Fatal(err)
-			}
-		})
-		replaceOperatorBatchFixtureCell(t, ctx, fixture, "event_deliveries", "delivery_id", deliveryID, "run_id", foreignRun, false)
-		return
-	}
-	conn, err := fixture.db.Conn(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if _, err := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys=ON`); err != nil {
-			t.Fatal(err)
-		}
-	}()
-	if _, err := conn.ExecContext(ctx, `UPDATE event_deliveries SET run_id=$1 WHERE delivery_id=$2`, foreignRun, deliveryID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if _, err := fixture.db.ExecContext(context.WithoutCancel(ctx), `UPDATE event_deliveries SET run_id=$1 WHERE delivery_id=$2`, originalRun, deliveryID); err != nil {
-			t.Fatal(err)
-		}
-	})
+	// Bypass the native writer to exercise read admission of a foreign run.
+	// Both referenced rows still exist; only their exact owner join is corrupt.
+	replaceOperatorBatchFixtureCell(t, ctx, fixture, "event_deliveries", "delivery_id", deliveryID, "run_id", foreignRun, false)
 }

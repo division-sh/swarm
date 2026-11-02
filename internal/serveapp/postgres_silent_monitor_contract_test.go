@@ -267,7 +267,7 @@ func TestServePostgresSilentMonitorWithdrawsReadinessAndJoins(t *testing.T) {
 		t.Fatal("late healthy proof response restored generation authority")
 	}
 	if workspaceReleased.Load() == 0 {
-		t.Fatal("joined shutdown did not release workspace dependency")
+		t.Fatalf("joined shutdown did not release workspace dependency: retained runtime shutdown=%v\n%s", rt.Shutdown(), serve.outputString())
 	}
 	if err := db.PingContext(context.Background()); err == nil {
 		t.Fatal("joined shutdown left the selected database open")

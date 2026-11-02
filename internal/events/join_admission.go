@@ -42,6 +42,9 @@ func (r JoinAdmissionReceipt) Validate() error {
 }
 
 func (c DeliveryContext) Validate() error {
+	if err := validateOptionalUUID("delivery.run_id", c.RunID); err != nil {
+		return err
+	}
 	seen := make(map[string]bool, len(c.Joins))
 	for _, receipt := range c.Joins {
 		if err := receipt.Validate(); err != nil {

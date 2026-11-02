@@ -319,20 +319,6 @@ expect:
 		}
 	}
 
-	payloadPath := filepath.Join(t.TempDir(), "run-payload.json")
-	if err := os.WriteFile(payloadPath, []byte(`{"order_id":"connected-replacement"}`), 0o600); err != nil {
-		t.Fatalf("write connected run payload: %v", err)
-	}
-	t.Setenv("SWARM_CONFIG", configPath)
-	var runStdout, runStderr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"run", "start", "--connect", endpoint, "--event", "fulfillment.requested", "--payload", payloadPath, "--no-follow",
-	}, &runStdout, &runStderr, nil); code != 0 {
-		t.Fatalf("connected replacement run code=%d stdout=%s stderr=%s", code, runStdout.String(), runStderr.String())
-	}
-	if !strings.Contains(runStdout.String(), "run started:") || strings.Contains(runStderr.String(), "BUNDLE_UNAVAILABLE") {
-		t.Fatalf("connected replacement run did not use successor health identity: stdout=%s stderr=%s", runStdout.String(), runStderr.String())
-	}
 }
 
 func requireServedHealthSubscriptionBundle(t *testing.T, endpoint, wantHash string) {

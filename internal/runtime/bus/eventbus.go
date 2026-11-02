@@ -108,6 +108,7 @@ type DurableDependencies struct {
 	ScenarioSetup            ScenarioSetupCommitOwner
 	ReplyContext             runtimereplycontext.Store
 	RunLifecycle             runtimerunlifecycle.OperationOwner
+	LiveRuns                 runtimerunlifecycle.LiveRunReader
 	DeliveryLifecycle        runtimedelivery.Store
 
 	ActiveAgents ActiveAgentDescriptorLister

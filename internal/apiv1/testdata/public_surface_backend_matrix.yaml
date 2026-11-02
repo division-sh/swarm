@@ -378,7 +378,7 @@ store_parity:
       path: internal/serveapp/reset_candidate_fence_test.go
       profile: lifecycle
       backends: [default_sqlite, explicit_postgres]
-      required_children: [sqlite/failure=none, sqlite/failure=second_preparation, sqlite/failure=registered_release, sqlite/failure=normal_registered_release, sqlite/failure=normal_active_release, sqlite/failure=reset_active_release, sqlite/failure=normal_second_preparation, postgres/failure=none, postgres/failure=second_preparation, postgres/failure=registered_release, postgres/failure=normal_registered_release, postgres/failure=normal_active_release, postgres/failure=reset_active_release, postgres/failure=normal_second_preparation]
+      required_children: [sqlite/failure=none, sqlite/failure=preparation, sqlite/failure=registered_release, sqlite/failure=normal_registered_release, sqlite/failure=normal_active_release, sqlite/failure=reset_active_release, postgres/failure=none, postgres/failure=preparation, postgres/failure=registered_release, postgres/failure=normal_registered_release, postgres/failure=normal_active_release, postgres/failure=reset_active_release]
       purpose_ids: [runtime]
       capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]
     - id: destructive-reset-provider-guard

@@ -499,12 +499,13 @@ func (r ReplyContextRef) Empty() bool {
 // DeliveryContext contains route-scoped platform metadata. It is persisted
 // with one delivery route and installed only while that route executes.
 type DeliveryContext struct {
+	RunID string                 `json:"run_id,omitempty"`
 	Reply *ReplyContextRef       `json:"reply,omitempty"`
 	Joins []JoinAdmissionReceipt `json:"joins,omitempty"`
 }
 
 func (c DeliveryContext) Normalized() DeliveryContext {
-	normalized := DeliveryContext{Joins: normalizeJoinAdmissions(c.Joins)}
+	normalized := DeliveryContext{RunID: c.RunID, Joins: normalizeJoinAdmissions(c.Joins)}
 	if c.Reply == nil {
 		return normalized
 	}
@@ -517,7 +518,7 @@ func (c DeliveryContext) Normalized() DeliveryContext {
 }
 
 func (c DeliveryContext) Empty() bool {
-	return c.Normalized().Reply == nil && len(c.Joins) == 0
+	return c.RunID == "" && c.Normalized().Reply == nil && len(c.Joins) == 0
 }
 
 func (c DeliveryContext) ReplyContextID() string {
@@ -1745,6 +1746,15 @@ func (e Event) ChainDepth() int {
 
 func (e Event) RunID() string {
 	return strings.TrimSpace(e.runID)
+}
+
+// IsRunlessPlatformPublication separates a platform occurrence from each
+// subscribing flow's execution. Causal and explicitly run-scoped events remain
+// bound to their original run.
+func (e Event) IsRunlessPlatformPublication() bool {
+	return e.ProducerType() == EventProducerPlatform && e.runtimeIntent == runtimeLineageStandalone &&
+		(e.AdmissionClass() == EventAdmissionRuntimeControl || e.AdmissionClass() == EventAdmissionRuntimeDiagnostic) &&
+		e.RunID() == "" && e.ParentEventID() == ""
 }
 
 func (e Event) ParentEventID() string {

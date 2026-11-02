@@ -51,12 +51,13 @@ func TestIssue2564ServedH1ReconstructedEquivalentBothStores(t *testing.T) {
 				defer cancel()
 				provider := &issue2564H1Provider{t: t, sessions: map[string]*issue2564H1Session{}}
 				rt := issue2564H1StartServed(t, backend, issue2564H1WriteCorpus(t), provider)
+				liveRunID := requireServedLiveLandingRunID(t, rt.Endpoint, rt.BundleHash, ".")
 				seed := issue2564H1Publish(t, ctx, rt.Endpoint, map[string]any{
 					"event_name": "hub.start", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "h1-start-h01",
 				})
-				if !seed.NewRunCreated || seed.RunID == "" {
-					t.Fatalf("normal served run/construction missing: %+v", seed)
+				if seed.NewRunCreated || seed.RunID != liveRunID {
+					t.Fatalf("normal served construction escaped its live run: %+v want=%s", seed, liveRunID)
 				}
 				// Start requests, and hence actual first provider turns, are concurrent.
 				var starts sync.WaitGroup

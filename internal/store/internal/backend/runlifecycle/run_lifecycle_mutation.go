@@ -892,7 +892,12 @@ func recordRunStarted(ctx context.Context, attempt *mutationprotocol.Attempt, re
 		},
 	}
 	if attempt != nil {
-		if err := attempt.DeclareRunStart(ctx, request.RunID, request.Source.BundleHash(), request.Origin.EventID()); err != nil {
+		creatingEventID := request.Origin.EventID()
+		if scope, ok := scenarioexecution.PrivateRunScopeFromContext(ctx); ok && scope.RunID == request.RunID {
+			// The private host constructs its keyless root before publishing the origin event.
+			creatingEventID = ""
+		}
+		if err := attempt.DeclareRunStart(ctx, request.RunID, request.Source.BundleHash(), creatingEventID); err != nil {
 			return err
 		}
 		return attempt.Record(ctx, draft)
