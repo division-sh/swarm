@@ -43,9 +43,15 @@ func NativeCompactionMethod(backend, destination, model string) string {
 func ContextCompactionBudget(backend, destination, model string) (window, output int) {
 	if backend == BackendAnthropic && destination == "https://api.anthropic.com/v1/messages" {
 		switch model {
+		case "claude-sonnet-4-5", "claude-sonnet-4-5-20250929", "claude-haiku-4-5", "claude-haiku-4-5-20251001":
+			// https://platform.claude.com/docs/en/models/sonnet-4-5/overview
+			// https://platform.claude.com/docs/en/models/haiku-4-5/overview
+			return 200000, 1024
 		case "claude-3-haiku-20240307", "claude-3-5-haiku", "claude-3-5-haiku-20241022", "claude-3-5-sonnet", "claude-3-5-sonnet-20240620", "claude-3-5-sonnet-20241022", "claude-3-opus", "claude-3-opus-20240229":
 			return 200000, 1024
-		case "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5":
+		case "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
+			"claude-mythos-5-1", "claude-fable-5", "claude-mythos-5", "claude-mythos-preview", "claude-opus-5", "claude-sonnet-5":
+			// https://platform.claude.com/docs/en/build-with-claude/context-windows
 			return 1000000, 1024
 		}
 	}
