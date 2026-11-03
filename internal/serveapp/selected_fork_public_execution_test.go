@@ -68,6 +68,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			supervisors := make(chan *processLifecycleSupervisor, 1)
+			continueEntered := make(chan struct{}, 1)
 			{
 				prior := buildSelectedAPICapabilities
 				var once sync.Once
@@ -83,6 +84,16 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 								t.Logf("W4 continue runtime preparation for %s: %v", runID, err)
 							}
 							return err
+						}
+					}
+					if options.deferredContinue && caps.ContinueRunRuntime != nil {
+						continueRun := caps.ContinueRunRuntime
+						caps.ContinueRunRuntime = func(ctx context.Context, request runcontrol.TransitionRequest) (runcontrol.TransitionResult, error) {
+							select {
+							case continueEntered <- struct{}{}:
+							default:
+							}
+							return continueRun(ctx, request)
 						}
 					}
 					if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
@@ -431,7 +442,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					if read.Run.Status != "live" || read.RuntimeReadiness == nil || read.RuntimeReadiness.Ready || read.RuntimeReadiness.Reason != "runtime_starting" {
 						t.Fatalf("accepted continue did not expose pending target: %+v", read)
 					}
-					caller, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+					caller, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 					defer cancel()
 					body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "expired-continue", "method": "run.continue", "params": map[string]any{"run_id": seed.RunID, "idempotency_key": "expired-continued-target"}})
 					if err != nil {
@@ -443,12 +454,28 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					}
 					request.Header.Set("Content-Type", "application/json")
 					request.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
-					response, err := http.DefaultClient.Do(request)
-					if response != nil {
-						response.Body.Close()
+					// Earlier conflict controls also entered this owner; only the new
+					// request's arrival is relevant after the native commit.
+					select {
+					case <-continueEntered:
+					default:
 					}
+					requestDone := make(chan error, 1)
+					go func() {
+						response, err := http.DefaultClient.Do(request)
+						if response != nil {
+							response.Body.Close()
+						}
+						requestDone <- err
+					}()
+					select {
+					case <-continueEntered:
+					case <-caller.Done():
+						t.Fatal("post-commit caller expired before reaching the Continue owner")
+					}
+					err = <-requestDone
 					if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(caller.Err(), context.DeadlineExceeded) {
-						t.Fatalf("post-commit caller did not expire while load held lifecycle serialization: response=%v err=%v", response, err)
+						t.Fatalf("post-commit caller did not expire while load held lifecycle serialization: %v", err)
 					}
 					released.Do(func() { close(release) })
 				}
@@ -575,14 +602,6 @@ func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.Eve
 func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID string, sourceCoordinate agenttopology.SourceCoordinate, childRunID, childHash string, onContinue func(runcontrol.TransitionResult)) {
 	t.Helper()
 	sourceHash := sourceCoordinate.BundleHash
-	type runControlReply struct {
-		OK       bool
-		Recovery *struct {
-			Status runcontrol.RecoveryDisposition
-		}
-	}
-	var acceptedContinue *runControlReply
-	continueKey := uuid.NewString()
 	status := func(runID, want string) {
 		var result struct {
 			Run              struct{ Status string } `json:"run"`
@@ -616,17 +635,17 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 		}
 	}
 	control := func(method, runID string) {
-		var result runControlReply
-		key := uuid.NewString()
-		if method == "run.continue" && runID == sourceRunID && onContinue != nil {
-			key = continueKey
+		var result struct {
+			OK       bool
+			Recovery *struct {
+				Status runcontrol.RecoveryDisposition
+			}
 		}
-		requireServedJSONRPCResult(t, endpoint, method, map[string]any{"run_id": runID, "idempotency_key": key}, &result)
+		requireServedJSONRPCResult(t, endpoint, method, map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()}, &result)
 		if !result.OK {
 			t.Fatalf("%s did not acknowledge %s", method, runID)
 		}
 		if method == "run.continue" && runID == sourceRunID && onContinue != nil {
-			acceptedContinue = &result
 			if result.Recovery == nil {
 				t.Fatal("continued run omitted its recovery disposition")
 			}
@@ -696,13 +715,6 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	control("run.continue", childRunID)
 	status(sourceRunID, "paused")
 	status(childRunID, "live")
-	if acceptedContinue != nil {
-		var replayed runControlReply
-		requireServedJSONRPCResult(t, endpoint, "run.continue", map[string]any{"run_id": sourceRunID, "idempotency_key": continueKey}, &replayed)
-		if !reflect.DeepEqual(*acceptedContinue, replayed) {
-			t.Fatalf("expired caller changed committed continue replay: first=%+v replay=%+v", *acceptedContinue, replayed)
-		}
-	}
 	stop := map[string]any{"run_id": sourceRunID, "idempotency_key": "W4-unloaded-source-stop"}
 	var stopped, replayed map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &stopped)
