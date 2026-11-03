@@ -121,6 +121,7 @@ func acquireContinuedMemory(ctx context.Context, acquirer LiveSessionAcquirer, s
 		}
 		session.ID = lease.SessionID
 		session.Messages = append([]Message(nil), hydrated.Messages...)
+		session.ContextCheckpoints = cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints)
 		session.TurnCount = hydrated.TurnCount
 		session.Watchdog = hydrated.Watchdog
 		session.RetryReason = hydrated.RetryReason

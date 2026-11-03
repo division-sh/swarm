@@ -598,5 +598,14 @@ func decodeLiveConversationRecord(identity agentmemory.Identity, sessionID, stat
 	if err := json.Unmarshal(rawMessages, &record.Messages); err != nil {
 		return runtimellm.ConversationRecord{}, fmt.Errorf("decode exact live session conversation: %w", err)
 	}
+	var privateState struct {
+		ContextCheckpoints []runtimellm.ContextCompactionCheckpoint `json:"context_checkpoints"`
+	}
+	if len(runtimeStateRaw) != 0 {
+		if err := json.Unmarshal(runtimeStateRaw, &privateState); err != nil {
+			return runtimellm.ConversationRecord{}, fmt.Errorf("decode exact live session compaction state: %w", err)
+		}
+	}
+	record.ContextCheckpoints = privateState.ContextCheckpoints
 	return record, nil
 }

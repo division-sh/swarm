@@ -160,11 +160,12 @@ func (r *OpenAIResponsesRuntime) StartSession(ctx context.Context, agentID, syst
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
-		Tools:        tools,
-		Messages:     append([]Message(nil), hydrated.Messages...),
-		TurnCount:    hydrated.TurnCount,
-		Watchdog:     hydrated.Watchdog,
+		SystemPrompt:       systemPrompt,
+		Tools:              tools,
+		Messages:           append([]Message(nil), hydrated.Messages...),
+		ContextCheckpoints: cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints),
+		TurnCount:          hydrated.TurnCount,
+		Watchdog:           hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
@@ -443,8 +444,24 @@ func (r *OpenAIResponsesRuntime) persistConversation(ctx context.Context, lease 
 }
 
 func (r *OpenAIResponsesRuntime) buildRequest(s *Session, input Message, model string) (openAIResponsesRequest, error) {
-	items := make([]any, 0, len(s.Messages)+2)
-	for _, m := range s.Messages {
+	replay, err := replayContextCompaction(s, contextCompactionRoute("openai_responses", r.baseURL+"/responses"), model)
+	if err != nil {
+		return openAIResponsesRequest{}, err
+	}
+	items := make([]any, 0, len(replay.Messages)+2)
+	if len(replay.Native) != 0 {
+		if replay.Method != "openai_native" {
+			return openAIResponsesRequest{}, contextCompactionLimitation("native_checkpoint_transport_mismatch")
+		}
+		var native []json.RawMessage
+		if err := json.Unmarshal(replay.Native, &native); err != nil || len(native) == 0 {
+			return openAIResponsesRequest{}, contextCompactionLimitation("invalid_native_replay_window")
+		}
+		for _, item := range native {
+			items = append(items, item)
+		}
+	}
+	for _, m := range replay.Messages {
 		items = append(items, toOpenAIResponsesInputItems(m)...)
 	}
 	items = append(items, toOpenAIResponsesInputItems(input)...)

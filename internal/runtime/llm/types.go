@@ -209,6 +209,7 @@ type Session struct {
 	SystemPrompt         string
 	Tools                []ToolDefinition
 	Messages             []Message
+	ContextCheckpoints   []ContextCompactionCheckpoint
 	claudeState          workspace.ClaudeState
 	pendingAsync         *Message
 	adoptedFromID        string
