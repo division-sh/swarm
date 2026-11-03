@@ -154,6 +154,10 @@ func completeRunControlTransition(ctx context.Context, opts RunControlHandlerOpt
 	if err != nil {
 		return apiidempotency.Completion{}, runControlError(runID, err)
 	}
+	return runControlTransitionCompletion(result, action)
+}
+
+func runControlTransitionCompletion(result runtimeruncontrol.TransitionResult, action string) (apiidempotency.Completion, error) {
 	responseResult := runControlResult{OK: true}
 	if action == "stop" || (action == "continue" && result.Recovery.Disposition != "") {
 		recovery := &runControlRecoveryResult{Status: result.Recovery.Disposition}

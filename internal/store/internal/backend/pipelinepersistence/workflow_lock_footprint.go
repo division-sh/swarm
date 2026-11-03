@@ -157,8 +157,7 @@ func collectWorkflowPublicationFootprint(owners []flowidentity.RunScopedFlowInst
 	return preparedWorkflowPublicationFootprint{ordered: ordered, strong: strong, ready: ready, creating: creating}, nil
 }
 
-func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, footprint preparedWorkflowPublicationFootprint) error {
-	ordered, strong, ready, creating := footprint.ordered, footprint.strong, footprint.ready, footprint.creating
+func workflowFootprintRunIDs(ordered []flowidentity.RunScopedFlowInstance, creating map[string]bool) []string {
 	runIDs := make([]string, 0, len(ordered))
 	seen := make(map[string]bool)
 	for _, owner := range ordered {
@@ -168,6 +167,16 @@ func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, foot
 		}
 	}
 	sort.Strings(runIDs)
+	return runIDs
+}
+
+func workflowFootprintReadFailed(err error) bool {
+	return err != nil && !errors.Is(err, sql.ErrNoRows)
+}
+
+func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, footprint preparedWorkflowPublicationFootprint) error {
+	ordered, strong, ready := footprint.ordered, footprint.strong, footprint.ready
+	runIDs := workflowFootprintRunIDs(ordered, footprint.creating)
 	for _, runID := range runIDs {
 		if _, err := sourceadmission.LoadPostgresTx(ctx, tx, runID, false, false); err != nil {
 			return fmt.Errorf("admit prepared workflow run %s: %w", runID, err)
@@ -181,19 +190,19 @@ func acquireWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, foot
 			var id string
 			var entityType sql.NullString
 			err := tx.QueryRowContext(ctx, `SELECT entity_id, entity_type FROM flow_instances WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`, owner.RunID, owner.Route.InstancePath).Scan(&id, &entityType)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if workflowFootprintReadFailed(err) {
 				return fmt.Errorf("lock prepared workflow header %v: %w", owner, err)
 			}
 			if err == nil && entityType.Valid {
 				err := tx.QueryRowContext(ctx, `SELECT entity_id FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4 FOR UPDATE`, owner.RunID, id, owner.Route.InstancePath, entityType.String).Scan(&id)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				if workflowFootprintReadFailed(err) {
 					return fmt.Errorf("lock prepared workflow fields %v: %w", owner, err)
 				}
 			}
 		} else {
 			var id string
 			err := tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1::uuid AND instance_path=$2 FOR SHARE`, owner.RunID, owner.Route.InstancePath).Scan(&id)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if workflowFootprintReadFailed(err) {
 				return fmt.Errorf("lock prepared publication stage %v: %w", owner, err)
 			}
 		}
