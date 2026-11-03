@@ -97,25 +97,11 @@ func runMemoryConsumedProcess(t *testing.T, raw string) {
 			if err != nil {
 				return nil, err
 			}
-			deps := stores.RuntimeDeps()
-			continuations, ok := deps.CompletionStore.(runtimeeffects.CompletionContinuationStore)
-			if !ok {
-				return nil, fmt.Errorf("native completion owner has no continuation writer")
-			}
-			observed := &memoryConsumedStore{CompletionStore: deps.CompletionStore, CompletionContinuationStore: continuations, cutURL: request.CutURL}
-			credentials, err := cliapp.BuildProviderCredentialStore()
+			modelRuntime, err := newMemoryConsumedModel(stores, cfg, publisher, request.CutURL)
 			if err != nil {
 				return nil, err
 			}
-			modelRuntime, err := (runtimellm.RuntimeFactory{
-				Cfg: cfg, Sessions: deps.SessionRegistry, LiveSessions: deps.LiveSessionAcquirer, Conversations: deps.ConversationStore,
-				Events: publisher, Credentials: credentials,
-				CompletionController: runtimeeffects.NewCompletionController(deps.EffectsStore, observed, deps.CompletionHeartbeatStore, publisher).WithExecutionPosture(executionposture.Live),
-			}).Build()
-			if err != nil {
-				return nil, err
-			}
-			model.OpenAICompatibleRuntime = modelRuntime.(*runtimellm.OpenAICompatibleRuntime)
+			model.OpenAICompatibleRuntime = modelRuntime
 			return stores, nil
 		}
 	}
@@ -128,39 +114,66 @@ func runMemoryConsumedProcess(t *testing.T, raw string) {
 	}
 }
 
+func newMemoryConsumedModel(stores *selectedStoreOwner, cfg *config.Config, publisher *memoryConsumedPublisher, cutURL string) (*runtimellm.OpenAICompatibleRuntime, error) {
+	deps := stores.RuntimeDeps()
+	continuations, ok := deps.CompletionStore.(runtimeeffects.CompletionContinuationStore)
+	if !ok {
+		return nil, fmt.Errorf("native completion owner has no continuation writer")
+	}
+	observed := &memoryConsumedStore{CompletionStore: deps.CompletionStore, CompletionContinuationStore: continuations, cutURL: cutURL}
+	credentials, err := cliapp.BuildProviderCredentialStore()
+	if err != nil {
+		return nil, err
+	}
+	model, err := (runtimellm.RuntimeFactory{
+		Cfg: cfg, Sessions: deps.SessionRegistry, LiveSessions: deps.LiveSessionAcquirer, Conversations: deps.ConversationStore,
+		Events: publisher, Credentials: credentials,
+		CompletionController: runtimeeffects.NewCompletionController(deps.EffectsStore, observed, deps.CompletionHeartbeatStore, publisher).WithExecutionPosture(executionposture.Live),
+	}).Build()
+	if err != nil {
+		return nil, err
+	}
+	return model.(*runtimellm.OpenAICompatibleRuntime), nil
+}
+
 func TestProviderConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
 	if raw := os.Getenv(memoryConsumedProcessEnv); raw != "" {
 		runMemoryConsumedProcess(t, raw)
 		return
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			isolateCLIAPIConfigEnv(t)
-			unsetStoreSelectorEnv(t)
-			cut := make(chan struct{}, 1)
-			barrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				cut <- struct{}{}
-				<-r.Context().Done()
-			}))
-			t.Cleanup(barrier.Close)
-			provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "resume-key", func(request llmapi.Request) (llmapi.Reply, error) {
-				if request.Number > 2 {
-					return llmapi.Reply{}, fmt.Errorf("consumed emission was reissued")
-				}
-				if request.Number == 2 {
-					if _, err := retainedProviderToolResult(request, "consumed-reply-1", "emit_memory_replied"); err != nil {
-						return llmapi.Reply{}, err
-					}
-					if !strings.Contains(string(request.Body), "memory customer first") || !strings.Contains(string(request.Body), "memory customer next") {
-						return llmapi.Reply{}, fmt.Errorf("recovery lost a customer input")
-					}
-				}
-				arguments, _ := json.Marshal(map[string]string{"text": fmt.Sprintf("accepted memory reply %d", request.Number)})
-				return llmapi.Reply{ID: fmt.Sprintf("memory-consumed-%d", request.Number), Model: "resume-model", InputTokens: 10, OutputTokens: 3, TotalTokens: 13,
-					Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("consumed-reply-%d", request.Number), Name: "emit_memory_replied", Arguments: arguments}}}, nil
-			})
-			source := canonicalrouting.CopyRootIngressServedSessionCleanup(t)
-			writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "agents.yaml"), `load-agent:
+		t.Run(backend, func(t *testing.T) { runProviderConsumedMemoryRecovery(t, backend) })
+	}
+}
+
+func runProviderConsumedMemoryRecovery(t *testing.T, backend string) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	cut := make(chan struct{}, 1)
+	barrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cut <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(barrier.Close)
+	provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "resume-key", func(request llmapi.Request) (llmapi.Reply, error) {
+		if request.Number > 2 {
+			return llmapi.Reply{}, fmt.Errorf("consumed emission was reissued")
+		}
+		if request.Number == 2 {
+			if _, err := retainedProviderToolResult(request, "consumed-reply-1", "emit_memory_replied"); err != nil {
+				return llmapi.Reply{}, err
+			}
+			if !strings.Contains(string(request.Body), "memory customer first") || !strings.Contains(string(request.Body), "memory customer next") {
+				return llmapi.Reply{}, fmt.Errorf("recovery lost a customer input")
+			}
+		}
+		arguments, _ := json.Marshal(map[string]string{"text": fmt.Sprintf("accepted memory reply %d", request.Number)})
+		return llmapi.Reply{ID: fmt.Sprintf("memory-consumed-%d", request.Number), Model: "resume-model", InputTokens: 10, OutputTokens: 3, TotalTokens: 13,
+			Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("consumed-reply-%d", request.Number), Name: "emit_memory_replied", Arguments: arguments}}}, nil
+	})
+	source := canonicalrouting.CopyRootIngressServedSessionCleanup(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "agents.yaml"), `load-agent:
   role: load_agent
   intent: prompts/load-agent.md
   model: resume-model
@@ -168,59 +181,57 @@ func TestProviderConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
   subscriptions: [item.agent_hold]
   emit_events: [memory.replied]
 `)
-			writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "events.yaml"), "memory.replied:\n  text: text\n")
-			writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "prompts", "load-agent.md"), "On each customer input call emit_memory_replied with the required text field.\n")
-			writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "nodes.yaml"), "owner:\n  item.agent_hold:\n    advances_to: active\n  item.processed:\n    advances_to: done\n  memory.replied:\n    advances_to: active\n")
-			root := t.TempDir()
-			configPath := writeProviderResumeConfig(t, backend, "openai_compatible", root, provider.URL)
-			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(root, "credentials.json"))
-			credentials, err := runtimecredentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := credentials.Set(t.Context(), "OPENAI_COMPATIBLE_API_KEY", "resume-key"); err != nil {
-				t.Fatal(err)
-			}
-			request := memoryConsumedProcessRequest{Root: root, Source: source, ConfigPath: configPath, Backend: backend, CutURL: barrier.URL}
-			raw, _ := json.Marshal(request)
-			first := startServedCrashProcess(t, "TestProviderConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
-			endpoint := first.endpoint(t) + "/v1/rpc"
-			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, source),
-				"payload": map[string]any{"item_id": "consumed-memory"}, "idempotency_key": "consumed-memory-seed"})
-			business := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": seed.RunID, "source_event_id": seed.EventID,
-				"payload": map[string]any{"note": "memory customer first"}, "idempotency_key": "consumed-memory-first"})
-			select {
-			case <-cut:
-			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
-				t.Fatalf("native consumed-emission cut not reached:\n%s", first.output.String())
-			}
-			if err := first.kill(); err != nil {
-				t.Fatal(err)
-			}
-			request.CutURL = ""
-			raw, _ = json.Marshal(request)
-			second := startServedCrashProcess(t, "TestProviderConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
-			endpoint = second.endpoint(t) + "/v1/rpc"
-			requireProviderMemoryDelivery(t, endpoint, []string{business.EventID})
-			if len(provider.Requests()) != 1 {
-				t.Fatalf("recovery reissued provider turn: %d", len(provider.Requests()))
-			}
-			requireMemoryReplyEvents(t, endpoint, seed.RunID, 1)
-			var before operatorread.OperatorConversationListResult
-			requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": seed.RunID}, &before)
-			next := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": seed.RunID, "source_event_id": seed.EventID,
-				"payload": map[string]any{"note": "memory customer next"}, "idempotency_key": "consumed-memory-next"})
-			requireProviderMemoryDelivery(t, endpoint, []string{next.EventID})
-			requireMemoryReplyEvents(t, endpoint, seed.RunID, 2)
-			var after operatorread.OperatorConversationListResult
-			requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": seed.RunID}, &after)
-			if len(before.Conversations) != 1 || len(after.Conversations) != 1 || before.Conversations[0].SessionID != after.Conversations[0].SessionID || len(provider.Requests()) != 2 {
-				t.Fatalf("recovered memory rotated/reissued: before=%+v after=%+v requests=%d", before, after, len(provider.Requests()))
-			}
-			if err := second.stop(); err != nil {
-				t.Fatal(err)
-			}
-		})
+	writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "events.yaml"), "memory.replied:\n  text: text\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "prompts", "load-agent.md"), "On each customer input call emit_memory_replied with the required text field.\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "nodes.yaml"), "owner:\n  item.agent_hold:\n    advances_to: active\n  item.processed:\n    advances_to: done\n  memory.replied:\n    advances_to: active\n")
+	root := t.TempDir()
+	configPath := writeProviderResumeConfig(t, backend, "openai_compatible", root, provider.URL)
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(root, "credentials.json"))
+	credentials, err := runtimecredentials.NewFileStore(os.Getenv("SWARM_CREDENTIALS_FILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentials.Set(t.Context(), "OPENAI_COMPATIBLE_API_KEY", "resume-key"); err != nil {
+		t.Fatal(err)
+	}
+	request := memoryConsumedProcessRequest{Root: root, Source: source, ConfigPath: configPath, Backend: backend, CutURL: barrier.URL}
+	raw, _ := json.Marshal(request)
+	first := startServedCrashProcess(t, "TestProviderConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
+	endpoint := first.endpoint(t) + "/v1/rpc"
+	seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, source),
+		"payload": map[string]any{"item_id": "consumed-memory"}, "idempotency_key": "consumed-memory-seed"})
+	business := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": seed.RunID, "source_event_id": seed.EventID,
+		"payload": map[string]any{"note": "memory customer first"}, "idempotency_key": "consumed-memory-first"})
+	select {
+	case <-cut:
+	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
+		t.Fatalf("native consumed-emission cut not reached:\n%s", first.output.String())
+	}
+	if err := first.kill(); err != nil {
+		t.Fatal(err)
+	}
+	request.CutURL = ""
+	raw, _ = json.Marshal(request)
+	second := startServedCrashProcess(t, "TestProviderConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
+	endpoint = second.endpoint(t) + "/v1/rpc"
+	requireProviderMemoryDelivery(t, endpoint, []string{business.EventID})
+	if len(provider.Requests()) != 1 {
+		t.Fatalf("recovery reissued provider turn: %d", len(provider.Requests()))
+	}
+	requireMemoryReplyEvents(t, endpoint, seed.RunID, 1)
+	var before operatorread.OperatorConversationListResult
+	requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": seed.RunID}, &before)
+	next := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": seed.RunID, "source_event_id": seed.EventID,
+		"payload": map[string]any{"note": "memory customer next"}, "idempotency_key": "consumed-memory-next"})
+	requireProviderMemoryDelivery(t, endpoint, []string{next.EventID})
+	requireMemoryReplyEvents(t, endpoint, seed.RunID, 2)
+	var after operatorread.OperatorConversationListResult
+	requireServedJSONRPCResult(t, endpoint, "conversation.list", map[string]any{"run_id": seed.RunID}, &after)
+	if len(before.Conversations) != 1 || len(after.Conversations) != 1 || before.Conversations[0].SessionID != after.Conversations[0].SessionID || len(provider.Requests()) != 2 {
+		t.Fatalf("recovered memory rotated/reissued: before=%+v after=%+v requests=%d", before, after, len(provider.Requests()))
+	}
+	if err := second.stop(); err != nil {
+		t.Fatal(err)
 	}
 }
 
