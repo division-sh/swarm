@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
@@ -325,19 +324,7 @@ func TestPublicPublicationCreatingTurnRestartBothStores(t *testing.T) {
 func creatingTurnOrderHarness(t *testing.T, backend string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, issue2564ServedFixture)) {
 	t.Helper()
 	opts, start := issue2564ServeHarness(t, backend, issue2564H1WriteCorpus(t), false)
-	provider := &issue2564H1Provider{t: t, sessions: map[string]*issue2564H1Session{}}
-	server := httptest.NewServer(provider)
-	t.Cleanup(server.Close)
-	setDoctorProviderSecret(t, "OPENAI_COMPATIBLE_API_KEY", "issue2564-h1-proof-key")
-	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
-	config, err := os.ReadFile(opts.ConfigPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.Replace(string(config), "  backend: anthropic\n", "  backend: openai_compatible\n  openai_compatible:\n    base_url: "+server.URL+"\n", 1)
-	if text == string(config) {
-		t.Fatal("normal H1 provider config was not found")
-	}
-	writeWorkflowValidationFixtureFile(t, opts.ConfigPath, text)
+	// These roots cover creating-node order, not the separate H1 tool workload.
+	opts.TestLLMRuntime = servedNoopLLMRuntime{}
 	return opts, start
 }
