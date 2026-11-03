@@ -10,8 +10,9 @@ import (
 )
 
 type liveHeadDeclaration struct {
-	flowPath  string
-	eventName string
+	flowPath     string
+	eventName    string
+	schemaDigest string
 }
 
 // A selected fork retains its immutable construction pin. Only its live read
@@ -19,12 +20,13 @@ type liveHeadDeclaration struct {
 func (o *Owner) readRunResourceBindingTx(ctx context.Context, tx *sql.Tx, runID string, ref runtimedata.DeclarationRef) (runtimedata.SchemaDigest, runtimedata.VersionID, error) {
 	var digest, version sql.NullString
 	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT CASE WHEN r.origin_kind='fork_materialization' AND r.status='live' THEN d.schema_digest ELSE p.schema_digest END,
-		       CASE WHEN r.origin_kind='fork_materialization' AND r.status='live' THEN h.version_id ELSE p.version_id END
+		SELECT CASE WHEN r.origin_kind='fork_materialization' AND r.status='live' AND hv.schema_digest=d.schema_digest THEN d.schema_digest ELSE p.schema_digest END,
+		       CASE WHEN r.origin_kind='fork_materialization' AND r.status='live' AND hv.schema_digest=d.schema_digest THEN h.version_id ELSE p.version_id END
 		FROM runs r
 		LEFT JOIN resource_version_pins p ON p.run_id=r.run_id AND p.flow_path=%s AND p.event_name=%s
 		LEFT JOIN resource_bundle_declarations d ON d.bundle_hash=r.bundle_hash AND d.flow_path=%s AND d.event_name=%s
 		LEFT JOIN resource_heads h ON h.flow_path=d.flow_path AND h.event_name=d.event_name
+		LEFT JOIN resource_versions hv ON hv.version_id=h.version_id AND hv.flow_path=d.flow_path AND hv.event_name=d.event_name
 		WHERE r.run_id=%s
 	`, 5), ref.FlowPath, ref.EventName, ref.FlowPath, ref.EventName, runID).Scan(&digest, &version)
 	if err != nil {
@@ -52,7 +54,7 @@ func BindLiveRunHeadsTx(ctx context.Context, tx *sql.Tx, runID, bundleHash strin
 	if storedBundle != bundleHash || status != "live" {
 		return fmt.Errorf("live run data binding requires its exact active source")
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT flow_path,event_name FROM resource_bundle_declarations
+	rows, err := tx.QueryContext(ctx, `SELECT flow_path,event_name,schema_digest FROM resource_bundle_declarations
 		WHERE bundle_hash=$1 ORDER BY flow_path,event_name`, bundleHash)
 	if err != nil {
 		return fmt.Errorf("list live run data declarations: %w", err)
@@ -60,7 +62,7 @@ func BindLiveRunHeadsTx(ctx context.Context, tx *sql.Tx, runID, bundleHash strin
 	var declarations []liveHeadDeclaration
 	for rows.Next() {
 		var declaration liveHeadDeclaration
-		if err := rows.Scan(&declaration.flowPath, &declaration.eventName); err != nil {
+		if err := rows.Scan(&declaration.flowPath, &declaration.eventName, &declaration.schemaDigest); err != nil {
 			rows.Close()
 			return fmt.Errorf("read live run data declaration: %w", err)
 		}
@@ -96,6 +98,9 @@ func BindLiveRunHeadsTx(ctx context.Context, tx *sql.Tx, runID, bundleHash strin
 		if prunedAt.Valid {
 			return fmt.Errorf("live run data head references pruned version %s", versionID.String)
 		}
+		if schemaDigest != declaration.schemaDigest {
+			continue
+		}
 		if err := upsertLiveRunHeadPinTx(ctx, tx, runID, declaration, schemaDigest, versionID.String, now); err != nil {
 			return err
 		}
@@ -122,7 +127,7 @@ func advanceLiveRunHeadPinsTx(ctx context.Context, tx *sql.Tx, declaration liveH
 		(run_id,flow_path,event_name,schema_digest,version_id,selection,pinned_at)
 		SELECT r.run_id,$1,$2,$3,$4,'explicit',$5 FROM runs r
 		JOIN resource_bundle_declarations d ON d.bundle_hash=r.bundle_hash
-			AND d.flow_path=$1 AND d.event_name=$2
+			AND d.flow_path=$1 AND d.event_name=$2 AND d.schema_digest=$3
 		WHERE r.origin_kind='deployment' AND r.status='live'
 			AND NOT EXISTS (SELECT 1 FROM resource_run_creation_operations c WHERE c.run_id=r.run_id)
 		ON CONFLICT (run_id,flow_path,event_name) DO UPDATE SET
