@@ -131,17 +131,18 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T) {
+func TestRun_RejectsHandlerLevelFanOutCountWrites(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		mutate func(*runtimecontracts.SystemNodeEventHandler, *runtimecontracts.WorkflowContractBundle)
+		name      string
+		mutate    func(*runtimecontracts.SystemNodeEventHandler, *runtimecontracts.WorkflowContractBundle)
+		ruleLevel bool
 	}{
 		{
 			name: "direct write",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
 					{TargetRef: "state.line_items", Value: runtimecontracts.CELExpression("payload.line_items")},
-					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					{TargetField: "observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}
 			},
 		},
@@ -150,9 +151,32 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
 					{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "state.line_items", Value: runtimecontracts.LiteralExpression(map[string]any{"id": "later"})},
-					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					{TargetField: "observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}
 			},
+		},
+		{
+			name: "count without source mutation",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+				handler.FanOut.ItemsFrom = "payload.line_items"
+				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
+					{TargetField: "observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				}
+			},
+		},
+		{
+			name: "rule-level count",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+				handler.FanOut.ItemsFrom = "payload.line_items"
+				handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+					FanOut: handler.FanOut,
+					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+						{TargetField: "observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					}},
+				}}
+				handler.FanOut = nil
+			},
+			ruleLevel: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,9 +189,15 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 				}},
 			}
 			bundle := fanOutValidationBundle(spec)
+			bundle.Platform.Platform.Name = "r84-count-write"
+			bundle.Platform.Platform.Version = "1.0.0"
+			input := bundle.Events["order.accepted"]
+			input.Payload.Required = []string{"line_items"}
+			bundle.Events["order.accepted"] = input
 			bundle.RootEntities = runtimecontracts.EntityContractsDocument{
 				"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
-					"line_items": {Type: "[LineItem]"},
+					"line_items":     {Type: "[LineItem]", Initial: []any{}},
+					"observed_count": {Type: "integer"},
 				}},
 			}
 			node := bundle.Nodes["dispatcher"]
@@ -179,8 +209,13 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			completeBootverifyFanOutFixture(t, bundle, "dispatcher", "order.accepted")
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			if !reportContains(report.HardInvalidities(), fanOutValidationCheckID, "mutates fan_out.items_from and a same-handler data write references fan_out.count") {
-				t.Fatalf("missing source/count cycle invalidity: %#v", report.HardInvalidities())
+			if tc.ruleLevel {
+				if reportContains(report.HardInvalidities(), fanOutValidationCheckID, "") {
+					t.Fatalf("rule-level count write refused: %#v", report.HardInvalidities())
+				}
+			} else if !reportContains(report.HardInvalidities(), fanOutValidationCheckID, "handler-level data write references fan_out.count before fan_out") ||
+				!reportContains(report.HardInvalidities(), fanOutValidationCheckID, "rule-level data_accumulation") {
+				t.Fatalf("missing handler-level count refusal/teaching: %#v", report.HardInvalidities())
 			}
 		})
 	}
