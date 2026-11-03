@@ -106,6 +106,9 @@ func (am *AgentManager) agentAttachment(identity agentidentity.Identity, require
 	am.dynamicFlowReadinessMu.Lock()
 	defer am.dynamicFlowReadinessMu.Unlock()
 	for key, active := range am.dynamicFlowActiveAttempts {
+		if required != nil && am.dynamicFlowReadinessAttempts[key] == required && active != nil {
+			log.Printf("S2_READINESS_OWNER key=%+v identity=%+v actor=%+v route_matches=%t complete=%t retiring=%t retirement_kind=%d locally_retired=%t pending=%t successor=%t executor_ordinal=%d receipt_ordinal=%d executor_hash=%s active_hash=%s", key, active.identity, identity, active.identity.MatchesAgentRoute(identity), active.complete, active.retiring, active.retirementKind, active.locallyRetired, active.pending != nil, required.successorRequired, required.attemptOrdinal, active.receipt.Ordinal(), required.planHash, active.planHash)
+		}
 		if active == nil || !active.identity.MatchesAgentRoute(identity) {
 			continue
 		}
