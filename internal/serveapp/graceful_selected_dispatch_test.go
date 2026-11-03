@@ -149,6 +149,7 @@ func TestOrdinaryDispatchStopsBeforeSelectedHandoffBothStores(t *testing.T) {
 				})
 				redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "item.received", "bundle_hash": rt.BundleHash, "payload": map[string]any{"item_id": "stop"}, "idempotency_key": "dispatch-seed"})
+				waitSelectedSourceNodeDelivered(t, rt.Events.(operatorread.ObservabilityReader), seed.EventID)
 				publish := func(name, key string) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": name, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"note": key}, "idempotency_key": key})
 				}
@@ -350,7 +351,7 @@ func TestSelectedForkIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
 			}
 			forkDone := make(chan servedJSONRPCEnvelope, 1)
 			go func() {
-				result := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "at_start": true, "bundle_hash": rt.BundleHash, "idempotency_key": "selected-idle-fork"}, serveRuntimeStopTimeout)
+				result := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": seed.EventID, "bundle_hash": rt.BundleHash, "idempotency_key": "selected-idle-fork"}, serveRuntimeStopTimeout)
 				forkDone <- result
 			}()
 			select {
@@ -406,5 +407,34 @@ func TestSelectedForkIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
 				t.Errorf("selected idle withdrawal changed durable arm: %+v found=%t err=%v", arm, found, err)
 			}
 		})
+	}
+}
+
+func waitSelectedSourceNodeDelivered(t *testing.T, reader operatorread.ObservabilityReader, eventID string) {
+	t.Helper()
+	deadline := time.Now().Add(serveRuntimeReadyTimeout)
+	for {
+		event, err := reader.LoadOperatorEvent(t.Context(), eventID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen, pending := false, false
+		for _, delivery := range event.Deliveries {
+			if delivery.SubscriberType != "node" {
+				continue
+			}
+			seen = true
+			if delivery.Terminal && delivery.Status != "delivered" {
+				t.Fatalf("selected source seed failed before fork: %+v", delivery)
+			}
+			pending = pending || delivery.Status != "delivered"
+		}
+		if seen && !pending {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("selected source seed did not settle before fork: %+v", event.Deliveries)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

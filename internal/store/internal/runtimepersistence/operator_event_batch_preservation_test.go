@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -303,12 +304,20 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 				assertOperatorBatchScalarEqual(t, got.Events[0], want)
 			})
 			t.Run("cross_run_delivery_must_not_disappear_in_join", func(t *testing.T) {
-				corruptOperatorBatchDeliveryRun(t, ctx, fixture, queuedID, runID, foreignRun)
-				if _, err := store.LoadOperatorEvent(ctx, event.ID()); err == nil {
-					t.Fatal("scalar accepted cross-run delivery")
+				_, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET run_id=$1 WHERE delivery_id=$2`, foreignRun, queuedID)
+				if err == nil || !strings.Contains(err.Error(), "event delivery run identity mismatch") {
+					t.Fatalf("native owner accepted cross-run delivery: %v", err)
 				}
-				page, err := store.ListOperatorEvents(ctx, unfiltered)
-				assertOperatorBatchRefused(t, page, err)
+				got, err := store.LoadOperatorEvent(ctx, event.ID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertOperatorBatchScalarEqual(t, got, page.Events[0])
+				listed, err := store.ListOperatorEvents(ctx, unfiltered)
+				if err != nil || len(listed.Events) != 1 {
+					t.Fatalf("refused cross-run write changed batch membership: %+v err=%v", listed, err)
+				}
+				assertOperatorBatchScalarEqual(t, listed.Events[0], page.Events[0])
 			})
 			t.Run("missing_routes_are_not_no_delivery", func(t *testing.T) {
 				// Moving both rows preserves their real evidence but removes event membership.
@@ -394,11 +403,4 @@ func replaceOperatorBatchFixtureCell(t *testing.T, ctx context.Context, fixture 
 	}
 	write(value)
 	t.Cleanup(func() { write(original) })
-}
-
-func corruptOperatorBatchDeliveryRun(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, deliveryID, originalRun, foreignRun string) {
-	t.Helper()
-	// Bypass the native writer to exercise read admission of a foreign run.
-	// Both referenced rows still exist; only their exact owner join is corrupt.
-	replaceOperatorBatchFixtureCell(t, ctx, fixture, "event_deliveries", "delivery_id", deliveryID, "run_id", foreignRun, false)
 }
