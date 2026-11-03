@@ -126,12 +126,13 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 			}
 			constructor := request.Constructor
 			constructor.Instance = observation.Identity()
+			constructor.Restart = &FlowInstanceRestart{Life: instance.Life, Revision: instance.Revision, FinalStage: stage}
 			plan, err := planner.PrepareFlowInstanceActivation(ctx, constructor)
 			if err != nil {
 				return FlowInstanceSelection{}, err
 			}
-			if plan.Identity != observation.Identity() {
-				return FlowInstanceSelection{}, fmt.Errorf("instance restart changed its observed identity")
+			if plan.Identity != observation.Identity() || plan.Restart == nil || *plan.Restart != *constructor.Restart || plan.Instance.Life != instance.Life+1 {
+				return FlowInstanceSelection{}, fmt.Errorf("instance restart changed its observed identity or prepared life")
 			}
 			readiness, present := observation.Readiness()
 			if !present {
@@ -139,13 +140,11 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 			}
 			// Restart is another life of this physical instance, not another
 			// birth or another construction of its existing descendants.
-			plan.Instance.Life = instance.Life + 1
 			plan.Instance.CreatedAt = instance.CreatedAt
 			plan.Instance.TemplateVersion = instance.TemplateVersion
 			plan.Instance.Status = instance.Status
 			plan.Readiness = readiness.Plan
 			plan.Children = nil
-			plan.Restart = &FlowInstanceRestart{Life: instance.Life, Revision: instance.Revision, FinalStage: stage}
 			if err := plan.Validate(); err != nil {
 				return FlowInstanceSelection{}, err
 			}

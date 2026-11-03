@@ -67,7 +67,7 @@ func prospectiveSelectionObservation(t *testing.T) (FlowInstanceLookupRequest, F
 		WorkflowName: "worker", WorkflowVersion: source.WorkflowVersion(), Mode: flow.EffectiveMode(), Status: "active",
 		InstanceID: child.InstanceID, StorageRef: child.InstancePath, EntityID: child.EntityID, EntityType: "state",
 		ParentFlowID: parent.TemplateID, ParentFlowInstance: parent.InstancePath, ParentEntityID: parent.EntityID,
-		InstanceKey: "business-key", CurrentState: "open", Revision: 1, CreatedAt: at, UpdatedAt: at,
+		InstanceKey: "business-key", CurrentState: "open", Life: 1, Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := FlowConstructionPublicationEvidence{Identity: child, InstanceKey: instance.InstanceKey, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash()}

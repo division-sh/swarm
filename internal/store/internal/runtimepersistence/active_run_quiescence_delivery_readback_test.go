@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -41,7 +42,8 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				runID, events.EventEnvelope{}, now,
 			)
 			identity := mustTestAgentIdentityForRun(runID, "agent-a", "quiescence/instance-a")
-			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}
+			life := events.InstanceLife{RunID: runID, FlowInstance: "quiescence/instance-a", Life: 1}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity, Context: events.DeliveryContext{Life: &life}}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit active-run delivery: %v", err)
 			}
@@ -52,6 +54,37 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			if claimed.Snapshot.Status != runtimedelivery.StatusInProgress {
 				t.Fatalf("claimed status = %q, want in_progress", claimed.Snapshot.Status)
 			}
+			assertLifeScope := func(scope events.InstanceLife, want int) {
+				t.Helper()
+				var rows []runtimedelivery.Snapshot
+				read := func(ctx context.Context, tx *sql.Tx) error {
+					var err error
+					switch owner := fixture.store.(type) {
+					case *PostgresStore:
+						rows, err = owner.deliveryPostgresOwner.ReadActiveInstanceLifeDeliveriesTx(ctx, tx, scope)
+					case *SQLiteRuntimeStore:
+						rows, err = owner.deliverySQLiteOwner.ReadActiveInstanceLifeDeliveriesTx(ctx, tx, scope)
+					}
+					return err
+				}
+				var err error
+				switch owner := fixture.store.(type) {
+				case *PostgresStore:
+					err = owner.backend.RunReadTransaction(ctx, read)
+				case *SQLiteRuntimeStore:
+					err = owner.backend.RunReadTransaction(ctx, read)
+				}
+				if err != nil || len(rows) != want || want == 1 && rows[0].DeliveryID != claimed.Snapshot.DeliveryID {
+					t.Fatalf("instance-life active delivery scope=%+v rows=%+v want=%d err=%v", scope, rows, want, err)
+				}
+			}
+			assertLifeScope(life, 1)
+			nextLife := life
+			nextLife.Life++
+			assertLifeScope(nextLife, 0)
+			siblingLife := life
+			siblingLife.FlowInstance = "quiescence/instance-b"
+			assertLifeScope(siblingLife, 0)
 			dryRun, err := selected.ApplyActiveRunQuiescence(ctx, runtimerunquiescence.Request{
 				OperationName: "test_active_run_delivery_quiescence_dry_run",
 				DryRun:        true,
@@ -87,6 +120,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			if len(result.Deliveries) != 1 || !result.Deliveries[0].Changed {
 				t.Fatalf("quiesced deliveries = %#v, want one changed delivery", result.Deliveries)
 			}
+			assertLifeScope(life, 0)
 
 			reason, quiesced, err := selected.ActiveRunDeliveryQuiesced(ctx, eventID, route)
 			if err != nil || !quiesced || reason != runtimerunquiescence.ServeAbandonReasonCode {
