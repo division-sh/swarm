@@ -188,7 +188,7 @@ func TestInMemoryRegistryRotateGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	rotated, err := sr.Rotate(context.Background(), lease, RotationMetadata{CheckpointSummary: "checkpoint", RetryReason: "provider history invalid"})
+	rotated, err := sr.Rotate(context.Background(), lease, RotationMetadata{RetryReason: "provider history invalid"})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}

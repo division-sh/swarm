@@ -25,7 +25,6 @@ func TestSwarmTestUsesCompleteDeploymentLLMConfig(t *testing.T) {
     regular: {openai_compatible: configured-model}
   session:
     lock_ttl: 17s
-    rotate_after_turns: 19
     rotate_on_parse_failures: 2
   provider_limits:
     openai_compatible:

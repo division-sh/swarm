@@ -21,7 +21,7 @@ func TestRuntimeConfigRecoveryDefaultsWithoutExecutionSelector(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "swarm.yaml")
-			source := tc.source + "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n"
+			source := tc.source + "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_on_parse_failures: 3\n"
 			if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -127,7 +127,7 @@ func TestRuntimeConfigUnknownKeyDiagnosticNamesFileVocabularyAndSuggestion(t *te
 }
 
 func TestRuntimeConfigAdmitsSourceBeforeOverrides(t *testing.T) {
-	const prefix = "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n"
+	const prefix = "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_on_parse_failures: 3\n"
 	for _, row := range []struct{ source, key string }{
 		{"totally_unknown: true", "totally_unknown"},
 		{"<<: {totally_unknown: null}", "totally_unknown"},

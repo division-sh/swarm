@@ -506,7 +506,6 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -529,7 +528,6 @@ func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend s
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n")
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {

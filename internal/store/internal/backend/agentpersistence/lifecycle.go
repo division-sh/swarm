@@ -888,8 +888,8 @@ func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req 
 	mutation.SuccessorSessionID = runtimesessions.LifecycleSuccessorSessionID(req.OperationID, row.SessionID)
 	mutation.SuccessorStatus = row.Status
 	runtimeState, err := json.Marshal(map[string]any{
-		"summary": req.Subordinate.CheckpointSummary, "retries_from_session_id": row.SessionID,
-		"rotation_operation_id": req.OperationID,
+		"retries_from_session_id": row.SessionID,
+		"rotation_operation_id":   req.OperationID,
 	})
 	if err != nil {
 		return mutation, err
@@ -971,8 +971,8 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 			mutation.SuccessorSessionID = runtimesessions.LifecycleSuccessorSessionID(req.OperationID, row.SessionID)
 			mutation.SuccessorStatus = row.Status
 			runtimeState, err := json.Marshal(map[string]any{
-				"summary": req.Subordinate.CheckpointSummary, "retries_from_session_id": row.SessionID,
-				"rotation_operation_id": req.OperationID,
+				"retries_from_session_id": row.SessionID,
+				"rotation_operation_id":   req.OperationID,
 			})
 			if err != nil {
 				return outcome, err

@@ -64,7 +64,7 @@ func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs 
 		Models: llmselection.ModelAliases{llmselection.ModelAliasRegular: {
 			llmselection.BackendOpenAICompatible: "gpt-selected-external-proof",
 		}},
-		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateOnParseFailures: 3},
 	}}
 	if len(providerURLs) == 0 {
 		return newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle), notifyAllChildrenRuntimeOptions{ordinaryConfig: cfg})

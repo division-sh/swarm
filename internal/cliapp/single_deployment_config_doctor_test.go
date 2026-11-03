@@ -39,7 +39,7 @@ func TestSingleDeploymentConfigDoctorReportsOneSource(t *testing.T) {
 					case "malformed":
 						body, admitted = "llm: [\n", false
 					case "runtime_invalid":
-						body, admitted = "llm:\n  session:\n    rotate_after_turns: 0\n", false
+						body, admitted = "llm:\n  session:\n", false
 					case "inspection_loop":
 						loop := filepath.Join(root, "loop")
 						if err := os.Symlink("loop", loop); err != nil {
@@ -182,7 +182,7 @@ func TestSingleDeploymentConfigDoctorUnreadProjectNotice(t *testing.T) {
 func TestSingleDeploymentConfigDoctorRefusesLaterInvalidDelegation(t *testing.T) {
 	for _, body := range []string{
 		"llm:\n  backend: unsupported_backend\n",
-		"llm:\n  session:\n    rotate_after_turns: 0\n",
+		"llm:\n  session:\n",
 		"connection:\n  api_server: [not, text]\n",
 	} {
 		t.Run(body, func(t *testing.T) {
@@ -264,13 +264,13 @@ func TestSingleDeploymentConfigDoctorDefaultsTextIsCompact(t *testing.T) {
 func TestSingleDeploymentConfigDoctorRuntimeBlockerNamesDocumentLocation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	selected := filepath.Join(t.TempDir(), "operator.yaml")
-	writeSingleDeploymentConfig(t, selected, "llm:\n  session:\n    rotate_after_turns: 0\n")
+	writeSingleDeploymentConfig(t, selected, "llm:\n  session:\n    lock_ttl: -1s\n")
 	loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: t.TempDir(), ExplicitPath: selected})
 	if err == nil || loaded.validated {
 		t.Fatalf("invalid runtime config was admitted: %v", err)
 	}
 	for _, diagnostic := range loaded.Diagnostics {
-		if diagnostic.Kind == unifiedConfigDiagnosticValidationFailed && strings.Contains(diagnostic.Message, "llm.session.rotate_after_turns") {
+		if diagnostic.Kind == unifiedConfigDiagnosticValidationFailed && strings.Contains(diagnostic.Message, "llm.session.lock_ttl") {
 			if diagnostic.Path != selected || diagnostic.Line < 1 || diagnostic.Column < 1 || !strings.Contains(diagnostic.Message, selected+":1:1:") {
 				t.Fatalf("runtime blocker lost selected document location: %+v", diagnostic)
 			}
@@ -323,7 +323,7 @@ func TestSingleDeploymentConfigDoctorTargetOmitsUninspectedFacts(t *testing.T) {
 				case "malformed":
 					body = "llm: [\n"
 				case "runtime_invalid":
-					body = "llm:\n  session:\n    rotate_after_turns: 0\n"
+					body = "llm:\n  session:\n"
 				case "shape_invalid":
 					body = "connection:\n  api_server: [not, text]\n"
 				case "null_container":

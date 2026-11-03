@@ -382,14 +382,11 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, leaseInput *runtimesessio
 		`, currentID, rotation.TerminationReason.String(), retryReason, now); err != nil {
 				return err
 			}
-			runtimeState, err := json.Marshal(map[string]any{"summary": rotation.CheckpointSummary, "retry_reason": retryReason, "retries_from_session_id": currentID})
+			runtimeState, err := json.Marshal(map[string]any{"retry_reason": retryReason, "retries_from_session_id": currentID})
 			if err != nil {
 				return err
 			}
-			conversation, err := json.Marshal(runtimellm.RotationCheckpointConversation(rotation.CheckpointSummary))
-			if err != nil {
-				return err
-			}
+			conversation := []byte("[]")
 			expires := now.Add(s.postgresSessionLockTTL()).Truncate(time.Microsecond)
 			newGrantID := uuid.NewString()
 			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, GrantID: newGrantID, ExpiresAt: expires}

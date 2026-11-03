@@ -94,7 +94,6 @@ func testRuntimeConfig() *config.Config {
 			Backend: "anthropic",
 			Session: config.LLMSessionConfig{
 				LockTTL:               30 * time.Second,
-				RotateAfterTurns:      8,
 				RotateOnParseFailures: 2,
 			},
 			Models: map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-haiku"}},

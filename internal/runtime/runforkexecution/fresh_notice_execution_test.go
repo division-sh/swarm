@@ -99,7 +99,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 				AgentRuntime: SelectedContractAgentRuntimeOptions{
 					ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability, Workspace: manager, MailboxStore: selected,
 					Config: &config.Config{LLM: config.LLMConfig{Backend: selection.BackendClaudeCLI,
-						Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3}}},
+						Session: config.LLMSessionConfig{LockTTL: time.Second, RotateOnParseFailures: 3}}},
 				},
 			})
 			if err != nil || result.SelectedContractExecutionAdmission == nil || result.Materialization.ForkRunID == "" {

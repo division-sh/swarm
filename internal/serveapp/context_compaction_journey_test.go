@@ -69,7 +69,7 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 				opts.StoreMode, opts.StoreModeSet = "postgres", true
 				storeConfig = ""
 			}
-			configuration := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: anthropic\n  models:\n    regular: {anthropic: %s}\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, model)
+			configuration := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: anthropic\n  models:\n    regular: {anthropic: %s}\n  session:\n    lock_ttl: 10s\n    rotate_on_parse_failures: 3\n", storeConfig, model)
 			if err := os.WriteFile(opts.ConfigPath, []byte(withTestProviderTriggerPlatformInventory(t, configuration)), 0o600); err != nil {
 				t.Fatal(err)
 			}

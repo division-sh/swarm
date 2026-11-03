@@ -36,7 +36,6 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  backend: claude_cli",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 		"  claude_cli:",
 		"    command: true",
@@ -98,7 +97,6 @@ func TestValidatePlatformPackDirs(t *testing.T) {
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")
 
@@ -209,7 +207,6 @@ func validDatabasePasswordConfig() *Config {
 			Backend: "claude_cli",
 			Session: LLMSessionConfig{
 				LockTTL:               time.Second,
-				RotateAfterTurns:      1,
 				RotateOnParseFailures: 1,
 			},
 			ClaudeCLI: ClaudeCLIConfig{
@@ -230,7 +227,6 @@ func TestLoad_RejectsRetiredWorkspaceDataSourceEvenWhenBlank(t *testing.T) {
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
 	var cfg Config
@@ -250,7 +246,6 @@ func TestLoad_PreservesWorkspaceBackendPresence(t *testing.T) {
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
 	var cfg Config
@@ -272,7 +267,6 @@ func TestValidate_RejectsInvalidBackend(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "bogus"
 	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error")
@@ -285,7 +279,6 @@ func TestValidate_RejectsLegacyBackendIDsForNewConfig(t *testing.T) {
 			c := &Config{Runtime: RuntimeConfig{}}
 			c.LLM.Backend = backend
 			c.LLM.Session.LockTTL = time.Second
-			c.LLM.Session.RotateAfterTurns = 1
 			c.LLM.Session.RotateOnParseFailures = 1
 			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported llm backend profile") {
 				t.Fatalf("Validate error = %v, want legacy backend rejection", err)
@@ -298,7 +291,6 @@ func TestValidate_RejectsReservedActiveBackend(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "local"
 	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("Validate error = %v, want reserved backend rejection", err)
@@ -309,7 +301,6 @@ func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "openai_compatible"
 	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "llm.openai_compatible.base_url") {
 		t.Fatalf("Validate error = %v, want openai-compatible base url requirement", err)
@@ -327,7 +318,6 @@ func TestValidate_OpenAIResponsesUsesProfileOwnedDefaultAndOverride(t *testing.T
 	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "openai_responses"
 	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
 	if err := c.Validate(); err != nil {
 		t.Fatalf("Validate with built-in OpenAI Responses base URL: %v", err)
@@ -353,7 +343,6 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "claude_cli"
 	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
 	c.LLM.ClaudeCLI.Command = ""
 	c.LLM.ClaudeCLI.OutputFormat = "text"
@@ -369,7 +358,6 @@ func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 		"budget:",
 		"  human_tasks: oops",
@@ -385,7 +373,6 @@ func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "anthropic"
 	c.LLM.Session.LockTTL = 1 * time.Second
-	c.LLM.Session.RotateAfterTurns = 1
 	c.LLM.Session.RotateOnParseFailures = 1
 	c.Runtime.MaxConcurrentAgents = 2
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "runtime.max_concurrent_agents") {
@@ -407,7 +394,6 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 				Backend: "anthropic",
 				Session: LLMSessionConfig{
 					LockTTL:               time.Second,
-					RotateAfterTurns:      1,
 					RotateOnParseFailures: 1,
 				},
 			},
@@ -520,7 +506,6 @@ func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 		"sharding:",
 		"  max_shards_per_job: 4",

@@ -71,6 +71,7 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 		{"llm.claude_cli.retries", "timeout"},
 		{"llm.claude_cli.no_session_persistence", "command"},
 		{"llm.claude_cli.use_tmux", "output_format"},
+		{"llm.session.rotate_after_turns", "lock_ttl"},
 		{"paths.agent_config_map_file", "swarm_dir"},
 		{"paths.verification_gates_file", "monitor_dir"},
 		{"paths.tooling_lock_file", "swarm_dir"},

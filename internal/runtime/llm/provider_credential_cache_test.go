@@ -62,7 +62,7 @@ func credentialCacheRuntime(t *testing.T, backend, baseURL string, registry sess
 	t.Helper()
 	cfg := &config.Config{LLM: config.LLMConfig{
 		Backend:          backend,
-		Session:          config.LLMSessionConfig{LockTTL: time.Minute, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		Session:          config.LLMSessionConfig{LockTTL: time.Minute, RotateOnParseFailures: 3},
 		Models:           llmselection.ModelAliases{llmselection.ModelAliasRegular: {backend: "test-model"}},
 		OpenAICompatible: config.OpenAICompatibleConfig{BaseURL: baseURL},
 		OpenAIResponses:  config.OpenAIResponsesConfig{BaseURL: baseURL},

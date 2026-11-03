@@ -84,7 +84,7 @@ func startForkEngineOrdinarySuccessor(t *testing.T, ctx context.Context, selecte
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(t.TempDir(), "successor.yaml")
-	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: false\nllm:\n  backend: anthropic\n  session: {lock_ttl: 10s, rotate_after_turns: 40, rotate_on_parse_failures: 3}\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: false\nllm:\n  backend: anthropic\n  session: {lock_ttl: 10s, rotate_on_parse_failures: 3}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
@@ -753,7 +753,7 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 	config := map[string]any{
 		"runtime": map[string]any{"recovery_on_startup": false},
 		"store":   map[string]any{"backend": backend, "sqlite": map[string]any{"path": sqlitePath}},
-		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_after_turns": 40, "rotate_on_parse_failures": 3}},
+		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_on_parse_failures": 3}},
 	}
 	var dsn string
 	driver, address := "sqlite", sqlitePath
