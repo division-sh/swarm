@@ -17,6 +17,25 @@ func (c *checkerContext) fanOutValidation() []Finding {
 		return c.fanOutFindings
 	}
 	c.fanOutLoaded = true
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+			for _, write := range handler.DataAccumulation.Writes {
+				if !fanOutWriteReferencesCount(write) {
+					continue
+				}
+				c.fanOutFindings = append(c.fanOutFindings, Finding{
+					CheckID: fanOutValidationCheckID, Severity: SeverityHardInvalidity,
+					Message:  fmt.Sprintf("flow %s node %s handler %s: handler-level data write references fan_out.count before fan_out; put the write in the rule-level data_accumulation of the rule that declares fan_out, where its fan_out runs before its writes", defaultFlowLabel(node.FlowPath()), node.Key(), event),
+					Location: node.Key(),
+				})
+				break
+			}
+		}
+	}
 	for _, failure := range c.source.FanOutPlanFailures() {
 		c.fanOutFindings = append(c.fanOutFindings, Finding{
 			CheckID: fanOutValidationCheckID, Severity: SeverityHardInvalidity,
@@ -55,14 +74,6 @@ func (c *checkerContext) validateFanOutPlan(plan runtimecontracts.FanOutCompiled
 	}
 	if !fanOutEmitCarriesIdentity(plan.Emit, plan.Identity) {
 		add(fmt.Sprintf("fan_out.emit.fields must carry identity expression %q", plan.Identity))
-	}
-	if plan.SourceAfterWrites {
-		for _, write := range plan.Writes {
-			if fanOutWriteReferencesCount(write) {
-				add(fmt.Sprintf("%s mutates fan_out.items_from and a same-handler data write references fan_out.count; remove the cycle or source the count outside this handler", plan.ItemsFrom))
-				break
-			}
-		}
 	}
 	return out
 }
