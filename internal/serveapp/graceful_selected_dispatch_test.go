@@ -309,7 +309,11 @@ func TestSelectedForkIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
 					execute := executor.ExecuteSelectedContractRunFork
 					executor.ExecuteSelectedContractRunFork = func(ctx context.Context, request runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 						operations <- request.ForkOperation.OperationID
-						return execute(ctx, request)
+						result, err := execute(ctx, request)
+						if err != nil {
+							t.Logf("selected idle fork returned: %v", err)
+						}
+						return result, err
 					}
 					caps.RunFork = executor
 				}
