@@ -25,6 +25,9 @@ func (am *AgentManager) acceptedReadinessRegistration(ctx context.Context, ident
 	}
 	ownerCtx, _, _ := am.lifecycle.runSnapshot()
 	observed, planned, err := am.observeInstallingAgentAttachment(ctx, identity, ownerCtx, attempt)
+	if err != nil {
+		return false, &readinessProofReadError{cause: err}
+	}
 	return observed && planned, err
 }
 

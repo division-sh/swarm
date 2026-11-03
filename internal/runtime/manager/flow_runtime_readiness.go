@@ -316,6 +316,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			return err
 		}
 		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true, selectedRootReadiness); err != nil {
+			shutdownCancellation = am.cleanReadinessShutdownProofReadCancellation(ctx, err)
 			return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 		}
 	}
