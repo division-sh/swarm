@@ -1760,6 +1760,9 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		if am.workspaceGatewayAdmission != nil {
 			admissionCtx := runtimeactors.WithActor(loopCtx, candidate.Config)
+			if attempt := readinessAttemptFromContext(parent); attempt != nil {
+				admissionCtx = context.WithValue(admissionCtx, readinessRetirementWaitersKey{}, attempt)
+			}
 			if err := am.observeUnpublishedActivation(admissionCtx, token, candidate.Config); err != nil {
 				abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 				return replaceExecutionResult{}, errors.Join(err, abortErr, cleanupPrepared())
