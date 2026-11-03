@@ -41,22 +41,7 @@ func commitDecisionCardOperation(
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedDecisionCardMutation, error) {
 		result := runtimepipeline.CommittedDecisionCardMutation{Kind: command.Mutation.Kind()}
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			var owners []runtimeflowidentity.RunScopedFlowInstance
-			var publications []runtimebus.PublicationCommand
-			if command.GateState != nil {
-				owners = append(owners, command.GateState.Identity)
-			}
-			for _, value := range []runtimeengine.DurablePublicationPlan{command.Publication, command.ForcedDeferralPublication} {
-				if value == nil {
-					continue
-				}
-				plan, ok := value.(runtimebus.EnginePublicationPlan)
-				if !ok {
-					return fmt.Errorf("decision-card publication has unexpected type %T", value)
-				}
-				publications = append(publications, plan.PublicationCommand())
-			}
-			if err := admitDecisionCardAnchorTx(txctx, tx, attempt, decisions, command.Mutation, postgres, owners, publications); err != nil {
+			if err := admitDecisionCardAnchorTx(txctx, tx, attempt, decisions, command, postgres); err != nil {
 				return err
 			}
 			var selected runtimeengine.DurablePublicationPlan
@@ -166,7 +151,23 @@ func commitDecisionCardOperation(
 	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, result.ChannelCardsChanged))
 }
 
-func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool, owners []runtimeflowidentity.RunScopedFlowInstance, publications []runtimebus.PublicationCommand) error {
+func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, decisions decisionCardMutationTxOwner, command runtimepipeline.DecisionCardMutationCommand, postgres bool) error {
+	var owners []runtimeflowidentity.RunScopedFlowInstance
+	var publications []runtimebus.PublicationCommand
+	if command.GateState != nil {
+		owners = append(owners, command.GateState.Identity)
+	}
+	for _, value := range []runtimeengine.DurablePublicationPlan{command.Publication, command.ForcedDeferralPublication} {
+		if value == nil {
+			continue
+		}
+		plan, ok := value.(runtimebus.EnginePublicationPlan)
+		if !ok {
+			return fmt.Errorf("decision-card publication has unexpected type %T", value)
+		}
+		publications = append(publications, plan.PublicationCommand())
+	}
+	mutation := command.Mutation
 	var cardID string
 	switch mutation.Kind() {
 	case runtimepipeline.DecisionCardMutationDecide:
