@@ -3459,21 +3459,6 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 	}
 }
 
-func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID string) {
-	t.Helper()
-	candidate, err := storetest.ReadStandaloneCompletionCandidate(ctx, pg, eventID)
-	if err != nil {
-		t.Fatalf("load standalone completion candidate: %v", err)
-	}
-	result, err := pg.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.FinalCatalog{})
-	if err != nil {
-		t.Fatalf("execute standalone completion candidate: %v", err)
-	}
-	if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-		t.Fatalf("standalone completion outcome = %s, want %s", result.Outcome, runtimerunlifecycle.OutcomeTerminallyEligible)
-	}
-}
-
 func platformSignalFixturePayload(t *testing.T, eventType events.EventType) []byte {
 	t.Helper()
 	payload := map[string]any{}
