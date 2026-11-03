@@ -18,7 +18,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -195,41 +194,6 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	if pending != 0 || delivered != len(agents) {
 		t.Fatalf("delivery counts = pending:%d delivered:%d", pending, delivered)
 	}
-}
-
-func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, selected any, runID string) {
-	executeStandaloneCompletionCandidateWithCatalog(t, ctx, selected, runID, runtimerunlifecycle.FinalCatalog{})
-}
-
-func executeStandaloneCompletionCandidateWithCatalog(t *testing.T, ctx context.Context, selected any, runID string, catalog runtimerunlifecycle.FinalCatalog) {
-	t.Helper()
-	owner, ok := selected.(runtimerunlifecycle.CandidateStore)
-	if !ok {
-		t.Fatalf("standalone completion store %T does not expose typed candidates", selected)
-	}
-	page, err := owner.ListCompletionCandidates(
-		ctx,
-		runtimerunlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash},
-		runtimerunlifecycle.CandidateCursor{},
-		128,
-	)
-	if err != nil {
-		t.Fatalf("ListCompletionCandidates: %v", err)
-	}
-	for _, candidate := range page.Candidates {
-		if candidate.RunID != runID {
-			continue
-		}
-		result, err := owner.ExecuteCompletionCandidate(ctx, candidate, catalog)
-		if err != nil {
-			t.Fatalf("ExecuteCompletionCandidate: %v", err)
-		}
-		if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-			t.Fatalf("completion result = %#v retryable=%v, want outcome %s", result, result.Retryable, runtimerunlifecycle.OutcomeTerminallyEligible)
-		}
-		return
-	}
-	t.Fatalf("completion candidate for run %s was not persisted", runID)
 }
 
 func newRunConvergenceEventBus(t *testing.T, ctx context.Context, selected any) (*runtimebus.EventBus, error) {

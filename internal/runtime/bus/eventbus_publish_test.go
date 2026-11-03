@@ -1300,15 +1300,6 @@ func seedActiveRuntimeBusAgentForSource(t *testing.T, ctx context.Context, selec
 	return identity
 }
 
-func loadRunStateForEvent(t *testing.T, ctx context.Context, selected any, eventID string) (string, string, string) {
-	t.Helper()
-	out, err := storetest.ReadStandaloneRunStorage(ctx, selected, eventID)
-	if err != nil {
-		t.Fatalf("load run state for %s: %v", eventID, err)
-	}
-	return out.RunID, out.Status, out.TriggerEventType
-}
-
 func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, selected any, eventID string) int {
 	t.Helper()
 	count, err := storetest.CountAgentEventDeliveryStorage(ctx, selected, eventID)
