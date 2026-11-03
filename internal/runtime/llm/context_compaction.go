@@ -196,15 +196,22 @@ func contextCompactionRequestTokens(raw []byte) (int, error) {
 		tokens += contextCompactionTextTokens(string(request.Tools)) + 4
 	}
 	for _, item := range append(request.Messages, request.Input...) {
-		var message struct {
-			Content json.RawMessage `json:"content"`
-		}
+		var message map[string]json.RawMessage
 		if err := json.Unmarshal(item, &message); err != nil {
 			return 0, err
 		}
 		var text string
-		if len(message.Content) != 0 && json.Unmarshal(message.Content, &text) == nil {
+		if content := message["content"]; len(content) != 0 && json.Unmarshal(content, &text) == nil {
 			tokens += contextCompactionTextTokens(text) + 8
+			delete(message, "content")
+			delete(message, "role")
+			if len(message) != 0 {
+				rendered, err := json.Marshal(message)
+				if err != nil {
+					return 0, err
+				}
+				tokens += contextCompactionTextTokens(string(rendered))
+			}
 		} else {
 			tokens += contextCompactionTextTokens(string(item)) + 8
 		}
