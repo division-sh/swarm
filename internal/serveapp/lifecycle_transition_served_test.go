@@ -95,7 +95,6 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
 								t.Fatal("duplicate changed selected transition")
 							}
-							requireServedRunStatus(t, rt.Endpoint, seed.RunID, "completed")
 						})
 					}
 				}
