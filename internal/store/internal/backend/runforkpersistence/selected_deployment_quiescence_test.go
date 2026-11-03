@@ -64,11 +64,7 @@ func TestSelectedDeploymentQuiescenceRequiresFeedPipelineAndReceiverExhaustionBo
 			if _, err := db.Exec(`INSERT INTO event_receipts VALUES ($1,'platform','pipeline','dead_letter')`, eventID); err != nil {
 				t.Fatal(err)
 			}
-			check("unfinished event pipeline")
-			if _, err := db.Exec(`UPDATE event_receipts SET outcome='reject' WHERE event_id=$1`, eventID); err != nil {
-				t.Fatal(err)
-			}
-			check("unfinished event pipeline")
+			check("") // A committed terminal disposition settles the publication without becoming success.
 			if _, err := db.Exec(`UPDATE event_receipts SET outcome='success' WHERE event_id=$1`, eventID); err != nil {
 				t.Fatal(err)
 			}
