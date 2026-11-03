@@ -70,7 +70,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 							!reflect.DeepEqual(entity.Fields, authoredFields) || entity.Entity.StageDefined != nil || entity.Entity.CurrentState != nil ||
 							entity.Entity.Revision != nil || entity.Entity.EnteredStateAt != nil || entity.Entity.LifecycleCreatedAt != nil || entity.Entity.LifecycleUpdatedAt != nil ||
 							!entity.Entity.CreatedAt.Equal(at) || !entity.Entity.UpdatedAt.Equal(at) ||
-							entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulated != nil || entity.Loops != nil {
+							entity.Bookkeeping != nil || entity.Accumulated != nil || entity.Loops != nil {
 							t.Fatalf("import readback changed data membership or invented lifecycle: run=%s entity=%+v err=%v", inspectedRun, entity, err)
 						}
 						inventory, err := owner.ListOperatorEntities(f.ctx, operatorread.OperatorEntityListOptions{RunID: inspectedRun})
@@ -84,7 +84,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					}
 					assertImport(runID)
 					history, err := owner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: marker.ID()})
-					if err != nil || len(history.Entities) != 1 || history.Entities[0].EntityID != entityID || history.Entities[0].CurrentState != nil || history.Entities[0].EnteredStateAt != nil || history.Entities[0].Gates != nil || history.Entities[0].Bookkeeping != nil || history.Entities[0].Accumulator != nil ||
+					if err != nil || len(history.Entities) != 1 || history.Entities[0].EntityID != entityID || history.Entities[0].CurrentState != nil || history.Entities[0].EnteredStateAt != nil || history.Entities[0].Bookkeeping != nil || history.Entities[0].Accumulator != nil ||
 						!reflect.DeepEqual(history.Entities[0].Fields, authoredFields) || history.Entities[0].MaterializationMetadata == nil ||
 						history.Entities[0].MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
 						t.Fatalf("scenario import lost its historical meaning: %+v err=%v", history.Entities, err)

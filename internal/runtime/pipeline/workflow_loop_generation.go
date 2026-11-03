@@ -56,7 +56,7 @@ func workflowLoopGenerationCurrentInBuckets(stateBuckets map[string]map[string]a
 }
 
 func WorkflowLoopGenerationCurrent(fields, stateBuckets map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
-	carrier, err := runtimeengine.StateCarrierFromPersisted(fields, nil, nil, stateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(fields, nil, stateBuckets)
 	if err != nil {
 		return false, err
 	}

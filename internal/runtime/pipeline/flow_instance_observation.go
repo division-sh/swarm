@@ -213,7 +213,6 @@ func cloneIndexWorkflowInstance(instance WorkflowInstance) (WorkflowInstance, er
 		}
 		*fields = isolated
 	}
-	instance.Gates = cloneWorkflowGates(instance.Gates)
 	instance.TransitionHistory = slices.Clone(instance.TransitionHistory)
 	for index := range instance.TransitionHistory {
 		instance.TransitionHistory[index].GuardsEvaluated = slices.Clone(instance.TransitionHistory[index].GuardsEvaluated)

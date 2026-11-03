@@ -21,12 +21,11 @@ type Contract struct {
 }
 
 type Field struct {
-	Path        string
-	Type        string
-	LeafKind    string
-	FieldDecl   runtimecontracts.EntityFieldDecl
-	Refinements runtimecontracts.SchemaRefinements
-	IsOptional  bool
+	Path       string
+	Type       string
+	LeafKind   string
+	FieldDecl  runtimecontracts.EntityFieldDecl
+	IsOptional bool
 }
 
 type WriteTarget struct {
@@ -396,7 +395,6 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 		return Field{}, err
 	}
 	currentType := strings.TrimSpace(decl.Type)
-	currentRefinements := decl.Refinements
 	optional := decl.IsOptional
 	for _, segment := range segments[1:] {
 		segment = strings.TrimSpace(segment)
@@ -412,14 +410,13 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 			return Field{}, fmt.Errorf("undeclared path %s", path)
 		}
 		currentType = strings.TrimSpace(field.TypeRef)
-		currentRefinements = field.Refinements
 		optional = field.IsOptional
 	}
 	kind, err := pathKind(contract, currentType)
 	if err != nil {
 		return Field{}, err
 	}
-	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, Refinements: currentRefinements, IsOptional: optional}, nil
+	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, IsOptional: optional}, nil
 }
 
 func ResolveLeafField(contract Contract, path string) (Field, error) {

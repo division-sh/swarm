@@ -95,7 +95,7 @@ connect:
 	writeLegacyInstanceFlow(t, root, "producer", `# fixture: producer
 outputs:
   - deploy.done
-`, "deploy.done:\n  key: "+producerField+"\n  "+producerField+": string\n", "", "")
+`, "deploy.done:\n  _key: "+producerField+"\n  "+producerField+": string\n", "", "")
 
 	consumerNodes := "consumer-node:\n  deploy.done: {}\n" + secondHandler
 	consumerAgents := ""
@@ -145,7 +145,7 @@ outputs:
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml", `deploy.requested:
   vertical_id: string
 deploy.done:
-  key: vertical_id
+  _key: vertical_id
   vertical_id: string
 `)
 	writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", `producer-node:

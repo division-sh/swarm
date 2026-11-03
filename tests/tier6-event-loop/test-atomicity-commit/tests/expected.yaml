@@ -7,8 +7,6 @@ expected:
 
   handler_outcome: success
   entity_state: done
-  gates:
-    approval_gate: true
   emitted_events:
     - task.accepted
 

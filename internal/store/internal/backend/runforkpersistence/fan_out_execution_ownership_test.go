@@ -169,7 +169,7 @@ func fanOutOwnershipFixture(t *testing.T, flow, kind string) (runfork.RunForkPla
 		CurrentState: "working", ChainDepth: 2, ProducerSource: producer,
 		Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: target},
 		Lineage:  events.EventLineage{RunID: "ancestor-run", ParentEventID: "original-trigger", ExecutionMode: executionmode.Live},
-		Entity:   frozen(), PlatformEntity: frozen(), Computed: frozen(), Accumulated: frozen(), Join: frozen(), StateFields: frozen(), StateBookkeeping: frozen(), StateGates: map[string]bool{"ready": true},
+		Entity:   frozen(), PlatformEntity: frozen(), Computed: frozen(), Accumulated: frozen(), Join: frozen(), StateFields: frozen(), StateBookkeeping: frozen(),
 	}
 }
 
@@ -179,7 +179,7 @@ func assertFanOutCapsuleFieldPartition(t *testing.T, source, child fanoutobligat
 	if receiverType.NumField() != 2 || receiverType.Field(0).Name != "Node" || receiverType.Field(1).Name != "Target" {
 		t.Fatal("execution receiver field census changed; publication authority must not enter the capsule")
 	}
-	immutable := []string{"SourcePlanRef", "SourceProjection", "NodeKey", "ExecutionFlowID", "HandlerEventKey", "CurrentState", "ChainDepth", "Lineage", "Entity", "PlatformEntity", "Computed", "Accumulated", "Join", "StateFields", "StateBookkeeping", "StateGates"}
+	immutable := []string{"SourcePlanRef", "SourceProjection", "NodeKey", "ExecutionFlowID", "HandlerEventKey", "CurrentState", "ChainDepth", "Lineage", "Entity", "PlatformEntity", "Computed", "Accumulated", "Join", "StateFields", "StateBookkeeping"}
 	executable := []string{"EntityID", "Route", "ProducerSource", "Receiver", "Loop", "Context"}
 	if len(immutable)+len(executable) != reflect.TypeOf(source).NumField() {
 		t.Fatal("capsule field census changed; classify every new field")

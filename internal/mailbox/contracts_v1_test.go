@@ -15,7 +15,6 @@ func TestV1DecisionSheetPreservesAuthoredFieldsAndBookkeepingAsSiblingMaps(t *te
 				Entity: &operatorread.OperatorEntityFull{
 					Fields:      map[string]any{"activation": "manual"},
 					Bookkeeping: map[string]any{"activation": "standing"},
-					Gates:       map[string]bool{},
 					Accumulated: map[string]any{},
 				},
 			},

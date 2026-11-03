@@ -40,10 +40,6 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				entity := bundle.RootEntities["state"]
 				entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem", Initial: map[string]any{"id": "proof", "status": "ready", "tags": []any{}}}
 				entity.Fields["captured"] = rc.EntityFieldDecl{Type: "text"}
-				for name, field := range entity.Fields {
-					field.UnusedReason = "externally populated proof fixture"
-					entity.Fields[name] = field
-				}
 				bundle.RootEntities["state"] = entity
 				bundle.Events["work.result"] = rc.EventCatalogEntry{Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}}
 				tools, _ := semanticview.Bundle(schemaBoundActivityInputSource(value, "text", rc.ToolSchemaString, true))

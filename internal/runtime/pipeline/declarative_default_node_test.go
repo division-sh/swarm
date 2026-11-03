@@ -59,7 +59,4 @@ func TestHandlerExecutionStateSnapshotKeepsAuthoredGatesFieldSeparate(t *testing
 	if got := snapshot.Fields["gates"]; got != "authored" {
 		t.Fatalf("authored gates field = %#v, want authored", got)
 	}
-	if len(snapshot.Gates) != 0 {
-		t.Fatalf("typed gates = %#v, want empty", snapshot.Gates)
-	}
 }

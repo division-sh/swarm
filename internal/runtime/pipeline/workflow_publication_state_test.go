@@ -38,7 +38,7 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 		EntityID: constructed.EntityID, WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "static", Status: "active",
 		ParentInstance: constructed.ParentRoute.FlowInstance,
 		CurrentState:   "ready", ExpectedState: "ready", ExpectedRevision: 3, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
-		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`), Config: raw,
 		Transition: WorkflowEngineStateTransitionUpdateStateAndCompanion}
 	prepared, err := prepareWorkflowPublicationState(record, WorkflowLifecycleMutationPlan{}, constructed.TemplateID, fact)
@@ -95,7 +95,7 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 		Identity: owner, EntityID: entityID, WorkflowName: "review", WorkflowVersion: "v1",
 		Mode: "template", Status: "active", CurrentState: "review", EntityType: "state",
 		InstanceKey: "exact", ParentInstance: runID,
-		Fields: json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		Fields: json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), Config: rawConfig, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: at, CreatedAt: at, UpdatedAt: at, Transition: WorkflowEngineStateTransitionCreateStateAndCompanion,
 	}
@@ -134,7 +134,6 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 				"expected stage":  func(s *WorkflowEngineStateRecord) { s.ExpectedState = "other" },
 				"stage":           func(s *WorkflowEngineStateRecord) { s.CurrentState = "done" },
 				"fields":          func(s *WorkflowEngineStateRecord) { s.Fields = json.RawMessage(`{"case_id":"foreign"}`) },
-				"gates":           func(s *WorkflowEngineStateRecord) { s.Gates = json.RawMessage(`{"approved":true}`) },
 				"accumulator":     func(s *WorkflowEngineStateRecord) { s.Accumulator = json.RawMessage(`{"items":[1]}`) },
 				"lifecycle":       func(s *WorkflowEngineStateRecord) { s.Status = "terminated"; s.TerminatedAt = at },
 				"time":            func(s *WorkflowEngineStateRecord) { s.UpdatedAt = at.Add(time.Second) },

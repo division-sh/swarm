@@ -82,7 +82,7 @@ func TestS1ReservedInboundDeclarationPreservesYAMLIntroductions(t *testing.T) {
 		locations  []string
 	}{
 		{"merge", "<<: &catalog\n  inbound.telegram.message:\n", []string{"introduced at events.yaml:1:", "events.yaml:2:"}},
-		{"key_alias", "business.event:\n  value:\n    type: text\n    description: &reserved inbound.telegram.message\n? *reserved\n:\n", []string{"events.yaml:5:"}},
+		{"key_alias", "business.event:\n  _key: &reserved inbound.telegram.message\n  inbound.telegram.message: text\n\n? *reserved\n:\n", []string{"events.yaml:5:"}},
 		{"value_alias", "business.event: &payload\n  value: text\ninbound.telegram.message: *payload\n", []string{"events.yaml:3:", "resolved at events.yaml:1:"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

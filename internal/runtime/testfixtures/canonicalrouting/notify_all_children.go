@@ -152,11 +152,11 @@ auto_emit_on_create:
             canceled: join.dispositions.canceled
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
-  key: account_id
+  _key: account_id
   account_id: text
   command: text
 `, `account.notify.requested:
-  key: account_id
+  _key: account_id
   account_id: text
   command: text
 portfolio.notify.completed:
@@ -239,10 +239,10 @@ threshold: integer
           account_id: account.account_id
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
-  key: account_id
+  _key: account_id
   account_id: text
 `, `account.registered:
-  key: account_id
+  _key: account_id
   portfolio_id: text
   account_id: text
   eng_roles: integer

@@ -1134,15 +1134,15 @@ func VerifyNativeWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothSto
 				t.Fatalf("create loop activation: %v", err)
 			}
 			carrier := runtimeengine.NewStateCarrier(
-				map[string]any{}, nil, map[string]map[string]any{},
-			)
+				map[string]any{}, map[string]map[string]any{})
+
 			if err := loopruntime.Store(carrier.StateBuckets, loopActivation); err != nil {
 				t.Fatalf("store loop activation: %v", err)
 			}
 			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".",
 				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), StateBuckets: carrier.PersistedStateBuckets(),
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}

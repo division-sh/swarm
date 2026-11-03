@@ -19,12 +19,12 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 			for k, v := range base {
 				data[k] = v
 			}
-			full := map[string]any{"entity": data, "fields": map[string]any{"current_state": "business"}, "gates": nil, "bookkeeping": nil, "accumulated": nil, "loops": nil}
+			full := map[string]any{"entity": data, "fields": map[string]any{"current_state": "business"}, "bookkeeping": nil, "accumulated": nil, "loops": nil}
 			want := "no lifecycle"
 			if kind != "import" {
 				data["stage_defined"], data["revision"] = kind == "unknown", 3
 				data["lifecycle_created_at"], data["lifecycle_updated_at"] = base["created_at"], base["updated_at"]
-				full["gates"], full["bookkeeping"], full["accumulated"], full["loops"] = map[string]bool{}, map[string]any{}, map[string]any{}, []any{}
+				full["bookkeeping"], full["accumulated"], full["loops"] = map[string]any{}, map[string]any{}, []any{}
 				want = "no named stage"
 				if kind == "unknown" {
 					data["current_state"], data["entered_state_at"], want = "unknown", base["created_at"], "unknown"
@@ -58,7 +58,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 				}
 				data[key] = value
 			}
-			for _, key := range []string{"fields", "bookkeeping", "gates", "accumulated", "loops"} {
+			for _, key := range []string{"fields", "bookkeeping", "accumulated", "loops"} {
 				value := full[key]
 				delete(full, key)
 				if _, err := decode(full); err == nil {
@@ -91,7 +91,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 					data[key] = nil
 				}
 				for key, value := range map[string]any{
-					"gates": map[string]bool{}, "bookkeeping": map[string]any{}, "accumulated": map[string]any{}, "loops": []any{},
+					"bookkeeping": map[string]any{}, "accumulated": map[string]any{}, "loops": []any{},
 				} {
 					full[key] = value
 					if _, err := decode(full); err == nil {
@@ -115,7 +115,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 					}
 				}
 				data["revision"] = 3
-				for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+				for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
 					value := full[key]
 					full[key] = nil
 					if _, err := decode(full); err == nil {

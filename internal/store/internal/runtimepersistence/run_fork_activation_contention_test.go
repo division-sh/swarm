@@ -197,7 +197,7 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	if err != nil || !found {
 		t.Fatalf("load canonical gate: found=%v error=%v", found, err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

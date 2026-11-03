@@ -1,7 +1,0 @@
-name: test-sets-gate visible smoke
-steps:
-  - publish: gate.requested
-    payload: {}
-expect:
-  events:
-    include: [gate.set]

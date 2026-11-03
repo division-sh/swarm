@@ -341,7 +341,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), forkRunID, runtimepipeline.WorkflowInstance{
 				InstanceID: forkRunID, StorageRef: forkRunID, EntityID: forkRunID,
 				WorkflowName: ".", WorkflowVersion: target.WorkflowVersion, Mode: "static", StageDefined: true,
-				CurrentState: forkActivation.Stage, Fields: map[string]any{}, StateBuckets: runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
+				CurrentState: forkActivation.Stage, Fields: map[string]any{}, StateBuckets: runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets(),
 				EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
 			}, now)
 

@@ -620,7 +620,6 @@ func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.
 func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowInstance {
 	instance.Fields = cloneStringAnyMap(instance.Fields)
 	instance.Bookkeeping = cloneStringAnyMap(instance.Bookkeeping)
-	instance.Gates = cloneWorkflowGates(instance.Gates)
 	instance.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
 	instance.InitialFieldValues = cloneStringAnyMap(instance.InitialFieldValues)
 	instance.TransitionHistory = append([]WorkflowTransitionRecord(nil), instance.TransitionHistory...)
@@ -847,7 +846,6 @@ func workflowInstanceEngineStateSnapshot(
 		return runtimeengine.StateSnapshot{}, false, err
 	}
 	carrier.Fields = fields
-	carrier.Gates = workflowStateGatesForScope(source, flowID, carrier.Gates)
 	return runtimeengine.StateSnapshot{
 		EntityID:        entityID,
 		Revision:        instance.Revision,
@@ -1147,36 +1145,9 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if err != nil {
 		return fmt.Errorf("workflow mutation final entity candidate: %w", err)
 	}
-	existingGates := cloneWorkflowGates(instance.Gates)
-	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
-		if mutation.StateCarrier.Fields == nil {
-			mutation.StateCarrier.Fields = cloneStringAnyMap(instance.Fields)
-		}
-		gates := workflowCloneBoolMap(existingGates)
-		for key, value := range mutation.StateCarrier.Gates {
-			key = workflowScopedGateKey(source, flowID, key)
-			if key != "" {
-				gates[key] = value
-			}
-		}
-		for _, gate := range mutation.ClearGates {
-			gate = workflowScopedGateKey(source, flowID, gate)
-			if gate != "" {
-				gates[gate] = false
-			}
-		}
-		if gate := workflowScopedGateKey(source, flowID, mutation.SetGate); gate != "" {
-			gates[gate] = true
-		}
-		mutation.StateCarrier.Gates = gates
-	}
-	if mutation.StateCarrier.Fields != nil && len(mutation.StateCarrier.Gates) == 0 && len(existingGates) > 0 {
-		mutation.StateCarrier.Gates = workflowCloneBoolMap(existingGates)
-	}
-	if mutation.StateCarrier.Fields != nil || len(mutation.StateCarrier.Gates) > 0 {
+	if mutation.StateCarrier.Fields != nil {
 		instance.Fields = fields
 		instance.Bookkeeping = mutation.StateCarrier.PersistedBookkeeping()
-		instance.Gates = cloneWorkflowGates(mutation.StateCarrier.Gates)
 	}
 	if mutation.StateCarrier.StateBuckets != nil {
 		if err := supersedePriorLoopGenerationArtifacts(instance, previousBuckets, &mutation.StateCarrier); err != nil {
@@ -1225,52 +1196,6 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	return constructed.ValidateConstruction(source, runID) == nil
 }
 
-func workflowStateGatesForScope(source semanticview.Source, flowID string, persisted map[string]bool) map[string]bool {
-	gates := cloneWorkflowGates(persisted)
-	scopeKey := workflowScopeKey(source, flowID)
-	if scopeKey == "" {
-		return gates
-	}
-	prefix := scopeKey + "/"
-	for key, value := range workflowCloneBoolMap(gates) {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		localKey := strings.TrimPrefix(key, prefix)
-		localKey = strings.TrimSpace(localKey)
-		if localKey == "" {
-			continue
-		}
-		if _, exists := gates[localKey]; !exists {
-			gates[localKey] = value
-		}
-	}
-	return gates
-}
-
-func workflowCloneBoolMap(in map[string]bool) map[string]bool {
-	if len(in) == 0 {
-		return map[string]bool{}
-	}
-	out := make(map[string]bool, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func workflowScopedGateKey(source semanticview.Source, flowID, gate string) string {
-	gate = strings.TrimSpace(gate)
-	if gate == "" || strings.Contains(gate, "/") {
-		return gate
-	}
-	scopeKey := workflowScopeKey(source, flowID)
-	if scopeKey == "" {
-		return gate
-	}
-	return strings.Trim(scopeKey+"/"+gate, "/")
-}
-
 func workflowInitialStateForFlow(source semanticview.Source, flowID string) (string, error) {
 	ref, err := workflowInitialStoredStageForFlow(source, flowID)
 	return ref.ID(), err
@@ -1293,17 +1218,6 @@ func workflowInitialStoredStageForFlow(source semanticview.Source, flowID string
 
 func workflowScopeKey(source semanticview.Source, flowID string) string {
 	return runtimeflowidentity.ScopeKey(source, flowID)
-}
-
-func workflowBoolGatesAsMap(gates map[string]bool) map[string]any {
-	out := make(map[string]any, len(gates))
-	for key, value := range gates {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			out[key] = value
-		}
-	}
-	return out
 }
 
 func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerContext {

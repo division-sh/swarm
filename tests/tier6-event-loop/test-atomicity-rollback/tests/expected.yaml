@@ -5,8 +5,6 @@ expected:
 
   handler_outcome: reject
   entity_state: pending
-  gates:
-    approval_gate: false
   emitted_events: []
 
 conformance:

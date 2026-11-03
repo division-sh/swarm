@@ -23,7 +23,7 @@ func TestCatalogTypeDetachmentPublicRestartBothStores(t *testing.T) {
 			base := filepath.Join(root, backend)
 			source := filepath.Join(base, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
-			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n  id: {type: text, pattern: '^[a-z]+$', length: {min: 2, max: 8}, equal_to: peer}\n  peer: text\n  score: {type: numeric, range: {min: 1.5, max: 9.5}}\n  note: text?\n")
+			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n  id: text\n  peer: text\n  score: numeric\n  note: text?\n")
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
@@ -87,11 +87,11 @@ func TestCatalogTypeDetachmentPublicRestartBothStores(t *testing.T) {
 				t.Fatalf("public restart changed retained events: %v", err)
 			}
 			for index, bad := range []map[string]any{
-				{"id": "x", "peer": "x", "score": 3.5},
-				{"id": "toooolong", "peer": "toooolong", "score": 3.5},
-				{"id": "valid", "peer": "valid", "score": 1.0},
-				{"id": "valid", "peer": "valid", "score": 10.0},
-				{"id": "valid", "peer": "different", "score": 3.5},
+				{"id": 7, "peer": "valid", "score": 3.5},
+				{"id": "valid", "peer": false, "score": 3.5},
+				{"id": "valid", "peer": "valid", "score": "3.5"},
+				{"id": "valid", "peer": "valid"},
+				{"id": "valid", "peer": "valid", "score": 3.5, "undeclared": true},
 			} {
 				var result json.RawMessage
 				if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": bad, "emitter": "releasee2e", "idempotency_key": "detached-refused-" + string(rune('a'+index))}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {

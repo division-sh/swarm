@@ -152,7 +152,7 @@ func admitInheritedTimerLoops(entity runfork.RunForkEntityState, generation atte
 	if generation == (attemptgeneration.Generation{}) {
 		return nil, nil
 	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, map[string]any{
+	carrier, err := engine.StateCarrierFromPersisted(nil, nil, map[string]any{
 		loopruntime.BucketKey: entity.Accumulator[loopruntime.BucketKey],
 	})
 	if err != nil {

@@ -50,7 +50,7 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 	var handlers []yamlsource.MappingField
 	for _, entry := range entries {
 		switch entry.Name {
-		case "state_table", "state_schema":
+		case "state_table", "state_schema", "gate_state":
 			return SystemNodeContract{}, nodeValueError(entry.Value, fmt.Errorf("%s is not a node field; state is declared in state.yaml", entry.Name))
 		case "execution_type", "subscribes_to", "produces", "event_handlers":
 			diagnostic := NewUndefinedFieldDiagnostic("node", entry.Name, systemNodeContractFields, entry)
@@ -84,12 +84,6 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 			}
 			seen[event] = item.IntroductionLocation()
 			out.Timers = append(out.Timers, timer)
-		}
-	}
-	if gates, present := fields["gate_state"]; present {
-		out.GateState, err = projectNodeGateStateValue(gates)
-		if err != nil {
-			return SystemNodeContract{}, nodeFieldProjectionError("gate_state", gates, err)
 		}
 	}
 	out.EventHandlers = make(map[string]SystemNodeEventHandler, len(handlers))
@@ -157,8 +151,6 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Join, err = projectNodeJoinValue(field)
 		case "on_success":
 			out.OnSuccess, err = projectNodeOnSuccessValue(field)
-		case "sets_gate":
-			out.SetsGate, err = projectNodeGateEffectValue(field)
 		case "query":
 			out.Query, err = projectNodeQueryValue(field)
 		case "accumulate":
@@ -175,8 +167,6 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Count, err = projectNodeCountValue(field)
 		case "clear":
 			out.Clear, err = projectNodeClearValue(field)
-		case "clear_gates":
-			out.ClearGates, err = projectNodeClearGatesValue(field)
 		default:
 			return SystemNodeEventHandler{}, fmt.Errorf("unsupported handler field %q at %s", name, field.Location())
 		}
@@ -192,36 +182,4 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 		return SystemNodeEventHandler{}, err
 	}
 	return out, nil
-}
-
-func projectNodeGateEffectValue(value yamlsource.Value) (*GateSpec, error) {
-	if value.Presence() == yamlsource.PresenceNull {
-		return nil, nil
-	}
-	if value.Presence() == yamlsource.PresenceScalar || value.Presence() == yamlsource.PresenceEmptyScalar {
-		name, err := nodeValueText(value, "sets_gate")
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(name) == "" {
-			return nil, nil
-		}
-		return &GateSpec{Name: strings.TrimSpace(name), Value: true}, nil
-	}
-	fields, err := nodeValueFields(value, "sets_gate", map[string]struct{}{"name": {}})
-	if err != nil {
-		return nil, err
-	}
-	name, present := fields["name"]
-	if !present {
-		return nil, nil
-	}
-	text, err := nodeValueText(name, "sets_gate.name")
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(text) == "" {
-		return nil, nil
-	}
-	return &GateSpec{Name: strings.TrimSpace(text), Value: true}, nil
 }

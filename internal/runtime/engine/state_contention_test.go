@@ -51,7 +51,7 @@ func TestExecutorReevaluatesOnlyUncommittedStateContention(t *testing.T) {
 		{"different refusal", 1, false, false, failures.New(failures.ClassAuthorizationDenied, "cross_flow_write_forbidden", "test", "commit", nil), 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			snapshot := testStateSnapshot("pending", map[string]any{"marker": int64(1)}, nil, nil)
+			snapshot := testStateSnapshot("pending", map[string]any{"marker": int64(1)}, nil)
 			snapshot.Revision = 1
 			repo := &recordingStateRepo{snapshot: &snapshot}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -60,15 +60,15 @@ func TestExecutorReevaluatesOnlyUncommittedStateContention(t *testing.T) {
 			if tc.cancel {
 				owner.cancel = cancel
 			}
-			source := sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending")
+			source := sourceWithFixtureStages(sourceWithPolicyEntity(".", nil, map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "integer"}, "ready": {Type: "boolean"}}), ".", "pending", "pending")
 			executor, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: repo, MutationOwner: owner, Locker: &executionBoundaryLocker{}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			result, err := executor.ExecuteSemanticFixture(ctx, ExecutionRequest{
-				EntityID: "entity-1", Node: testFlowExecutableNode(t, "flow-1", "node-1"),
+				EntityID: "entity-1", Node: testFlowExecutableNode(t, ".", "node-1"),
 				Event:   eventtest.RunCreatingRootIngress("evt-contention", "task.completed", "test", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
-				Handler: runtimecontracts.SystemNodeEventHandler{SetsGate: &runtimecontracts.GateSpec{Name: "ready"}},
+				Handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "ready", Value: runtimecontracts.LiteralExpression(true)}}}},
 			})
 			if owner.calls != tc.wantCalls {
 				t.Fatalf("calls=%d want=%d err=%v", owner.calls, tc.wantCalls, err)

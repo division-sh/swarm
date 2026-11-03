@@ -34,7 +34,7 @@ func VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t *testing.T
 		InstanceID: "root", StorageRef: "bookkeeping/root", EntityID: entityID,
 		WorkflowName: "bookkeeping", WorkflowVersion: "v1", CurrentState: "ready",
 		EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"status": "before"},
-		Bookkeeping: map[string]any{}, Gates: map[string]bool{"ready": true},
+		Bookkeeping:  map[string]any{},
 		StateBuckets: map[string]any{"join": map[string]any{"count": float64(1)}},
 		EntityType:   "state",
 	})
@@ -55,8 +55,8 @@ func VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t *testing.T
 	}
 	if err := fixture.Persistence.store.mutateE(ctx, route, func(current *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(
-			map[string]any{"status": "after"}, current.Bookkeeping, current.Gates, current.StateBuckets,
-		)
+			map[string]any{"status": "after"}, current.Bookkeeping, current.StateBuckets)
+
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t *testing.T
 	if err != nil || !ok {
 		t.Fatalf("reload workflow instance found=%v err=%v", ok, err)
 	}
-	if loaded.Fields["status"] != "after" || loaded.Bookkeeping["platform_fact"] != "preserve" || !loaded.Gates["ready"] {
+	if loaded.Fields["status"] != "after" || loaded.Bookkeeping["platform_fact"] != "preserve" {
 		t.Fatalf("reloaded workflow state = %#v", loaded)
 	}
 }
@@ -195,7 +195,6 @@ func VerifyWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshotsForTest(t
 	go func() {
 		defer workers.Done()
 		errCh <- fixture.Persistence.store.mutate(ctx, testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
-			setWorkflowGate(instance, "g_first")
 			appendWorkflowJournal(instance, "audit", map[string]any{"writer": "first"})
 			close(firstEntered)
 			<-releaseFirst
@@ -208,7 +207,6 @@ func VerifyWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshotsForTest(t
 		defer workers.Done()
 		errCh <- fixture.Persistence.store.mutate(ctx, testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
 			close(secondEntered)
-			setWorkflowGate(instance, "g_second")
 			appendWorkflowJournal(instance, "audit", map[string]any{"writer": "second"})
 			instance.CurrentState = "done"
 		})
@@ -232,10 +230,6 @@ func VerifyWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshotsForTest(t
 	}
 	if got := instance.CurrentState; got != "done" {
 		t.Fatalf("current_state = %q, want done", got)
-	}
-	gates := instance.Gates
-	if gates["g_first"] || !gates["g_second"] {
-		t.Fatalf("gates = %#v, want only the committed snapshot", gates)
 	}
 	evidence := workflowJournalEntries(t, instance, "audit")
 	if len(evidence) != 1 {
@@ -268,7 +262,6 @@ func VerifyUpdateEntityState_RejectsCompetingStaleCallbackSnapshotForTest(t *tes
 	go func() {
 		defer workers.Done()
 		callbackErr <- fixture.Persistence.store.mutate(ctx, testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
-			setWorkflowGate(instance, "g_ready")
 			close(firstEntered)
 			<-releaseFirst
 		})
@@ -299,10 +292,6 @@ func VerifyUpdateEntityState_RejectsCompetingStaleCallbackSnapshotForTest(t *tes
 	if got := instance.CurrentState; got != "done" {
 		t.Fatalf("current_state = %q, want done", got)
 	}
-	gates := instance.Gates
-	if gates["g_ready"] {
-		t.Fatalf("gates = %#v, stale callback mutation survived", gates)
-	}
 	if len(instance.TransitionHistory) == 0 {
 		t.Fatal("expected transition history to be recorded")
 	}
@@ -314,7 +303,6 @@ func VerifyWorkflowInstanceStoreMutate_PersistsSingleWriterUpdatesForTest(t *tes
 	seedWorkflowInstanceForMutationTest(t, fixture, entityID)
 
 	if err := fixture.Persistence.store.mutate(fixture.Context, testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
-		setWorkflowGate(instance, "g_single")
 		appendWorkflowJournal(instance, "audit", map[string]any{"writer": "single"})
 		instance.CurrentState = "processing"
 	}); err != nil {
@@ -330,10 +318,6 @@ func VerifyWorkflowInstanceStoreMutate_PersistsSingleWriterUpdatesForTest(t *tes
 	}
 	if got := instance.CurrentState; got != "processing" {
 		t.Fatalf("current_state = %q, want processing", got)
-	}
-	gates := instance.Gates
-	if !gates["g_single"] {
-		t.Fatalf("gates = %#v, want g_single=true", gates)
 	}
 	evidence := workflowJournalEntries(t, instance, "audit")
 	if len(evidence) != 1 {
@@ -415,13 +399,6 @@ func seedWorkflowInstanceForMutationTest(t *testing.T, fixture WorkflowMutationN
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
-}
-
-func setWorkflowGate(instance *WorkflowInstance, gate string) {
-	if instance.Gates == nil {
-		instance.Gates = map[string]bool{}
-	}
-	instance.Gates[gate] = true
 }
 
 func appendWorkflowJournal(instance *WorkflowInstance, bucketID string, payload map[string]any) {

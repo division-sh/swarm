@@ -28,7 +28,6 @@ func workflowInstanceStateCarrier(instance WorkflowInstance) (runtimeengine.Stat
 	carrier, err := runtimeengine.StateCarrierFromPersisted(
 		instance.Fields,
 		instance.Bookkeeping,
-		instance.Gates,
 		instance.StateBuckets,
 	)
 	if err != nil {

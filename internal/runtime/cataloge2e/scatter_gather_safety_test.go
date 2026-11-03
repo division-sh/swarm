@@ -215,7 +215,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					if collector.StorageRef != collectorRef || collector.EntityID != collectorID || collector.InstanceID != initialCollector.InstanceID {
 						t.Fatalf("collector rematerialized: initial=%+v current=%+v", initialCollector, collector)
 					}
-					carrier, err := engine.StateCarrierFromPersisted(collector.Fields, collector.Bookkeeping, collector.Gates, collector.StateBuckets)
+					carrier, err := engine.StateCarrierFromPersisted(collector.Fields, collector.Bookkeeping, collector.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -576,7 +576,7 @@ func scatterGatherWaitForJoinOutcome(t testing.TB, h *runtimeHarness, collectorR
 	defer tick.Stop()
 	for {
 		collector := scatterGatherLoad(t, h, collectorRef, ctx)
-		carrier, err := engine.StateCarrierFromPersisted(collector.Fields, collector.Bookkeeping, collector.Gates, collector.StateBuckets)
+		carrier, err := engine.StateCarrierFromPersisted(collector.Fields, collector.Bookkeeping, collector.StateBuckets)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -15,7 +15,7 @@ type FlowConstructorHeaderFaultField string
 func (f FlowConstructorHeaderFaultField) valid() bool {
 	switch f {
 	case "flow_template", "mode", "status", "current_state", "stage_defined", "config",
-		"entered_state_at", "created_at", "updated_at", "revision", "gates", "bookkeeping",
+		"entered_state_at", "created_at", "updated_at", "revision", "bookkeeping",
 		"accumulator", "slug", "name", "parent_instance", "instance_key":
 		return true
 	default:

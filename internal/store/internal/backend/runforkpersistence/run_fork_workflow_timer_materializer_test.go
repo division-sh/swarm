@@ -238,7 +238,7 @@ func TestRunForkWorkflowTimerMaterializerPreservesExactLoopCorrespondence(t *tes
 	source.Ref.Generation = activation.Generation()
 	source.Ref.Cause = timeridentity.WorkflowTimerActivationCauseEvent
 	plan := workflowTimerMaterializerPlan(source, runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 3})
-	plan.Entities[0].Accumulator = engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
+	plan.Entities[0].Accumulator = engine.NewStateCarrier(nil, buckets).PersistedStateBuckets()
 	owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 	if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
 		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour)); err != nil {

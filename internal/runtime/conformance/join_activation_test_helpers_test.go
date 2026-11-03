@@ -18,7 +18,7 @@ func findConformanceJoinActivation(t *testing.T, ctx context.Context, instance r
 	if err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,5 @@
 validator:
-  gate_state:
-    g_validated: gate set when validation completes
   validate.start:
     advances_to: done
-    sets_gate: g_validated
     emit:
       event: validation.done

@@ -66,7 +66,6 @@ type WorkflowInstance struct {
 	StateBuckets       map[string]any
 	Fields             map[string]any
 	Bookkeeping        map[string]any
-	Gates              map[string]bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	InitialFieldValues map[string]any
@@ -387,7 +386,7 @@ func (r WorkflowTargetPersistenceRecord) DecodeComplete(route runtimeflowidentit
 		ParentInstance: r.Lifecycle.ParentInstance, InstanceKey: r.Lifecycle.InstanceKey,
 		Mode: r.Lifecycle.Mode, Status: r.Lifecycle.Status, TerminatedAt: r.Lifecycle.TerminatedAt,
 		CurrentState: header.CurrentState, StageDefined: r.Lifecycle.StageDefined, Revision: header.Revision, EnteredStageAt: header.EnteredStageAt,
-		Gates: header.Gates, Fields: r.State.Fields, Bookkeeping: header.Bookkeeping, Accumulator: header.Accumulator,
+		Fields: r.State.Fields, Bookkeeping: header.Bookkeeping, Accumulator: header.Accumulator,
 		Config: r.Lifecycle.Config, FlowInstance: header.FlowInstance, EntityType: header.EntityType,
 		Slug: header.Slug, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: header.UpdatedAt,
 	})
@@ -452,7 +451,6 @@ type WorkflowInstancePersistenceRecord struct {
 	StageDefined    bool
 	Revision        int64
 	EnteredStageAt  time.Time
-	Gates           json.RawMessage
 	Fields          json.RawMessage
 	Bookkeeping     json.RawMessage
 	Accumulator     json.RawMessage
@@ -493,7 +491,6 @@ func decodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 	projection, err := decodeWorkflowInstancePersistedProjection(
 		record.Fields,
 		record.Bookkeeping,
-		record.Gates,
 		record.Accumulator,
 		record.Config,
 		workflowInstancePersistedControl{
@@ -547,7 +544,6 @@ func decodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		StateBuckets:       projection.Accumulator,
 		Fields:             projection.Fields,
 		Bookkeeping:        projection.Bookkeeping,
-		Gates:              projection.Gates,
 		TransitionHistory:  append([]WorkflowTransitionRecord(nil), projection.Control.TransitionHistory...),
 		CreatedAt:          record.CreatedAt.UTC(),
 		UpdatedAt:          record.UpdatedAt.UTC(),
@@ -590,7 +586,6 @@ type WorkflowTransitionRecord struct {
 type workflowInstancePersistedProjection struct {
 	Fields      map[string]any                   `json:"fields"`
 	Bookkeeping map[string]any                   `json:"bookkeeping"`
-	Gates       map[string]bool                  `json:"gates"`
 	Accumulator map[string]any                   `json:"accumulator"`
 	Control     workflowInstancePersistedControl `json:"control"`
 }
@@ -1051,7 +1046,7 @@ func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID stri
 }
 
 func decodeWorkflowInstancePersistedProjection(
-	fieldsRaw, bookkeepingRaw, gatesRaw, accRaw, configRaw []byte,
+	fieldsRaw, bookkeepingRaw, accRaw, configRaw []byte,
 	control workflowInstancePersistedControl,
 ) (workflowInstancePersistedProjection, error) {
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
@@ -1059,10 +1054,6 @@ func decodeWorkflowInstancePersistedProjection(
 		return workflowInstancePersistedProjection{}, err
 	}
 	bookkeeping, err := decodeWorkflowInstanceJSONMap("flow_instances.bookkeeping", bookkeepingRaw)
-	if err != nil {
-		return workflowInstancePersistedProjection{}, err
-	}
-	gates, err := decodeWorkflowInstanceJSONBoolMap("flow_instances.gates", gatesRaw)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
@@ -1080,7 +1071,6 @@ func decodeWorkflowInstancePersistedProjection(
 	return workflowInstancePersistedProjection{
 		Fields:      fields,
 		Bookkeeping: bookkeeping,
-		Gates:       gates,
 		Accumulator: accumulator,
 		Control:     control,
 	}, nil
@@ -1125,7 +1115,6 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	return workflowInstancePersistedProjection{
 		Fields:      cloneStringAnyMap(instance.Fields),
 		Bookkeeping: cloneStringAnyMap(instance.Bookkeeping),
-		Gates:       cloneWorkflowGates(instance.Gates),
 		Accumulator: cloneStringAnyMap(instance.StateBuckets),
 		Control:     control,
 	}, nil
@@ -1195,18 +1184,6 @@ func WorkflowInstanceHeaderPayloadForIdentity(
 	}).ConfigPayload(workflowVersion), nil
 }
 
-func (p workflowInstancePersistedProjection) GatesAny() map[string]any {
-	return workflowBoolGatesAsMap(p.Gates)
-}
-
-func cloneWorkflowGates(in map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
 func decodeWorkflowInstanceJSONMap(label string, raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
 		return map[string]any{}, nil
@@ -1223,20 +1200,6 @@ func decodeWorkflowInstanceJSONMap(label string, raw []byte) (map[string]any, er
 		return nil, fmt.Errorf("%s contains an invalid semantic value: %w", label, err)
 	}
 	return projected.(map[string]any), nil
-}
-
-func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]bool, error) {
-	if len(raw) == 0 {
-		return map[string]bool{}, nil
-	}
-	var out map[string]bool
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("%s must be an object of booleans: %w", label, err)
-	}
-	if out == nil {
-		return map[string]bool{}, nil
-	}
-	return out, nil
 }
 
 // Recorded headers retain runtime controls during historical projection,

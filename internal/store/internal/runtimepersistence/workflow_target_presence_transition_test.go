@@ -161,7 +161,7 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":        "stages: []\n",
-		"review/schema.yaml": "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\npins:\n  inputs: [review.created]\n",
+		"review/schema.yaml": "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
 		"review/state.yaml":  "account_id: text\nhandled: false\n",
 		"review/events.yaml": "review.created:\n  account_id: text\nfinish.requested:\nsettle.requested:\n",
 		"review/nodes.yaml": `progress:
@@ -454,7 +454,7 @@ func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instance
 		WorkflowName: flowID, WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "done", EntityType: "review_item",
 		Fields: json.RawMessage(`{"account_id":"preserved","handled":true}`), Bookkeeping: json.RawMessage(`{}`),
-		Gates: json.RawMessage(`{}`), Accumulator: json.RawMessage(`{}`), Config: config, InitialFields: json.RawMessage(`{}`),
+		Accumulator: json.RawMessage(`{}`), Config: config, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: createdAt.Add(time.Minute), CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
 		ExpectedState: expectedState, ExpectedRevision: expectedRevision,
 		// Creation-shaped ordinary mutations cannot acquire construction.

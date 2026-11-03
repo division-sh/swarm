@@ -32,13 +32,12 @@ const (
 	DomainLifecycleState Domain = "lifecycle_state"
 	DomainAuthoredField  Domain = "authored_field"
 	DomainBookkeeping    Domain = "bookkeeping"
-	DomainGate           Domain = "gate"
 	DomainAccumulator    Domain = "accumulator"
 )
 
 func (d Domain) Valid() bool {
 	switch d {
-	case DomainLifecycleState, DomainAuthoredField, DomainBookkeeping, DomainGate, DomainAccumulator:
+	case DomainLifecycleState, DomainAuthoredField, DomainBookkeeping, DomainAccumulator:
 		return true
 	default:
 		return false
@@ -72,7 +71,6 @@ type EntityStateProjection struct {
 	CurrentState *string
 	Fields       map[string]any
 	Bookkeeping  map[string]any
-	Gates        map[string]any
 	Accumulator  map[string]any
 }
 
@@ -179,11 +177,6 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 		return nil, err
 	}
 	records = append(records, bookkeepingRecords...)
-	gateRecords, err := diffMapRecords(entityID, DomainGate, before.Gates, after.Gates, writerType, writerID, handlerStep)
-	if err != nil {
-		return nil, err
-	}
-	records = append(records, gateRecords...)
 	accRecords, err := diffMapRecords(entityID, DomainAccumulator, before.Accumulator, after.Accumulator, writerType, writerID, handlerStep)
 	if err != nil {
 		return nil, err
@@ -223,15 +216,12 @@ func ApplyEntityStateProjectionMutation(state *EntityStateProjection, domain Dom
 		}
 		state.CurrentState = PresentLifecycleState(next)
 		state.ensureBookkeeping()
-		state.ensureGates()
 		state.ensureAccumulator()
 		return nil
 	case DomainAuthoredField:
 		return applyProjectionMapValue(state.ensureFields(), path, value, "authored_field")
 	case DomainBookkeeping:
 		applyProjectionAtomicMapValue(state.ensureBookkeeping(), path, value)
-	case DomainGate:
-		applyProjectionAtomicMapValue(state.ensureGates(), path, value)
 	case DomainAccumulator:
 		applyProjectionAtomicMapValue(state.ensureAccumulator(), path, value)
 	default:
@@ -341,13 +331,6 @@ func (p *EntityStateProjection) ensureBookkeeping() map[string]any {
 		p.Bookkeeping = map[string]any{}
 	}
 	return p.Bookkeeping
-}
-
-func (p *EntityStateProjection) ensureGates() map[string]any {
-	if p.Gates == nil {
-		p.Gates = map[string]any{}
-	}
-	return p.Gates
 }
 
 func (p *EntityStateProjection) ensureAccumulator() map[string]any {

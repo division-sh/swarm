@@ -36,7 +36,7 @@ func readForkBarrierLoop(t *testing.T, ctx context.Context, db *sql.DB, runID st
 	if err := json.Unmarshal(raw, &buckets); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, buckets)
+	carrier, err := engine.StateCarrierFromPersisted(nil, nil, buckets)
 	if err != nil {
 		t.Fatal(err)
 	}

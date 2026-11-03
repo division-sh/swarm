@@ -147,7 +147,7 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					if geometry == "duplicate_child" {
 						buckets[loopruntime.BucketKey]["duplicate"] = buckets[loopruntime.BucketKey][actual[0].Key()]
 					}
-					raw, err := json.Marshal(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+					raw, err := json.Marshal(runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets())
 					if err != nil {
 						t.Fatal(err)
 					}

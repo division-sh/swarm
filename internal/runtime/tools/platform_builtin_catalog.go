@@ -471,7 +471,7 @@ func entityToolReadFilterPropertySchema(contracts []entityruntime.Contract, name
 		if err != nil {
 			continue
 		}
-		return entityContractJSONSchemaWithRefinements(contract, field.Type, field.Refinements, false, map[string]struct{}{})
+		return entityContractJSONSchema(contract, field.Type, map[string]struct{}{})
 	}
 	return map[string]any{}
 }
@@ -628,7 +628,6 @@ func entityResolvedContractJSONSchema(contract entityruntime.Contract, resolved 
 		required := make([]string, 0, len(resolved.Fields))
 		for _, field := range resolved.Fields {
 			value := entityResolvedContractJSONSchema(contract, field.Type, seen)
-			applyEntitySchemaRefinements(value, field.Refinements, true)
 			props[field.Name] = value
 			if !field.IsOptional {
 				required = append(required, field.Name)
@@ -647,46 +646,6 @@ func entityResolvedContractJSONSchema(contract entityruntime.Contract, resolved 
 
 func resolveEntityToolStructuralType(contract entityruntime.Contract, typeRef string) (runtimecontracts.ResolvedCatalogType, error) {
 	return (runtimecontracts.CatalogTypeReference{Type: strings.TrimSpace(typeRef), Catalog: contract.Types}).Resolve()
-}
-
-func entityContractJSONSchemaWithRefinements(contract entityruntime.Contract, typeRef string, refinements runtimecontracts.SchemaRefinements, includeEquality bool, seen map[string]struct{}) map[string]any {
-	schema := entityContractJSONSchema(contract, typeRef, seen)
-	applyEntitySchemaRefinements(schema, refinements, includeEquality)
-	return schema
-}
-
-func applyEntitySchemaRefinements(schema map[string]any, refinements runtimecontracts.SchemaRefinements, includeEquality bool) {
-	if len(schema) == 0 || refinements.Empty() {
-		return
-	}
-	if value := strings.TrimSpace(refinements.Pattern); value != "" {
-		schema["pattern"] = value
-	}
-	if min := refinements.Length.Min; min != nil {
-		if strings.TrimSpace(asString(schema["type"])) == "array" {
-			schema["minItems"] = *min
-		} else {
-			schema["minLength"] = *min
-		}
-	}
-	if max := refinements.Length.Max; max != nil {
-		if strings.TrimSpace(asString(schema["type"])) == "array" {
-			schema["maxItems"] = *max
-		} else {
-			schema["maxLength"] = *max
-		}
-	}
-	if min := refinements.Range.Min; min != nil {
-		schema["minimum"] = *min
-	}
-	if max := refinements.Range.Max; max != nil {
-		schema["maximum"] = *max
-	}
-	if includeEquality {
-		if value := strings.TrimSpace(refinements.EqualTo); value != "" {
-			schema["x-swarm-equalTo"] = value
-		}
-	}
 }
 
 func deliveryTypeName(contract entityruntime.Contract, typeRef string) string {

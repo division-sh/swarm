@@ -104,7 +104,7 @@ func (p PreparedWorkflowPublicationState) JoinAdmissionInstance(target events.Ro
 		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode,
 		Status: record.Status, TerminatedAt: record.TerminatedAt, StageDefined: record.StageDefined, Config: record.Config,
 		CurrentState: record.CurrentState, Revision: revision, EnteredStageAt: record.EnteredStageAt,
-		Fields: fields, Bookkeeping: record.Bookkeeping, Gates: record.Gates, Accumulator: record.Accumulator,
+		Fields: fields, Bookkeeping: record.Bookkeeping, Accumulator: record.Accumulator,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	})
 	if err != nil {

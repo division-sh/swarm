@@ -118,7 +118,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				t.Helper()
 				after := requireA2PortfolioEntity(t, rt, setup.RunID, period.Entity.FlowInstance)
 				if !reflect.DeepEqual(partial, requireA2PortfolioJoin(t, rt, after, 1, false, nil)) ||
-					!reflect.DeepEqual(period.Fields, after.Fields) || !reflect.DeepEqual(period.Gates, after.Gates) ||
+					!reflect.DeepEqual(period.Fields, after.Fields) ||
 					!reflect.DeepEqual(period.Accumulated, after.Accumulated) ||
 					period.Entity.CurrentState == nil || after.Entity.CurrentState == nil || *period.Entity.CurrentState != *after.Entity.CurrentState || history() != beforeHistory ||
 					len(requireA2PortfolioEvents(t, rt, setup.RunID, "platform.join_complete")) != 0 {

@@ -21,12 +21,12 @@ func TestQ10DataOnlyLifecycleInputPresenceAdmission(t *testing.T) {
 	}
 	input := map[string]any{"alias": "import", "entity_id": entityID, "entity_type": "task", "fields": map[string]any{"current_state": "business"}}
 	data, err := testSetupEntityRequestFromParam(input, 1, runID)
-	if err != nil || data.CurrentState != nil || data.Gates != nil || data.Fields["current_state"] != "business" {
+	if err != nil || data.CurrentState != nil || data.Fields["current_state"] != "business" {
 		t.Fatalf("ordinary business data lost or gained lifecycle: %+v %v", data, err)
 	}
-	input["entity_id"], input["current_state"], input["gates"] = runID, "ready", map[string]any{"approved": true}
+	input["entity_id"], input["current_state"] = runID, "ready"
 	root, err := testSetupEntityRequestFromParam(input, 0, runID)
-	if err != nil || root.CurrentState == nil || *root.CurrentState != "ready" || !root.Gates["approved"] {
+	if err != nil || root.CurrentState == nil || *root.CurrentState != "ready" {
 		t.Fatalf("constructor-bound seed lost explicit initialization: %+v %v", root, err)
 	}
 }

@@ -396,7 +396,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 
 func a2KnownTargetArms(t *testing.T, instance runtimepipeline.WorkflowInstance) []joinruntime.Activation {
 	t.Helper()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

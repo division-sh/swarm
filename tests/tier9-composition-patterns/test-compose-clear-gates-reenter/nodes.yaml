@@ -1,11 +1,7 @@
 reviewer:
-  gate_state:
-    g_reviewed: gate set when review is approved
   review.done:
-    sets_gate: g_reviewed
     advances_to: approved
     emit:
       event: review.approved
   review.insufficient:
-    clear_gates: true
     advances_to: reviewing

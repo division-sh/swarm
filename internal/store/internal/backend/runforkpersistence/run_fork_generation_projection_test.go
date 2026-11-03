@@ -29,7 +29,7 @@ func projectionState(t *testing.T) (map[string]any, loopruntime.Activation, time
 		t.Fatal(err)
 	}
 	buckets[node.Key()] = map[string]any{"handler_accumulators": map[string]any{bucket.Key(): map[string]any{"nested": []any{map[string]any{"value": "original"}}}}}
-	return runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(), a, bucket
+	return runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets(), a, bucket
 }
 
 func forkAttemptGenerationState(raw map[string]any, runID, entityID string) (map[string]any, error) {
@@ -78,7 +78,7 @@ func TestForkGenerationProjectionHistoricalAccumulator(t *testing.T) {
 	if _, err := a.Repeat("draft", "repeat", time.Unix(101, 0)); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, raw)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, raw)
 	if err != nil {
 		t.Fatal(err)
 	}

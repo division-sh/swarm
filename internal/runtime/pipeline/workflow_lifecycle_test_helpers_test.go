@@ -96,19 +96,6 @@ func (pc *PipelineCoordinator) persistWorkflowStateWithAdmissionForTest(ctx cont
 	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, currentState, []runtimeworkflowlifecycle.Effect{effect})
 }
 
-func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, route runtimeflowidentity.Route, _ string, setGate string, clearAll bool) error {
-	return pc.workflowStore.mutate(ctx, testRunScopedWorkflowRoute(ctx, route), func(instance *WorkflowInstance) {
-		gates := cloneWorkflowGates(instance.Gates)
-		if clearAll {
-			clear(gates)
-		}
-		if setGate = strings.TrimSpace(setGate); setGate != "" {
-			gates[setGate] = true
-		}
-		instance.Gates = gates
-	})
-}
-
 func fireWorkflowTimerTestWakeup(ctx context.Context, pc *PipelineCoordinator, activation WorkflowTimerActivation) (WorkflowTimerFireOutcome, error) {
 	wakeup, err := newWorkflowTimerWakeup(activation)
 	if err != nil {

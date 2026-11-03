@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -27,7 +26,7 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 			}
 			defer restore()
 			got, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity)
-			if err != nil || got.EntityType != "storage_witness" || got.Revision == nil || *got.Revision != 1 || got.CurrentState == nil || *got.CurrentState != "queued" || len(got.Mutations) != 4 || !bytes.Equal(got.Gates, []byte(`{}`)) {
+			if err != nil || got.EntityType != "storage_witness" || got.Revision == nil || *got.Revision != 1 || got.CurrentState == nil || *got.CurrentState != "queued" || len(got.Mutations) != 4 {
 				t.Fatalf("projection=%+v/%v", got, err)
 			}
 			var want []TrackedProjectionMutationStorage
@@ -152,11 +151,11 @@ func TestTrackedMutationProjectionPreservesAbsenceAndPrivateCurrentOperandsBothS
 						if err := json.Unmarshal(got.Accumulator, &accumulator); err != nil {
 							t.Fatal(err)
 						}
-						if got.CurrentState == nil || *got.CurrentState != "queued" || string(got.Gates) != `{}` || string(got.Bookkeeping) != `{}` ||
+						if got.CurrentState == nil || *got.CurrentState != "queued" || string(got.Bookkeeping) != `{}` ||
 							!reflect.DeepEqual(accumulator, map[string]any{"handler_loops": map[string]any{}, "evidence": map[string]any{"score": float64(2)}}) {
 							t.Fatalf("private current lifecycle facts changed: %+v", got)
 						}
-					} else if got.CurrentState != nil || got.Gates != nil || got.Bookkeeping != nil || got.Accumulator != nil {
+					} else if got.CurrentState != nil || got.Bookkeeping != nil || got.Accumulator != nil {
 						t.Fatalf("data-only member acquired lifecycle: %+v", got)
 					}
 					var last map[string]any

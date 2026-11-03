@@ -60,7 +60,7 @@ func TestValidateUsageHintCoverage_ExternalMCPMissingHintIsLintOnly(t *testing.T
 
 func TestValidateUsageHintCoverage_GeneratedEmitUsesModelDescription(t *testing.T) {
 	const authorLine = "The title is the business summary."
-	contract := entityruntime.Contract{Entity: runtimecontracts.EntityContract{Description: authorLine}}
+	contract := entityruntime.Contract{Entity: runtimecontracts.EntityContract{}}
 	read := roleScopedEntityToolSpec{Kind: roleScopedEntityToolReadWhole, EntityType: "state"}
 	if got := roleScopedEntityToolSchemaEntry(contract, read).Description; got != "Read the fields of this state" {
 		t.Fatalf("generated description is not the verb line only: %q", got)

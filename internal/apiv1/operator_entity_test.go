@@ -65,7 +65,6 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 			Loops:       []loopruntime.PublicActivation{},
 			Fields:      map[string]any{"priority": "high", "activation": "manual"},
 			Bookkeeping: map[string]any{"activation": "standing"},
-			Gates:       map[string]bool{"approved": true},
 			Accumulated: map[string]any{
 				"score":       float64(3),
 				"accumulator": map[string]any{"count": float64(2)},
@@ -165,7 +164,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	}
 	getResult := asMap(t, get.Result)
 	assertOperatorDataOnlyLifecycle(t, asMap(t, getResult["entity"]))
-	for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+	for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
 		if value, present := getResult[key]; !present || value != nil {
 			t.Fatalf("data-only entity.get %s = %#v, present=%v, want explicit null", key, value, present)
 		}
@@ -233,7 +232,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	}
 	getResult := asMap(t, get.Result)
 	assertOperatorDataOnlyLifecycle(t, asMap(t, getResult["entity"]))
-	for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+	for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
 		if value, present := getResult[key]; !present || value != nil {
 			t.Fatalf("data-only entity.get %s = %#v, present=%v, want explicit null", key, value, present)
 		}

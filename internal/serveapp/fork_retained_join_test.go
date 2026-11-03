@@ -503,7 +503,7 @@ func waitRetainedJoinPipelineHandoff(t *testing.T, reader receiverProofStateRead
 func readRetainedRootJoins(t *testing.T, reader receiverProofStateReader, runID string) (loopruntime.Activation, []joinruntime.Activation) {
 	t.Helper()
 	_, root := requireReceiverTargetState(t, reader, runID, ".", runID, runID)
-	carrier, err := engine.StateCarrierFromPersisted(root.Fields, root.Bookkeeping, root.Gates, root.StateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(root.Fields, root.Bookkeeping, root.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

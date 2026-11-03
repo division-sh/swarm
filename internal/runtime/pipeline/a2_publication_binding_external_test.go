@@ -501,7 +501,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				}
 				for index := range paths {
 					item := load(index)
-					state, err := runtimeengine.StateCarrierFromPersisted(item.Fields, item.Bookkeeping, item.Gates, item.StateBuckets)
+					state, err := runtimeengine.StateCarrierFromPersisted(item.Fields, item.Bookkeeping, item.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
 					}

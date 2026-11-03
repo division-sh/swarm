@@ -626,7 +626,6 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 				Loops:       []loopruntime.PublicActivation{},
 				Fields:      map[string]any{"priority": "high", "activation": "manual"},
 				Bookkeeping: map[string]any{"activation": "standing"},
-				Gates:       map[string]bool{"approved": true},
 				Accumulated: map[string]any{
 					"score":       float64(3),
 					"accumulator": map[string]any{"count": float64(2)},

@@ -35,7 +35,7 @@ func projectRunForkAttemptGenerationState(raw map[string]any, forkRunID, entityI
 			return nil, nil, fmt.Errorf("fork loop bucket must be an object")
 		}
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, structured)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, structured)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -115,7 +115,7 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 			structured[key] = value
 		}
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, structured)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, structured)
 	if err != nil {
 		return nil, nil, err
 	}

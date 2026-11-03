@@ -167,7 +167,6 @@ type forkChatEntitySnapshot struct {
 	CurrentState   string         `json:"current_state,omitempty"`
 	EnteredStateAt string         `json:"entered_state_at,omitempty"`
 	Fields         map[string]any `json:"fields,omitempty"`
-	Gates          map[string]any `json:"gates,omitempty"`
 	Accumulator    map[string]any `json:"accumulator,omitempty"`
 }
 

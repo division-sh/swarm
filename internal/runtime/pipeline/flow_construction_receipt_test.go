@@ -29,7 +29,6 @@ func constructionReceiptFixture(t *testing.T) (FlowConstructionReceipt, flowiden
 	control.TransitionHistory = []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "account", "before", "initial", receipt.CreatingInput.EventID, receipt.OccurredAt)}
 	receipt.Persisted.Bookkeeping = map[string]any{"initial": map[string]any{"integer": int64(7), "double": float64(7)}}
 	receipt.Persisted.Accumulator = map[string]any{"members": []any{"original-member", int64(7), float64(7)}}
-	receipt.Persisted.Gates = map[string]bool{"original-gate": true}
 	receipt.CreationEvent = &DynamicFlowRuntimeCreationEventPlan{
 		EventID: "33333333-3333-4333-8333-333333333333", EventType: "account.created", RunID: receipt.RunID,
 		ParentEventID: receipt.CreatingInput.EventID, ExecutionMode: executionmode.Live,
@@ -61,7 +60,6 @@ func TestFlowConstructionReceiptV3CanonicalCorrespondence(t *testing.T) {
 			r.Persisted.Bookkeeping["initial"].(map[string]any)["integer"] = float64(7)
 		}},
 		{name: "accumulator", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Accumulator["changed"] = []any{"other"} }},
-		{name: "gate", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Gates["original-gate"] = false }},
 		{name: "header presentation", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Control.Slug = "other-slug" }},
 		{name: "creation occurrence", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.EventID = "44444444-4444-4444-8444-444444444444" }},
 		{name: "reply context", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.DeliveryContext.Reply.ID = "other-reply" }},
@@ -126,7 +124,6 @@ func TestFlowConstructionReceiptV3IndependentIdentityAndOccurrence(t *testing.T)
 	got.Persisted.Fields["nested"].(map[string]any)["values"].([]any)[0] = int64(99)
 	got.Persisted.Bookkeeping["initial"].(map[string]any)["integer"] = int64(99)
 	got.Persisted.Accumulator["members"].([]any)[0] = "changed"
-	got.Persisted.Gates["original-gate"] = false
 	got.Persisted.Control.TransitionHistory[0].From = "changed"
 	got.CreationEvent.Payload[0] = 'x'
 	got.CreationEvent.DeliveryContext.Reply.ID = "changed"
@@ -331,7 +328,7 @@ func TestFlowConstructionReceiptV3ChildProjectionKeepsExactInitialization(t *tes
 	}
 	if got.InitialState != receipt.InitialState || got.OccurredAt != receipt.OccurredAt || got.BundleHash != receipt.BundleHash || got.WorkflowVersion != receipt.WorkflowVersion ||
 		!reflect.DeepEqual(got.Persisted.Fields, receipt.Persisted.Fields) || !reflect.DeepEqual(got.Persisted.Bookkeeping, receipt.Persisted.Bookkeeping) ||
-		!reflect.DeepEqual(got.Persisted.Gates, receipt.Persisted.Gates) || !reflect.DeepEqual(got.Persisted.Accumulator, receipt.Persisted.Accumulator) {
+		!reflect.DeepEqual(got.Persisted.Accumulator, receipt.Persisted.Accumulator) {
 		t.Fatal("child projection replaced initial values with current state")
 	}
 	wantControl := receipt.Persisted.Control

@@ -851,7 +851,6 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 			"entity_type":   evaluated.EntityType,
 			"current_state": evaluated.CurrentState,
 			"fields":        evaluated.Fields,
-			"gates":         evaluated.Gates,
 		})
 	}
 	params["entities"] = entities
@@ -884,7 +883,6 @@ type evaluatedScenarioSetupEntity struct {
 	EntityType   string
 	CurrentState string
 	Fields       map[string]any
-	Gates        map[string]bool
 }
 
 func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, entity scenarioSetupEntity) (evaluatedScenarioSetupEntity, error) {
@@ -934,17 +932,12 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 	if err != nil {
 		return evaluatedScenarioSetupEntity{}, err
 	}
-	gates, err := r.evaluateScenarioSetupGates(evaluator, flowID, entity)
-	if err != nil {
-		return evaluatedScenarioSetupEntity{}, err
-	}
 	return evaluatedScenarioSetupEntity{
 		Alias:        entity.Alias,
 		FlowID:       flowID,
 		EntityType:   entity.EntityType,
 		CurrentState: currentState,
 		Fields:       fields,
-		Gates:        gates,
 	}, nil
 }
 
@@ -974,66 +967,6 @@ func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressio
 		fields[field] = normalized
 	}
 	return fields, nil
-}
-
-func (r scenarioRunner) evaluateScenarioSetupGates(evaluator *scenarioExpressionEvaluator, flowID string, entity scenarioSetupEntity) (map[string]bool, error) {
-	if !entity.GatesSet {
-		return map[string]bool{}, nil
-	}
-	value, err := evaluator.Evaluate(entity.Gates)
-	if err != nil {
-		return nil, fmt.Errorf("setup.entities[%s].gates: %w", entity.Alias, err)
-	}
-	raw, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("setup.entities[%s].gates must evaluate to a mapping", entity.Alias)
-	}
-	declared := r.declaredScenarioGateNames(flowID)
-	out := make(map[string]bool, len(raw))
-	for gate, rawValue := range raw {
-		boolValue, ok := rawValue.(bool)
-		if !ok {
-			return nil, fmt.Errorf("setup.entities[%s].gates.%s must evaluate to boolean", entity.Alias, gate)
-		}
-		if _, ok := declared[gate]; !ok {
-			return nil, fmt.Errorf("setup.entities[%s].gates.%s is not declared for flow %s", entity.Alias, gate, scenarioFlowLabel(flowID))
-		}
-		out[gate] = boolValue
-	}
-	return out, nil
-}
-
-func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]struct{} {
-	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
-	out := map[string]struct{}{}
-	for _, record := range r.bundle.ScopedNodeRecords() {
-		node, err := record.Identity()
-		if err != nil || strings.Trim(node.FlowPath(), "/") != flowID {
-			continue
-		}
-		for _, gate := range record.Entry.GateState.Gates {
-			if name := strings.TrimSpace(gate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-	}
-	for _, transition := range r.bundle.DerivedHandlerTransitions() {
-		if strings.Trim(transition.Node.FlowPath(), "/") != flowID {
-			continue
-		}
-		if transition.SetsGate != nil {
-			if name := strings.TrimSpace(transition.SetsGate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-		for _, gate := range transition.ClearGates {
-			gate = strings.TrimSpace(gate)
-			if gate != "" && gate != "*" {
-				out[gate] = struct{}{}
-			}
-		}
-	}
-	return out
 }
 
 func scenarioFlowLabel(flowID string) string {
@@ -2055,11 +1988,6 @@ func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID
 			return err
 		}
 	}
-	if detail.GatesSet {
-		if err := assertScenarioJSONEqual(fmt.Sprintf("entity %s gates", entityID), full.Gates, detail.Gates); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -2067,8 +1995,6 @@ type evaluatedScenarioEntityDetail struct {
 	State     *string
 	Fields    map[string]any
 	FieldsSet bool
-	Gates     map[string]bool
-	GatesSet  bool
 }
 
 func evaluateScenarioEntityDetail(e scenarioEntityExpect, evaluator *scenarioExpressionEvaluator) (evaluatedScenarioEntityDetail, error) {
@@ -2099,25 +2025,6 @@ func evaluateScenarioEntityDetail(e scenarioEntityExpect, evaluator *scenarioExp
 		}
 		out.Fields = fields
 		out.FieldsSet = true
-	}
-	if e.GatesSet {
-		value, err := evaluator.Evaluate(e.Gates)
-		if err != nil {
-			return out, fmt.Errorf("expect.entities.gates: %w", err)
-		}
-		gates, ok := value.(map[string]any)
-		if !ok {
-			return out, fmt.Errorf("expect.entities.gates must evaluate to a mapping")
-		}
-		out.Gates = map[string]bool{}
-		for gate, raw := range gates {
-			value, ok := raw.(bool)
-			if !ok {
-				return out, fmt.Errorf("expect.entities.gates.%s must evaluate to boolean", gate)
-			}
-			out.Gates[gate] = value
-		}
-		out.GatesSet = true
 	}
 	return out, nil
 }

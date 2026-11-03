@@ -293,6 +293,7 @@ rows:
     corpus: {entity_scalar: 4, entity_type_only_mapping: 5, entity_mapping_with_metadata: 7}
     list_proofs: [TestListSpellingRetirementTypedFields, TestListSpellingRetirementPresenceMatrix, TestListSpellingRetirementMetadataAndData, TestListSpellingRetirementBundleStyle]
     reconciliation: "List spellings are retired. The metadata/paths/counts above describe historical or current-source evidence, not the #1745 destination. Under comments6218903402/6220360999 embedded fields transfer type and optionality only; indexed is own-state-only and initial values are state.yaml literals. Description/refinements/immutable/citation are not revived. #1745 owns the remaining cutover."
+    slice3_retirement: "#2293 Q2 retires authored descriptions, refinements, immutable and unused-reason metadata carriers/readers; type and optionality remain, indexed is own-state-only and initial values are literals. The preceding census is historical, not accepted grammar. External JSON Schema validation remains independent."
 
   - id: entity_document
     ruled: mechanical-ratified
@@ -371,6 +372,7 @@ rows:
       distinct_overrides: [mapping_with_default_or_description, gate_storage]
     corpus: {state_schema: 0, gate_state: 0}
     list_proofs: [TestListSpellingRetirementTypedFields, TestListSpellingRetirementBundleStyle, TestListSpellingRetirementNodeState]
+    slice3_retirement: "#2293 Q2 deletes node-state schemas and private boolean gates, their storage and readers. Presence is refused by the node admission owner. Stage-decision gates/cards and native lifecycle/loop/join storage are distinct and remain. The preceding owners/spellings are historical."
 
   - id: node.timer
     ruled: mechanical-ratified
@@ -458,6 +460,7 @@ rows:
       retired_duplicates: [sets_gate_scalar_equals_name_true, sets_gate_inert_value, clear_gates_true_equals_star, clear_gates_scalar_equals_one_item_list]
       already_retired: [guard_scalar_id, deprecated_guard_id_only_fallback]
     execution_note: "sets_gate always sets the named gate true; GateSpec.Value is not evaluated by Executor.stepSetsGate and must not be treated as an R2 value slot. Guard.check is required only in single-check form; checks is the list-form selector."
+    slice3_retirement: "#2293 Q2 retires sets_gate/clear_gates and their private boolean storage. Only the live guard/check/policy behavior remains; the preceding gate execution note is historical, not an admitted effect."
     corpus: {rows: 0}
 
   - id: handler.expression

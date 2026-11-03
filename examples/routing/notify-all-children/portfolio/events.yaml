@@ -1,7 +1,7 @@
 account.registered:
-  key: account_id
+  _key: account_id
   account_id: text
 account.notify.requested:
-  key: account_id
+  _key: account_id
   account_id: text
   command: text

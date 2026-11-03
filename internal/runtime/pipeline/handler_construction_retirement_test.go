@@ -42,7 +42,6 @@ func TestHandlerBridgeCannotConstructThroughEffectsOrPreview(t *testing.T) {
 	}{
 		{"payload_only", runtimecontracts.SystemNodeEventHandler{}},
 		{"stage", runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}},
-		{"gate", runtimecontracts.SystemNodeEventHandler{SetsGate: &runtimecontracts.GateSpec{Name: "approved"}}},
 		{"field_write", runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "marker", Value: runtimecontracts.LiteralExpression("new")}}}}},
 		{"retired_creation", runtimecontracts.SystemNodeEventHandler{CreateEntity: true}},
 	} {
@@ -96,7 +95,7 @@ func TestPreviewRequiresExactConstructedSnapshot(t *testing.T) {
 			snapshot := runtimeengine.StateSnapshot{
 				EntityID: entityID, WorkflowName: "review", WorkflowVersion: "v1", CurrentState: "pending", EnteredStateAt: time.Now().UTC(),
 				StateCarrier: runtimeengine.NewStateCarrierWithOwners(map[string]any{"marker": "original"}, nil,
-					runtimeStateControlForDeliveryTarget(route, "review_item"), nil, nil),
+					runtimeStateControlForDeliveryTarget(route, "review_item"), nil),
 			}
 			test.edit(&snapshot)
 			projected, found, err := loadPreviewEngineState(snapshot, address)

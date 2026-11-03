@@ -39,8 +39,7 @@ func commitAccumulatorAppendForTest(ctx context.Context, pc *PipelineCoordinator
 		return runtimeengine.ErrUnconstructedWorkflowTarget
 	}
 	mutation := runtimeengine.StateMutation{StateCarrier: runtimeengine.NewStateCarrierWithOwners(
-		state.Fields, state.Bookkeeping, state.Control, state.Gates, state.StateBuckets,
-	)}
+		state.Fields, state.Bookkeeping, state.Control, state.StateBuckets)}
 	if mutation.StateBuckets == nil {
 		mutation.StateBuckets = map[string]map[string]any{}
 	}
@@ -72,9 +71,9 @@ func (r *rejectWorkflowEvaluationR2Reader) LoadWorkflowTargetPersistence(context
 	return WorkflowTargetPersistenceRecord{}, errors.New("unexpected preparation-time R2 read")
 }
 
-func testEngineStateMutation(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateMutation {
+func testEngineStateMutation(metadata map[string]any, buckets map[string]map[string]any) runtimeengine.StateMutation {
 	return runtimeengine.StateMutation{
-		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
+		StateCarrier: runtimeengine.NewStateCarrier(metadata, buckets),
 	}
 }
 
@@ -116,7 +115,8 @@ func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"research_context": map[string]any{"summary": "done"},
-	}, nil, nil)
+	}, nil)
+
 	mutation.StateCarrier.Bookkeeping = map[string]any{
 		"last_data_accumulation_event":  "research.completed",
 		"last_data_accumulation_source": "research.completed",
@@ -137,56 +137,6 @@ func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
 	}
 	if got := instance.Bookkeeping["last_data_accumulation_event"]; got != "research.completed" {
 		t.Fatalf("last_data_accumulation_event = %#v", got)
-	}
-}
-
-func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing.T) {
-	instance := &WorkflowInstance{
-		Fields:     map[string]any{},
-		Gates:      map[string]bool{"g_a": true, "g_b": true},
-		EntityType: "state",
-	}
-	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
-	mutation.SetGate = "g_c"
-
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
-
-	gates := instance.Gates
-	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
-	if len(gates) != len(want) {
-		t.Fatalf("gates len=%d want %d (%v)", len(gates), len(want), gates)
-	}
-	for key, value := range want {
-		if gates[key] != value {
-			t.Fatalf("gate %s=%v want %v (all=%v)", key, gates[key], value, gates)
-		}
-	}
-}
-
-func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Version: "v-test",
-			FlowPrefix: map[string]string{
-				"child": "child",
-			},
-		},
-	})
-	instance := &WorkflowInstance{
-		Fields:     map[string]any{},
-		EntityType: "state",
-	}
-	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
-	mutation.SetGate = "g_validated"
-
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, "child")
-
-	gates := instance.Gates
-	if !gates["child/g_validated"] {
-		t.Fatalf("scoped gates = %#v, want child/g_validated=true", gates)
-	}
-	if gates["g_validated"] {
-		t.Fatalf("raw unscoped child gate leaked into metadata: %#v", gates)
 	}
 }
 
@@ -254,26 +204,6 @@ request.received:
 	}
 }
 
-func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
-	source := testRootEntityContractSource("root")
-	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["state"].Fields["flow_path"] = runtimecontracts.EntityFieldDecl{Type: "text"}
-	instance := &WorkflowInstance{
-		Fields: map[string]any{
-			"flow_path": "child/inst-1",
-		},
-		EntityType: "state",
-	}
-	mutation := testEngineStateMutation(nil, map[string]bool{"g_ready": true}, nil)
-	mutation.SetGate = "g_ready"
-
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
-
-	if !instance.Gates["./g_ready"] {
-		t.Fatalf("gates = %#v, want g_ready=true", instance.Gates)
-	}
-}
-
 func authoredControlCollisionSource() semanticview.Source {
 	source := testRootEntityContractSource("root")
 	bundle, _ := semanticview.Bundle(source)
@@ -306,7 +236,7 @@ func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t
 		"parent_flow_instance": "wrong/root",
 		"parent_entity_id":     "wrong-parent",
 		"business_status":      "new",
-	}, nil, nil)
+	}, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
@@ -345,7 +275,7 @@ func TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames(t *testi
 		"parent_flow_id":       "root",
 		"parent_flow_instance": "root/inst-1",
 		"parent_entity_id":     "parent-ent",
-	}, nil, nil)
+	}, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
@@ -377,7 +307,7 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 		"parent_flow_id":       "root",
 		"parent_flow_instance": "root/inst-1",
 		"parent_entity_id":     "wrong-parent",
-	}, nil, nil)
+	}, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
@@ -408,7 +338,8 @@ func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.
 	instance := &WorkflowInstance{}
 	mutation := testEngineStateMutation(map[string]any{
 		"name": "Test Vertical",
-	}, nil, nil)
+	}, nil)
+
 	mutation.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{TargetField: "name", Value: runtimecontracts.LiteralExpression("Test Vertical")},
@@ -421,21 +352,6 @@ func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.
 	}
 }
 
-func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-
-	got := workflowStateGatesForScope(source, "child/grandchild", map[string]bool{
-		"child/grandchild/g_ready": true,
-	})
-
-	if !got["child/grandchild/g_ready"] {
-		t.Fatalf("scoped gate missing from result: %#v", got)
-	}
-	if !got["g_ready"] {
-		t.Fatalf("local gate alias missing from deep scope result: %#v", got)
-	}
-}
-
 func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(t *testing.T) {
 	source := testRootEntityContractSource("root")
 	bundle, _ := semanticview.Bundle(source)
@@ -443,14 +359,13 @@ func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(
 	bundle.RootEntities["state"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"composite_score": 0},
-		Gates:        map[string]bool{"g_ready": true},
 		StateBuckets: map[string]any{},
 		EntityType:   "state",
 	}
 	mutation := testEngineStateMutation(map[string]any{
 		"composite_score": 71,
 		"scoring_rubric":  "corpus_rubric",
-	}, nil, nil)
+	}, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
@@ -463,14 +378,11 @@ func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(
 	if _, present := instance.StateBuckets["entity_projection"]; present {
 		t.Fatal("entity mutation created a shadow entity_projection bucket")
 	}
-	if !instance.Gates["g_ready"] {
-		t.Fatalf("field-only mutation dropped existing gates: %#v", instance.Gates)
-	}
 }
 
 func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.T) {
 	instance := &WorkflowInstance{EntityType: "state"}
-	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
+	mutation := testEngineStateMutation(map[string]any{}, nil)
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
 
@@ -547,7 +459,7 @@ func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.
 	evaluated := loadEngineEvaluationForTest(t, executionCtx, repo, address)
 	_, err = (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(executionCtx, runtimeengine.EngineMutation{
 		Address: address, EvaluatedState: evaluated,
-		State: testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil),
+		State: testEngineStateMutation(map[string]any{"note": "bad write"}, nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
@@ -573,7 +485,7 @@ func VerifyPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOn
 
 	entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
 	address := testEngineStateAddress(".", wrongRunID, entityID)
-	mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+	mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil)
 	mutation.StateCarrier.Control.EntityType = "state"
 	mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
 
@@ -617,7 +529,7 @@ func VerifyWorkflowEngineMutationRejectsEntityContractDriftOnBothStoresForTest(t
 	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatalf("seed contradictory entity contract: %v", err)
 	}
-	mutation := testEngineStateMutation(map[string]any{"marker": "mutated"}, nil, nil)
+	mutation := testEngineStateMutation(map[string]any{"marker": "mutated"}, nil)
 	mutation.NextState = "done"
 	mutation.TriggeredAt = time.Date(2026, time.August, 23, 4, 0, 0, 0, time.UTC)
 	address := testEngineStateAddress(".", testPipelineRunID, entityID)
@@ -660,7 +572,7 @@ func VerifyWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntity
 			})
 
 			entityID := eventtest.UUID("first-materialization-contract-" + backend + "-" + label)
-			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil)
 			mutation.NextState = "active"
 			mutation.StateCarrier.Control = runtimeengine.StateControl{
 				FlowPath: testPipelineRunID, StorageRef: testPipelineRunID, InstanceID: testPipelineRunID, EntityType: carriedType,
@@ -760,9 +672,8 @@ func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T
 	}
 	mutation := testEngineStateMutation(
 		map[string]any{"score": 91, "subject_id": "11111111-1111-1111-1111-111111111111"},
-		map[string]bool{"ready": true},
-		map[string]map[string]any{"evidence": {"count": 2}},
-	)
+
+		map[string]map[string]any{"evidence": {"count": 2}})
 
 	address := testEngineStateAddress(".", testPipelineRunID, entityID.String())
 	address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID)
@@ -782,9 +693,6 @@ func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T
 	}
 	if got := loaded.Fields["score"]; got != int64(91) {
 		t.Fatalf("loaded metadata score = %#v, want 91", got)
-	}
-	if !loaded.Gates["ready"] {
-		t.Fatalf("loaded gates = %#v, want ready=true", loaded.Gates)
 	}
 	if got := loaded.StateBuckets["evidence"]["count"]; got != int64(2) {
 		t.Fatalf("loaded state bucket evidence.count = %#v, want 2", got)
@@ -842,26 +750,6 @@ func TestPipelineEngineQueryEntityCountRejectsRawNumericCarrierBeforeStoreLookup
 	}
 }
 
-func TestWorkflowStateGatesForScopeAddsLocalAliasesForChildFlow(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Version: "v-test",
-			FlowPrefix: map[string]string{
-				"child": "child",
-			},
-		},
-	})
-	got := workflowStateGatesForScope(source, "child", map[string]bool{
-		"child/g_validated": true,
-	})
-	if !got["child/g_validated"] {
-		t.Fatalf("scoped key missing from gates view: %#v", got)
-	}
-	if !got["g_validated"] {
-		t.Fatalf("local alias missing from gates view: %#v", got)
-	}
-}
-
 func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-child-flow-local-events")
 	bundle, ok := semanticview.Bundle(source)
@@ -894,7 +782,7 @@ func TestPipelineEnginePayloadShaper_UsesParentEntityForCrossFlowOutputs(t *test
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 
@@ -948,7 +836,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsAcrossCrossFlowOutpu
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 
@@ -996,7 +884,7 @@ func TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnDeclarativeSurface(t
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 
@@ -1051,7 +939,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnDeclarativeSu
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 
@@ -1109,7 +997,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 
@@ -1167,7 +1055,7 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnDeclarati
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 
@@ -1320,7 +1208,7 @@ func TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput(t *te
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1"}, nil),
 		},
 	}
 
@@ -1368,7 +1256,7 @@ func TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnDeclarativeSurface
 
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID("ent-child"),
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"flow_path": "child/inst-1", "subject_id": "ent-parent", "parent_entity_id": "ent-parent"}, nil),
 		},
 	}
 

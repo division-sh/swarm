@@ -18,11 +18,11 @@ func TestA2WorkflowHistoryProjectionPreservesRetainedNumbers(t *testing.T) {
 	}
 	before := mutationlog.EntityStateProjection{
 		CurrentState: mutationlog.PresentLifecycleState("collecting"), Fields: retained, Bookkeeping: retained,
-		Gates: map[string]any{"ready": true}, Accumulator: retained,
+		Accumulator: retained,
 	}
 	after, err := workflowEngineStateProjection(pipeline.WorkflowEngineStateRecord{
 		CurrentState: "collecting", Fields: raw, Bookkeeping: raw,
-		Gates: json.RawMessage(`{"ready":true}`), Accumulator: raw,
+		Accumulator: raw,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -42,15 +42,13 @@ func TestA2WorkflowHistoryProjectionPreservesRetainedNumbers(t *testing.T) {
 func TestA2WorkflowHistoryProjectionRejectsMalformedEvidence(t *testing.T) {
 	for _, raw := range []string{`{"value":1,"value":2}`, `{"value":-0}`, `{"value":9007199254740993}`, `{"value":1} {}`, `[1,2]`} {
 		t.Run(raw, func(t *testing.T) {
-			for _, bucket := range []string{"fields", "bookkeeping", "gates", "accumulator"} {
-				record := pipeline.WorkflowEngineStateRecord{Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Gates: []byte(`{}`), Accumulator: []byte(`{}`)}
+			for _, bucket := range []string{"fields", "bookkeeping", "accumulator"} {
+				record := pipeline.WorkflowEngineStateRecord{Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`)}
 				switch bucket {
 				case "fields":
 					record.Fields = []byte(raw)
 				case "bookkeeping":
 					record.Bookkeeping = []byte(raw)
-				case "gates":
-					record.Gates = []byte(raw)
 				case "accumulator":
 					record.Accumulator = []byte(raw)
 				}

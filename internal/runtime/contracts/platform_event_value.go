@@ -97,7 +97,7 @@ func admitPlatformEventFieldValue(value yamlsource.Value) (EventFieldSpec, bool,
 			return EventFieldSpec{}, false, nodeValueError(value, err)
 		}
 		typeName, description := normalizePlatformEventFieldType(typeName)
-		return EventFieldSpec{Type: typeName, Description: description}, optional, nil
+		return EventFieldSpec{Type: typeName, platformDescription: description}, optional, nil
 	}
 	f, err := platformValueFields(value)
 	if err != nil {
@@ -112,17 +112,17 @@ func admitPlatformEventFieldValue(value yamlsource.Value) (EventFieldSpec, bool,
 		if err = schemaValueRequiredTexts(value, f, map[string]*string{"type": &field.Type}); err != nil {
 			return field, false, err
 		}
-		if err = schemaValueTexts(f, map[string]*string{"description": &field.Description}, false); err != nil {
+		if err = schemaValueTexts(f, map[string]*string{"description": &field.platformDescription}, false); err != nil {
 			return field, false, err
 		}
 		typeName, optional, err := admitEventFieldTypeMarker(field.Type, value.SemanticPath())
 		var annotation string
 		field.Type, annotation = normalizePlatformEventFieldType(typeName)
 		if annotation != "" {
-			if field.Description != "" {
-				annotation += ". " + field.Description
+			if field.platformDescription != "" {
+				annotation += ". " + field.platformDescription
 			}
-			field.Description = annotation
+			field.platformDescription = annotation
 		}
 		if err != nil {
 			return field, false, nodeValueError(value, err)

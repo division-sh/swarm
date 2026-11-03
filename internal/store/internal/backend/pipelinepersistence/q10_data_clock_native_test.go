@@ -40,7 +40,7 @@ func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProce
 			record := pipeline.WorkflowEngineStateRecord{
 				Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("work", "work", "work")},
 				EntityID: entityID, EntityType: "task", WorkflowName: "work", Mode: "static", Status: "active", StageDefined: true,
-				CurrentState: "ready", Fields: []byte(`{"count":1}`), Gates: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{}`),
+				CurrentState: "ready", Fields: []byte(`{"count":1}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{}`),
 				CreatedAt: at, UpdatedAt: at, EnteredStageAt: at,
 			}
 			commit := func(create bool) {
@@ -77,7 +77,6 @@ func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProce
 				{"lifecycle_only", `{"count":1}`, false},
 				{"integer_to_double", `{"count":1.0}`, true},
 				{"absent_to_null", `{"count":1.0,"note":null}`, true},
-				{"gate_only", `{"count":1.0,"note":null}`, false},
 				{"representation_only", `{"note":null,"count":1.000}`, false},
 				{"slug_only", `{"count":1.0,"note":null}`, true},
 				{"name_only", `{"count":1.0,"note":null}`, true},
@@ -90,9 +89,6 @@ func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProce
 					record.CurrentState = "review"
 					record.UpdatedAt = at.Add(time.Duration(index+1) * time.Minute)
 					record.Fields = []byte(change.fields)
-					if change.name == "gate_only" {
-						record.Gates = []byte(`{"approved":true}`)
-					}
 					if change.name == "slug_only" {
 						record.Slug = "renamed-task"
 					}

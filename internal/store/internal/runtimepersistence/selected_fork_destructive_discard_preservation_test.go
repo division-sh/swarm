@@ -321,9 +321,9 @@ func seedSelectedForkDiscardConstructionRows(t *testing.T, ctx context.Context, 
 	}{
 		{`INSERT INTO flow_instances
 			(run_id, instance_path, entity_id, flow_template, mode, config, status,
-			 stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			 stage_defined, current_state, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
 			VALUES ($1, 'discard-native', $3, 'discard-native', 'static', '{}', 'active',
-			 FALSE, 'operating', '{}', '{}', '{}', 1, $2, $2, $2)`, []any{runID, at, entityID}},
+			 FALSE, 'operating', '{}', '{}', 1, $2, $2, $2)`, []any{runID, at, entityID}},
 		{`INSERT INTO flow_instance_runtime_readiness
 			(run_id, instance_path, plan, plan_hash, created_at, updated_at)
 			VALUES ($1, 'discard-native', '{}', $2, $3, $3)`, []any{runID, "sha256:" + strings.Repeat("a", 64), at}},

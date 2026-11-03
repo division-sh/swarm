@@ -492,7 +492,7 @@ func requireA2PortfolioJoin(t *testing.T, rt servedControlProofRuntime, period o
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &persisted); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(period.Fields, period.Bookkeeping, period.Gates, persisted)
+	carrier, err := engine.StateCarrierFromPersisted(period.Fields, period.Bookkeeping, persisted)
 	if err != nil {
 		t.Fatal(err)
 	}

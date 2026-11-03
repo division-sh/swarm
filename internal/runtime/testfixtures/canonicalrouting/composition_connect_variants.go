@@ -80,7 +80,7 @@ outputs:
 `, `deploy.requested:
   vertical_id: string
 deploy.done:
-  key: vertical_id
+  _key: vertical_id
   vertical_id: string
 `, "", `producer-node:
   deploy.requested:
@@ -125,7 +125,7 @@ func CopyCompositionConnectAmbiguity(t testing.TB) string {
 		"consumer/agents.yaml", "consumer/state.yaml", "consumer/events.yaml", "consumer/nodes.yaml",
 	)
 	for _, flowID := range []string{"producer_a", "producer_b"} {
-		writeLegacyInstanceFlow(t, root, flowID, "# fixture: "+flowID+"\noutputs:\n  - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
+		writeLegacyInstanceFlow(t, root, flowID, "# fixture: "+flowID+"\noutputs:\n  - ticket.ready\n", "ticket.ready:\n  _key: entity_id\n  entity_id: string\n", "", "")
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", "# fixture: consumer\ninputs:\n  - ticket.ready\n", "", "", "")
 	return root
@@ -171,7 +171,7 @@ connect:
     inline: Consume connected root work events.
   subscriptions: [work.ready]
 `)
-	writeClosedVariantFile(t, root, "producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  key: work_id\n  work_id: text\n")
+	writeClosedVariantFile(t, root, "producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  _key: work_id\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\noutputs:\n  - work.ready\n")
 	writeLegacyInstanceFlow(t, root, "consumer", "# fixture: consumer\ninputs:\n  - consumer.work.ready\n", "", "", `consumer-node:
   consumer.work.ready: {}

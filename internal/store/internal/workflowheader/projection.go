@@ -18,7 +18,7 @@ import (
 type Projection struct {
 	EntityID, InstancePath, EntityType, FlowTemplate, Stage string
 	Revision                                                int64
-	Gates, Bookkeeping, Accumulator, Fields                 any
+	Bookkeeping, Accumulator, Fields                        any
 }
 
 // ProjectionError distinguishes malformed persisted ownership from storage
@@ -57,7 +57,7 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 		entityPredicate = "fi.entity_id = NULLIF($2, '')::uuid"
 	}
 	query := `SELECT fi.entity_id, fi.instance_path, fi.entity_type, fi.flow_template, fi.current_state, fi.revision,
-		fi.gates, fi.bookkeeping, fi.accumulator,
+		fi.bookkeeping, fi.accumulator,
 		es.entity_id, es.flow_instance, es.entity_type, es.fields
 		FROM flow_instances fi
 		LEFT JOIN entity_state es ON es.run_id = fi.run_id AND (es.entity_id = fi.entity_id OR es.flow_instance = fi.instance_path)
@@ -77,7 +77,7 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 	}
 	err = rows.Scan(
 		&header.EntityID, &header.InstancePath, &declaredType, &header.FlowTemplate, &header.Stage, &header.Revision,
-		&header.Gates, &header.Bookkeeping, &header.Accumulator,
+		&header.Bookkeeping, &header.Accumulator,
 		&fieldID, &fieldPath, &fieldType, &header.Fields,
 	)
 	if err != nil {
@@ -112,7 +112,7 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 	for _, object := range []struct {
 		name string
 		raw  any
-	}{{"gates", header.Gates}, {"bookkeeping", header.Bookkeeping}, {"accumulator", header.Accumulator}} {
+	}{{"bookkeeping", header.Bookkeeping}, {"accumulator", header.Accumulator}} {
 		if err := requireJSONObject(object.name, object.raw); err != nil {
 			return Projection{}, false, &ProjectionError{runID, header.EntityID, header.InstancePath, err.Error()}
 		}

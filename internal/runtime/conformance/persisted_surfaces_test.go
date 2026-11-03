@@ -1821,7 +1821,6 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 	}
 	// Preserve the original component state without inventing construction evidence.
 	child.Instance.Fields = map[string]any{"status": "closed"}
-	child.Instance.Gates = map[string]bool{"g_done": true}
 	child.Instance.StateBuckets = map[string]any{
 		"evidence": map[string]any{"score": 2},
 		"notes":    map[string]any{"count": 1},
@@ -1842,7 +1841,7 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 	if err != nil || !found {
 		t.Fatalf("read constructed workflow mutation target: found=%v err=%v", found, err)
 	}
-	if stored.CurrentState != "done" || stored.Fields["status"] != "closed" || !stored.Gates["g_done"] ||
+	if stored.CurrentState != "done" || stored.Fields["status"] != "closed" ||
 		mustCanonicalJSON(nil, stored.StateBuckets["evidence"]) != `{"score":2}` ||
 		mustCanonicalJSON(nil, stored.StateBuckets["notes"]) != `{"count":1}` {
 		t.Fatalf("constructed workflow lost the original mutation evidence: %+v", stored)
@@ -2111,7 +2110,7 @@ func trackedMutationStateMatchesEntityState(selected any, runID, entityID string
 	if readErr != nil {
 		return readErr
 	}
-	currentState, fieldsRaw, bookRaw, gatesRaw, accRaw := evidence.CurrentState, evidence.Fields, evidence.Bookkeeping, evidence.Gates, evidence.Accumulator
+	currentState, fieldsRaw, bookRaw, accRaw := evidence.CurrentState, evidence.Fields, evidence.Bookkeeping, evidence.Accumulator
 	want := runtimemutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       map[string]any{},
@@ -2124,7 +2123,7 @@ func trackedMutationStateMatchesEntityState(selected any, runID, entityID string
 		name string
 		raw  []byte
 		dst  *map[string]any
-	}{{"bookkeeping", bookRaw, &want.Bookkeeping}, {"gates", gatesRaw, &want.Gates}, {"accumulator", accRaw, &want.Accumulator}} {
+	}{{"bookkeeping", bookRaw, &want.Bookkeeping}, {"accumulator", accRaw, &want.Accumulator}} {
 		if bucket.raw == nil {
 			continue
 		}

@@ -102,7 +102,6 @@ type WorkflowEngineStateRecord struct {
 	Name             string
 	Fields           json.RawMessage
 	Bookkeeping      json.RawMessage
-	Gates            json.RawMessage
 	Accumulator      json.RawMessage
 	Config           json.RawMessage
 	InitialFields    json.RawMessage
@@ -132,7 +131,7 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		return fmt.Errorf("workflow engine state record requires mode and status")
 	}
 	for name, raw := range map[string]json.RawMessage{
-		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
+		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
 	} {
 		if len(raw) == 0 || !json.Valid(raw) {
 			return fmt.Errorf("workflow engine state record %s must be valid JSON", name)
@@ -415,10 +414,6 @@ func workflowEngineStateRecord(
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
-	gates, err := canonicaljson.MarshalPreservingNumberKinds(projection.GatesAny())
-	if err != nil {
-		return WorkflowEngineStateRecord{}, err
-	}
 	accumulator, err := canonicaljson.MarshalPreservingNumberKinds(projection.Accumulator)
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
@@ -441,7 +436,7 @@ func workflowEngineStateRecord(
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
-		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config, InitialFields: initialFields,
+		Fields: fields, Bookkeeping: bookkeeping, Accumulator: accumulator, Config: config, InitialFields: initialFields,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 		UpdatedAt:      canonicalWorkflowInstancePersistedTime(updatedAt),

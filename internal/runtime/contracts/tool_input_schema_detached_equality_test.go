@@ -140,12 +140,6 @@ func TestSchemaRelation2630DetachedEqualityEntrances(t *testing.T) {
 }
 
 func TestSchemaRelation2630CatalogEqualityGates(t *testing.T) {
-	t.Run("detached_field", func(t *testing.T) {
-		err := ValidateCatalogFieldSupply("catalog", map[string]any{"type": "string"}, EntityFieldDecl{Type: "text", Refinements: SchemaRefinements{EqualTo: "peer"}}, TypeCatalogDocument{})
-		if err == nil || !strings.Contains(err.Error(), "catalog state schema") || !strings.Contains(err.Error(), "x-swarm-equalTo") {
-			t.Fatalf("detached catalog target must fail definition admission: %v", err)
-		}
-	})
 	t.Run("detached_map_key", func(t *testing.T) {
 		keys := map[string]any{"type": "string", "x-swarm-equalTo": "peer"}
 		object := map[string]any{"type": "object", "propertyNames": keys}
@@ -155,7 +149,7 @@ func TestSchemaRelation2630CatalogEqualityGates(t *testing.T) {
 	})
 	t.Run("nested_record", func(t *testing.T) {
 		catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{"Pair": {Fields: map[string]TypeFieldSpec{
-			"mode": {Type: "text", Refinements: SchemaRefinements{EqualTo: "peer"}}, "peer": {Type: "text"},
+			"mode": {Type: "text"}, "peer": {Type: "text"},
 		}}}}
 		source := detachedEqualityObject(t, "string", "mode", "approved", true)
 		if err := ValidateCatalogFieldSupply("catalog", source.Projection(), EntityFieldDecl{Type: "Pair"}, catalog); err != nil {

@@ -234,8 +234,8 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
 				(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,
-				gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at,terminated_at)
-				VALUES($1,$2,$3,$4,'inventory','static',$5,'{}',TRUE,'{}','{}','{}',1,$6,$6,$6,$7)`,
+				bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at,terminated_at)
+				VALUES($1,$2,$3,$4,'inventory','static',$5,'{}',TRUE,'{}','{}',1,$6,$6,$6,$7)`,
 				row.headerRun, row.headerEntity, row.headerPath, row.state, status, now, ended); err != nil {
 				return err
 			}
@@ -248,8 +248,8 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
 			(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,
-			gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at)
-			VALUES($1,$2,'inventory/foreign','queued','inventory','static','active','{}',TRUE,'{}','{}','{}',1,$3,$3,$3)`, sibling, entity, now); err != nil {
+			bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at)
+			VALUES($1,$2,'inventory/foreign','queued','inventory','static','active','{}',TRUE,'{}','{}',1,$3,$3,$3)`, sibling, entity, now); err != nil {
 			return err
 		}
 		return nil

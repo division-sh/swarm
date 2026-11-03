@@ -207,10 +207,7 @@ func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *t
 			if entity["alias"] != "product" || entity["flow_instance"] != "" || entity["entity_type"] != "state" || entity["current_state"] != "waiting" {
 				t.Fatalf("test.setup_entities entity = %#v", entity)
 			}
-			if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], map[string]any{"product_id": "p-1", "note": "seeded"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := assertScenarioJSONEqual("test.setup_entities gates", entity["gates"], map[string]any{"review_ready": true}); err != nil {
+			if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], map[string]any{"product_id": "p-1", "note": "seeded", "review_ready": true}); err != nil {
 				t.Fatal(err)
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{
@@ -252,8 +249,7 @@ func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *t
 			entity["run_id"] = setupRunID
 			entity["entity_type"] = "state"
 			entity["current_state"] = "ready"
-			result["fields"] = map[string]any{"product_id": "p-1", "note": "approved"}
-			result["gates"] = map[string]any{"review_ready": false}
+			result["fields"] = map[string]any{"product_id": "p-1", "note": "approved", "review_ready": false}
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
 			t.Fatalf("unexpected method = %s", req.Method)
@@ -561,7 +557,6 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 	var entityExpect scenarioEntityExpect
 	var currentState string
 	fields := map[string]any{}
-	gates := map[string]any{}
 	if len(doc.Expect.Entities) > 1 {
 		t.Fatalf("scenario entity expectations = %#v, want at most one entity assertion", doc.Expect.Entities)
 	}
@@ -576,9 +571,6 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 		}
 		if entityExpect.FieldsSet {
 			fields = entityExpect.Fields.(map[string]any)
-		}
-		if entityExpect.GatesSet {
-			gates = entityExpect.Gates.(map[string]any)
 		}
 	}
 
@@ -636,11 +628,6 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 				}
 				if want.FieldsSet {
 					if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], want.Fields); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if want.GatesSet {
-					if err := assertScenarioJSONEqual("test.setup_entities gates", entity["gates"], want.Gates); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -776,7 +763,6 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 			entity["entity_type"] = entityType
 			entity["current_state"] = currentState
 			result["fields"] = fields
-			result["gates"] = gates
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
 			t.Fatalf("unexpected method = %s", req.Method)
@@ -1438,6 +1424,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 			entity := result["entity"].(map[string]any)
 			entity["entity_type"] = "state"
 			entity["current_state"] = "done"
+			result["fields"] = map[string]any{"score": 7, "ready": true}
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
 			t.Fatalf("unexpected request %#v", req)
@@ -1459,10 +1446,8 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 		Flow:         ".",
 		CurrentState: "${vars.done_state}",
 		StateSet:     true,
-		Fields:       map[string]any{"score": "${vars.score}"},
+		Fields:       map[string]any{"score": "${vars.score}", "ready": "${vars.ready}"},
 		FieldsSet:    true,
-		Gates:        map[string]any{"ready": "${vars.ready}"},
-		GatesSet:     true,
 	}); err != nil {
 		t.Fatalf("entity detail expectation: %v", err)
 	}

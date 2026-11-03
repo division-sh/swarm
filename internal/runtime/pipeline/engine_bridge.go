@@ -36,8 +36,6 @@ type handlerExecutionOutcome struct {
 	GuardsEvaluated  []string
 	ActionsExecuted  []string
 	AdvancesTo       string
-	SetsGate         string
-	ClearGates       []string
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 	Emits            []string
 	RuleSelection    handlerselection.Observation
@@ -276,9 +274,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			plan.Emit.Event = strings.TrimSpace(outcome.Emits[0])
 		}
 	}
-	if outcome.SetsGate != "" {
-		plan.SetsGate = outcome.SetsGate
-	}
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
 		Committed:            result.Committed,
@@ -322,9 +317,6 @@ func previewMetadataAfterExecution(snapshot runtimeengine.StateSnapshot, mutatio
 	if mutation.StateCarrier.Bookkeeping != nil {
 		carrier.Bookkeeping = cloneStringAnyMap(mutation.StateCarrier.Bookkeeping)
 	}
-	if len(mutation.StateCarrier.Gates) > 0 {
-		carrier.Gates = workflowCloneBoolMap(mutation.StateCarrier.Gates)
-	}
 	return carrier.PersistedFields()
 }
 
@@ -334,8 +326,6 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		GuardsEvaluated:  append([]string{}, result.GuardsEvaluated...),
 		ActionsExecuted:  append([]string{}, result.ActionsExecuted...),
 		AdvancesTo:       strings.TrimSpace(result.NextState),
-		SetsGate:         strings.TrimSpace(result.SetsGate),
-		ClearGates:       append([]string{}, result.ClearGates...),
 		DataAccumulation: result.StateMutation.DataAccumulation,
 		RuleSelection:    result.HandlerRuleSelection,
 		FanOutCount:      result.FanOutCount,

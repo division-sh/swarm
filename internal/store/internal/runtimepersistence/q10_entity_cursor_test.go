@@ -47,7 +47,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 				ctx := correlation.WithRunID(f.ctx, runID)
 				seed := pipeline.ScenarioSetupEntityRequest{
 					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
-					CurrentState: mutationlog.PresentLifecycleState("ready"), Fields: map[string]any{"count": int64(1)}, Gates: map[string]bool{},
+					CurrentState: mutationlog.PresentLifecycleState("ready"), Fields: map[string]any{"count": int64(1)},
 				}
 				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 					ContractBundle: source, OccurredAt: at, ScenarioSeed: &seed,
@@ -194,7 +194,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			}
 			state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 			state.ExpectedState, state.ExpectedRevision = "ready", 1
-			state.Gates, state.UpdatedAt = []byte(`{"approved":true}`), at.Add(time.Minute)
+			state.UpdatedAt = at.Add(time.Minute)
 			mutate()
 			next := page(operatorread.OperatorEntityListOptions{Limit: 1, Cursor: first.NextCursor})
 			assertRows(next.Entities, initialOrder[1:2])
@@ -247,7 +247,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			assertRows(page(operatorread.OperatorEntityListOptions{Flow: "imports"}).Entities, initialOrder[2:5])
 			assertRows(publicPage(map[string]any{"run_id": runA, "flow": "imports"}).Entities, [][2]string{{shared, runA}, {tail, runA}})
 			full, err := f.store.(apiv1.EntityReadStore).LoadOperatorEntity(f.ctx, runB, runB)
-			if err != nil || full.Fields["count"] != json.Number("2") || !full.Gates["approved"] || full.Entity.EnteredStateAt == nil || !full.Entity.EnteredStateAt.Equal(at) || !full.Entity.CreatedAt.Equal(at) || !full.Entity.UpdatedAt.Equal(state.UpdatedAt) {
+			if err != nil || full.Fields["count"] != json.Number("2") || full.Entity.EnteredStateAt == nil || !full.Entity.EnteredStateAt.Equal(at) || !full.Entity.CreatedAt.Equal(at) || !full.Entity.UpdatedAt.Equal(state.UpdatedAt) {
 				t.Fatalf("cursor changes lost typed data, gate, stage entry or independent clocks: %+v %v", full, err)
 			}
 			groups, err := f.store.(apiv1.EntityReadStore).AggregateOperatorEntities(f.ctx, operatorread.OperatorEntityAggregateOptions{GroupBy: "current_state"})

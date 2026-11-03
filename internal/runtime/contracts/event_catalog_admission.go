@@ -132,7 +132,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField, ty
 			entry.Payload.Required = append(entry.Payload.Required, name)
 		}
 	}
-	if field, ok := byName["key"]; ok {
+	if field, ok := byName["_key"]; ok {
 		key, err := requiredLiteralString(field.Value, "event key")
 		if err != nil {
 			return EventCatalogEntry{}, err
@@ -196,7 +196,7 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 
 func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.MappingField) error {
 	for _, field := range fields {
-		if field.Name == "key" || field.Name == "_embed" {
+		if field.Name == "_key" || field.Name == "_embed" {
 			continue
 		}
 		payloadField, optional, err := admitEventPayloadField(field.Value)

@@ -48,7 +48,6 @@ func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID stri
 		WorkflowVersion: strings.TrimSpace(workflowVersion),
 		StateCarrier: runtimeengine.NewStateCarrier(
 			nil,
-			nil,
 			map[string]map[string]any{},
 		),
 	}

@@ -290,10 +290,10 @@ func validateFlowConstructionInputFields(input semanticvalue.Value) error {
 
 func validateFlowConstructionInitialProjectionFields(persisted semanticvalue.Value) error {
 	persistedFields, object := persisted.ObjectMap()
-	if !object || len(persistedFields) != 5 {
+	if !object || len(persistedFields) != 4 {
 		return fmt.Errorf("flow construction receipt requires its complete initial projection")
 	}
-	for _, name := range []string{"fields", "bookkeeping", "gates", "accumulator", "control"} {
+	for _, name := range []string{"fields", "bookkeeping", "accumulator", "control"} {
 		if _, present := persistedFields[name]; !present {
 			return fmt.Errorf("flow construction initial projection requires %s", name)
 		}

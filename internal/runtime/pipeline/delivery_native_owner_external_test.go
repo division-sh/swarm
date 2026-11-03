@@ -353,7 +353,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		for _, owner := range []struct {
 			raw json.RawMessage
 			dst *map[string]any
-		}{{snapshot.Fields, &projection.Fields}, {snapshot.Bookkeeping, &projection.Bookkeeping}, {snapshot.Gates, &projection.Gates}, {snapshot.Accumulator, &projection.Accumulator}} {
+		}{{snapshot.Fields, &projection.Fields}, {snapshot.Bookkeeping, &projection.Bookkeeping}, {snapshot.Accumulator, &projection.Accumulator}} {
 			if owner.raw == nil {
 				continue
 			}

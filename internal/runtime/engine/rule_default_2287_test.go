@@ -34,7 +34,7 @@ func TestRuleDefaultRuntimeDoesNotInterpretElse(t *testing.T) {
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				ExecutionFlowID: identity.NormalizeFlowID("."), EntityID: "entity-1", Node: node,
 				Event:   eventtest.RunCreatingRootIngress("default-refusal", "score.dimension_complete", "", "", json.RawMessage(`{"score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-				Handler: handler, State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				Handler: handler, State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 			})
 			if !errors.Is(err, wantErr) || result.Committed || len(result.EmitIntents) != 0 || len(result.ActivityIntents) != 0 {
 				t.Fatalf("ordinary predicate bypassed evaluation or leaked effects: %+v, %v", result, err)

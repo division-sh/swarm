@@ -132,7 +132,6 @@ type Capsule struct {
 	Loop             map[string]any                       `json:"loop,omitempty"`
 	StateFields      map[string]any                       `json:"state_fields,omitempty"`
 	StateBookkeeping map[string]any                       `json:"state_bookkeeping,omitempty"`
-	StateGates       map[string]bool                      `json:"state_gates,omitempty"`
 }
 
 // Capsule business values are frozen JSON, not floating-point approximations.

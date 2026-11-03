@@ -1896,8 +1896,6 @@ func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T)
 timers:
   - event: timer.task.timeout
     delay: 1m
-gate_state:
-  ready: Worker is ready
 task.requested:
   advances_to: done
 `), &node); err != nil {

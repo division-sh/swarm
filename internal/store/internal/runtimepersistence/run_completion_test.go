@@ -51,9 +51,9 @@ func seedNormalRunCompletionFixture(t *testing.T, ctx context.Context, db *sql.D
 	}
 	if _, err := db.ExecContext(ctx, `
 			INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status,
-				stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+				stage_defined, current_state, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
 			VALUES ($1::uuid, $2, $4::uuid, 'default', $3, 'static', '{}'::jsonb, 'active',
-				TRUE, $5, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
+				TRUE, $5, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
 			ON CONFLICT (run_id, instance_path) DO UPDATE SET flow_template = EXCLUDED.flow_template
 		`, runID, flowInstance, flowTemplate, entityID, state); err != nil {
 		t.Fatalf("seed flow instance: %v", err)

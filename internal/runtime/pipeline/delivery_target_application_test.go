@@ -612,7 +612,7 @@ func VerifyDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMut
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: instancePath, StorageRef: instancePath, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", EntityType: "state",
-		CurrentState: "active", Fields: map[string]any{"marker": "preserved"}, Gates: map[string]bool{"./approved": true},
+		CurrentState: "active", Fields: map[string]any{"marker": "preserved"},
 		CreatedAt: occurredAt, EnteredStageAt: occurredAt,
 	})); err != nil {
 		t.Fatalf("seed exact constructed scenario pre-state: %v", err)
@@ -649,7 +649,7 @@ func VerifyDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMut
 	if err != nil || !exists {
 		t.Fatalf("load first-mutation workflow instance: found=%t err=%v", exists, err)
 	}
-	if instance.EntityID != entityID || instance.Fields["marker"] != "preserved" || !instance.Gates["./approved"] || instance.Revision != 2 || !instance.CreatedAt.Equal(occurredAt) || !instance.EnteredStageAt.Equal(occurredAt) {
+	if instance.EntityID != entityID || instance.Fields["marker"] != "preserved" || instance.Revision != 2 || !instance.CreatedAt.Equal(occurredAt) || !instance.EnteredStageAt.Equal(occurredAt) {
 		t.Fatalf("first-mutation state = %#v, want exact preserved pre-state at revision 2", instance)
 	}
 }
@@ -670,7 +670,7 @@ func VerifyDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres
 	persisted := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", CurrentState: "active",
-		Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"./approved": true},
+		Fields:     map[string]any{"marker": "durable"},
 		EntityType: "state",
 	})
 	if err := fixture.Construct(ctx, persisted); err != nil {
@@ -704,18 +704,17 @@ func VerifyDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres
 	if err != nil || !exists {
 		t.Fatalf("load execution snapshot: exists=%t err=%v", exists, err)
 	}
-	if !snapshot.StateCarrier.Gates["approved"] || !snapshot.StateCarrier.Gates["./approved"] || snapshot.StateCarrier.Fields["marker"] != "current" {
-		t.Fatalf("execution gates = %#v, want local and qualified facts", snapshot.StateCarrier.Gates)
+	if snapshot.StateCarrier.Fields["marker"] != "current" {
+		t.Fatalf("execution fields = %#v, want current scoped state", snapshot.StateCarrier.Fields)
 	}
-	snapshot.StateCarrier.Gates["approved"] = false
 	snapshot.StateCarrier.Fields["marker"] = "mutated"
 
 	fresh, exists, err := stateRepo.LoadState(executionCtx, address)
-	if err != nil || !exists || !fresh.StateCarrier.Gates["approved"] || fresh.StateCarrier.Fields["marker"] != "current" {
+	if err != nil || !exists || fresh.StateCarrier.Fields["marker"] != "current" {
 		t.Fatalf("fresh immutable snapshot = %#v exists=%t err=%v", fresh, exists, err)
 	}
 	stored, exists, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
-	if err != nil || !exists || stored.Gates["approved"] || !stored.Gates["./approved"] || stored.Fields["marker"] != "current" {
+	if err != nil || !exists || stored.Fields["marker"] != "current" {
 		t.Fatalf("durable state changed by execution projection: exists=%t err=%v instance=%#v", exists, err, stored)
 	}
 }

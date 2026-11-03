@@ -48,7 +48,7 @@ func TestReadOnlyActivityConsumesConstructedParentBeforeGeneration(t *testing.T)
 	valid := WorkflowInstance{
 		WorkflowName: child.TemplateID, InstanceID: child.InstanceID, StorageRef: child.InstancePath, EntityID: child.EntityID,
 		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
-		CurrentState: "review", StateBuckets: runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
+		CurrentState: "review", StateBuckets: runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets(),
 	}
 	childFlow, err := identity.AdmitFlowIdentity(child.TemplateID)
 	if err != nil {

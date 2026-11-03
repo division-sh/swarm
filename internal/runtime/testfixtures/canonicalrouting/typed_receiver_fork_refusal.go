@@ -25,7 +25,7 @@ auto_emit_on_create:
   account_id: text
   values: InitializationValues
 work.ready:
-  key: account_id
+  _key: account_id
   account_id: text
   count: integer
   label: text

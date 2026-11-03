@@ -42,8 +42,6 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	},
 	"AdvancesTo": noHandlerExecutableReaders,
 	"Terminate":  noHandlerExecutableReaders,
-	"SetsGate":   noHandlerExecutableReaders,
-	"ClearGates": noHandlerExecutableReaders,
 	"DataAccumulation": func(out *[]WorkflowExecutableReader, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendDataAccumulationExecutableReaders(out, "data_accumulation", handler.DataAccumulation)
 	},

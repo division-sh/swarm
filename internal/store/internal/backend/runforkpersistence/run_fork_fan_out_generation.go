@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"maps"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -59,7 +58,6 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, lockPostgres b
 			}
 		}
 	}
-	capsule.StateGates = maps.Clone(capsule.StateGates)
 	if capsule.Receiver != nil {
 		receiver := *capsule.Receiver
 		capsule.Receiver = &receiver

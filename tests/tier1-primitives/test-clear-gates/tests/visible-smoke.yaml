@@ -1,8 +1,0 @@
-name: test-clear-gates setup visible smoke
-steps:
-- publish: gates.clear_requested
-  payload: {}
-expect:
-  events:
-    include:
-    - gates.cleared

@@ -62,8 +62,8 @@ func TestForkReceiverHeaderDoneFaultExactAndRollbackBothStores(t *testing.T) {
 						}
 					})
 					if _, err := fixture.db.ExecContext(ctx, `INSERT INTO flow_instances
-						(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at)
-						SELECT run_id,entity_id,'second-path',current_state,flow_template,mode,status,config,stage_defined,gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at
+						(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at)
+						SELECT run_id,entity_id,'second-path',current_state,flow_template,mode,status,config,stage_defined,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at
 						FROM flow_instances WHERE run_id=$1`, runID); err != nil {
 						t.Fatal(err)
 					}

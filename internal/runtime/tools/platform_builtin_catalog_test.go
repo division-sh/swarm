@@ -94,39 +94,3 @@ func TestEntityToolWritablePathNames_IncludesDeclaredDottedPaths(t *testing.T) {
 		t.Fatalf("entityToolWritablePathNames() = %#v, want %#v", got, want)
 	}
 }
-
-func TestEntityToolWritablePathNames_EqualityUsesFinalCandidateValidation(t *testing.T) {
-	contract := entityruntime.Contract{
-		Entity: runtimecontracts.EntityContract{
-			Fields: map[string]runtimecontracts.EntityFieldDecl{
-				"component": {Type: "text"},
-				"owner": {
-					Type:        "text",
-					Refinements: runtimecontracts.SchemaRefinements{EqualTo: "component"},
-				},
-				"manifest": {Type: "Manifest"},
-				"notes":    {Type: "text"},
-			},
-		},
-		Types: runtimecontracts.TypeCatalogDocument{
-			Types: map[string]runtimecontracts.NamedTypeDecl{
-				"Manifest": {
-					Fields: map[string]runtimecontracts.TypeFieldSpec{
-						"component": {Type: "text"},
-						"owner": {
-							Type:        "text",
-							Refinements: runtimecontracts.SchemaRefinements{EqualTo: "component"},
-						},
-						"description": {Type: "text"},
-					},
-				},
-			},
-		},
-	}
-
-	got := entityToolWritablePathNames(contract)
-	want := []string{"component", "manifest", "manifest.component", "manifest.description", "manifest.owner", "notes", "owner"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("entityToolWritablePathNames() = %#v, want %#v", got, want)
-	}
-}

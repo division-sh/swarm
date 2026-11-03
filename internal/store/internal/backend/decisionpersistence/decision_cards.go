@@ -1272,7 +1272,7 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 			rows.Close()
 			return fmt.Errorf("decode run gate activations for entity %s: %w", entityID, err)
 		}
-		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, accumulator)
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, accumulator)
 		if err != nil {
 			rows.Close()
 			return err

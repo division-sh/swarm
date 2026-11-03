@@ -266,7 +266,6 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 		"vertical",
 		"collecting",
 		"score",
-		"ready",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -291,7 +290,6 @@ func TestEntityViewPreservesExactIdentifiersAndSemanticKeys(t *testing.T) {
 		return strings.Repeat(prefix, 187) + discriminator + strings.Repeat("m", 20) + strings.Repeat("z", 12)
 	}
 	fieldA, fieldB := longKey("f", "a"), longKey("f", "b")
-	gateA, gateB := longKey("g", "a"), longKey("g", "b")
 	accumulatedA, accumulatedB := longKey("a", "a"), longKey("a", "b")
 	loopA, loopB := longKey("l", "a"), longKey("l", "b")
 
@@ -305,7 +303,6 @@ func TestEntityViewPreservesExactIdentifiersAndSemanticKeys(t *testing.T) {
 		entity["run_id"] = runID
 		entity["flow_instance"] = rawFlow
 		result["fields"] = map[string]any{fieldA: "first", fieldB: "second"}
-		result["gates"] = map[string]any{gateA: false, gateB: true}
 		result["accumulated"] = map[string]any{accumulatedA: 1, accumulatedB: 2}
 		result["loops"] = []map[string]any{
 			{"id": loopA, "revision_id": "rev-a", "attempt": 1, "max_attempts": 2, "current_stage": "collecting", "status": "open"},
@@ -329,7 +326,7 @@ func TestEntityViewPreservesExactIdentifiersAndSemanticKeys(t *testing.T) {
 	}
 
 	defaultOutput := render("entity", "view", "entity-1", "--run-id", "run-1")
-	for _, want := range []string{runID, wantFlow, fieldA, fieldB, gateA, gateB} {
+	for _, want := range []string{runID, wantFlow, fieldA, fieldB} {
 		if !strings.Contains(defaultOutput, want) {
 			t.Fatalf("default entity view missing exact value %q:\n%s", want, defaultOutput)
 		}
@@ -339,7 +336,7 @@ func TestEntityViewPreservesExactIdentifiersAndSemanticKeys(t *testing.T) {
 	}
 
 	verboseOutput := render("entity", "view", "entity-1", "--run-id", "run-1", "--verbose")
-	for _, want := range []string{runID, wantFlow, fieldA, fieldB, gateA, gateB, accumulatedA, accumulatedB, loopA, loopB} {
+	for _, want := range []string{runID, wantFlow, fieldA, fieldB, accumulatedA, accumulatedB, loopA, loopB} {
 		if !strings.Contains(verboseOutput, want) {
 			t.Fatalf("verbose entity view missing exact value %q:\n%s", want, verboseOutput)
 		}
@@ -375,7 +372,6 @@ func TestEntityViewJSONIsDataComplete(t *testing.T) {
 		`"updated_at":"2026-05-20T01:05:00Z"`,
 		`"fields":{"score":7}`,
 		`"bookkeeping":{}`,
-		`"gates":{"ready":true}`,
 		`"accumulated":{"accumulator":{"count":2},"notes":["a",{"text":"probe"}],"score":3}`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -404,7 +400,6 @@ func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
 			UpdatedAt:          "2026-05-20T01:05:00Z",
 		},
 		Fields:      map[string]any{},
-		Gates:       map[string]bool{},
 		Accumulated: map[string]any{},
 	}, entityRenderOptions{})
 
@@ -668,55 +663,6 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 	}
 }
 
-func TestEntityViewGatesRenderFalseValuesInDefaultOutput(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		result := validEntityFullResult("entity-1")
-		result["gates"] = map[string]any{"approved": false}
-		writeJSONRPCResult(t, w, captured.ID, result)
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "approved") || !strings.Contains(stdout.String(), "false") {
-		t.Fatalf("Ruling A: a declared false gate must render its name and value in default output:\n%s", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "Gates  none") {
-		t.Fatalf("populated gate map must not render as none:\n%s", stdout.String())
-	}
-}
-
-func TestEntityViewEmptyGatesRenderNone(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	var captured jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		result := validEntityFullResult("entity-1")
-		result["gates"] = map[string]any{}
-		writeJSONRPCResult(t, w, captured.ID, result)
-	}))
-	defer server.Close()
-
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "Gates  none") {
-		t.Fatalf("empty gates map should render as stated none:\n%s", stdout.String())
-	}
-}
-
 func TestEntityViewAccumulatedStatedPresenceAndVerboseExpansion(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
@@ -872,7 +818,6 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 			"label\nwith_newline": "value",
 		}
 		result["bookkeeping"] = map[string]any{"fan_out_count": 3}
-		result["gates"] = map[string]any{}
 		result["accumulated"] = map[string]any{}
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
@@ -1147,7 +1092,6 @@ func validEntityFullResult(entityID string) map[string]any {
 		"entity":      validEntitySummary(entityID),
 		"fields":      map[string]any{"score": 7},
 		"bookkeeping": map[string]any{},
-		"gates":       map[string]any{"ready": true},
 		"loops":       []any{},
 		"accumulated": map[string]any{
 			"score":       3,

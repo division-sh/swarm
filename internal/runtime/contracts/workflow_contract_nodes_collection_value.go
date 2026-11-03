@@ -1,9 +1,6 @@
 package contracts
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -118,31 +115,4 @@ func projectNodeClearValue(value yamlsource.Value) (*ClearSpec, error) {
 		return nil, nil
 	}
 	return &ClearSpec{Targets: targets}, nil
-}
-
-func projectNodeClearGatesValue(value yamlsource.Value) ([]string, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceNull, yamlsource.PresenceEmptyScalar:
-		return nil, nil
-	case yamlsource.PresenceScalar:
-		scalar, err := value.Scalar()
-		if err != nil {
-			return nil, err
-		}
-		if scalar.Tag == "!!bool" {
-			all, err := nodeValueBool(value, "clear_gates")
-			if err != nil {
-				return nil, err
-			}
-			if all {
-				return []string{"*"}, nil
-			}
-			return nil, nil
-		}
-		return []string{strings.TrimSpace(scalar.Value)}, nil
-	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
-		return nodeValueStringSequence(value, "clear_gates")
-	default:
-		return nil, fmt.Errorf("clear_gates at %s must be a scalar or sequence, got %s", value.Location(), value.Presence())
-	}
 }

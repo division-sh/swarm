@@ -23,7 +23,6 @@ type ScenarioSetupEntityRequest struct {
 	EntityType   string
 	CurrentState *string
 	Fields       map[string]any
-	Gates        map[string]bool
 }
 
 type ScenarioSetupResult struct {

@@ -394,7 +394,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 			{"stage_presence", "stage_defined", true}, {"config", "config", `{}`},
 			{"entry_clock", "entered_state_at", time.Now().UTC()}, {"creation_clock", "created_at", req.OccurredAt.Add(-time.Hour)},
 			{"update_clock", "updated_at", time.Now().UTC()}, {"revision", "revision", int64(2)},
-			{"gates", "gates", `{"foreign":true}`}, {"bookkeeping", "bookkeeping", `{"foreign":true}`},
+			{"bookkeeping", "bookkeeping", `{"foreign":true}`},
 			{"accumulator", "accumulator", `{"foreign":true}`}, {"slug", "slug", "foreign"}, {"name", "name", "foreign"},
 		} {
 			t.Run("reuse_rejects/"+fault.name, func(t *testing.T) {

@@ -75,61 +75,26 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsRenderedNodeIDTempl
 }
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefinements(t *testing.T) {
-	minLength := 1
-	bundle := &WorkflowContractBundle{
-		Events: map[string]EventCatalogEntry{
-			"deploy.requested": {
-				Payload: EventPayloadSpec{
-					Properties: map[string]EventFieldSpec{
-						"score": {
-							Type:        "integer",
-							Refinements: SchemaRefinements{Pattern: "^[0-9]+$"},
-						},
-						"component": {Type: "text"},
-						"owner": {
-							Type:        "text",
-							Refinements: SchemaRefinements{EqualTo: "missing"},
-						},
-					},
-				},
-			},
-		},
-		RootTypes: TypeCatalogDocument{
-			Types: map[string]NamedTypeDecl{
-				"Manifest": {
-					Fields: map[string]TypeFieldSpec{
-						"files": {
-							Type:        "integer",
-							Refinements: SchemaRefinements{Length: SchemaLengthRefinement{Min: &minLength}},
-						},
-					},
-				},
-			},
-		},
-		RootEntities: EntityContractsDocument{
-			"deploy": {
-				Fields: map[string]EntityFieldDecl{
-					"created_at": {
-						Type:        "timestamp",
-						Refinements: SchemaRefinements{Pattern: "^2026-"},
-					},
-				},
-			},
-		},
-	}
-
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil {
-		t.Fatal("expected invalid schema refinements to fail")
-	}
-	for _, want := range []string{
-		"pattern refinement requires string/text type",
-		"equal_to references undeclared sibling field",
-		"length refinement requires string/text or list type",
-		"root entities.deploy.created_at pattern refinement requires string/text type",
-	} {
-		if !contractErrorContains(err, want) {
-			t.Fatalf("load validation error = %v, want %q", err, want)
+	for _, file := range []string{"state.yaml", "events.yaml", "types.yaml"} {
+		for _, metadata := range []string{"description: prose", "pattern: x", "length: {min: 1}", "range: {min: 0}", "equal_to: peer", "immutable: true"} {
+			t.Run(file+"/"+metadata, func(t *testing.T) {
+				root := t.TempDir()
+				body := "value: {type: text, " + metadata + "}\n"
+				if file != "state.yaml" {
+					name := "Entry"
+					if file == "events.yaml" {
+						name = "entry.ready"
+					}
+					body = name + ":\n  " + body
+				}
+				writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: {done: {final: true}}\n")
+				writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeFixtureFile(t, filepath.Join(root, file), body)
+				repo := repoRootForContractsTest(t)
+				if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "YAML comments") {
+					t.Fatalf("retired authored metadata lost its refusal/teaching: %s: %v", body, err)
+				}
+			})
 		}
 	}
 }

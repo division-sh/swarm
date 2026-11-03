@@ -179,7 +179,7 @@ func testSetupEntityRequestFromParam(raw any, i int, runID string) (runtimepipel
 	}
 	for key := range entity {
 		switch key {
-		case "alias", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "gates":
+		case "alias", "entity_id", "flow_instance", "entity_type", "current_state", "fields":
 		default:
 			return runtimepipeline.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].%s", i, key), "reason": "unknown field"})
 		}
@@ -202,19 +202,14 @@ func testSetupEntityRequestFromParam(raw any, i int, runID string) (runtimepipel
 	}
 	constructedRoot := entityID == runID && (flowInstance == "" || flowInstance == runID)
 	var currentState *string
-	var gates map[string]bool
 	if constructedRoot {
 		state, err := requiredStringParam(entity, "current_state")
 		if err != nil {
 			return runtimepipeline.ScenarioSetupEntityRequest{}, err
 		}
 		currentState = &state
-		gates, err = testSetupGatesParam(entity, i)
-		if err != nil {
-			return runtimepipeline.ScenarioSetupEntityRequest{}, err
-		}
 	} else {
-		for _, key := range []string{"current_state", "gates"} {
+		for _, key := range []string{"current_state"} {
 			if _, present := entity[key]; present {
 				return runtimepipeline.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].%s", i, key), "reason": "data-only imports cannot carry lifecycle inputs"})
 			}
@@ -231,7 +226,6 @@ func testSetupEntityRequestFromParam(raw any, i int, runID string) (runtimepipel
 		EntityType:   entityType,
 		CurrentState: currentState,
 		Fields:       fields,
-		Gates:        gates,
 	}, nil
 }
 
@@ -245,26 +239,6 @@ func testSetupFieldsParam(entity map[string]any, i int) (map[string]any, error) 
 		return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].fields", i), "reason": "must be an object"})
 	}
 	return fields, nil
-}
-
-func testSetupGatesParam(entity map[string]any, i int) (map[string]bool, error) {
-	raw, ok := entity["gates"]
-	if !ok || raw == nil {
-		return map[string]bool{}, nil
-	}
-	gates, ok := raw.(map[string]any)
-	if !ok {
-		return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].gates", i), "reason": "must be an object"})
-	}
-	out := make(map[string]bool, len(gates))
-	for name, rawValue := range gates {
-		value, ok := rawValue.(bool)
-		if !ok {
-			return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].gates.%s", i, name), "reason": "must be boolean"})
-		}
-		out[name] = value
-	}
-	return out, nil
 }
 
 func testSetupEntitiesAPIResult(result runtimepipeline.ScenarioSetupResult) testSetupEntitiesResult {
@@ -338,9 +312,6 @@ func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContr
 	if err := validateTestSetupFieldsAgainstBundle(flowID, primary, entity.Fields, fieldPrefix); err != nil {
 		return err
 	}
-	if err := validateTestSetupGatesAgainstBundle(bundle, flowID, entity.Gates, fieldPrefix); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -363,51 +334,4 @@ func validateTestSetupFieldsAgainstBundle(flowID string, primary runtimecontract
 		fields[field] = normalized
 	}
 	return nil
-}
-
-func validateTestSetupGatesAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, flowID string, gates map[string]bool, fieldPrefix string) error {
-	declared := declaredTestSetupGateNames(bundle, flowID)
-	for gate := range gates {
-		if _, ok := declared[gate]; !ok {
-			return NewInvalidParamsError(map[string]any{
-				"field":         fieldPrefix + ".gates." + gate,
-				"reason":        "is not declared for the selected flow",
-				"flow_instance": flowID,
-			})
-		}
-	}
-	return nil
-}
-
-func declaredTestSetupGateNames(bundle *runtimecontracts.WorkflowContractBundle, flowID string) map[string]struct{} {
-	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
-	out := map[string]struct{}{}
-	for _, record := range bundle.ScopedNodeRecords() {
-		node, err := record.Identity()
-		if err != nil || strings.Trim(node.FlowPath(), "/") != flowID {
-			continue
-		}
-		for _, gate := range record.Entry.GateState.Gates {
-			if name := strings.TrimSpace(gate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-	}
-	for _, transition := range bundle.DerivedHandlerTransitions() {
-		if strings.Trim(transition.Node.FlowPath(), "/") != flowID {
-			continue
-		}
-		if transition.SetsGate != nil {
-			if name := strings.TrimSpace(transition.SetsGate.Name); name != "" {
-				out[name] = struct{}{}
-			}
-		}
-		for _, gate := range transition.ClearGates {
-			gate = strings.TrimSpace(gate)
-			if gate != "" && gate != "*" {
-				out[gate] = struct{}{}
-			}
-		}
-	}
-	return out
 }

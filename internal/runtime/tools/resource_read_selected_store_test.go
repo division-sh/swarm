@@ -45,7 +45,7 @@ func TestResourceReadSelectedStore(t *testing.T) {
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				root := resourceReadSourceRoot(t)
 				if keyed {
-					if err := os.WriteFile(filepath.Join(root, "support/events.yaml"), []byte("records.loaded:\n  key: id\n  id: text\n  payload: text\n"), 0o600); err != nil {
+					if err := os.WriteFile(filepath.Join(root, "support/events.yaml"), []byte("records.loaded:\n  _key: id\n  id: text\n  payload: text\n"), 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}

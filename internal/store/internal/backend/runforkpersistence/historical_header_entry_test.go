@@ -76,7 +76,7 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 				history := runfork.RunForkEntityState{
 					EntityID: entityID, CurrentState: mutationlog.PresentLifecycleState("active"), EnteredStateAt: &at,
 					Fields: map[string]any{}, Bookkeeping: map[string]any{"stage_entry": entry},
-					Accumulator: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
+					Accumulator: engine.NewStateCarrier(nil, buckets).PersistedStateBuckets(),
 					MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 						Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 						Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,

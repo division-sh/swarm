@@ -271,7 +271,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 		{"noop_cannot_smuggle_evidence", "ready", &cause, "disagrees with state"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil)
 			mutation.NextState, mutation.Transition = tc.next, tc.evidence
 			mutation.TriggerEventID, mutation.TriggerEventType = accepted.ID(), string(accepted.Type())
 			mutation.TriggeredAt = accepted.CreatedAt()
@@ -284,7 +284,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 			}
 		})
 	}
-	mutation := testEngineStateMutation(map[string]any{"marker": "committed"}, nil, nil)
+	mutation := testEngineStateMutation(map[string]any{"marker": "committed"}, nil)
 	mutation.NextState, mutation.Transition = "done", &cause
 	mutation.TriggerEventID, mutation.TriggerEventType = accepted.ID(), string(accepted.Type())
 	mutation.TriggeredAt = accepted.CreatedAt()

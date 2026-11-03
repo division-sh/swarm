@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -97,9 +96,6 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		},
 	})
 	if !result.Acknowledged {
-		if errors.Is(err, entityruntime.ErrImmutableMutation) {
-			return nil, failures.Wrap(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName}, err)
-		}
 		if failure, typed := failures.EnvelopeFromError(err); typed && (failure.Class == failures.ClassSchemaInvalid || failure.Class == failures.ClassAuthorizationDenied) {
 			return nil, err
 		}

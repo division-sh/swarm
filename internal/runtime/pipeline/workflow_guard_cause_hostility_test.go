@@ -86,7 +86,7 @@ func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testi
 				if err != nil {
 					t.Fatalf("construct hostile cause: %v", err)
 				}
-				state := testEngineStateMutation(map[string]any{"marker": "unauthorized"}, nil, nil)
+				state := testEngineStateMutation(map[string]any{"marker": "unauthorized"}, nil)
 				state.NextState, state.Transition = tc.target, &cause
 				state.TriggerEventType, state.TriggeredAt = tc.handler, time.Now().UTC()
 				inbound := nativeWorkflowJoinEventForTest(ctx, ".", runID, entityID, tc.handler, []byte("{}"), state.TriggeredAt)

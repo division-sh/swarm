@@ -1,11 +1,8 @@
 processor:
-  gate_state:
-    g_processed: gate set when processing succeeds
   process.requested:
     guard: has(state.status) && has(state.counter) && state.status == 'ready'
     data_accumulation:
       writes:
         - target_field: counter
           value: state.counter + 1
-    sets_gate: g_processed
     advances_to: processed

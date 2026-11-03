@@ -14,7 +14,7 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 	at := time.Unix(100, 0).UTC()
 	updated := at.Add(time.Minute)
 	reversed := at.Add(-time.Second)
-	for _, change := range []string{"exact", "missing_creation_clock", "missing_update_clock", "reversed_clocks", "lifecycle_history", "gate_history", "bookkeeping_history", "accumulator_history", "duplicate_birth"} {
+	for _, change := range []string{"exact", "missing_creation_clock", "missing_update_clock", "reversed_clocks", "lifecycle_history", "bookkeeping_history", "accumulator_history", "duplicate_birth"} {
 		t.Run(change, func(t *testing.T) {
 			fact := runForkRevisionEntityMetadata{EntityID: "entity-1", FlowInstance: "import/one", EntityType: "task", ConstructionKind: "imported_state", DataCreatedAt: &at, DataUpdatedAt: &updated}
 			snapshot := &runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{fact}}
@@ -27,8 +27,6 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 				snapshot.EntityMetadata[0].DataUpdatedAt = &reversed
 			case "lifecycle_history":
 				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainLifecycleState), NewValue: []byte(`"unknown"`), CreatedAt: updated}}
-			case "gate_history":
-				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainGate), Path: "approved", NewValue: []byte(`true`), CreatedAt: updated}}
 			case "bookkeeping_history":
 				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainBookkeeping), Path: "step", NewValue: []byte(`"retained"`), CreatedAt: updated}}
 			case "accumulator_history":
@@ -69,7 +67,7 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 				t.Fatalf("empty import lost historical membership: %+v %v", entities, err)
 			}
 			entity := entities[0]
-			if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil || !reflect.DeepEqual(entity.Fields, map[string]any{}) {
+			if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Bookkeeping != nil || entity.Accumulator != nil || !reflect.DeepEqual(entity.Fields, map[string]any{}) {
 				t.Fatalf("empty import acquired lifecycle or lost empty fields: %+v", entity)
 			}
 			meta, err := loadRunForkEntityMetadata(runfork.RunForkPlan{Entities: entities})
@@ -77,7 +75,7 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			projection, err := projectRunForkHistoricalFields("source", "child", entity.EntityID, "", entity, meta[entity.EntityID])
-			if err != nil || projection.Mutation.CurrentState != nil || projection.Mutation.Gates != nil || projection.Correspondence != nil || len(projection.GateBindings) != 0 || string(projection.Record.Fields) != `{}` || !projection.Record.CreatedAt.Equal(at) || !projection.Record.UpdatedAt.Equal(updated) {
+			if err != nil || projection.Mutation.CurrentState != nil || projection.Correspondence != nil || len(projection.GateBindings) != 0 || string(projection.Record.Fields) != `{}` || !projection.Record.CreatedAt.Equal(at) || !projection.Record.UpdatedAt.Equal(updated) {
 				t.Fatalf("data-only projection gained execution or changed data clocks: %+v %v", projection, err)
 			}
 		})

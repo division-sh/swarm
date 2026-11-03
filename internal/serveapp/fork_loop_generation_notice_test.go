@@ -100,7 +100,7 @@ func readForkLoopActivation(t *testing.T, rt servedControlProofRuntime, runID st
 	if err := json.Unmarshal([]byte(raw), &state); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, state)
+	carrier, err := engine.StateCarrierFromPersisted(nil, nil, state)
 	if err != nil {
 		t.Fatal(err)
 	}
