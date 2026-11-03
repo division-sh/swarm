@@ -2335,9 +2335,9 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 		_ = rt.workOccurrence.Fence()
 	}
 	// Idle projections retain manager leases; withdraw their local waits before
-	// draining the manager. Stop does not cancel callbacks already firing.
+	// draining the manager, but keep accepted readiness reconciliation available.
 	if rt.Scheduler != nil {
-		rt.Scheduler.Stop()
+		rt.Scheduler.CloseDispatch()
 	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
@@ -2398,6 +2398,7 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 		}
 	}
 	if rt.Scheduler != nil {
+		rt.Scheduler.Stop()
 		if err := rt.Scheduler.Wait(drainCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("scheduler shutdown: %w", err))
 			_ = rt.Scheduler.Wait(context.Background())
