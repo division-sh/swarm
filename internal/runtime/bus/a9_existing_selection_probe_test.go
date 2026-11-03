@@ -82,7 +82,7 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					instanceID = connectMissingInstanceID(plan, []contracts.TemplateInstanceKeyValue{{Field: field, Value: "acct-1"}})
+					instanceID = connectMissingInstanceID(plan.ReceiverKeyDigest([]contracts.TemplateInstanceKeyValue{{Field: field, Value: "acct-1"}}))
 				}
 				instance, err := flowidentity.KeyedChild(source, root, "account", instanceID)
 				if err != nil {

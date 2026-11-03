@@ -200,7 +200,7 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		if !failure.Empty() {
 			t.Fatal(failure)
 		}
-		parent, err := flowidentity.KeyedChild(source, root, "parent", connectMissingInstanceID(parentPlan, parentMaterial.Keys))
+		parent, err := flowidentity.KeyedChild(source, root, "parent", connectMissingInstanceID(parentPlan.ReceiverKeyDigest(parentMaterial.Keys)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +212,7 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		if !failure.Empty() {
 			t.Fatal(failure)
 		}
-		leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", connectMissingInstanceID(leafPlan, leafMaterial.Keys))
+		leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", connectMissingInstanceID(leafPlan.ReceiverKeyDigest(leafMaterial.Keys)))
 		if err != nil {
 			t.Fatal(err)
 		}

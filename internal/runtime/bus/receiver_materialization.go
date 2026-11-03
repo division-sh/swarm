@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func (intent RoutePlanDeliveryIntent) deliveryRoute() events.DeliveryRoute {
@@ -34,28 +33,26 @@ func (p publicationTargetOwnerEvidence) bindReceiverMaterializations(plan *Route
 }
 
 func flowReceiverInitialization(plan RoutePlan, target events.DeliveryTargetOwnership) (events.ReceiverInitialization, bool, error) {
-	var constructionPlans []runtimepipeline.FlowInstanceActivationPlan
-	for _, activation := range plan.ActivationPlans {
-		constructionPlans = append(constructionPlans, activation.ConstructionPlans()...)
-	}
-	for _, activation := range constructionPlans {
-		if err := activation.Validate(); err != nil {
-			return events.ReceiverInitialization{}, false, err
+	for _, tree := range plan.ActivationPlans {
+		for _, activation := range tree.ConstructionPlans() {
+			if err := activation.Validate(); err != nil {
+				return events.ReceiverInitialization{}, false, err
+			}
+			identity := activation.Identity
+			route := target.Route()
+			if activation.Readiness.RunID != plan.Event.RunID() || identity.TemplateID != route.FlowID || identity.InstancePath != route.FlowInstance || identity.EntityID != route.EntityID {
+				continue
+			}
+			if activation.CreatingInput.EventID != plan.Event.ID() {
+				return events.ReceiverInitialization{}, false, fmt.Errorf("future receiver construction belongs to another creating event")
+			}
+			receiver, err := identity.Route().AgentIdentityRoute()
+			if err != nil {
+				return events.ReceiverInitialization{}, false, err
+			}
+			supplier, err := events.AdmitFlowReceiverInitialization(plan.Event, target, receiver)
+			return supplier, err == nil, err
 		}
-		identity := activation.Identity
-		route := target.Route()
-		if activation.Readiness.RunID != plan.Event.RunID() || identity.TemplateID != route.FlowID || identity.InstancePath != route.FlowInstance || identity.EntityID != route.EntityID {
-			continue
-		}
-		if activation.CreatingInput.EventID != plan.Event.ID() {
-			return events.ReceiverInitialization{}, false, fmt.Errorf("future receiver construction belongs to another creating event")
-		}
-		receiver, err := identity.Route().AgentIdentityRoute()
-		if err != nil {
-			return events.ReceiverInitialization{}, false, err
-		}
-		supplier, err := events.AdmitFlowReceiverInitialization(plan.Event, target, receiver)
-		return supplier, err == nil, err
 	}
 	return events.ReceiverInitialization{}, false, nil
 }
