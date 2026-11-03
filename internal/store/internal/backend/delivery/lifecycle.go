@@ -497,12 +497,12 @@ func (s *DeliverySQLiteOwner) ProviderOriginPendingTx(ctx context.Context, tx *s
 	return sqliteDeliveryAdapter.providerOriginPendingTx(ctx, tx, claim)
 }
 
-func (s *DeliveryPostgresOwner) InspectProviderOriginRecoveryTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, disposition runtimedelivery.FailureDisposition) (runtimedelivery.Status, bool, error) {
-	return postgresDeliveryAdapter.inspectProviderOriginRecovery(ctx, tx, claim, disposition)
+func (s *DeliveryPostgresOwner) InspectProviderOriginRecoveryTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, disposition runtimedelivery.FailureDisposition, ordinarySettlement bool) (runtimedelivery.Status, bool, error) {
+	return postgresDeliveryAdapter.inspectProviderOriginRecovery(ctx, tx, claim, disposition, ordinarySettlement)
 }
 
-func (s *DeliverySQLiteOwner) InspectProviderOriginRecoveryTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, disposition runtimedelivery.FailureDisposition) (runtimedelivery.Status, bool, error) {
-	return sqliteDeliveryAdapter.inspectProviderOriginRecovery(ctx, tx, claim, disposition)
+func (s *DeliverySQLiteOwner) InspectProviderOriginRecoveryTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, disposition runtimedelivery.FailureDisposition, ordinarySettlement bool) (runtimedelivery.Status, bool, error) {
+	return sqliteDeliveryAdapter.inspectProviderOriginRecovery(ctx, tx, claim, disposition, ordinarySettlement)
 }
 
 func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, claim runtimedelivery.Claim, lease time.Duration) error {
