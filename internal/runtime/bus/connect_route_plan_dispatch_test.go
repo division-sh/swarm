@@ -1143,9 +1143,9 @@ func connectRoutePlanLifecycleAgentRoute(
 ) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission, string) {
 	t.Helper()
 	plan := mustInstanceKeyConnectRoutePlan(t, source)
-	instanceID := connectMissingInstanceID(plan, []runtimecontracts.TemplateInstanceKeyValue{{
+	instanceID := connectMissingInstanceID(plan.ReceiverKeyDigest([]runtimecontracts.TemplateInstanceKeyValue{{
 		Field: mustBusTemplateInstanceField(t, "vertical_id"), Value: "v-1",
-	}})
+	}}))
 	instance := runtimeflowidentity.Derive(source, "consumer", instanceID)
 	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "consumer-agent", instance.InstancePath)
 	subscriptions := []events.EventType{"deploy.done"}
@@ -2631,7 +2631,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 		Value: "acct-1",
 	}}
 	root := runtimeflowidentity.Stored(source, ".", evt.RunID(), evt.RunID(), evt.RunID(), "")
-	instance, err := runtimeflowidentity.KeyedChild(source, root, plan.ReceiverEndpoint().Readback().FlowID, connectMissingInstanceID(plan, keys))
+	instance, err := runtimeflowidentity.KeyedChild(source, root, plan.ReceiverEndpoint().Readback().FlowID, connectMissingInstanceID(plan.ReceiverKeyDigest(keys)))
 	if err != nil {
 		t.Fatal(err)
 	}

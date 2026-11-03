@@ -54,7 +54,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 			keys := []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}}
 			root := ConstructedFlowInstanceIdentityFixture(source, ".", busInternalTestRunID, busInternalTestRunID)
 			producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
-			instance, err := flowidentity.KeyedChild(source, root, "account", connectMissingInstanceID(plan, keys))
+			instance, err := flowidentity.KeyedChild(source, root, "account", connectMissingInstanceID(plan.ReceiverKeyDigest(keys)))
 			if err != nil {
 				t.Fatal(err)
 			}

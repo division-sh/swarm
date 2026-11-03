@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -332,17 +333,11 @@ func (p publicationTargetOwnerEvidence) resolveNodeTargetOwners(plan *RoutePlan,
 func (p publicationTargetOwnerEvidence) withActivationPlans(plans []pipeline.FlowInstanceActivationPlan) (publicationTargetOwnerEvidence, error) {
 	ordered := newOrderedTargetOwnerCandidates(p.candidates)
 	agents := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
-	for identity, descriptor := range p.agents {
-		agents[identity] = descriptor
-	}
+	maps.Copy(agents, p.agents)
 	constructing := make(map[agentidentity.Identity]struct{}, len(p.constructingAgents))
-	for identity := range p.constructingAgents {
-		constructing[identity] = struct{}{}
-	}
+	maps.Copy(constructing, p.constructingAgents)
 	activationOwners := make(map[events.RouteIdentity]pipeline.FlowInstanceActivationPlan, len(p.activationOwners))
-	for identity, plan := range p.activationOwners {
-		activationOwners[identity] = plan
-	}
+	maps.Copy(activationOwners, p.activationOwners)
 	var constructionPlans []pipeline.FlowInstanceActivationPlan
 	for _, plan := range plans {
 		constructionPlans = append(constructionPlans, plan.ConstructionPlans()...)

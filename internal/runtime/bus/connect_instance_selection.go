@@ -118,7 +118,7 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 		prepared = preview.plans
 	}
 	selected, err := pipeline.PrepareFlowInstanceSelection(ctx, o.index, o.plan, pipeline.FlowInstanceSelectionRequest{
-		Lookup: lookup, Mode: selection.mode, MissingInstanceID: connectMissingInstanceID(plan, keys), Prepared: prepared, RunProposal: o.runProposal,
+		Lookup: lookup, Mode: selection.mode, MissingInstanceID: connectMissingInstanceID(selection.KeyDigest), Prepared: prepared, RunProposal: o.runProposal,
 		Constructor: pipeline.FlowInstanceActivationRequest{ContractBundle: o.source, ConstructorInput: string(plan.ReceiverLocalEvent()), ResolvedKey: resolved,
 			PayloadProjection: projection, Bookkeeping: map[string]any{"last_source_event": event.ID()}, TriggerEvent: event},
 	})
@@ -177,8 +177,7 @@ func instanceKeyMaterialForConnectSelection(event events.Event, plan pinrouting.
 	return pinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, pinrouting.AdmitConnectRouteMatchValues(values))
 }
 
-func connectMissingInstanceID(plan pinrouting.ConnectRoutePlan, keys []contracts.TemplateInstanceKeyValue) string {
-	digest := plan.ReceiverKeyDigest(keys)
+func connectMissingInstanceID(digest string) string {
 	if digest == "" {
 		return ""
 	}
