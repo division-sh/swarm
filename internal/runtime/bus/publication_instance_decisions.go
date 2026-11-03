@@ -53,6 +53,9 @@ func (p publicationTargetOwnerEvidence) decisionObservation(listed pipeline.Flow
 }
 
 func (p publicationTargetOwnerEvidence) decisionTargetCandidate(descriptor pipeline.DeliveryTargetOwnerCandidate) (pipeline.DeliveryTargetOwnerCandidate, error) {
+	if plan, present := p.activationOwners[descriptor.Route]; present && plan.Restart != nil {
+		return descriptor, nil // The same transaction must discharge this restart.
+	}
 	if descriptor.Materializing || p.context == nil {
 		return descriptor, nil
 	}
@@ -80,6 +83,7 @@ func (p publicationTargetOwnerEvidence) decisionTargetCandidate(descriptor pipel
 		return descriptor, err
 	}
 	descriptor.Availability = workflowInstanceTargetAvailability(instance)
+	descriptor.Life = instance.Life
 	return descriptor, nil
 }
 

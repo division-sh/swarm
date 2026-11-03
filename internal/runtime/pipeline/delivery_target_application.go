@@ -168,6 +168,9 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("decode exact admitted delivery target: %w", err)
 		}
+		if instance.Life != owner.Life() {
+			return DeliveryTargetApplication{}, InstanceRestarted(flowIdentity, owner.Life(), instance.Life)
+		}
 		if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target: %w", err)
 		}

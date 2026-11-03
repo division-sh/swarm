@@ -43,13 +43,15 @@ const (
 	WorkflowEngineStateTransitionCreateStateAndCompanion
 	WorkflowEngineStateTransitionUpdateStateAndCompanion
 	WorkflowEngineStateTransitionPreserveStateAndCompanion
+	WorkflowEngineStateTransitionRestartStateAndCompanion
 )
 
 func (t WorkflowEngineStateTransition) Valid() bool {
 	switch t {
 	case WorkflowEngineStateTransitionCreateStateAndCompanion,
 		WorkflowEngineStateTransitionUpdateStateAndCompanion,
-		WorkflowEngineStateTransitionPreserveStateAndCompanion:
+		WorkflowEngineStateTransitionPreserveStateAndCompanion,
+		WorkflowEngineStateTransitionRestartStateAndCompanion:
 		return true
 	default:
 		return false
@@ -66,6 +68,10 @@ func (t WorkflowEngineStateTransition) UpdatesState() bool {
 
 func (t WorkflowEngineStateTransition) PreservesState() bool {
 	return t == WorkflowEngineStateTransitionPreserveStateAndCompanion
+}
+
+func (t WorkflowEngineStateTransition) RestartsState() bool {
+	return t == WorkflowEngineStateTransitionRestartStateAndCompanion
 }
 
 func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistencePresence) (WorkflowEngineStateTransition, error) {
@@ -118,6 +124,9 @@ type WorkflowEngineStateRecord struct {
 func (r WorkflowEngineStateRecord) Validate() error {
 	if r.Life <= 0 {
 		return fmt.Errorf("workflow engine state requires its positive captured life")
+	}
+	if r.Transition.RestartsState() && r.Life == 1 {
+		return fmt.Errorf("workflow engine restart requires a successor life")
 	}
 	if err := r.validateConstructionIdentity(); err != nil {
 		return err
@@ -267,6 +276,9 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	runID := strings.TrimSpace(c.State.Identity.RunID)
 	if err := c.State.Validate(); err != nil {
 		return err
+	}
+	if c.State.Transition.RestartsState() {
+		return fmt.Errorf("instance restart requires its constructor activation and atomic quiescence owner")
 	}
 	if c.Writer != nil {
 		if c.Writer.Type != "agent" || strings.TrimSpace(c.Writer.ID) == "" || c.Writer.HandlerStep != "save_entity_field" || !c.State.Transition.UpdatesState() || c.State.Status != "active" {

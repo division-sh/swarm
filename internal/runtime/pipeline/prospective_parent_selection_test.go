@@ -109,7 +109,7 @@ func TestProspectiveParentSelectionBindsExactObservationBeforeAvailability(t *te
 	if err != nil || !found || observation.HeaderRevision() != 2 || !reflect.DeepEqual(calls, []string{"inventory", "exact"}) {
 		t.Fatalf("selection reused inventory as mutable evidence: found=%t revision=%d calls=%v err=%v", found, observation.HeaderRevision(), calls, err)
 	}
-	selected, err := selectObservedFlowInstance(FlowInstanceSelectionRequest{Lookup: lookup, Mode: contracts.FlowInputResolutionModeSelect}, observation)
+	selected, err := selectObservedFlowInstance(context.Background(), nil, FlowInstanceSelectionRequest{Lookup: lookup, Mode: contracts.FlowInputResolutionModeSelect}, observation)
 	var terminated *TerminatedReceiverError
 	if !errors.As(err, &terminated) || selected.Observation.Valid() || selected.Activation != nil {
 		t.Fatalf("exact unavailable receiver became executable: %+v err=%v", selected, err)

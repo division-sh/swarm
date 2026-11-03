@@ -19175,7 +19175,10 @@ platform_tables:
         insert/update constraint. Ordinary delivery event/run equality remains structurally enforced.
         RouteIdentity equality compares all normalized
         route fields without inferring or completing missing fields. DeliveryTargetOwnership equality additionally includes
-        its closed ownership kind; existing_entity and materializing_entity for the same receiver route are contradictory,
+        its closed ownership kind and positive captured instance life; life is not part of instance identity. Retained
+        deliveries preserve their captured life and refuse as instance_restarted when it differs from the receiver's
+        authoritative header before effects. Missing or nonpositive persisted life refuses; it is never inferred from
+        the current header. existing_entity and materializing_entity for the same receiver route are contradictory,
         not distinct executable obligations. Validation keys cross-route ownership and payload-projection agreement by one
         exact execution slot: concrete AgentIdentity plus recipient and reply context for agents, or exact receiver route plus
         recipient and reply context for nodes. Distinct concrete agent identities sharing one authored agent ID remain
@@ -19505,13 +19508,12 @@ platform_tables:
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             entity_id          UUID NOT NULL,
             instance_path      TEXT NOT NULL,
-            life               INTEGER NOT NULL DEFAULT 1 CHECK (life > 0),
             projection_version INTEGER NOT NULL CHECK (projection_version = 3),
             projection         JSONB NOT NULL,
             occurred_at        TIMESTAMPTZ NOT NULL,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (run_id, entity_id, life),
-            UNIQUE (run_id, instance_path, life),
+            PRIMARY KEY (run_id, entity_id),
+            UNIQUE (run_id, instance_path),
             FOREIGN KEY (run_id, entity_id) REFERENCES flow_instances(run_id, entity_id) ON DELETE CASCADE,
             FOREIGN KEY (run_id, instance_path) REFERENCES flow_instances(run_id, instance_path) ON DELETE CASCADE
         );

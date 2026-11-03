@@ -1919,7 +1919,7 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		delete(entity, source.Field)
 		delete(stateFields, source.Field)
 	}
-	incoming := events.DeliveryContextFromContext(frame.ctx).ReplyOnly()
+	incoming := events.DeliveryContextFromContext(frame.ctx).Continuation()
 	var receiver *fanoutobligation.ExecutionReceiver
 	if route, ok := runtimedelivery.RouteFromContext(frame.ctx); ok {
 		if route.Context.ReplyContextID() != incoming.ReplyContextID() {
@@ -2519,7 +2519,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
-	deliveryContext := events.DeliveryContextFromContext(ctx).ReplyOnly()
+	deliveryContext := events.DeliveryContextFromContext(ctx).Continuation()
 	if !deliveryContext.Empty() {
 		for i := range frame.result.EmitIntents {
 			if frame.result.EmitIntents[i].Context.Empty() {

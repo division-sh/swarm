@@ -19,6 +19,7 @@ type PreparedWorkflowPublicationState struct {
 	source       runtimecorrelation.SourceArtifactFact
 	runID        string
 	route        events.RouteIdentity
+	life         int64
 	availability DeliveryTargetAvailability
 	fields       string
 	instanceID   string
@@ -77,7 +78,7 @@ func prepareWorkflowPublicationState(record WorkflowEngineStateRecord, lifecycle
 		return PreparedWorkflowPublicationState{}, err
 	}
 	return PreparedWorkflowPublicationState{
-		digest: sha256.Sum256(raw), source: source, runID: record.Identity.RunID,
+		digest: sha256.Sum256(raw), source: source, runID: record.Identity.RunID, life: record.Life,
 		route:        events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID},
 		availability: NewDeliveryTargetAvailability(record.CurrentState, record.Status, !record.TerminatedAt.IsZero()),
 		fields:       string(record.Fields), instanceID: record.Identity.Route.InstanceID,
@@ -142,7 +143,7 @@ func (p PreparedWorkflowPublicationState) ValidateMutation(record WorkflowEngine
 }
 
 func (p PreparedWorkflowPublicationState) Candidate() DeliveryTargetOwnerCandidate {
-	return DeliveryTargetOwnerCandidate{Route: p.route, Availability: p.availability}
+	return DeliveryTargetOwnerCandidate{Route: p.route, Availability: p.availability, Life: p.life}
 }
 
 func (p PreparedWorkflowPublicationState) PinRoutingDescriptor() (runtimepinrouting.Descriptor, error) {

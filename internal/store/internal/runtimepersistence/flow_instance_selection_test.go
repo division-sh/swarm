@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"testing"
@@ -187,6 +188,10 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 				})
 			}
 			t.Run("restart_exact_replay", func(t *testing.T) {
+				var originalBirth []byte
+				if err := f.db.QueryRowContext(f.ctx, `SELECT projection FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&originalBirth); err != nil {
+					t.Fatal(err)
+				}
 				restart := request
 				restart.Mode = contracts.FlowInputResolutionModeCreate
 				restart.Constructor.OccurredAt = winner.OccurredAt.Add(2 * time.Second)
@@ -214,8 +219,12 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 				if err := f.db.QueryRowContext(f.ctx, `SELECT life FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&life); err != nil || life != 2 {
 					t.Fatalf("restart/replay life=%d want=2 err=%v", life, err)
 				}
-				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&births); err != nil || births != 2 {
-					t.Fatalf("restart lost immutable life history: births=%d err=%v", births, err)
+				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&births); err != nil || births != 1 {
+					t.Fatalf("restart changed immutable construction: births=%d err=%v", births, err)
+				}
+				var retainedBirth []byte
+				if err := f.db.QueryRowContext(f.ctx, `SELECT projection FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&retainedBirth); err != nil || !bytes.Equal(originalBirth, retainedBirth) || !header.CreatedAt.Equal(winner.Instance.CreatedAt) {
+					t.Fatalf("restart rewrote physical construction evidence: %v", err)
 				}
 			})
 			if err := f.workflows.MarkTerminated(f.ctx, owner, identity.NormalizeEntityID(winner.Identity.EntityID), winner.OccurredAt.AddDate(0, 0, 1)); err != nil {

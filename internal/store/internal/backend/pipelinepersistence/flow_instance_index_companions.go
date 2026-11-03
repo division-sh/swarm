@@ -20,7 +20,7 @@ const flowInstanceCompanionSelect = `SELECT
 	FROM flow_instances fi
 	JOIN runs run ON run.run_id=fi.run_id
 	LEFT JOIN workflow_instance_initial_materializations m
-		ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id AND m.life=fi.life
+		ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
 	LEFT JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
 	WHERE fi.run_id=$1 AND fi.instance_path IN (`
 

@@ -331,7 +331,19 @@ func (p publicationTargetOwnerEvidence) resolveNodeTargetOwners(plan *RoutePlan,
 }
 
 func (p publicationTargetOwnerEvidence) withActivationPlans(plans []pipeline.FlowInstanceActivationPlan) (publicationTargetOwnerEvidence, error) {
-	ordered := newOrderedTargetOwnerCandidates(p.candidates)
+	// A prepared reset replaces only its own finished observation for planning.
+	// Its native compare-and-write remains the prerequisite for publication.
+	candidates := make([]pipeline.DeliveryTargetOwnerCandidate, 0, len(p.candidates))
+	for _, candidate := range p.candidates {
+		restarting := false
+		for _, plan := range plans {
+			restarting = restarting || plan.Restart != nil && plan.Identity.InstancePath == candidate.Route.FlowInstance && plan.Identity.EntityID == candidate.Route.EntityID
+		}
+		if !restarting {
+			candidates = append(candidates, candidate)
+		}
+	}
+	ordered := newOrderedTargetOwnerCandidates(candidates)
 	agents := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
 	maps.Copy(agents, p.agents)
 	constructing := make(map[agentidentity.Identity]struct{}, len(p.constructingAgents))
@@ -357,7 +369,9 @@ func (p publicationTargetOwnerEvidence) withActivationPlans(plans []pipeline.Flo
 			Route: events.RouteIdentity{FlowID: normalized.Identity.TemplateID,
 				FlowInstance: normalized.Identity.InstancePath,
 				EntityID:     normalized.Identity.EntityID},
-			Materializing: true,
+			Materializing: normalized.Restart == nil,
+			Availability:  workflowInstanceTargetAvailability(normalized.Instance),
+			Life:          normalized.Instance.Life,
 		})
 		for _, expected := range normalized.Readiness.Agents {
 			identity := expected.Identity.Normalize()

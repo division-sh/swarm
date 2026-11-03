@@ -81,7 +81,7 @@ func admitConstructionIndexTestObservation(source semanticview.Source, runID str
 		WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, InstanceKey: key,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
-		CurrentState: "active", Revision: 1, CreatedAt: at, UpdatedAt: at,
+		CurrentState: "active", Life: 1, Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}
 	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
 		instance.EntityType = entity.EntityType

@@ -173,8 +173,14 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 	view.deliveryContext = route.Context.Normalized()
 	target := route.Target.Route()
 	if target.Empty() {
+		view.deliveryContext.Life = nil
 		view.setEnvelopeClaim(EnvelopeForBroadcast(view.NormalizedEnvelope()))
 	} else if !target.Empty() {
+		life := InstanceLife{RunID: event.RunID(), FlowInstance: target.FlowInstance, Life: route.Target.Life()}
+		if err := life.Validate(); err != nil {
+			return DeliveryEvent{}, err
+		}
+		view.deliveryContext.Life = &life
 		view.setEnvelopeClaim(EnvelopeForTargetRoute(view.NormalizedEnvelope(), target))
 	}
 	return DeliveryEvent{journal: event.Clone(), view: view}, nil
