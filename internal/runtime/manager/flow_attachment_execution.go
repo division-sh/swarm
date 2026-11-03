@@ -27,6 +27,7 @@ type dynamicFlowRuntimeReadinessAttempt struct {
 	err               error
 	attemptOrdinal    uint64
 	planHash          string
+	acceptedReceipt   runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	successorRequired bool
 	successor         *dynamicFlowRuntimeReadinessAdmission
 }
@@ -228,6 +229,7 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 			current = *attempt.successor
 			attempt.attemptOrdinal = current.attemptOrdinal
 			attempt.planHash = current.planHash
+			attempt.acceptedReceipt = runtimepipeline.DynamicFlowRuntimeActivationAttempt{}
 			attempt.successorRequired = false
 			attempt.successor = nil
 			am.dynamicFlowReadinessMu.Unlock()

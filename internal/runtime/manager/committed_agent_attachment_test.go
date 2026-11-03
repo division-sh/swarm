@@ -17,7 +17,7 @@ import (
 func TestCommittedAgentAttachmentRequiresExactAcceptedOwner(t *testing.T) {
 	for _, fault := range []string{"accepted", "planned", "agents_registered", "ready", "retired", "aborted", "superseded", "terminal",
 		"missing_row", "wrong_hash", "wrong_attempt", "missing_actor", "wrong_generation", "no_executor", "executor_completed",
-		"executor_retiring", "successor", "pending_admission", "retiring_owner", "completed_owner", "stopped_generation", "canceled_generation", "missing_workflow_owner", "shutting_down", "resetting"} {
+		"executor_retiring", "missing_executor_receipt", "foreign_executor_receipt", "successor", "pending_admission", "retiring_owner", "completed_owner", "stopped_generation", "canceled_generation", "missing_workflow_owner", "shutting_down", "resetting"} {
 		t.Run(fault, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
 			bundle := testFlowBundle(t, "")
@@ -47,7 +47,7 @@ func TestCommittedAgentAttachmentRequiresExactAcceptedOwner(t *testing.T) {
 				am.dynamicFlowActiveAttempts = nil
 				am.dynamicFlowReadinessAttempts = nil
 			}()
-			executor := &dynamicFlowRuntimeReadinessAttempt{attemptOrdinal: active.receipt.Ordinal(), planHash: active.planHash, done: make(chan struct{}), retiring: make(chan struct{})}
+			executor := &dynamicFlowRuntimeReadinessAttempt{attemptOrdinal: row.AttemptOrdinal, planHash: active.planHash, acceptedReceipt: active.receipt, done: make(chan struct{}), retiring: make(chan struct{})}
 			am.dynamicFlowReadinessAttempts = map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt{key: executor}
 			row, _, err = instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
 			if err != nil {
@@ -89,6 +89,13 @@ func TestCommittedAgentAttachmentRequiresExactAcceptedOwner(t *testing.T) {
 				close(executor.done)
 			case "executor_retiring":
 				close(executor.retiring)
+			case "missing_executor_receipt":
+				executor.acceptedReceipt = pipeline.DynamicFlowRuntimeActivationAttempt{}
+			case "foreign_executor_receipt":
+				executor.acceptedReceipt, err = pipeline.NewDynamicFlowRuntimeActivationAttempt(active.receipt.ID(), active.receipt.RunID(), active.receipt.InstancePath()+"/foreign", active.receipt.ProcessBinding())
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "successor":
 				executor.successorRequired = true
 			case "pending_admission":

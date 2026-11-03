@@ -240,6 +240,18 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		}
 		acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("admit dynamic flow activation %s: %w", readiness.InstancePath, beginErr))
 	}
+	if executor := readinessAttemptFromContext(ctx); executor != nil {
+		am.dynamicFlowReadinessMu.Lock()
+		owned := am.dynamicFlowReadinessAttempts[key] == executor && am.dynamicFlowActiveAttempts[key] == active &&
+			executor.attemptOrdinal == admission.attemptOrdinal && executor.planHash == admission.planHash && active.planHash == admission.planHash && active.pending == nil
+		if owned {
+			executor.acceptedReceipt = active.receipt
+		}
+		am.dynamicFlowReadinessMu.Unlock()
+		if !owned {
+			return errDynamicFlowRuntimeReadinessPlanStale
+		}
+	}
 	advance := func(previous runtimepipeline.FlowAttachmentPhase) (bool, error) {
 		if err := checkForward(); err != nil {
 			return false, err
