@@ -15,11 +15,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
@@ -163,11 +166,14 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 					t.Fatalf("rows publication replaced the original immutable pin: %d err=%v", pins, err)
 				}
 				var resourceOwner *storedurabledata.Owner
+				var servingFactory rawFanOutTestFactory
 				switch selected := selected.(type) {
 				case *SQLiteRuntimeStore:
 					resourceOwner = selected.durableDataOwner
+					servingFactory = selected.pipelineSQLiteOwner
 				case *PostgresStore:
 					resourceOwner = selected.durableDataOwner
+					servingFactory = selected.pipelinePostgresOwner
 				}
 				feedID := published.Record.DeploymentFeedIDs()[0]
 				firstSource, err := resourceOwner.LoadFeedSource(ctx, runID, catalog.BundleHash, feedID, ref)
@@ -254,6 +260,59 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 				}
 				if _, err := resourceOwner.LoadFeedSource(ctx, fork.ForkRunID, catalog.BundleHash, uuid.NewString(), ref); err == nil {
 					t.Fatal("fork admitted a missing publication as its legacy feed")
+				}
+				control := selected.(interface {
+					PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+				})
+				if outcome, err := control.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: runID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+					t.Fatalf("pause original before fork selection: %+v err=%v", outcome, err)
+				}
+				forkWriter := selectedAdmissionLifecycleWriter(selected).(interface {
+					SelectLiveRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error)
+				})
+				if err := runSelectedFixtureMutation(ctx, selected, "r64 select retained-feed fork", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+					_, err := forkWriter.SelectLiveRunTx(txctx, attempt, fork.ForkRunID, time.Now().UTC())
+					return err
+				}); err != nil {
+					t.Fatalf("select materialized fork live: %v", err)
+				}
+				advanced, err := dataOwner.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: catalog.BundleHash,
+					Declaration: ref, ExpectedHead: durabledata.VersionHead(latest.VersionID), InputFormat: "jsonl", Input: []byte("{\"body\":\"week-6\"}\n"),
+				})
+				if err != nil || advanced.Outcome != "accepted" {
+					t.Fatalf("advance head after fork selection: %+v err=%v", advanced, err)
+				}
+				actor, err := selected.(durabledata.ResourceAccessStore).LoadRunResourceAccess(ctx, fork.ForkRunID, []durabledata.DeclarationRef{ref})
+				if err != nil || len(actor) != 1 || actor[0].VersionID != advanced.Candidate.VersionID {
+					t.Fatalf("live fork actor did not read HEAD: %+v err=%v", actor, err)
+				}
+				retained, err := resourceOwner.LoadFeedSource(ctx, fork.ForkRunID, catalog.BundleHash, legacyFeed.PublicationID(), ref)
+				if err != nil || retained.VersionID != imported.Candidate.VersionID {
+					t.Fatalf("live fork changed retained feed version: %+v err=%v", retained, err)
+				}
+				rowsAtCut, err := resourceOwner.LoadPinnedRowsRange(ctx, fork.ForkRunID, catalog.BundleHash, retained, 0, 1)
+				if err != nil || len(rowsAtCut) != 1 || rowsAtCut[0].(map[string]any)["body"] != "recorded" {
+					t.Fatalf("live fork changed retained feed bytes: %+v err=%v", rowsAtCut, err)
+				}
+				fanOut, err := rawFanOutTestOwner(servingFactory, catalog.BundleHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				key := fanoutobligation.IntentKey{RunID: fork.ForkRunID, DeploymentFeedID: legacyFeed.PublicationID()}
+				intent, claim, found, err := fanOut.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "r64-retained-feed", BundleHash: catalog.BundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: time.Minute})
+				if err != nil || !found {
+					t.Fatalf("claim retained fork feed: found=%t err=%v", found, err)
+				}
+				if intent.Request.Key != key || claim.Key != key {
+					t.Fatalf("retained fork claim changed its feed key: intent=%+v claim=%+v want=%+v", intent.Request.Key, claim.Key, key)
+				}
+				if intent.Source.Declaration != ref || intent.Source.VersionID != retained.VersionID || intent.Request.Deployment == nil {
+					t.Fatalf("retained fork claim changed its committed source: %+v", intent)
+				}
+				input, err := fanOut.LoadFanOutEvaluation(ctx, claim)
+				if err != nil || len(input.Items) != 1 || input.Items[0].(map[string]any)["body"] != "recorded" {
+					t.Fatalf("resume retained fork feed at committed bytes: %+v claim=%+v err=%v", input, claim, err)
 				}
 			})
 		}
