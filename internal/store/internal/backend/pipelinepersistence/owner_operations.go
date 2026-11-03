@@ -612,8 +612,9 @@ func SelectedDeploymentPipelineDrainCountsTx(ctx context.Context, tx *sql.Tx, ru
 	return missingScope, unfinishedPipeline, err
 }
 
-// UnacknowledgedRunPipelineCountTx observes publication settlement, not receiver
-// terminality. A delivered receiver alone cannot acknowledge its event pipeline.
+// UnacknowledgedRunPipelineCountTx observes the exact terminal publication
+// receipt, not receiver terminality or successful execution. Deferred work
+// leaves the platform/pipeline receipt absent.
 func UnacknowledgedRunPipelineCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	if tx == nil || runID == "" {
 		return 0, fmt.Errorf("pipeline acknowledgement observation requires transaction and run")
@@ -621,7 +622,7 @@ func UnacknowledgedRunPipelineCountTx(ctx context.Context, tx *sql.Tx, runID str
 	var unfinished int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes s
 		LEFT JOIN event_receipts r ON r.event_id=s.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
-		WHERE s.run_id=$1 AND COALESCE(r.outcome,'')<>'success'`, runID).Scan(&unfinished)
+		WHERE s.run_id=$1 AND r.event_id IS NULL`, runID).Scan(&unfinished)
 	if err != nil {
 		return 0, fmt.Errorf("read run pipeline acknowledgements: %w", err)
 	}
