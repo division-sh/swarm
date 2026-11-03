@@ -83,67 +83,7 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 		TTL:            runControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		controlReq := runtimeruncontrol.TransitionRequest{
-			RunID: runID, Reason: "operator_request", ControlledBy: "api.v1", Now: now,
-		}
-		var result runtimeruncontrol.TransitionResult
-		var err error
-		if action == "continue" && opts.ContinueRunRuntime != nil {
-			result, err = opts.ContinueRunRuntime(ctx, controlReq)
-		} else {
-			var selectedStop bool
-			if action == "stop" && opts.SelectedForkStop != nil {
-				result, selectedStop, err = opts.SelectedForkStop.StopSelectedFork(ctx, controlReq)
-				if err != nil {
-					return apiidempotency.Completion{}, runControlError(runID, err)
-				}
-			}
-			controller := opts.Controller
-			if action == "continue" && opts.PrepareRunRuntime != nil {
-				if err := opts.PrepareRunRuntime(ctx, runID); err != nil {
-					return apiidempotency.Completion{}, runControlError(runID, err)
-				}
-			}
-			if !selectedStop && runtimeContextManager(opts.RuntimeContexts) != nil {
-				var selected selectedRuntimeContext
-				ctx, selected, err = runControlRuntimeContext(ctx, opts.RuntimeContexts, runID, action)
-				if err != nil {
-					return apiidempotency.Completion{}, err
-				}
-				if selected.Runtime == nil || selected.Runtime.RunControl == nil {
-					return apiidempotency.Completion{}, fmt.Errorf("run control owner is required for the selected runtime")
-				}
-				controller = selected.Runtime.RunControl
-			}
-			switch action {
-			case "stop":
-				if !selectedStop {
-					result, err = controller.Stop(ctx, controlReq)
-				}
-			case "pause":
-				result, err = controller.Pause(ctx, controlReq)
-			case "continue":
-				result, err = controller.Continue(ctx, controlReq)
-			default:
-				err = fmt.Errorf("unsupported run control action %q", action)
-			}
-		}
-		if err != nil {
-			return apiidempotency.Completion{}, runControlError(runID, err)
-		}
-		responseResult := runControlResult{OK: true}
-		if action == "stop" || (action == "continue" && result.Recovery.Disposition != "") {
-			recovery := &runControlRecoveryResult{Status: result.Recovery.Disposition}
-			if result.Recovery.Err != nil {
-				recovery.Diagnostic = result.Recovery.Err.Error()
-			}
-			responseResult.Recovery = recovery
-		}
-		response, err := json.Marshal(responseResult)
-		if err != nil {
-			return apiidempotency.Completion{}, err
-		}
-		return apiidempotency.Completion{ResourceID: result.RunID, Response: response}, nil
+		return completeRunControlTransition(ctx, opts, runID, now, action)
 	})
 	if err != nil {
 		return nil, runControlError(runID, err)
@@ -156,6 +96,70 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 		return nil, fmt.Errorf("decode %s response: %w", req.Method, err)
 	}
 	return stored, nil
+}
+
+func completeRunControlTransition(ctx context.Context, opts RunControlHandlerOptions, runID string, now time.Time, action string) (apiidempotency.Completion, error) {
+	controlReq := runtimeruncontrol.TransitionRequest{
+		RunID: runID, Reason: "operator_request", ControlledBy: "api.v1", Now: now,
+	}
+	var result runtimeruncontrol.TransitionResult
+	var err error
+	if action == "continue" && opts.ContinueRunRuntime != nil {
+		result, err = opts.ContinueRunRuntime(ctx, controlReq)
+	} else {
+		var selectedStop bool
+		if action == "stop" && opts.SelectedForkStop != nil {
+			result, selectedStop, err = opts.SelectedForkStop.StopSelectedFork(ctx, controlReq)
+			if err != nil {
+				return apiidempotency.Completion{}, runControlError(runID, err)
+			}
+		}
+		controller := opts.Controller
+		if action == "continue" && opts.PrepareRunRuntime != nil {
+			if err := opts.PrepareRunRuntime(ctx, runID); err != nil {
+				return apiidempotency.Completion{}, runControlError(runID, err)
+			}
+		}
+		if !selectedStop && runtimeContextManager(opts.RuntimeContexts) != nil {
+			var selected selectedRuntimeContext
+			ctx, selected, err = runControlRuntimeContext(ctx, opts.RuntimeContexts, runID, action)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+			if selected.Runtime == nil || selected.Runtime.RunControl == nil {
+				return apiidempotency.Completion{}, fmt.Errorf("run control owner is required for the selected runtime")
+			}
+			controller = selected.Runtime.RunControl
+		}
+		switch action {
+		case "stop":
+			if !selectedStop {
+				result, err = controller.Stop(ctx, controlReq)
+			}
+		case "pause":
+			result, err = controller.Pause(ctx, controlReq)
+		case "continue":
+			result, err = controller.Continue(ctx, controlReq)
+		default:
+			err = fmt.Errorf("unsupported run control action %q", action)
+		}
+	}
+	if err != nil {
+		return apiidempotency.Completion{}, runControlError(runID, err)
+	}
+	responseResult := runControlResult{OK: true}
+	if action == "stop" || (action == "continue" && result.Recovery.Disposition != "") {
+		recovery := &runControlRecoveryResult{Status: result.Recovery.Disposition}
+		if result.Recovery.Err != nil {
+			recovery.Diagnostic = result.Recovery.Err.Error()
+		}
+		responseResult.Recovery = recovery
+	}
+	response, err := json.Marshal(responseResult)
+	if err != nil {
+		return apiidempotency.Completion{}, err
+	}
+	return apiidempotency.Completion{ResourceID: result.RunID, Response: response}, nil
 }
 
 func runControlRuntimeContext(ctx context.Context, contexts *swruntime.RuntimeContextManager, runID, action string) (context.Context, selectedRuntimeContext, error) {

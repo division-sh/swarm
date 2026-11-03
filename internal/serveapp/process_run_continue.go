@@ -111,47 +111,9 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 		s.mu.Unlock()
 	}()
 	s.operationMu.Lock()
-	manager, liveRuns := s.runtimeContexts, s.selectedRecoveryEnvironment.LiveRuns
-	if s.stopping || manager == nil || liveRuns == nil {
-		err = errors.New("continued run lost its live process")
-	} else {
-		var availability struct {
-			status string
-			root   sourceartifact.RootAdmissionReference
-		}
-		_, observed, readErr := manager.LookupRunStatus(lease.Context(), runID)
-		if readErr != nil {
-			err = readErr
-		} else {
-			availability.status, availability.root = observed.Status, observed.RootReference
-			if (availability.status != string(runlifecycle.StateRunning) && availability.status != string(runlifecycle.StateLive)) || availability.root != reference {
-				err = errors.New("continued run was superseded before target startup")
-			}
-		}
-		if err == nil {
-			scope, scopeErr := liveRuns.LoadRunLiveScope(lease.Context(), runID)
-			if scopeErr != nil {
-				err = scopeErr
-			} else if !scope.Empty() {
-				live, found, liveErr := liveRuns.LoadLiveRun(lease.Context(), scope)
-				if liveErr != nil {
-					err = liveErr
-				} else if !found || live.RunID != runID {
-					err = errors.New("continued run lost its exact live selection")
-				}
-			}
-		}
-		if err == nil {
-			current, exists, readErr := s.processCapability.CurrentSourceSet(lease.Context())
-			if readErr != nil || !exists {
-				err = errors.Join(readErr, errors.New("continued run lost its source set"))
-			} else if current.Revision != revision && !sourceSetContainsRoot(current, reference) {
-				err = errors.New("continued run source set was superseded")
-			}
-		}
-		if err == nil {
-			use, err = s.acquireLiveTargetRuntimeLocked(lease.Context(), reference)
-		}
+	err = s.validateContinuedRunTarget(lease.Context(), runID, reference, revision)
+	if err == nil {
+		use, err = s.acquireLiveTargetRuntimeLocked(lease.Context(), reference)
 	}
 	s.operationMu.Unlock()
 	if err != nil {
@@ -167,6 +129,43 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 	}
 	recovery := use.Runtime().RunControl.RecoverContinuedRun(use.WorkContext(), runID)
 	err = recovery.Err
+}
+
+// The lifecycle operation lock is held while checking the exact committed
+// run/source selection and while acquiring its runtime.
+func (s *processLifecycleSupervisor) validateContinuedRunTarget(ctx context.Context, runID string, reference sourceartifact.RootAdmissionReference, revision string) error {
+	manager, liveRuns := s.runtimeContexts, s.selectedRecoveryEnvironment.LiveRuns
+	if s.stopping || manager == nil || liveRuns == nil {
+		return errors.New("continued run lost its live process")
+	}
+	_, observed, err := manager.LookupRunStatus(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if (observed.Status != string(runlifecycle.StateRunning) && observed.Status != string(runlifecycle.StateLive)) || observed.RootReference != reference {
+		return errors.New("continued run was superseded before target startup")
+	}
+	scope, err := liveRuns.LoadRunLiveScope(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !scope.Empty() {
+		live, found, err := liveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return err
+		}
+		if !found || live.RunID != runID {
+			return errors.New("continued run lost its exact live selection")
+		}
+	}
+	current, exists, err := s.processCapability.CurrentSourceSet(ctx)
+	if err != nil || !exists {
+		return errors.Join(err, errors.New("continued run lost its source set"))
+	}
+	if current.Revision != revision && !sourceSetContainsRoot(current, reference) {
+		return errors.New("continued run source set was superseded")
+	}
+	return nil
 }
 
 func sourceSetContainsRoot(plan agenttopology.SourceSetPlan, reference sourceartifact.RootAdmissionReference) bool {
