@@ -300,6 +300,13 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 	if !out.Activation.Activated {
 		return out, errors.Join(err, fmt.Errorf("live handoff was not acknowledged; selected work remains recoverable"))
 	}
+	if p.forkOperation != nil {
+		record, found, _, projectionErr := p.owner.observeSelectedForkOperation(ctx, *p.forkOperation, p.operation)
+		if projectionErr != nil || !found || record.Status != runfork.ForkOperationActivated {
+			return out, errors.Join(err, projectionErr, errors.New("acknowledged live handoff lacks its exact immutable operation result"))
+		}
+		out.ExecutedEventCount = selectedForkRecordedOutcome(record).ExecutedEventCount
+	}
 	// Post-commit reconciliation can fail without undoing the immutable ACK.
 	// Direct targets may still be parked by the outer owner.
 	if use != nil {
