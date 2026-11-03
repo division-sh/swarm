@@ -231,11 +231,22 @@ func (c *Controller) Pause(ctx context.Context, req TransitionRequest) (Transiti
 }
 
 func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (TransitionResult, error) {
+	return c.continueRun(ctx, req, false)
+}
+
+// ContinueDeferred commits the lifecycle transition without releasing queued
+// work into a runtime that is still being loaded. RecoverContinuedRun consumes
+// that work after the selected runtime is ready.
+func (c *Controller) ContinueDeferred(ctx context.Context, req TransitionRequest) (TransitionResult, error) {
+	return c.continueRun(ctx, req, true)
+}
+
+func (c *Controller) continueRun(ctx context.Context, req TransitionRequest, deferRecovery bool) (TransitionResult, error) {
 	if c == nil || c.store == nil {
 		return TransitionResult{}, fmt.Errorf("run control owner is not configured")
 	}
 	req = c.normalize(req)
-	if c.queue != nil {
+	if c.queue != nil && !deferRecovery {
 		if err := c.queue.PreflightRunQueue(ctx, req.RunID); err != nil {
 			return TransitionResult{}, err
 		}
@@ -255,8 +266,10 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 			Disposition: RecoveryNotConfigured,
 		},
 	}
-	if c.queue != nil {
-		result.Recovery = c.releaseQueuedAfterContinue(ctx, state.RunID)
+	if deferRecovery && c.queue != nil {
+		result.Recovery.Disposition = RecoveryPending
+	} else if c.queue != nil {
+		result.Recovery = c.releaseQueuedAfterContinue(ctx, state.RunID, true)
 	}
 	if err != nil {
 		result.Recovery.Err = errors.Join(err, result.Recovery.Err)
@@ -264,10 +277,25 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 			result.Recovery.Disposition = RecoveryFailed
 		}
 	}
+	if deferRecovery {
+		// The native transition is acknowledged. A post-commit diagnostic cannot
+		// turn it into a retryable transition error.
+		return result, nil
+	}
 	return result, err
 }
 
-func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string) PostCommitRecovery {
+func (c *Controller) RecoverContinuedRun(ctx context.Context, runID string) PostCommitRecovery {
+	if c == nil || c.queue == nil {
+		return PostCommitRecovery{Disposition: RecoveryNotConfigured}
+	}
+	if err := c.queue.PreflightRunQueue(ctx, runID); err != nil {
+		return PostCommitRecovery{Disposition: RecoveryFailed, Err: err}
+	}
+	return c.releaseQueuedAfterContinue(ctx, runID, false)
+}
+
+func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string, detachFirst bool) PostCommitRecovery {
 	if c == nil || c.queue == nil {
 		return PostCommitRecovery{Disposition: RecoveryNotConfigured}
 	}
@@ -275,7 +303,7 @@ func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID strin
 	firstBatch := true
 	for {
 		releaseCtx := ctx
-		if firstBatch {
+		if firstBatch && detachFirst {
 			// An acknowledged transition must initiate recovery even if its caller canceled.
 			releaseCtx = context.WithoutCancel(ctx)
 			firstBatch = false

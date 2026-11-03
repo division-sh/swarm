@@ -1678,7 +1678,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: posture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
-		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs, FanOutRuntime: apiStoreCaps.FanOutRuntime}),
+		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs, FanOutRuntime: apiStoreCaps.FanOutRuntime, RuntimeReadiness: supervisor.continuedRunReadiness}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycle(), Usage: stores.AgentUsage()}),

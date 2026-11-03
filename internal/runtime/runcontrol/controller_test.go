@@ -191,6 +191,31 @@ func TestControllerContinueReleasesAfterCallerCancelsAtAcknowledgedCommit(t *tes
 	}
 }
 
+func TestControllerDeferredContinueKeepsCommittedRequestAndProcessBoundRecovery(t *testing.T) {
+	caller, cancelCaller := context.WithCancel(context.Background())
+	defer cancelCaller()
+	store := &fakeRunControlStore{onContinueCommit: cancelCaller}
+	queue := &fakeRunControlQueue{}
+	controller := NewController(store, queue, Options{})
+
+	result, err := controller.ContinueDeferred(caller, TransitionRequest{RunID: "run-1"})
+	if err != nil || result.Status != StatusRunning || result.Recovery.Disposition != RecoveryPending || queue.called || queue.preflightCalls != 0 {
+		t.Fatalf("deferred continue result=%+v err=%v queue=%+v", result, err, queue)
+	}
+	process, cancelProcess := context.WithCancel(context.Background())
+	cancelProcess()
+	recovery := controller.RecoverContinuedRun(process, "run-1")
+	if recovery.Disposition != RecoveryCancelled || !errors.Is(recovery.Err, context.Canceled) || queue.releaseContextErr != context.Canceled {
+		t.Fatalf("fenced process recovery=%+v release context=%v", recovery, queue.releaseContextErr)
+	}
+	queue.called = false
+	queue.releaseContextErr = nil
+	recovery = controller.RecoverContinuedRun(context.Background(), "run-1")
+	if recovery.Disposition != RecoveryExhausted || recovery.Err != nil || !queue.called {
+		t.Fatalf("live process recovery=%+v queue=%+v", recovery, queue)
+	}
+}
+
 func TestControllerContinuePreflightsQueueBeforeRunMutation(t *testing.T) {
 	preflightErr := errors.New("live queue rejected")
 	store := &fakeRunControlStore{}

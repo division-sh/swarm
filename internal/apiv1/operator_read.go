@@ -64,7 +64,14 @@ type RuntimeSourceArtifactIdentity struct {
 }
 
 type runGetResult struct {
-	Run operatorread.RunHeader `json:"run"`
+	Run              operatorread.RunHeader `json:"run"`
+	RuntimeReadiness *RunRuntimeReadiness   `json:"runtime_readiness,omitempty"`
+}
+
+type RunRuntimeReadiness struct {
+	Ready   bool                      `json:"ready"`
+	Reason  string                    `json:"reason,omitempty"`
+	Failure *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 type runListResult struct {
@@ -79,6 +86,7 @@ type runTraceListResult struct {
 
 type runDiagnosis struct {
 	Run              operatorread.RunHeader                      `json:"run"`
+	RuntimeReadiness *RunRuntimeReadiness                        `json:"runtime_readiness,omitempty"`
 	ObservedAt       *time.Time                                  `json:"observed_at,omitempty"`
 	NextWakeAt       *time.Time                                  `json:"next_wake_at,omitempty"`
 	OperationalState string                                      `json:"operational_state"`
@@ -176,7 +184,11 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 			if err != nil {
 				return nil, err
 			}
-			return runGetResult{Run: header}, nil
+			readiness, err := readRunRuntimeReadiness(ctx, opts, header)
+			if err != nil {
+				return nil, err
+			}
+			return runGetResult{Run: header, RuntimeReadiness: readiness}, nil
 		},
 		"run.list": func(ctx context.Context, req Request) (any, error) {
 			runs, err := requireRunReadStore(opts.Runs)
@@ -213,6 +225,13 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 				return nil, err
 			}
 			status := operatorread.ProjectRunOperationalStatus(report)
+			readiness, err := readRunRuntimeReadiness(ctx, opts, report.Header)
+			if err != nil {
+				return nil, err
+			}
+			if readiness != nil && !readiness.Ready {
+				status.BlockingLayer, status.BlockingReason = "runtime_context", readiness.Reason
+			}
 			failedDeliveries := report.FailedDeliveries
 			if failedDeliveries == nil {
 				failedDeliveries = []operatorread.RunDebugFailureDelivery{}
@@ -227,6 +246,7 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 			}
 			return runDiagnosis{
 				Run:              report.Header,
+				RuntimeReadiness: readiness,
 				NextWakeAt:       nextWakeAt,
 				ObservedAt:       observedAt,
 				OperationalState: strings.TrimSpace(status.State),
@@ -241,6 +261,17 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 			}, nil
 		},
 	}
+}
+
+func readRunRuntimeReadiness(ctx context.Context, opts RunReadHandlerOptions, header operatorread.RunHeader) (*RunRuntimeReadiness, error) {
+	if opts.RuntimeReadiness == nil || (header.Status != "running" && header.Status != "live") {
+		return nil, nil
+	}
+	readiness, err := opts.RuntimeReadiness(ctx, header.RunID)
+	if err != nil {
+		return nil, err
+	}
+	return readiness, nil
 }
 
 func normalizeRunFanOut(value fanoutobligation.RunSummary) fanoutobligation.RunSummary {
