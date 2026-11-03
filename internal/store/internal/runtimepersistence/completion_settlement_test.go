@@ -830,6 +830,15 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 }
 
 func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T) {
+	t.Run("compaction checkpoint acknowledgement and custody", func(t *testing.T) {
+		eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+			store := selected.selected.(completionSettlementTestStore)
+			if selected.postgres {
+				store = admitTestPostgresStore(t, selected.db)
+			}
+			proveContextCompactionCheckpointCustody(t, newCompletionSettlementFixture(t, store, selected.db, !selected.postgres))
+		})
+	})
 	for _, phase := range []string{"prelaunch", "launched", "recovery"} {
 		t.Run(phase, func(t *testing.T) {
 			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {

@@ -264,6 +264,13 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, err
 	}
+	compactor := r.contextCompactor()
+	if err := compactContext(ctx, s, lease, message, managed, resolvedModel, compactor, false); err != nil {
+		return nil, err
+	}
+	if err := bindFrozenContextCheckpoint(s, managed); err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -285,6 +292,9 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-compatible request: %w", err)
 	}
+	if managed != nil && managed.resume != nil {
+		reqJSON = append([]byte(nil), managed.resume.Journal.Call.Request.Body...)
+	}
 	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
 	if err != nil {
 		return nil, err
@@ -292,6 +302,14 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 
 	start := time.Now()
 	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
+	if payload, retry, repairErr := compactor.retryRejectedContext(ctx, s, lease, message, managed, resolvedModel, rawResp, dispatch); retry {
+		if repairErr != nil {
+			return nil, repairErr
+		}
+		retryCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "context_compaction_retry:1")
+		rawResp, parsed, dispatch, err = r.sendAdmittedRequest(retryCtx, profile, resolvedModel, payload, managed)
+		reqJSON = payload
+	}
 	latency := time.Since(start)
 	completionUsage := apiCompletionUsageFromRaw(rawResp, "prompt_tokens", "completion_tokens")
 	if err != nil {
@@ -517,7 +535,9 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
 	var attempt *runtimeeffects.Handle
-	if managed != nil {
+	if managed != nil && managed.compactionOperationID != "" {
+		attempt, err = runtimeeffects.BeginContextCompaction(ctx, "openai_compatible", managed.compactionOperationID, managed.frame, payload)
+	} else if managed != nil {
 		call, callErr := managedHTTPProviderCall(payload, req, managed)
 		if callErr != nil {
 			return nil, openAICompatibleResponse{}, nil, callErr

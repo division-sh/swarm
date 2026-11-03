@@ -32,7 +32,7 @@ func BindCompletionRequest(authority Authority, req AuthorizeRequest) (Authority
 			return authority, err
 		}
 		frameRequest := CompletionRequest{ModelAlias: provider.ModelAlias, RequestedModel: provider.Model,
-			BackendProfile: profile.ID, Provider: provider.Provider, Transport: provider.Transport}
+			BackendProfile: profile.ID, Provider: provider.Provider, Transport: provider.Transport, Purpose: request.Purpose}
 		if request != (CompletionRequest{}) && request != frameRequest {
 			return authority, fmt.Errorf("completion request contradicts the admitted frame")
 		}
@@ -47,6 +47,7 @@ func BindCompletionRequest(authority Authority, req AuthorizeRequest) (Authority
 
 // CompletionRequest is request identity, not a provider execution observation.
 type CompletionRequest struct {
+	Purpose        string `json:"purpose,omitempty"`
 	ModelAlias     string `json:"model_alias"`
 	RequestedModel string `json:"requested_model"`
 	BackendProfile string `json:"backend_profile"`
@@ -55,6 +56,9 @@ type CompletionRequest struct {
 }
 
 func (r CompletionRequest) Validate() error {
+	if r.Purpose != "" && r.Purpose != ContextCompactionPurpose {
+		return fmt.Errorf("completion request purpose is invalid")
+	}
 	for _, value := range []string{r.ModelAlias, r.RequestedModel, r.BackendProfile, r.Provider, r.Transport} {
 		if strings.TrimSpace(value) == "" || !utf8.ValidString(value) {
 			return fmt.Errorf("completion request requires exact model and provider identity")

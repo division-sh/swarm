@@ -122,9 +122,8 @@ func validateContextCompactionCheckpoints(sessionID string, messages []Message, 
 	for _, checkpoint := range checkpoints {
 		if checkpoint.Version != 1 || checkpoint.SessionID != sessionID || checkpoint.ParentID != parent ||
 			checkpoint.CoveredMessages < covered || checkpoint.CoveredMessages > len(messages) ||
-			checkpoint.FirstKeptMessage <= firstKept || checkpoint.FirstKeptMessage > checkpoint.CoveredMessages ||
-			checkpoint.Route == "" || checkpoint.Model == "" || checkpoint.OperationID == "" || checkpoint.AttemptID == "" ||
-			checkpoint.CanonicalFingerprint == "" || checkpoint.SystemFingerprint == "" || checkpoint.ToolsFingerprint == "" || checkpoint.ResultFingerprint == "" {
+			checkpoint.FirstKeptMessage < firstKept || checkpoint.FirstKeptMessage <= 0 || checkpoint.FirstKeptMessage > checkpoint.CoveredMessages ||
+			!contextCompactionEvidenceComplete(checkpoint) {
 			return contextCompactionLimitation("checkpoint_identity_or_parent_mismatch")
 		}
 		switch checkpoint.Method {
@@ -155,12 +154,21 @@ func validateContextCompactionCheckpoints(sessionID string, messages []Message, 
 	return nil
 }
 
+func contextCompactionEvidenceComplete(checkpoint ContextCompactionCheckpoint) bool {
+	return checkpoint.Route != "" && checkpoint.Model != "" && checkpoint.OperationID != "" && checkpoint.AttemptID != "" &&
+		checkpoint.CanonicalFingerprint != "" && checkpoint.SystemFingerprint != "" && checkpoint.ToolsFingerprint != "" && checkpoint.ResultFingerprint != ""
+}
+
 func contextCompactionMessageTokens(message Message) int {
 	content := message.Content + message.RuntimeContext
 	for _, call := range message.ToolCalls {
 		arguments, _ := json.Marshal(call.Arguments)
 		content += call.Name + string(arguments)
 	}
+	return contextCompactionTextTokens(content) + 8
+}
+
+func contextCompactionTextTokens(content string) int {
 	// Match the reference's UTF-16 character-density estimate, not billing usage.
 	characters := 0
 	for _, r := range content {
@@ -169,7 +177,39 @@ func contextCompactionMessageTokens(message Message) int {
 			characters++
 		}
 	}
-	return (characters+3)/4 + 8
+	return (characters + 3) / 4
+}
+
+func contextCompactionRequestTokens(raw []byte) (int, error) {
+	var request struct {
+		System       string            `json:"system"`
+		Instructions string            `json:"instructions"`
+		Tools        json.RawMessage   `json:"tools"`
+		Messages     []json.RawMessage `json:"messages"`
+		Input        []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return 0, err
+	}
+	tokens := contextCompactionTextTokens(request.System) + contextCompactionTextTokens(request.Instructions)
+	if len(request.Tools) != 0 {
+		tokens += contextCompactionTextTokens(string(request.Tools)) + 4
+	}
+	for _, item := range append(request.Messages, request.Input...) {
+		var message struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal(item, &message); err != nil {
+			return 0, err
+		}
+		var text string
+		if len(message.Content) != 0 && json.Unmarshal(message.Content, &text) == nil {
+			tokens += contextCompactionTextTokens(text) + 8
+		} else {
+			tokens += contextCompactionTextTokens(string(item)) + 8
+		}
+	}
+	return tokens, nil
 }
 
 func contextCompactionCut(messages []Message, firstEligible, keep int) (int, error) {

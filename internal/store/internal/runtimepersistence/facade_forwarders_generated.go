@@ -481,6 +481,10 @@ func (s *PostgresStore) InspectSelectedMaterializationReplay(ctx context.Context
 	return s.runForkPostgresOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
+func (s *PostgresStore) InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error {
+	return s.effectPostgresOwner.InstallContextCompaction(ctx, lease, result)
+}
+
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectPostgresOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
@@ -671,6 +675,10 @@ func (s *PostgresStore) LoadAgentsSpec(ctx context.Context) ([]manager.Persisted
 
 func (s *PostgresStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID string, eventID string, nodeID string) ([]computemodule.ReplayEnvelope, error) {
 	return s.eventPostgresOwner.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, eventID, nodeID)
+}
+
+func (s *PostgresStore) LoadContextCompaction(ctx context.Context, identity agentmemory.Identity, prepared llm.ContextCompactionPreparation) (llm.ContextCompactionResult, bool, error) {
+	return s.effectPostgresOwner.LoadContextCompaction(ctx, identity, prepared)
 }
 
 func (s *PostgresStore) LoadConversationForkSource(ctx context.Context, sessionID string) (runfork.ConversationForkSource, error) {
@@ -1729,6 +1737,10 @@ func (s *SQLiteRuntimeStore) InspectSelectedMaterializationReplay(ctx context.Co
 	return s.runForkSQLiteOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
+func (s *SQLiteRuntimeStore) InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error {
+	return s.effectSQLiteOwner.InstallContextCompaction(ctx, lease, result)
+}
+
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectSQLiteOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
@@ -1895,6 +1907,10 @@ func (s *SQLiteRuntimeStore) LoadAgentLifecycleState(ctx context.Context, identi
 
 func (s *SQLiteRuntimeStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID string, eventID string, nodeID string) ([]computemodule.ReplayEnvelope, error) {
 	return s.eventSQLiteOwner.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, eventID, nodeID)
+}
+
+func (s *SQLiteRuntimeStore) LoadContextCompaction(ctx context.Context, identity agentmemory.Identity, prepared llm.ContextCompactionPreparation) (llm.ContextCompactionResult, bool, error) {
+	return s.effectSQLiteOwner.LoadContextCompaction(ctx, identity, prepared)
 }
 
 func (s *SQLiteRuntimeStore) LoadConversationForkSource(ctx context.Context, sessionID string) (runfork.ConversationForkSource, error) {

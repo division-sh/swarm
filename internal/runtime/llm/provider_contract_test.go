@@ -2,10 +2,12 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -13,6 +15,62 @@ import (
 )
 
 func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
+	t.Run("compaction budget and replay boundary", func(t *testing.T) {
+		for _, cell := range []struct{ window, output, trigger, keep int }{
+			{200000, 1024, 133440, 31836},
+			{1000000, 1024, 800000, 159836},
+			{400000, 128000, 206464, 43520},
+			{1050000, 128000, 840000, 147520},
+			{1000000, 65536, 800000, 149514},
+		} {
+			budget, err := resolveContextCompactionBudget(cell.window, cell.output)
+			if err != nil || budget.Trigger != cell.trigger || budget.Keep != cell.keep {
+				t.Fatalf("budget %d/%d = %+v, %v", cell.window, cell.output, budget, err)
+			}
+		}
+		for _, cell := range [][2]int{{0, 0}, {100000, 0}, {100000, 100000}, {65536, 1}, {-1, 1}} {
+			if _, err := resolveContextCompactionBudget(cell[0], cell[1]); err == nil {
+				t.Fatalf("invalid/unknown budget accepted: %v", cell)
+			}
+		}
+		messages := []Message{{Role: "user", Content: strings.Repeat("old fact ", 100)},
+			{Role: "assistant", ToolCalls: []ToolCall{{ID: "call-1", Name: "lookup"}}},
+			{Role: "tool", Content: `[{"tool_call_id":"call-1","result":"kept"}]`},
+			{Role: "user", Content: "continue"}}
+		keep := contextCompactionMessageTokens(messages[2]) + contextCompactionMessageTokens(messages[3])
+		if cut, err := contextCompactionCut(messages, 0, keep); err != nil || cut != 1 {
+			t.Fatalf("tool pair split: cut=%d err=%v", cut, err)
+		}
+		if _, err := contextCompactionCut(messages[:2], 0, 0); err == nil {
+			t.Fatal("unfinished tool chain was compacted")
+		}
+		if tokens, err := contextCompactionRequestTokens([]byte(`{"system":"1234","messages":[{"role":"user","content":"1234"}]}`)); err != nil || tokens != 10 {
+			t.Fatalf("rendered request estimate = %d, %v", tokens, err)
+		}
+		if contextCompactionTextTokens("\U0001f600\U0001f600\U0001f600") != 2 {
+			t.Fatal("pressure estimate lost UTF-16 surrogate width")
+		}
+		if llmselection.NativeCompactionMethod("openai_responses", "https://compatible.example/v1/responses", "gpt-5.4") != "" ||
+			llmselection.NativeCompactionMethod("anthropic", "https://api.anthropic.com/v1/messages", "claude-opus-4-6-suffix") != "" {
+			t.Fatal("protocol or model prefix inferred native capability")
+		}
+	})
+	t.Run("only confirmed context rejection retries", func(t *testing.T) {
+		const rejected = `{"error":{"code":"context_length_exceeded"}}`
+		dispatch := &completionDispatch{handle: &runtimeeffects.Handle{}, state: runtimeeffects.StateTerminalFailure, invocation: completionProviderInvocationStarted, evidence: map[string]any{"status": 400}}
+		if !confirmedContextWindowRejection(dispatch, []byte(rejected)) {
+			t.Fatal("exact pre-inference context rejection was not recognized")
+		}
+		for _, raw := range []string{`{"error":{"code":"invalid_request_error"}}`, `{"finish_reason":"length"}`, `{"error":{"code":"context_length_exceeded"},"usage":{"input_tokens":1}}`, `{"error":{"code":"context_length_exceeded","code":"other"}}`} {
+			if confirmedContextWindowRejection(dispatch, []byte(raw)) {
+				t.Fatalf("non-context/charged/malformed response retries: %s", raw)
+			}
+		}
+		dispatch.mutationErr = errors.New("independent native refusal")
+		if confirmedContextWindowRejection(dispatch, []byte(rejected)) {
+			t.Fatal("independent native refusal was swallowed")
+		}
+	})
 	tests := []struct {
 		name              string
 		mode              string

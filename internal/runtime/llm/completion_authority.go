@@ -735,15 +735,11 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	turn = enrichTurnRecord(ctx, nil, turn, response)
 	turn = CanonicalizeTurnForPersistence(turn)
 	request := dispatch.handle.Attempt().Authority.CompletionRequest
-	if err := request.Validate(); err != nil {
-		return runtimeeffects.CompletionSettlementResult{}, err
+	var usageErr error
+	usage, usageErr = bindCompletionUsageEvidence(request, usage)
+	if usageErr != nil {
+		return runtimeeffects.CompletionSettlementResult{}, usageErr
 	}
-	usage = usage.Clone()
-	usage.Evidence.Request = request
-	usage.Evidence.ProviderReportedCostUSD = usage.ProviderReportedCostUSD
-	usage.ResolvedModel = usage.Evidence.ResolvedModel()
-	usage.Evidence.CostProvenance = usage.CostProvenance()
-	usage.Evidence = usage.Evidence.Canonical()
 	if state != runtimeeffects.StateSettled && failure == nil {
 		envelope := runtimefailures.FromError(fmt.Errorf("completion failed without provider failure detail"), "llm-completion-authority", "settle_completion")
 		failure = &envelope.Failure
@@ -847,6 +843,19 @@ func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.
 		RetryCount:          turn.RetryCount,
 		Failure:             turn.Failure,
 	}
+}
+
+func bindCompletionUsageEvidence(request runtimeeffects.CompletionRequest, usage runtimeeffects.CompletionUsage) (runtimeeffects.CompletionUsage, error) {
+	if err := request.Validate(); err != nil {
+		return usage, err
+	}
+	usage = usage.Clone()
+	usage.Evidence.Request = request
+	usage.Evidence.ProviderReportedCostUSD = usage.ProviderReportedCostUSD
+	usage.ResolvedModel = usage.Evidence.ResolvedModel()
+	usage.Evidence.CostProvenance = usage.CostProvenance()
+	usage.Evidence = usage.Evidence.Canonical()
+	return usage, nil
 }
 
 func completionSpendForContext(ctx context.Context, profile llmselection.Profile, turn AgentTurnRecord, usage runtimeeffects.CompletionUsage, providerModel llmselection.ResolvedModel) runtimeeffects.CompletionSpend {

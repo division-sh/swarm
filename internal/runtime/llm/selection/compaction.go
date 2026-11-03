@@ -36,3 +36,38 @@ func NativeCompactionMethod(backend, destination, model string) string {
 	}
 	return ""
 }
+
+// ContextCompactionBudget returns only documented concrete-route capacities.
+// The Responses reservation is made explicit in its ordinary request encoder;
+// DeepSeek's unmodified request uses the documented default thinking budget.
+func ContextCompactionBudget(backend, destination, model string) (window, output int) {
+	if backend == BackendAnthropic && destination == "https://api.anthropic.com/v1/messages" {
+		switch model {
+		case "claude-3-haiku-20240307", "claude-3-5-haiku", "claude-3-5-haiku-20241022", "claude-3-5-sonnet", "claude-3-5-sonnet-20240620", "claude-3-5-sonnet-20241022", "claude-3-opus", "claude-3-opus-20240229":
+			return 200000, 1024
+		case "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5":
+			return 1000000, 1024
+		}
+	}
+	if backend == BackendOpenAIResponses && destination == "https://api.openai.com/v1/responses" {
+		switch model {
+		case "gpt-5.4", "gpt-5.4-2026-03-05", "gpt-5.5", "gpt-5.5-2026-04-23":
+			// https://developers.openai.com/api/docs/models/gpt-5.4
+			// https://developers.openai.com/api/docs/models/gpt-5.5
+			return 1050000, 128000
+		case "gpt-5.4-mini", "gpt-5.4-mini-2026-03-17", "gpt-5.4-nano", "gpt-5.4-nano-2026-03-17":
+			// https://developers.openai.com/api/docs/models/gpt-5.4-mini
+			// https://developers.openai.com/api/docs/models/gpt-5.4-nano
+			return 400000, 128000
+		}
+	}
+	if backend == BackendOpenAICompatible && (destination == "https://api.deepseek.com/chat/completions" || destination == "https://api.deepseek.com/v1/chat/completions") {
+		switch model {
+		case "deepseek-flash", "deepseek-v4-pro":
+			// https://api-docs.deepseek.com/quick_start/pricing/
+			// https://api-docs.deepseek.com/api/create-chat-completion/
+			return 1000000, 65536
+		}
+	}
+	return 0, 0
+}

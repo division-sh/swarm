@@ -8656,6 +8656,49 @@ engine:
         - true to false terminates the complete active/suspended set before successor config publication.
         - true to true reconfiguration retains the complete current set and its conversation state. After an admitted in-place upgrade, the new prompt or model applies from the next turn on API and Claude CLI backends; existing accepted work is not replayed. Only the agent's own rotation rule requests rotation.
         - fire and teardown terminate the complete current set.
+      context_compaction:
+        ownership: Compaction preserves the exact actor/session, canonical conversation and current process/session grant.
+          It changes only the private rendering boundary for a later provider request, never execution authority.
+        routes:
+          anthropic: Use documented on-demand compaction only for the exact official endpoint and explicitly supported
+            concrete model. Preserve the signed compaction block and required beta header on compaction and replay.
+          openai_responses: Use the documented standalone compact endpoint only for the exact official endpoint and
+            explicitly supported concrete model. Retain its complete output window, including opaque and unknown members.
+          openai_compatible: Use the platform model-written summary. Protocol compatibility and caching do not establish
+            native compaction; DeepSeek has no documented native compaction route.
+          claude_cli: The CLI owns native compaction of its retained provider backing. No platform transcript serializer
+            or guessed token budget is imposed on that backing.
+        budget:
+          capacity: W is the documented concrete-route context capacity; O is the request's actual output reservation,
+            including a documented provider default when the request omits that field.
+          trigger: 'floor(min(0.8 * W, W - O - 65536))'
+          keep: 'floor(0.16 * (W - O))'
+          estimate: Price rendered system, tools and messages using UTF-16 character count divided by four, rounded up,
+            plus role/block overhead. Retain whole recent messages and intact tool-call/result groups.
+          unknown: Report context_compaction_unavailable for an unknown or invalid budget. An unchanged route without
+            a documented budget may continue its ordinary request with that named warning, but cannot guess capacity,
+            truncate history or rotate. Forced compaction or incompatible native replay without a budget refuses typed.
+        summary: The same admitted provider/model writes structured text preserving intent, exact facts, completed work,
+          errors, pending work and next action. It must not call tools or claim a business result. A platform summary is
+          replayed as background followed by the exact retained tail; the original conversation remains durable.
+        checkpoint: An append-only private runtime_state.context_checkpoints member binds the exact session, parent,
+          covered and first-kept coordinates, canonical-prefix/system/tools hashes, concrete route/model, acknowledged
+          effect operation/attempt/result and summary or complete native output. No new table or migration exists.
+        installation: Settle the auxiliary provider call and actual usage through the existing effect/spend owner without
+          an agent turn, delivery completion, accepted emission or provider-head mutation. Install only after store ACK,
+          under fresh native admission, exact live grant, unchanged canonical snapshot and parent. A refused installation
+          preserves the previous boundary; an exact retry reuses the settled result without another provider charge.
+        replay: Never compact an unfinished tool chain or change a frozen provider request. The existing resume journal
+          binds the checkpoint identity and exact rendered request; replay and tool-result prefix checks remain exact.
+          Changed native prompt, tools, model or route requires a new compaction from canonical evidence, not reinterpretation
+          of the old opaque result. Opaque and signed data remain private and are not exposed by public state DTOs.
+        eligibility: Existing turn-end settlement decides durable assistant/tool eligibility. No-emit frames remain absent
+          next turn; accepted-emission frames retain their existing treatment. Maintenance is not an accepted emission.
+        overflow: A confirmed pre-inference HTTP 400 context_length_exceeded with no usage may retire that rejected attempt,
+          maximally compact and make one fresh normally admitted request. Generic errors, ambiguous length finish reasons,
+          cancellation, native refusal, frozen replay and unfinished tool rounds do not authorize this retry.
+        rotation: There is no turn-count rotation deployment key or clipped rotation checkpoint. A remaining authored
+          retired key receives the configuration owner's existing unknown-key refusal, without an alias or migration.
       admission_rule: Only memory is an authored memory selector; other fields fail current-vocabulary admission.
       compatibility_policy: Unsupported fields, schemas, rows, aliases, and global-memory authority are rejected. There is no
         migration, backfill, dual reader/writer, export, purge, or fallback path.

@@ -84,6 +84,9 @@ func (t UsageTarget) Valid() bool {
 }
 
 func (a Authority) HasBusinessTurnOrigin() bool {
+	if a.CompletionRequest.Purpose == ContextCompactionPurpose {
+		return false
+	}
 	return a.Kind == AuthorityNormalAgent || a.Kind == AuthoritySelectedContractFork && a.Target.Kind == UsageTargetAgentTurn
 }
 
