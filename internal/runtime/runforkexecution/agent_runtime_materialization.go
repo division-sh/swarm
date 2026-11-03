@@ -722,7 +722,7 @@ func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipel
 	}
 	for len(r.pendingActivations) > 0 {
 		activation := r.pendingActivations[0]
-		if err := r.manager.AdoptSelectedFlowActivation(ctx, activation.identity, activation.attempt, activation.timersProjected); err != nil {
+		if err := r.manager.AdoptSelectedFlowActivation(ctx, activation.identity, activation.attempt, activation.plan, activation.timersProjected); err != nil {
 			return err
 		}
 		r.pendingActivations = r.pendingActivations[1:]

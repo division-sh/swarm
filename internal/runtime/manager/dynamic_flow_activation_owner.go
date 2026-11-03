@@ -13,7 +13,7 @@ type terminalProcessCapability interface{ ProcessCapabilityTerminal() bool }
 
 // AdoptSelectedFlowActivation transfers a committed selected attempt from the
 // outer preparation owner to the Manager that will receive its deliveries.
-func (am *AgentManager) AdoptSelectedFlowActivation(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, timersProjected bool) error {
+func (am *AgentManager) AdoptSelectedFlowActivation(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, timersProjected bool) error {
 	if am == nil || am.lifecycle == nil {
 		return errors.New("selected flow activation requires its exact Manager owner")
 	}
@@ -40,6 +40,13 @@ func (am *AgentManager) AdoptSelectedFlowActivation(ctx context.Context, identit
 	if !attempt.ProcessBinding().Equal(binding) {
 		return errors.New("selected flow activation differs from Manager generation grant")
 	}
+	planHash, err := plan.Hash()
+	if err != nil {
+		return err
+	}
+	if plan.RunID != identity.RunID || plan.Identity.Route() != identity.Route || plan.BundleHash != binding.BundleHash {
+		return errors.New("selected flow activation plan differs from its exact owner")
+	}
 	if am.workflowInstances == nil {
 		return errors.New("selected flow activation requires its durable attempt owner")
 	}
@@ -56,7 +63,7 @@ func (am *AgentManager) AdoptSelectedFlowActivation(ctx context.Context, identit
 		return errors.New("selected flow activation already has a Manager owner")
 	}
 	am.dynamicFlowActiveAttempts[key] = &dynamicFlowActiveAttempt{
-		receipt: attempt, identity: identity, timersProjected: timersProjected, complete: true,
+		receipt: attempt, identity: identity, planHash: planHash, timersProjected: timersProjected, complete: true,
 	}
 	return nil
 }
