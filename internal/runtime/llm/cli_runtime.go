@@ -198,11 +198,12 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
-		Tools:        tools,
-		Messages:     append([]Message(nil), hydrated.Messages...),
-		TurnCount:    hydrated.TurnCount,
-		Watchdog:     hydrated.Watchdog,
+		SystemPrompt:       systemPrompt,
+		Tools:              tools,
+		Messages:           append([]Message(nil), hydrated.Messages...),
+		ContextCheckpoints: cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints),
+		TurnCount:          hydrated.TurnCount,
+		Watchdog:           hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)

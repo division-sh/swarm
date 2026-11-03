@@ -129,6 +129,7 @@ type ConversationRecord struct {
 	RunID                string
 	TaskID               string
 	Messages             []Message
+	ContextCheckpoints   []ContextCompactionCheckpoint // Hydrated maintenance evidence; ordinary snapshots do not write it.
 	Summary              string
 	TurnCount            int
 	Status               string

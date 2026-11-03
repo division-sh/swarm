@@ -158,11 +158,12 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
-		Tools:        tools,
-		Messages:     append([]Message(nil), hydrated.Messages...),
-		TurnCount:    hydrated.TurnCount,
-		Watchdog:     hydrated.Watchdog,
+		SystemPrompt:       systemPrompt,
+		Tools:              tools,
+		Messages:           append([]Message(nil), hydrated.Messages...),
+		ContextCheckpoints: cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints),
+		TurnCount:          hydrated.TurnCount,
+		Watchdog:           hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
@@ -416,8 +417,18 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 	if err := validateProviderReplayToolNames(s.Messages, input); err != nil {
 		return anthropicRequest{}, err
 	}
-	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
-	for _, m := range s.Messages {
+	replay, err := replayContextCompaction(s, contextCompactionRoute("anthropic", r.apiURL), model)
+	if err != nil {
+		return anthropicRequest{}, err
+	}
+	msgs := make([]anthropicMessage, 0, len(replay.Messages)+2)
+	if len(replay.Native) != 0 {
+		if replay.Method != "anthropic_native" {
+			return anthropicRequest{}, contextCompactionLimitation("native_checkpoint_transport_mismatch")
+		}
+		msgs = append(msgs, anthropicMessage{Role: "assistant", Content: replay.Native})
+	}
+	for _, m := range replay.Messages {
 		am, ok, err := toAnthropicMessage(m)
 		if err != nil {
 			return anthropicRequest{}, err

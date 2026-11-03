@@ -161,11 +161,12 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
-		Tools:        tools,
-		Messages:     append([]Message(nil), hydrated.Messages...),
-		TurnCount:    hydrated.TurnCount,
-		Watchdog:     hydrated.Watchdog,
+		SystemPrompt:       systemPrompt,
+		Tools:              tools,
+		Messages:           append([]Message(nil), hydrated.Messages...),
+		ContextCheckpoints: cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints),
+		TurnCount:          hydrated.TurnCount,
+		Watchdog:           hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
@@ -453,11 +454,18 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, lease
 }
 
 func (r *OpenAICompatibleRuntime) buildRequest(s *Session, input Message, model string) (openAICompatibleRequest, error) {
-	msgs := make([]openAICompatibleMessage, 0, len(s.Messages)+2)
+	replay, err := replayContextCompaction(s, contextCompactionRoute("openai_compatible", r.baseURL+"/chat/completions"), model)
+	if err != nil {
+		return openAICompatibleRequest{}, err
+	}
+	if len(replay.Native) != 0 {
+		return openAICompatibleRequest{}, contextCompactionLimitation("native_checkpoint_transport_mismatch")
+	}
+	msgs := make([]openAICompatibleMessage, 0, len(replay.Messages)+2)
 	if strings.TrimSpace(s.SystemPrompt) != "" {
 		msgs = append(msgs, openAICompatibleMessage{Role: "system", Content: s.SystemPrompt})
 	}
-	for _, m := range s.Messages {
+	for _, m := range replay.Messages {
 		msgs = append(msgs, toOpenAICompatibleMessages(m)...)
 	}
 	msgs = append(msgs, toOpenAICompatibleMessages(input)...)
