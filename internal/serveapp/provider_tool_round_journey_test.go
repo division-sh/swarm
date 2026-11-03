@@ -177,11 +177,16 @@ func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
 					}
 					reply.Text = "Waiting for the human decision."
 				case 3:
-					if len(uses) != 1 || len(results) != 1 {
-						return llmapi.Reply{}, fmt.Errorf("human outcome invented a provider call or result id")
+					// The completed ask_human turn accepted no emission, so only its
+					// customer input survives before the separate human outcome.
+					if len(uses) != 0 || len(results) != 0 {
+						return llmapi.Reply{}, fmt.Errorf("no-emit human-task turn retained tool_use=%d tool_result=%d", len(uses), len(results))
 					}
 					var cardID string
 					for _, message := range body.Messages {
+						if message.Role == "assistant" {
+							return llmapi.Reply{}, fmt.Errorf("no-emit human-task turn retained an assistant frame")
+						}
 						var text string
 						if message.Role != "user" || json.Unmarshal(message.Content, &text) != nil || !strings.HasPrefix(text, "Tool result:\n") {
 							continue
