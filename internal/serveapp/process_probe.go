@@ -6,12 +6,28 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/store/backendselection"
 )
 
 type serveInstalledHandler struct{ handler http.Handler }
+
+func readStandbyStoreStatus(ctx context.Context, selection backendselection.Selection, cfg *config.Config) (string, error) {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	inspection, err := cliapp.InspectSelectedStoreStartup(bounded, selection, cfg)
+	if err != nil {
+		return "", err
+	}
+	if inspection.Possession == nil || inspection.Possession.Available {
+		return "booting", nil
+	}
+	return "waiting: store held; " + cliapp.LastAdmittedServeLine(inspection), nil
+}
 
 type serveProbeHandler struct {
 	standby http.Handler
