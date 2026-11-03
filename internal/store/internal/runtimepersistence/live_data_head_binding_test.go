@@ -10,8 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -34,10 +36,15 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 				EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 				ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 				LoadRunResourceAccess(context.Context, string, []durabledata.DeclarationRef) ([]durabledata.ResourceAccessItem, error)
+				LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
 				ReconcileFlowRun(context.Context, runlifecycle.LiveRunScope, runtimecorrelation.SourceArtifactFact) (runlifecycle.FlowRunReconciliation, error)
 				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 				ContinueRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 				StopRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+			})
+			forkWriter := selectedAdmissionLifecycleWriter(selected).(interface {
+				InsertRunForkRunTx(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmission) error
+				SelectLiveRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (string, error)
 			})
 			if _, err := store.EnsureSourceArtifactWithData(fixture.ctx, fixture.bundle.SourceArtifact, catalog); err != nil {
 				t.Fatal(err)
@@ -56,6 +63,10 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 				items, err := store.LoadRunResourceAccess(fixture.ctx, runID, []durabledata.DeclarationRef{ref})
 				if err != nil || len(items) != 1 || items[0].VersionID != want {
 					t.Fatalf("run %s binding: items=%+v err=%v want=%s", runID, items, err, want)
+				}
+				pinned, err := store.LoadPinnedSource(fixture.ctx, runID, catalog.BundleHash, ref)
+				if err != nil || pinned.VersionID != want {
+					t.Fatalf("run %s pinned read: source=%+v err=%v want=%s", runID, pinned, err, want)
 				}
 			}
 			if _, err := store.LoadRunResourceAccess(fixture.ctx, first.RunID, []durabledata.DeclarationRef{ref}); err == nil || !strings.Contains(err.Error(), "has no exact pin") {
@@ -111,6 +122,58 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 				t.Fatalf("stale import should refuse without moving bindings: %+v err=%v", conflict, err)
 			}
 			read(first.RunID, v3.Candidate.VersionID)
+			read(second.RunID, v4.Candidate.VersionID)
+			if outcome, err := store.PauseRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: second.RunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause fork source: %+v err=%v", outcome, err)
+			}
+			v5 := importData(durabledata.VersionHead(v4.Candidate.VersionID), "fifth")
+			read(second.RunID, v4.Candidate.VersionID)
+			root, present, err := runtimecorrelation.RootAdmissionFromContext(fixture.ctx)
+			if err != nil || !present {
+				t.Fatalf("fork requires captured root admission: %v", err)
+			}
+			forkRunID := uuid.NewString()
+			if err := runSelectedFixtureMutation(fixture.ctx, selected, "r64 materialize fork", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+				return forkWriter.InsertRunForkRunTx(ctx, attempt, forkRunID, second.RunID,
+					runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: 1}, time.Now().UTC(), fact, root)
+			}); err != nil {
+				t.Fatalf("materialize selected fork run: %v", err)
+			}
+			pins, err := MaterializeDataForkPinsForTest(fixture.ctx, selected, second.RunID, forkRunID, catalog.BundleHash, nil, false)
+			if err != nil || len(pins) != 1 || pins[0].VersionID != v4.Candidate.VersionID {
+				t.Fatalf("historical fork cut: pins=%+v err=%v", pins, err)
+			}
+			read(forkRunID, v4.Candidate.VersionID)
+			if err := runSelectedFixtureMutation(fixture.ctx, selected, "r64 select fork live", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+				_, err := forkWriter.SelectLiveRunTx(ctx, attempt, forkRunID, time.Now().UTC())
+				return err
+			}); err != nil {
+				t.Fatalf("select fork live: %v", err)
+			}
+			read(forkRunID, v5.Candidate.VersionID)
+			v6 := importData(durabledata.VersionHead(v5.Candidate.VersionID), "sixth")
+			read(forkRunID, v6.Candidate.VersionID)
+			if outcome, err := store.PauseRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause live fork: %+v err=%v", outcome, err)
+			}
+			v7 := importData(durabledata.VersionHead(v6.Candidate.VersionID), "seventh")
+			read(forkRunID, v4.Candidate.VersionID)
+			pins, err = MaterializeDataForkPinsForTest(fixture.ctx, selected, second.RunID, forkRunID, catalog.BundleHash, nil, true)
+			if err != nil || len(pins) != 1 || pins[0].VersionID != v4.Candidate.VersionID {
+				t.Fatalf("historical fork replay changed after imports: pins=%+v err=%v", pins, err)
+			}
+			if outcome, err := store.ContinueRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("continue selected fork: %+v err=%v", outcome, err)
+			}
+			read(forkRunID, v7.Candidate.VersionID)
+			if outcome, err := store.PauseRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause before fork stop: %+v err=%v", outcome, err)
+			}
+			if outcome, err := store.StopRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("stop selected fork: %+v err=%v", outcome, err)
+			}
+			importData(durabledata.VersionHead(v7.Candidate.VersionID), "eighth")
+			read(forkRunID, v4.Candidate.VersionID)
 			read(second.RunID, v4.Candidate.VersionID)
 		})
 	}

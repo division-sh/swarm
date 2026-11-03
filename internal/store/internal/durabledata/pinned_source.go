@@ -68,8 +68,7 @@ func (o *Owner) publicationSourceTx(ctx context.Context, tx *sql.Tx, runID, bund
 	var pinDigest runtimedata.SchemaDigest
 	var versionID runtimedata.VersionID
 	if publicationID == "" {
-		err = tx.QueryRowContext(ctx, o.query(`SELECT schema_digest,version_id FROM resource_version_pins
-			WHERE run_id=%s AND flow_path=%s AND event_name=%s`, 3), runID, ref.FlowPath, ref.EventName).Scan(&pinDigest, &versionID)
+		pinDigest, versionID, err = o.readRunResourceBindingTx(ctx, tx, runID, ref)
 	} else {
 		err = tx.QueryRowContext(ctx, o.query(`SELECT m.schema_digest,m.version_id FROM resource_feed_publication_members m
 			JOIN resource_feed_publications p ON p.publication_id=m.publication_id
