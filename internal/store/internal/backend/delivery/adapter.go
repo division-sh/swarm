@@ -1142,28 +1142,32 @@ func (a *Adapter) RunIDExact(ctx context.Context, q queryer, event events.Event,
 	if err != nil {
 		return "", err
 	}
+	return a.EventDeliveryRunID(ctx, q, event, deliveryID, route.Context.RunID)
+}
+
+// EventDeliveryRunID checks detached readback against the same native ownership
+// relation as executable routes, without reconstructing route custody.
+func (a *Adapter) EventDeliveryRunID(ctx context.Context, q queryer, event events.Event, deliveryID, selectedRun string) (string, error) {
 	query := `SELECT d.run_id::text FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
 		AND (e.run_id = d.run_id OR (e.run_id IS NULL AND e.event_class IN ('runtime_control','runtime_diagnostic')
-		AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.run_id = NULLIF($2,'')::uuid)) WHERE d.delivery_id = $1::uuid`
+		AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.run_id = NULLIF($2,'')::uuid)) WHERE d.delivery_id = $1::uuid AND e.event_id = $3::uuid`
 	if a.dialect == DialectSQLite {
 		query = `SELECT d.run_id FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
 			AND (e.run_id = d.run_id OR (e.run_id IS NULL AND e.event_class IN ('runtime_control','runtime_diagnostic')
-			AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.run_id = NULLIF(?2,''))) WHERE d.delivery_id = ?1`
+			AND e.produced_by_type = 'platform' AND e.source_event_id IS NULL AND d.run_id = NULLIF(?2,''))) WHERE d.delivery_id = ?1 AND e.event_id = ?3`
 	}
-	selectedRun := ""
 	if event.IsRunlessPlatformPublication() {
-		if route.Context.RunID == "" {
+		if selectedRun == "" {
 			return "", fmt.Errorf("platform delivery has no selected execution run")
 		}
 	}
-	if route.Context.RunID != "" {
-		if event.RunID() != route.Context.RunID && !event.IsRunlessPlatformPublication() {
+	if selectedRun != "" {
+		if event.RunID() != selectedRun && !event.IsRunlessPlatformPublication() {
 			return "", fmt.Errorf("delivery run crosses its publication")
 		}
-		selectedRun = route.Context.RunID
 	}
 	var runID string
-	if err := q.QueryRowContext(ctx, query, deliveryID, selectedRun).Scan(&runID); err != nil {
+	if err := q.QueryRowContext(ctx, query, deliveryID, selectedRun, event.ID()).Scan(&runID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
