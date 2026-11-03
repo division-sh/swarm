@@ -36,6 +36,7 @@ import (
 type selectedOperationActivationProbe struct {
 	SelectedContractForkLifecycle
 	before   func(context.Context)
+	after    func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest)
 	fail     error
 	discards *int
 }
@@ -50,7 +51,11 @@ func (p selectedOperationActivationProbe) ActivateRunForkForSelectedContractExec
 	if p.fail != nil {
 		return runfork.RunForkActivation{}, p.fail
 	}
-	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+	result, err := p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+	if result.Activated && p.after != nil {
+		p.after(ctx, req)
+	}
+	return result, err
 }
 
 type selectedOperationPublicationProbe struct {
@@ -114,6 +119,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				var interruptedSnapshot map[string]storetest.SelectedForkStorageTableSnapshot
 				failure := errors.New("injected activation failure")
 				var discards int
+				ackBeforeRetirement := false
 				activation := &selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
 					occurrence, ok := worklifetime.OccurrenceFromContext(ctx)
 					bound, _ = occurrence.(*worklifetime.SelectedForkOccurrence)
@@ -141,6 +147,26 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						}
 					}
 				}}
+				activation.after = func(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) {
+					operation, ok := ctx.Value(selectedOperationContextKey{}).(*selectedContractOperation)
+					if !ok || req.ForkOperation == nil {
+						t.Fatal("activation ACK lost its exact selected operation")
+					}
+					operation.mu.Lock()
+					retired, occurrence := operation.retired, operation.selected
+					operation.mu.Unlock()
+					if retired || occurrence != bound || ctx.Err() != nil || process.ActiveCount() == 0 {
+						t.Fatal("selected occurrence retired before its immutable activation ACK")
+					}
+					record, found, err := selected.(liveWinnerOperationReader).LoadForkOperation(ctx, req.ForkOperation.Actor, req.ForkOperation.IdempotencyKey, req.ForkOperation.TransportHash)
+					if err != nil || !found || record.Status != runfork.ForkOperationActivated || record.ForkRunID != req.ForkRunID || record.Result == nil {
+						t.Fatalf("retained selected occurrence lacks its recorded ACK: %+v found=%t err=%v", record, found, err)
+					}
+					if err := record.Result.Validate(record.Request, record.ForkRunID); err != nil {
+						t.Fatal(err)
+					}
+					ackBeforeRetirement = true
+				}
 				if point == "activation_failure" {
 					activation.fail = failure
 				}
@@ -187,6 +213,9 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				} else {
 					if err != nil {
 						t.Fatal(err)
+					}
+					if !ackBeforeRetirement {
+						t.Fatal("activation did not record its immutable ACK before selected retirement/store release")
 					}
 					observed, err := observeSelectedRetainedExecution(t, context.WithoutCancel(ctx), owner, selected, result.Materialization.ForkRunID)
 					if err != nil || observed.ExecutedEventCount != 1 || result.Activation.ForkRunStatus != string(runlifecycle.StateLive) || discards != 0 {
