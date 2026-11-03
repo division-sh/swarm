@@ -322,6 +322,13 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		CreatingInput:       runtimepipeline.FlowConstructionInput{EventID: triggerEventID, Input: constructor.Input()},
 		ActivationVariables: flowActivationVars(req),
 		OccurredAt:          occurredAt,
+		Restart:             req.Restart,
+	}
+	if req.Restart != nil {
+		plan.Instance.Life = req.Restart.Life + 1
+		if err := req.Restart.Validate(plan.Instance); err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
 	}
 	if seed := req.ScenarioSeed; seed != nil {
 		primary, err := bundle.ResolveTestSetupPrimaryEntity(templateID, seed.EntityType)
@@ -366,6 +373,9 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	for _, childFlowID := range children {
+		if req.Restart != nil {
+			break // Existing descendants retain their own instance lives.
+		}
 		child, err := runtimeflowidentity.KeylessChild(req.ContractBundle, instance, childFlowID)
 		if err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err

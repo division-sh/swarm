@@ -95,7 +95,7 @@ func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, int
 	}
 	descriptor = descriptor.Normalized()
 	if runtimeCreatedTargetlessAgentIntent(intent) {
-		return intent, nil
+		return p.captureTargetlessAgentLife(intent)
 	}
 	descriptor, found, _, err := p.decisionAgentDescriptor(identity)
 	if err != nil {
@@ -162,6 +162,42 @@ func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, int
 		}
 	}
 	return intent, nil
+}
+
+func (p publicationTargetOwnerEvidence) captureTargetlessAgentLife(intent RoutePlanDeliveryIntent) (RoutePlanDeliveryIntent, error) {
+	if p.context == nil {
+		if p.required {
+			return intent, fmt.Errorf("targetless agent life requires its selected instance observation")
+		}
+		return intent, nil
+	}
+	scope, _ := p.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
+	var selected pipeline.FlowInstanceObservation
+	for _, observation := range scope.observations {
+		if !observation.Owner().MatchesAgentRoute(intent.AgentIdentity) {
+			continue
+		}
+		if selected.Valid() {
+			return intent, fmt.Errorf("targetless agent has ambiguous instance-life evidence")
+		}
+		selected = observation
+	}
+	if !selected.Valid() {
+		if !p.required {
+			return intent, nil // Nonpersistent actors have no constructed instance to reset.
+		}
+		return intent, fmt.Errorf("targetless agent has no exact constructed instance-life owner")
+	}
+	observed, err := p.decisionObservation(selected)
+	if err != nil {
+		return intent, err
+	}
+	instance, err := observed.WorkflowInstance()
+	if err != nil {
+		return intent, err
+	}
+	intent.Context.Life = &events.InstanceLife{RunID: observed.Owner().RunID, FlowInstance: observed.Identity().InstancePath, Life: instance.Life}
+	return intent, intent.Context.Life.Validate()
 }
 
 func runtimeCreatedTargetlessAgentIntent(intent RoutePlanDeliveryIntent) bool {

@@ -2940,28 +2940,51 @@ func (a *Adapter) ActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 	if tx == nil {
 		return nil, fmt.Errorf("delivery active-run snapshot transaction is required")
 	}
-	return a.activeRunSnapshots(ctx, tx, runID, true)
+	return a.activeRunSnapshots(ctx, tx, runID, true, nil)
 }
 
 func (a *Adapter) ReadActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID string) ([]Snapshot, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery active-run read transaction is required")
 	}
-	return a.activeRunSnapshots(ctx, tx, runID, false)
+	return a.activeRunSnapshots(ctx, tx, runID, false, nil)
 }
 
-func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID string, forUpdate bool) ([]Snapshot, error) {
+func (a *Adapter) ReadActiveInstanceLifeSnapshots(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]Snapshot, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("instance-life delivery read requires its selected transaction")
+	}
+	if err := life.Validate(); err != nil {
+		return nil, err
+	}
+	return a.activeRunSnapshots(ctx, tx, life.RunID, false, &life)
+}
+
+func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID string, forUpdate bool, life *events.InstanceLife) ([]Snapshot, error) {
 	if _, err := uuid.Parse(strings.TrimSpace(runID)); err != nil {
 		return nil, fmt.Errorf("delivery active-run snapshot run id: %w", err)
 	}
-	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id`
+	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`
+	args := []any{runID}
+	if life != nil {
+		query += ` AND (delivery_target_route->'route'->>'flow_instance'=$2 OR
+			(subscriber_type='agent' AND (agent_flow_instance_path=$2 OR (agent_route_presence='root' AND $2=$1::text))))`
+		args = append(args, life.FlowInstance)
+	}
+	query += ` ORDER BY delivery_id`
 	if forUpdate {
 		query += " FOR UPDATE"
 	}
 	if a.dialect == DialectSQLite {
-		query = `SELECT delivery_id FROM event_deliveries WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id`
+		query = `SELECT delivery_id FROM event_deliveries WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed')`
+		if life != nil {
+			query = `SELECT delivery_id FROM event_deliveries WHERE run_id = $1 AND status IN ('pending', 'in_progress', 'failed')
+				AND (json_extract(delivery_target_route,'$.route.flow_instance')=$2 OR
+				(subscriber_type='agent' AND (agent_flow_instance_path=$2 OR (agent_route_presence='root' AND $2=$1))))`
+		}
+		query += ` ORDER BY delivery_id`
 	}
-	rows, err := tx.QueryContext(ctx, query, runID)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("select active run delivery snapshots: %w", err)
 	}
@@ -2987,9 +3010,30 @@ func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 		if err != nil {
 			return nil, err
 		}
+		if life != nil {
+			captured, err := capturedDeliveryLife(record.Snapshot)
+			if err != nil || captured.RunID != life.RunID || captured.FlowInstance != life.FlowInstance {
+				return nil, errors.Join(err, fmt.Errorf("instance-life delivery scope disagrees with its recorded receiver"))
+			}
+			if captured.Life != life.Life {
+				continue
+			}
+		}
 		out = append(out, record.Snapshot)
 	}
 	return out, nil
+}
+
+func capturedDeliveryLife(snapshot Snapshot) (events.InstanceLife, error) {
+	if target := snapshot.Route.Target; !target.Empty() {
+		life := events.InstanceLife{RunID: snapshot.RunID, FlowInstance: target.Route().FlowInstance, Life: target.Life()}
+		return life, life.Validate()
+	}
+	if snapshot.Route.Context.Life == nil {
+		return events.InstanceLife{}, fmt.Errorf("targetless delivery has no captured instance life")
+	}
+	life := *snapshot.Route.Context.Life
+	return life, life.Validate()
 }
 
 func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, error) {

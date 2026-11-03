@@ -18,7 +18,7 @@ type FlowInstanceRestart struct {
 }
 
 func (r FlowInstanceRestart) Validate(next WorkflowInstance) error {
-	if r.Life <= 0 || r.Life == math.MaxInt64 || r.Revision <= 0 || !r.FinalStage.IsFinal() || next.Life != r.Life+1 {
+	if r.Life <= 0 || r.Life == math.MaxInt64 || r.Revision <= 0 || !r.FinalStage.IsFinal() || r.FinalStage.FlowID() != next.WorkflowName || next.Life != r.Life+1 {
 		return fmt.Errorf("instance restart requires its exact finished life, revision and compiled final stage")
 	}
 	return nil

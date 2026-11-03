@@ -1104,6 +1104,20 @@ func (s *DeliverySQLiteOwner) SummarizeRunTx(ctx context.Context, tx *sql.Tx, ru
 	return sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 }
 
+func (s *DeliveryPostgresOwner) ReadActiveInstanceLifeDeliveriesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]runtimedelivery.Snapshot, error) {
+	if s == nil {
+		return nil, errors.New("delivery PostgreSQL owner is required")
+	}
+	return postgresDeliveryAdapter.ReadActiveInstanceLifeSnapshots(ctx, tx, life)
+}
+
+func (s *DeliverySQLiteOwner) ReadActiveInstanceLifeDeliveriesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]runtimedelivery.Snapshot, error) {
+	if s == nil {
+		return nil, errors.New("delivery SQLite owner is required")
+	}
+	return sqliteDeliveryAdapter.ReadActiveInstanceLifeSnapshots(ctx, tx, life)
+}
+
 func (s *DeliveryPostgresOwner) TerminalizeRunDeliveriesTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string) ([]runtimedelivery.Terminalization, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]runtimedelivery.Terminalization, error) {
 		terminalizations, err := postgresDeliveryAdapter.TerminalizeRun(ctx, attempt, runID, reason)
