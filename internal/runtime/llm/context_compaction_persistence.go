@@ -77,7 +77,7 @@ func ValidateContextCompactionSettlement(attempt runtimeeffects.Attempt, settlem
 		return err
 	}
 	checkpoint := result.Checkpoint
-	if checkpoint.OperationID != attempt.OperationID || checkpoint.AttemptID != attempt.AttemptID || checkpoint.SessionID != attempt.Authority.Target.SessionID {
+	if checkpoint.OperationID != attempt.OperationID || checkpoint.AttemptID != attempt.AttemptID || checkpoint.SessionID != attempt.Authority.Target.SessionID || checkpoint.Model != attempt.Authority.CompletionRequest.RequestedModel {
 		return contextCompactionLimitation("maintenance_attempt_mismatch")
 	}
 	return nil

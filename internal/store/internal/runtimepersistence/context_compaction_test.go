@@ -37,7 +37,7 @@ func proveContextCompactionCheckpointCustody(t *testing.T, fixture completionSet
 	}
 	ctx = runtimeeffects.WithCompletionRequest(ctx, bound.CompletionRequest)
 	const payload = `{"messages":[{"role":"user","content":"summarize"}]}`
-	checkpoint := runtimellm.ContextCompactionCheckpoint{Version: 1, SessionID: fixture.sessionID, Method: "platform_summary", Route: "exact-route", Model: "claude-test", CoveredMessages: 1, FirstKeptMessage: 1, OperationID: uuid.NewString()}
+	checkpoint := runtimellm.ContextCompactionCheckpoint{Version: 1, SessionID: fixture.sessionID, Method: "platform_summary", Route: "exact-route", Model: bound.CompletionRequest.RequestedModel, CoveredMessages: 1, FirstKeptMessage: 1, OperationID: uuid.NewString()}
 	checkpoint.CanonicalFingerprint, _ = canonicaljson.Hash(record.Messages[:1])
 	checkpoint.SystemFingerprint, _ = canonicaljson.Hash("exact system")
 	checkpoint.ToolsFingerprint, _ = canonicaljson.Hash([]string{"exact tool"})
@@ -69,6 +69,18 @@ func proveContextCompactionCheckpointCustody(t *testing.T, fixture completionSet
 	settlement.Usage.Evidence.Request = handle.Attempt().Authority.CompletionRequest
 	settlement.Spend.InvocationType = runtimeeffects.ContextCompactionPurpose
 	settlement.Settlement.Evidence = map[string]any{"context_compaction": result}
+	foreignModel := result
+	foreignModel.Preparation.Checkpoint.Model, foreignModel.Checkpoint.Model = "foreign-model", "foreign-model"
+	foreignModel.Checkpoint.ID, err = foreignModel.Checkpoint.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := settlement
+	forged.Settlement.Evidence = map[string]any{"context_compaction": foreignModel}
+	if _, err := handle.SettleCompletion(ctx, forged); err == nil {
+		t.Fatal("checkpoint labelled a response with a different admitted model")
+	}
+	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
 	ack, err := handle.SettleCompletion(ctx, settlement)
 	if err != nil || !ack.Committed {
 		t.Fatalf("maintenance settlement: %+v %v", ack, err)
