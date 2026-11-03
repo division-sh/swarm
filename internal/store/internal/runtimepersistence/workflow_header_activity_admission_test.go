@@ -68,7 +68,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						(shape == "fields" && stored.Fields["accumulator"] != "business-only") || (shape == "fieldless" && len(stored.Fields) != 0) {
 						t.Fatalf("independent activity header/business witness: found=%t instance=%+v err=%v", found, stored, err)
 					}
-					carrier, err := engine.StateCarrierFromPersisted(stored.Fields, stored.Bookkeeping, stored.Gates, stored.StateBuckets)
+					carrier, err := engine.StateCarrierFromPersisted(stored.Fields, stored.Bookkeeping, stored.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
 					}

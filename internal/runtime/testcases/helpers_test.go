@@ -70,13 +70,6 @@ func genericExecutableNode(t testing.TB, bundle *runtimecontracts.WorkflowContra
 	return match
 }
 
-func gateName(spec *runtimecontracts.GateSpec) string {
-	if spec == nil {
-		return ""
-	}
-	return strings.TrimSpace(spec.Name)
-}
-
 func stringSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -140,7 +133,7 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 		runtimeengine.StateSnapshot{
 			EntityID: runtimeidentity.NormalizeEntityID(state.EntityID), CurrentState: string(state.Stage),
 			WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStateAt: time.Now().UTC(),
-			StateCarrier: runtimeengine.NewStateCarrierWithOwners(state.Metadata, nil, control, nil, nil),
+			StateCarrier: runtimeengine.NewStateCarrierWithOwners(state.Metadata, nil, control, nil),
 		}, policyOverrides)
 	if err != nil {
 		t.Fatalf("preview handler %s/%s: %v", nodeID, eventType, err)

@@ -31,7 +31,7 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 	record := WorkflowInstancePersistenceRecord{
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
-		Gates: []byte(`{}`), Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", CreatedAt: now, UpdatedAt: now,
 	}
@@ -56,7 +56,6 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 	for _, tc := range []struct{ domain, want string }{
 		{"fields", "entity_state.fields must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
 		{"bookkeeping", "flow_instances.bookkeeping must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
-		{"gates", "flow_instances.gates must be an object of booleans: json: cannot unmarshal array into Go value of type map[string]bool"},
 		{"accumulator", "flow_instances.accumulator must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
 	} {
 		t.Run(tc.domain, func(t *testing.T) {
@@ -66,8 +65,6 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 				invalid.Fields = []byte(`[]`)
 			case "bookkeeping":
 				invalid.Bookkeeping = []byte(`[]`)
-			case "gates":
-				invalid.Gates = []byte(`[]`)
 			case "accumulator":
 				invalid.Accumulator = []byte(`[]`)
 			}
@@ -101,7 +98,7 @@ func VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest(t *testing.T
 		}
 		instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 			StorageRef: path, WorkflowName: path, WorkflowVersion: "fixture", CurrentState: "active", StageDefined: true,
-			EntityType: entityType, Fields: fields, Gates: map[string]bool{"ready": true},
+			EntityType: entityType, Fields: fields,
 			Bookkeeping: map[string]any{"authority": "header"}, StateBuckets: map[string]any{"count": int64(1)},
 		})
 		if err := fixture.Construct(ctx, instance); err != nil {
@@ -120,7 +117,7 @@ func VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest(t *testing.T
 			t.Fatalf("list changed exact constructed membership: %+v", instance)
 		}
 		delete(expected, instance.StorageRef)
-		if instance.CurrentState != "active" || !instance.StageDefined || instance.Revision != 1 || !instance.Gates["ready"] || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
+		if instance.CurrentState != "active" || !instance.StageDefined || instance.Revision != 1 || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
 			t.Fatalf("list replaced header lifecycle with business data: %+v", instance)
 		}
 		if instance.StorageRef == "fieldless" && (instance.EntityType != "" || len(instance.Fields) != 0) {
@@ -143,7 +140,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 	instance, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
-		Gates: []byte(`{}`), Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "state", CreatedAt: now, UpdatedAt: now,
 	})
@@ -213,7 +210,7 @@ func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) 
 	_, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
-		Gates: []byte(`{}`), Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "state", CreatedAt: now, UpdatedAt: now,
 	})
@@ -268,7 +265,6 @@ func VerifyWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalStateForTe
 		},
 		Fields:      map[string]any{"custom_threshold": float64(3), "business_brief": map[string]any{"title": "hello"}, "status": "open"},
 		Bookkeeping: map[string]any{"last_source_event": "review.started"},
-		Gates:       map[string]bool{"g_ready": true},
 	})
 
 	if err := fixture.Construct(ctx, instance); err != nil {
@@ -308,9 +304,6 @@ func VerifyWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalStateForTe
 	}
 	if _, exists := loaded.Fields["subject_id"]; exists {
 		t.Fatalf("Fields subject_id = %#v, want absent", loaded.Fields["subject_id"])
-	}
-	if !loaded.Gates["g_ready"] {
-		t.Fatalf("Gates = %#v, want g_ready=true", loaded.Gates)
 	}
 	if len(loaded.TransitionHistory) != 1 || loaded.TransitionHistory[0].TransitionID != instance.TransitionHistory[0].TransitionID {
 		t.Fatalf("TransitionHistory = %#v, want admitted cause %s", loaded.TransitionHistory, instance.TransitionHistory[0].TransitionID)
@@ -546,14 +539,6 @@ func VerifyWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapesForTes
 			},
 			mutateKey:    "entity",
 			wantContains: "entity_state.fields must be a JSON object",
-		},
-		{
-			name: "gates not bool map",
-			mutate: func(fixture WorkflowProjectionShapeNativeFixtureForTest, ctx context.Context, key string) (int64, error) {
-				return fixture.NumericGate(ctx, testPipelineRunID, key)
-			},
-			mutateKey:    "storage",
-			wantContains: "flow_instances.gates must be an object of booleans",
 		},
 		{
 			name: "accumulator not object",

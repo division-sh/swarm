@@ -1,9 +1,7 @@
 package entityruntime
 
 import (
-	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -24,8 +22,6 @@ type Mutation struct {
 
 const MutationClear = "clear"
 
-var ErrImmutableMutation = errors.New("immutable entity field write forbidden")
-
 // ValidateClearTarget is shared by authored-operation admission and execution.
 // Clearability is a declaration/ownership rule, independent of current presence.
 func ValidateClearTarget(contract Contract, target string) error {
@@ -40,16 +36,8 @@ func ValidateClearTarget(contract Contract, target string) error {
 	if err != nil {
 		return err
 	}
-	root, _, _ := strings.Cut(path, ".")
-	decl, err := FieldDecl(contract, root)
-	if err != nil {
-		return err
-	}
 	if !field.IsOptional {
 		return fmt.Errorf("cannot clear bare entity field %s", path)
-	}
-	if decl.Immutable {
-		return fmt.Errorf("%w: cannot clear %s", ErrImmutableMutation, path)
 	}
 	return nil
 }
@@ -178,7 +166,7 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 		return "", fmt.Errorf("mutation target %s is not an entity field", op.Target)
 	}
 	root, _, _ := strings.Cut(path, ".")
-	decl, err := FieldDecl(p.contract, root)
+	_, err = FieldDecl(p.contract, root)
 	if err != nil {
 		return "", err
 	}
@@ -239,12 +227,6 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 		}
 		if err := applyContainedOperationToMetadata(next, target, op.Operation, key, op.HasIndex, index, value); err != nil {
 			return "", err
-		}
-	}
-	if previous, exists := p.draft[root]; exists && decl.Immutable {
-		value, remains := next[root]
-		if !remains || !reflect.DeepEqual(previous, value) {
-			return "", fmt.Errorf("%w: %s cannot change", ErrImmutableMutation, root)
 		}
 	}
 	return path, nil

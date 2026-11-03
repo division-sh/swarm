@@ -70,7 +70,7 @@ func outcomeConstructedMutation(t *testing.T) (runtimeengine.EngineMutation, Wor
 	command := WorkflowEngineMutationCommand{State: WorkflowEngineStateRecord{
 		Identity: flow, EntityID: eventtest.UUID("outcome-entity"), WorkflowName: ".", WorkflowVersion: "v1",
 		Mode: "static", Status: "active", CurrentState: "pending", StageDefined: true,
-		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), Config: config, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: at, CreatedAt: at, UpdatedAt: at, ExpectedState: "pending", ExpectedRevision: 1,
 		Transition: WorkflowEngineStateTransitionUpdateStateAndCompanion,

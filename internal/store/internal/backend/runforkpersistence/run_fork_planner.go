@@ -533,7 +533,6 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 			EnteredStateAt: enteredStateAt,
 			Fields:         projection.Fields,
 			Bookkeeping:    projection.Bookkeeping,
-			Gates:          projection.Gates,
 			Accumulator:    projection.Accumulator,
 		})
 	}

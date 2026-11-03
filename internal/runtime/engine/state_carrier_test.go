@@ -9,7 +9,6 @@ func TestStateCarrierFromPersistedRoundTrip(t *testing.T) {
 			"score":      91,
 		},
 		map[string]any{"activation": "platform"},
-		map[string]bool{"ready": true},
 		map[string]any{
 			"evidence": map[string]any{
 				"count": 2,
@@ -24,9 +23,6 @@ func TestStateCarrierFromPersistedRoundTrip(t *testing.T) {
 	}
 	if carrier.Fields["activation"] != "authored" || carrier.Bookkeeping["activation"] != "platform" {
 		t.Fatalf("carrier owner collision = fields:%#v bookkeeping:%#v", carrier.Fields, carrier.Bookkeeping)
-	}
-	if !carrier.Gates["ready"] {
-		t.Fatalf("carrier gates = %#v, want ready=true", carrier.Gates)
 	}
 	if got := carrier.StateBuckets["evidence"]["count"]; got != 2 {
 		t.Fatalf("carrier state bucket evidence.count = %#v, want 2", got)
@@ -44,7 +40,7 @@ func TestStateCarrierFromPersistedRoundTrip(t *testing.T) {
 
 func TestStateCarrierFromPersistedRejectsMalformedShapes(t *testing.T) {
 	t.Run("state_buckets", func(t *testing.T) {
-		_, err := StateCarrierFromPersisted(nil, nil, nil, map[string]any{
+		_, err := StateCarrierFromPersisted(nil, nil, map[string]any{
 			"evidence": "bad",
 		})
 		if err == nil {

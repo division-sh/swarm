@@ -607,7 +607,6 @@ func newCompiledEventSchema(
 			continue
 		}
 		field.TypeRef = strings.TrimSpace(declaration.Type)
-		field.Refinements = declaration.Refinements.Clone()
 	}
 	value.structuralType = structuralType
 	if strings.TrimSpace(businessKeyField) != "" {

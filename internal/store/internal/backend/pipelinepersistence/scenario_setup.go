@@ -85,7 +85,7 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 				if err := requireScenarioImportWithoutHeader(txctx, tx, req.RunID, entity); err != nil {
 					return err
 				}
-				fieldsJSON, _, fieldsAny, _, err := scenarioSetupEntityJSON(entity)
+				fieldsJSON, fieldsAny, err := scenarioSetupEntityJSON(entity)
 				if err != nil {
 					return err
 				}
@@ -200,7 +200,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 				if err := requireScenarioImportWithoutHeader(txctx, tx, req.RunID, entity); err != nil {
 					return err
 				}
-				fieldsJSON, _, fieldsAny, _, err := scenarioSetupEntityJSON(entity)
+				fieldsJSON, fieldsAny, err := scenarioSetupEntityJSON(entity)
 				if err != nil {
 					return err
 				}
@@ -263,7 +263,7 @@ func acknowledgeScenarioSetup(result runtimepipeline.ScenarioSetupResult) runtim
 func validateScenarioConstruction(ctx context.Context, req runtimepipeline.ScenarioSetupRequest, activations []runtimebus.FlowInstanceActivationCommand) ([]runtimepipeline.FlowInstanceActivationPlan, error) {
 	for _, entity := range req.Entities {
 		constructedRoot := len(activations) == 1 && entity.EntityID == req.RunID && entity.FlowInstance == req.RunID
-		if !constructedRoot && (entity.CurrentState != nil || entity.Gates != nil) {
+		if !constructedRoot && entity.CurrentState != nil {
 			return nil, fmt.Errorf("data-only entity %s cannot carry lifecycle inputs", entity.Alias)
 		}
 	}
@@ -302,7 +302,7 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 }
 
 func validateScenarioConstructionSeed(entity runtimepipeline.ScenarioSetupEntityRequest, plan runtimepipeline.FlowInstanceActivationPlan) error {
-	fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
+	fields, _, err := scenarioSetupEntityJSON(entity)
 	if err != nil {
 		return err
 	}
@@ -315,8 +315,8 @@ func validateScenarioConstructionSeed(entity runtimepipeline.ScenarioSetupEntity
 		matchesType = entity.EntityType == "default" && len(entity.Fields) == 0
 	}
 	if !matchesType || entity.CurrentState == nil || *entity.CurrentState != record.CurrentState ||
-		!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
-		return fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
+		!scenarioSetupJSONEqual(string(fields), record.Fields) {
+		return fmt.Errorf("scenario construction changed explicit imported fields or stage")
 	}
 	return nil
 }
@@ -404,33 +404,21 @@ func matchesPrivateScenarioStart(ctx context.Context, req runtimepipeline.Scenar
 	return scoped && scope.RunID == req.RunID && scope.ProfileDigest == profileDigest
 }
 
-func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) (json.RawMessage, json.RawMessage, map[string]any, map[string]any, error) {
+func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) (json.RawMessage, map[string]any, error) {
 	admitted, err := canonicaljson.FromGo(entity.Fields)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("admit setup entity fields: %w", err)
+		return nil, nil, fmt.Errorf("admit setup entity fields: %w", err)
 	}
 	projected, err := workflowexpr.ProjectSemanticValue(admitted)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("project setup entity fields: %w", err)
+		return nil, nil, fmt.Errorf("project setup entity fields: %w", err)
 	}
 	fieldsJSON, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity fields: %w", err)
-	}
-	gates := entity.Gates
-	if gates == nil {
-		gates = map[string]bool{}
-	}
-	gatesJSON, err := json.Marshal(gates)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity gates: %w", err)
+		return nil, nil, fmt.Errorf("marshal setup entity fields: %w", err)
 	}
 	fieldsAny := projected.(map[string]any)
-	gatesAny := make(map[string]any, len(entity.Gates))
-	for key, value := range entity.Gates {
-		gatesAny[key] = value
-	}
-	return fieldsJSON, gatesJSON, fieldsAny, gatesAny, nil
+	return fieldsJSON, fieldsAny, nil
 }
 
 type scenarioSetupEntitySnapshot struct {

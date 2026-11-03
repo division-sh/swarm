@@ -338,7 +338,7 @@ func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
 		if err != nil {
 			return ResolvedCatalogType{}, fmt.Errorf("entity %s field %s: %w", p.EntityType, name, err)
 		}
-		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved, TypeRef: decl.Type, IsOptional: decl.IsOptional, Refinements: decl.Refinements.Clone()})
+		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved, TypeRef: decl.Type, IsOptional: decl.IsOptional})
 	}
 	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: p.FlowID + "." + p.EntityType, Fields: fields}, nil
 }
@@ -498,13 +498,10 @@ func cloneTypeCatalogDocument(in TypeCatalogDocument) TypeCatalogDocument {
 }
 
 func cloneNamedTypeDecl(in NamedTypeDecl) NamedTypeDecl {
-	out := NamedTypeDecl{
-		Description: in.Description,
-	}
+	out := NamedTypeDecl{}
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]TypeFieldSpec, len(in.Fields))
 		for key, value := range in.Fields {
-			value.Refinements = value.Refinements.Clone()
 			out.Fields[key] = value
 		}
 	}
@@ -524,13 +521,11 @@ func cloneEntityContractsDocument(in EntityContractsDocument) EntityContractsDoc
 
 func cloneEntityContract(in EntityContract) EntityContract {
 	out := EntityContract{
-		Description: in.Description,
-		Owner:       in.Owner,
+		Owner: in.Owner,
 	}
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]EntityFieldDecl, len(in.Fields))
 		for key, value := range in.Fields {
-			value.Refinements = value.Refinements.Clone()
 			out.Fields[key] = value
 		}
 	}

@@ -391,14 +391,11 @@ func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRo
 	producerEvents := filepath.Join(root, "producer", "events.yaml")
 	if err := os.WriteFile(producerEvents, []byte(`validation.requested:
   # Producer-owned request schema
-  candidate:
-    type: ProducerCandidate?
-    description: Candidate under validation
-    pattern: ^[a-z]+$
+  candidate: ProducerCandidate?
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "producer", "types.yaml"), []byte("scalars:\n  ProducerCandidate: text\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "producer", "types.yaml"), []byte("ProducerCandidate: [\"alpha\", \"beta\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -438,7 +435,7 @@ func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRo
 		t.Fatal("executable-node field typing omitted producer-owned candidate")
 	}
 	resolvedCandidate, err := candidateType.Resolve()
-	if err != nil || resolvedCandidate.Kind != CatalogTypeText {
+	if err != nil || resolvedCandidate.Kind != CatalogTypeText || resolvedCandidate.Name != "ProducerCandidate" {
 		t.Fatalf("executable-node field typing lost producer catalog: resolved=%#v err=%v", resolvedCandidate, err)
 	}
 

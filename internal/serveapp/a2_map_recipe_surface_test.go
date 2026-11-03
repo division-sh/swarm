@@ -185,7 +185,7 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 		!reflect.DeepEqual(typed.Fields.Items, items) || !reflect.DeepEqual(typed.Fields.OrderedResults, results) || len(entity.Fields) != 2 {
 		t.Fatalf("public terminal one-map/ordered-result state: entity=%+v fields=%+v want=%v", entity, typed.Fields, results)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Gates, entity.Accumulated)
+	carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Accumulated)
 	if err != nil {
 		t.Fatal(err)
 	}

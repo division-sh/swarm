@@ -60,7 +60,6 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		"compute",
 		"on_complete",
 		"advances_to",
-		"sets_gate",
 		"data_accumulation",
 		"emit",
 		"rules",
@@ -71,7 +70,6 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		"count",
 		"clear",
 		"admission_rule",
-		"clear_gates",
 	}
 	for _, key := range expectedHandlerFields {
 		if !hasMappingKey(handlerFields, key) {

@@ -99,16 +99,13 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 			if constructorFields[fieldName] {
 				continue
 			}
-			if strings.TrimSpace(fieldDecl.UnusedReason) != "" {
-				continue
-			}
 			if _, ok := writers[contract.FlowID][fieldName]; ok {
 				continue
 			}
 			c.entityWriterCoverageFindings = append(c.entityWriterCoverageFindings, Finding{
 				CheckID:  "entity_writer_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s entity_type %s declares field %s without constructor supply, authored writer coverage, initial, or _unused_reason", defaultFlowLabel(contract.FlowID), contract.EntityType, fieldName),
+				Message:  fmt.Sprintf("flow %s entity_type %s declares field %s without constructor supply, authored writer coverage, or initial", defaultFlowLabel(contract.FlowID), contract.EntityType, fieldName),
 				Location: defaultFlowLabel(contract.FlowID),
 			})
 		}
@@ -191,12 +188,9 @@ func (c *checkerContext) entityReaderCoverage() []Finding {
 	readers := wave1EntityReaderCoverageByFlow(c.source)
 	wave1MergeEntityReaderCoverage(readers, wave1GateReaderCoverageByFlow(c.source))
 	for _, contract := range wave1DeclaredEntityContracts(c.source) {
-		for fieldName, fieldDecl := range contract.Contract.Fields {
+		for fieldName := range contract.Contract.Fields {
 			fieldName = strings.TrimSpace(fieldName)
 			if fieldName == "" {
-				continue
-			}
-			if strings.TrimSpace(fieldDecl.UnusedReaderReason) != "" {
 				continue
 			}
 			if _, ok := readers[contract.FlowID][fieldName]; ok {

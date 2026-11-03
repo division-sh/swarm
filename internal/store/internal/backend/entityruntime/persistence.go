@@ -129,7 +129,6 @@ func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 			"name":                 nil,
 			"stage_defined":        nil,
 			"current_state":        nil,
-			"gates":                nil,
 			"fields":               full.Fields,
 			"bookkeeping":          nil,
 			"accumulator":          nil,
@@ -143,7 +142,7 @@ func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 		}
 		if item.StageDefined != nil {
 			row["stage_defined"], row["revision"] = *item.StageDefined, *item.Revision
-			row["gates"], row["bookkeeping"], row["accumulator"], row["loops"] = full.Gates, full.Bookkeeping, full.Accumulated, full.Loops
+			row["bookkeeping"], row["accumulator"], row["loops"] = full.Bookkeeping, full.Accumulated, full.Loops
 			row["lifecycle_created_at"], row["lifecycle_updated_at"] = item.LifecycleCreatedAt.Format(time.RFC3339Nano), item.LifecycleUpdatedAt.Format(time.RFC3339Nano)
 			if item.CurrentState != nil {
 				row["current_state"], row["entered_state_at"] = *item.CurrentState, item.EnteredStateAt.Format(time.RFC3339Nano)

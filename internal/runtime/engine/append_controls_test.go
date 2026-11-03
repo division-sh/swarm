@@ -40,7 +40,7 @@ func TestExecutor_GenericAppendReferenceControls(t *testing.T) {
 			result, err := executor.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				Node: testRootExecutableNode(t, "writer"), EntityID: "entity-1",
 				Event: eventtest.RunCreatingRootIngress("append-event", "finding.received", "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Time{}),
-				State: testStateSnapshot("active", map[string]any{"entries": []any{"before"}}, nil, nil),
+				State: testStateSnapshot("active", map[string]any{"entries": []any{"before"}}, nil),
 				Handler: contracts.SystemNodeEventHandler{DataAccumulation: contracts.WorkflowDataAccumulation{
 					Writes: []contracts.WorkflowDataWrite{{
 						Operation: contracts.WorkflowDataOperationAppend, TargetRef: "state.entries",

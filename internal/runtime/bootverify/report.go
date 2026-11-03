@@ -69,7 +69,6 @@ var stableHardInvalidityRemediation = map[string]string{
 	"join_validation":                         "Use the canonical staged handler.join contract with typed membership, mandatory timeout, and supported entity/join outcomes.",
 	"flow_boundary_create_entity_validation":  "Fix the cross-flow create_entity declaration so it preserves the receiving flow boundary.",
 	"flow_data_access_validation":             "Use the supported flow data access form for the referenced field or remove the unsupported access.",
-	"gate_schema_validation":                  "Fix the gate declaration so it uses supported gate fields and value types.",
 	"generated_tool_schema_closure":           "Fix the generated tool schema inputs/outputs so they close over declared contract types.",
 	"handler_field_compliance":                "Move the unsupported handler field to its promoted location or remove it.",
 	"impl.platform_metadata_validation":       "Remove authored declarations that conflict with platform-owned metadata.",

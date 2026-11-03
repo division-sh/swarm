@@ -59,7 +59,7 @@ func TestAdmissionRejectsRetiredAndConditionalForms(t *testing.T) {
 func TestAdmissionRetainsExactValuesAndDefensiveProjections(t *testing.T) {
 	document, err := Admit([]byte(`vars:
   original: &object {id: exact, ' id ': spaced, nested: [null, 4.5]}
-setup: {entities: [{as: item, type: task, fields: *object, gates: {approved: true}}]}
+setup: {entities: [{as: item, type: task, fields: *object}]}
 steps:
   - publish: request
     payload: {<<: *object}

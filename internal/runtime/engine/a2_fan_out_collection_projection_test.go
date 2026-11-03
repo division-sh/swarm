@@ -49,7 +49,7 @@ func a2FanOutCollectionFixture(t *testing.T, sourcePath, typ string, payload, st
 		t.Fatal(err)
 	}
 	trigger := eventtest.RunCreatingRootIngress(eventtest.UUID("a2-collection"), "batch.ready", "", "", raw, 0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{EntityID: identity.NormalizeEntityID(semanticExecutionFixtureRunID), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", state, nil, nil)})
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{EntityID: identity.NormalizeEntityID(semanticExecutionFixtureRunID), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", state, nil)})
 	return exec, trigger, result, err
 }
 

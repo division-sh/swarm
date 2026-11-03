@@ -85,7 +85,7 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	if err != nil {
 		return nil, err
 	}
-	carrier, err := StateCarrierFromPersisted(capsule.StateFields, capsule.StateBookkeeping, capsule.StateGates, nil)
+	carrier, err := StateCarrierFromPersisted(capsule.StateFields, capsule.StateBookkeeping, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,6 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	base.Join = values.Wrap(cloneStringAnyMap(capsule.Join))
 	base.Loop = values.Wrap(cloneStringAnyMap(capsule.Loop))
 	base.Metadata = values.Wrap(cloneStringAnyMap(capsule.StateFields))
-	base.Gates = values.Wrap(boolMapToAnyMap(capsule.StateGates))
 
 	frame := &executionFrame{
 		ctx: ctx,
@@ -176,7 +175,7 @@ func (p *FanOutEvaluation) EvaluateOrdinal(ctx context.Context, item any, ordina
 	frame.payload = cloneStringAnyMap(p.frame.payload)
 	state := p.frame.state
 	carrier := state.State.StateCarrier
-	state.State.StateCarrier = NewStateCarrierWithOwners(carrier.Fields, carrier.Bookkeeping, carrier.Control, carrier.Gates, carrier.StateBuckets)
+	state.State.StateCarrier = NewStateCarrierWithOwners(carrier.Fields, carrier.Bookkeeping, carrier.Control, carrier.StateBuckets)
 	state.Computed, state.Accumulated = cloneStringAnyMap(state.Computed), cloneStringAnyMap(state.Accumulated)
 	state.Join, state.Loop = cloneStringAnyMap(state.Join), cloneStringAnyMap(state.Loop)
 	state.FanOut = map[string]any{"item": item, "index": ordinal, "count": p.intent.Request.Cardinality}
@@ -243,7 +242,6 @@ func cloneFanOutCapsule(c fanoutobligation.Capsule) fanoutobligation.Capsule {
 	c.Computed, c.Accumulated = cloneStringAnyMap(c.Computed), cloneStringAnyMap(c.Accumulated)
 	c.Join, c.Loop = cloneStringAnyMap(c.Join), cloneStringAnyMap(c.Loop)
 	c.StateFields, c.StateBookkeeping = cloneStringAnyMap(c.StateFields), cloneStringAnyMap(c.StateBookkeeping)
-	c.StateGates = mapsClone(c.StateGates)
 	if c.Receiver != nil {
 		receiver := *c.Receiver
 		c.Receiver = &receiver

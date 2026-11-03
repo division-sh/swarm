@@ -197,7 +197,6 @@ type FlowInstanceActivationRecord struct {
 	Name                     string
 	Fields                   json.RawMessage
 	Bookkeeping              json.RawMessage
-	Gates                    json.RawMessage
 	Accumulator              json.RawMessage
 	Config                   json.RawMessage
 	InitialProjectionVersion int
@@ -235,7 +234,7 @@ func (r FlowInstanceActivationRecord) Validate() error {
 		return fmt.Errorf("flow instance activation record mode %q is unsupported", r.Mode)
 	}
 	for label, raw := range map[string]json.RawMessage{
-		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "gates": r.Gates, "accumulator": r.Accumulator,
+		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "accumulator": r.Accumulator,
 		"config": r.Config, "initial materialization": r.InitialMaterialization,
 		"readiness": r.Readiness,
 	} {
@@ -278,10 +277,6 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		return FlowInstanceActivationRecord{}, err
 	}
 	bookkeeping, err := canonicaljson.MarshalPreservingNumberKinds(projection.Bookkeeping)
-	if err != nil {
-		return FlowInstanceActivationRecord{}, err
-	}
-	gates, err := canonicaljson.MarshalPreservingNumberKinds(projection.GatesAny())
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
@@ -334,7 +329,7 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		State: state, Identity: state.Identity, EntityID: identity.RowID(),
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: workflowInstanceMode(instance),
 		CurrentState: instance.CurrentState, EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
-		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config,
+		Fields: fields, Bookkeeping: bookkeeping, Accumulator: accumulator, Config: config,
 		InitialProjectionVersion: workflowInitialMaterializationProjectionVersion,
 		InitialMaterialization:   initialJSON, Readiness: readinessJSON, ReadinessPlanHash: readinessHash,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),

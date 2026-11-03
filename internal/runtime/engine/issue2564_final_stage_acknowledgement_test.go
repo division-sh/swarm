@@ -54,7 +54,7 @@ func TestIssue2564M29FinalStageRetainsBusinessCommitAndAcknowledgement(t *testin
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 				StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"orders": graph},
 			}})
-			snapshot := testStateSnapshot("ready", map[string]any{}, nil, nil)
+			snapshot := testStateSnapshot("ready", map[string]any{}, nil)
 			executor, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: &recordingStateRepo{snapshot: &snapshot},
 				MutationOwner: owner, Locker: locker, WorkflowLifecycle: &testWorkflowLifecycleOwner{}}, nil)
 			if err != nil {

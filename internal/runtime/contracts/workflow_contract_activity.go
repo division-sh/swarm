@@ -129,24 +129,24 @@ func ActivityResultEventsForSite(site ActivitySite) (ActivityResultEvents, error
 func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCatalogEntry {
 	required := []string{"card_id", "activity_id", "tool", "effect_content_hash", "decided_by", "decided_at"}
 	properties := map[string]EventFieldSpec{
-		"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
-		"activity_id":         {Type: "string", Description: "Generated durable activity id."},
-		"tool":                {Type: "string", Description: "Authored tools.yaml tool id held by the proposal."},
-		"effect_content_hash": {Type: "string", Description: "Canonical immutable proposed-effect digest."},
-		"decided_by":          {Type: "string", Description: "Authenticated actor that settled the card."},
-		"decided_at":          {Type: "string", Description: "Canonical decision timestamp."},
-		"reason":              {Type: "text", Description: "Optional operator rejection reason."},
+		"card_id":             {Type: "string", platformDescription: "Decision-card identity that settled the proposed effect."},
+		"activity_id":         {Type: "string", platformDescription: "Generated durable activity id."},
+		"tool":                {Type: "string", platformDescription: "Authored tools.yaml tool id held by the proposal."},
+		"effect_content_hash": {Type: "string", platformDescription: "Canonical immutable proposed-effect digest."},
+		"decided_by":          {Type: "string", platformDescription: "Authenticated actor that settled the card."},
+		"decided_at":          {Type: "string", platformDescription: "Canonical decision timestamp."},
+		"reason":              {Type: "text", platformDescription: "Optional operator rejection reason."},
 	}
 	if revision {
 		required = append(required, "feedback")
 		properties = map[string]EventFieldSpec{
-			"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
-			"activity_id":         {Type: "string", Description: "Generated durable activity id."},
-			"tool":                {Type: "string", Description: "Authored tools.yaml tool id held by the proposal."},
-			"effect_content_hash": {Type: "string", Description: "Canonical immutable proposed-effect digest."},
-			"decided_by":          {Type: "string", Description: "Authenticated actor that settled the card."},
-			"decided_at":          {Type: "string", Description: "Canonical decision timestamp."},
-			"feedback":            {Type: "text", Description: "Required operator revision feedback."},
+			"card_id":             {Type: "string", platformDescription: "Decision-card identity that settled the proposed effect."},
+			"activity_id":         {Type: "string", platformDescription: "Generated durable activity id."},
+			"tool":                {Type: "string", platformDescription: "Authored tools.yaml tool id held by the proposal."},
+			"effect_content_hash": {Type: "string", platformDescription: "Canonical immutable proposed-effect digest."},
+			"decided_by":          {Type: "string", platformDescription: "Authenticated actor that settled the card."},
+			"decided_at":          {Type: "string", platformDescription: "Canonical decision timestamp."},
+			"feedback":            {Type: "text", platformDescription: "Required operator revision feedback."},
 		}
 	}
 	return EventCatalogEntry{
@@ -157,20 +157,20 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, status string) EventCatalogEntry {
 	required := []string{"activity_id", "tool", "result"}
 	properties := map[string]EventFieldSpec{
-		"activity_id": {Type: "string", Description: "Generated durable activity id."},
-		"tool":        {Type: "string", Description: "Authored tools.yaml tool id executed by the activity."},
-		"result":      {Type: "object", Description: "Tool output shaped by the authored tool output schema."},
+		"activity_id": {Type: "string", platformDescription: "Generated durable activity id."},
+		"tool":        {Type: "string", platformDescription: "Authored tools.yaml tool id executed by the activity."},
+		"result":      {Type: "object", platformDescription: "Tool output shaped by the authored tool output schema."},
 	}
 	if status == ActivityResultStatusFailed {
 		required = []string{"activity_id", "tool", "failure"}
 		properties = map[string]EventFieldSpec{
-			"activity_id": {Type: "string", Description: "Generated durable activity id."},
-			"tool":        {Type: "string", Description: "Authored tools.yaml tool id attempted by the activity."},
-			"failure":     {Type: runtimefailures.EnvelopeSchemaVersion + " envelope", Description: "Canonical durable activity failure envelope."},
+			"activity_id": {Type: "string", platformDescription: "Generated durable activity id."},
+			"tool":        {Type: "string", platformDescription: "Authored tools.yaml tool id attempted by the activity."},
+			"failure":     {Type: runtimefailures.EnvelopeSchemaVersion + " envelope", platformDescription: "Canonical durable activity failure envelope."},
 		}
 	}
 	if revisionField := strings.TrimSpace(site.RevisionField); revisionField != "" {
-		properties[revisionField] = EventFieldSpec{Type: "text", Description: "Owning bounded-loop revision identity."}
+		properties[revisionField] = EventFieldSpec{Type: "text", platformDescription: "Owning bounded-loop revision identity."}
 		required = append(required, revisionField)
 	}
 	return EventCatalogEntry{

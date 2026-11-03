@@ -117,7 +117,7 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		flow + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		flow + "/events.yaml":   eventSchema, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "stages: []\n",
-		flow + "/schema.yaml": fmt.Sprintf("instance: %s\nstages:\n  %s: {}\n  done: {final: true}\npins:\n  inputs: [%s]\n", keyField, stage, input),
+		flow + "/schema.yaml": fmt.Sprintf("instance: %s\nstages:\n  %s: {}\n  done: {final: true}\ninputs: [%s]\n", keyField, stage, input),
 		flow + "/state.yaml":  declarations.String(),
 		flow + "/events.yaml": eventSchema,
 	})
@@ -162,7 +162,6 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		plan.Instance.Slug = slug
 	}
 	if witness == "materializer-state" {
-		plan.Instance.Gates = map[string]bool{"review": true}
 		if plan.Instance.Bookkeeping == nil {
 			plan.Instance.Bookkeeping = map[string]any{}
 		}

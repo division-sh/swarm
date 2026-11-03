@@ -26,7 +26,7 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 	for _, query := range []string{
 		fmt.Sprintf(`CREATE TABLE entity_mutations(mutation_id TEXT PRIMARY KEY,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,new_value %s,created_at TIMESTAMP)`, jsonType),
 		fmt.Sprintf(`CREATE TABLE entity_state(run_id TEXT,entity_id %s,fields %s,flow_instance TEXT,entity_type TEXT,PRIMARY KEY(run_id,entity_id))`, entityIDType, jsonType),
-		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id %s,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,gates %s,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, entityIDType, jsonType, jsonType, jsonType),
+		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id %s,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, entityIDType, jsonType, jsonType),
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)
@@ -76,14 +76,14 @@ func inspectRunDriftTest(t *testing.T, db *sql.DB, run string) (mutationlog.Drif
 func TestVerifyRunMutationDriftBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, domain := range []mutationlog.Domain{mutationlog.DomainAuthoredField, mutationlog.DomainLifecycleState, mutationlog.DomainBookkeeping, mutationlog.DomainGate, mutationlog.DomainAccumulator} {
+			for _, domain := range []mutationlog.Domain{mutationlog.DomainAuthoredField, mutationlog.DomainLifecycleState, mutationlog.DomainBookkeeping, mutationlog.DomainAccumulator} {
 				t.Run(string(domain), func(t *testing.T) {
 					db, run, entity := runDriftDatabase(t, backend, true)
 					clean, err := inspectRunDriftTest(t, db, run)
 					if err != nil || len(clean.Rows) != 0 || clean.EntitiesChecked != 1 {
 						t.Fatalf("clean=%+v err=%v", clean, err)
 					}
-					column := map[mutationlog.Domain]string{mutationlog.DomainAuthoredField: "fields", mutationlog.DomainLifecycleState: "current_state", mutationlog.DomainBookkeeping: "bookkeeping", mutationlog.DomainGate: "gates", mutationlog.DomainAccumulator: "accumulator"}[domain]
+					column := map[mutationlog.Domain]string{mutationlog.DomainAuthoredField: "fields", mutationlog.DomainLifecycleState: "current_state", mutationlog.DomainBookkeeping: "bookkeeping", mutationlog.DomainAccumulator: "accumulator"}[domain]
 					value := `{"node.key":"bypass"}`
 					wantPath := "node.key"
 					if domain == mutationlog.DomainAuthoredField {
@@ -359,7 +359,7 @@ func TestVerifyRunSnapshotIsolationBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			added := uuid.NewString()
-			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,NULL,'worker','done',1,'{}','{}','{}','terminated')`, run, added, added); err != nil {
+			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,NULL,'worker','done',1,'{}','{}','terminated')`, run, added, added); err != nil {
 				t.Fatal(err)
 			}
 			for _, row := range []runForkRevisionEntityMutation{

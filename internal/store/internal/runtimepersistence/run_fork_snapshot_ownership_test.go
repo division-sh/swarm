@@ -95,7 +95,6 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	f.state.CurrentState = "ready"
 	f.state.Slug, f.state.Name = "snapshot-slug", "Snapshot Name"
 	f.state.Fields = json.RawMessage(`{"subject_id":"one","entity_type":"authored-not-owner","value":"at-R"}`)
-	f.state.Gates = json.RawMessage(`{"review":true}`)
 	f.state.Bookkeeping = json.RawMessage(`{"activation":"snapshot"}`)
 	f.state.Accumulator = json.RawMessage(`{"total":7}`)
 	if _, err := f.store.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: f.state}); err != nil {
@@ -134,7 +133,7 @@ func (f snapshotOwnershipFixture) advance(t *testing.T) {
 	state.Transition = runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	state.ExpectedRevision, state.ExpectedState = 2, "ready"
 	state.CurrentState, state.Name, state.Slug = "later", "Later Name", "later-slug"
-	state.Fields, state.Gates = json.RawMessage(`{"subject_id":"one","entity_type":"later-authored","value":"after-R"}`), json.RawMessage(`{"review":false}`)
+	state.Fields = json.RawMessage(`{"subject_id":"one","entity_type":"later-authored","value":"after-R"}`)
 	state.Bookkeeping, state.Accumulator = json.RawMessage(`{"activation":"later"}`), json.RawMessage(`{"total":99}`)
 	state.UpdatedAt, state.EnteredStageAt = time.Now().UTC(), time.Now().UTC()
 	if _, err := f.store.CommitWorkflowEngineMutation(f.ctx, runtimepipeline.WorkflowEngineMutationCommand{State: state}); err != nil {
@@ -247,7 +246,7 @@ func assertSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, for
 	if got.Flow != meta.FlowInstance || got.EntityType != meta.EntityType || got.Slug != meta.Slug || got.Name != meta.Name || want.CurrentState == nil || got.State != *want.CurrentState || got.Revision != wantRevision || want.EnteredStateAt == nil || !got.Entered.Equal(*want.EnteredStateAt) {
 		t.Fatalf("fork row differs: got=%#v want=%#v revision=%d", got, want, wantRevision)
 	}
-	for i, bucket := range []map[string]any{want.Fields, want.Gates, want.Bookkeeping, want.Accumulator} {
+	for i, bucket := range []map[string]any{want.Fields, want.Bookkeeping, want.Accumulator} {
 		if !reflect.DeepEqual(got.Buckets[i], bucket) {
 			t.Fatalf("fork bucket = %#v, want %#v", got.Buckets[i], bucket)
 		}
@@ -266,20 +265,20 @@ type snapshotOwnershipEntityRow struct {
 	Flow, EntityType, Slug, Name, State string
 	Revision                            int64
 	Entered                             time.Time
-	Buckets                             [4]map[string]any
+	Buckets                             [3]map[string]any
 }
 
 func readSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, runID string) snapshotOwnershipEntityRow {
 	t.Helper()
 	var flow, entityType, slug, name, state string
-	var fields, gates, bookkeeping, accumulator []byte
+	var fields, bookkeeping, accumulator []byte
 	var revision int64
 	var rawEntered any
 	if err := f.db.QueryRowContext(f.ctx, `SELECT es.flow_instance, es.entity_type, es.slug, es.name, fi.current_state,
-es.fields, fi.gates, fi.bookkeeping, fi.accumulator, fi.revision, fi.entered_state_at
+es.fields, fi.bookkeeping, fi.accumulator, fi.revision, fi.entered_state_at
 FROM entity_state es JOIN flow_instances fi
 ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-WHERE es.run_id=$1 AND es.entity_id=$2`, runID, f.entityID).Scan(&flow, &entityType, &slug, &name, &state, &fields, &gates, &bookkeeping, &accumulator, &revision, &rawEntered); err != nil {
+WHERE es.run_id=$1 AND es.entity_id=$2`, runID, f.entityID).Scan(&flow, &entityType, &slug, &name, &state, &fields, &bookkeeping, &accumulator, &revision, &rawEntered); err != nil {
 		t.Fatal(err)
 	}
 	entered, present, err := sqliteTimeValue(rawEntered)
@@ -287,7 +286,7 @@ WHERE es.run_id=$1 AND es.entity_id=$2`, runID, f.entityID).Scan(&flow, &entityT
 		t.Fatalf("decode committed entered_state_at: present=%t err=%v raw=%#v", present, err, rawEntered)
 	}
 	row := snapshotOwnershipEntityRow{Flow: flow, EntityType: entityType, Slug: slug, Name: name, State: state, Revision: revision, Entered: entered}
-	for i, raw := range [][]byte{fields, gates, bookkeeping, accumulator} {
+	for i, raw := range [][]byte{fields, bookkeeping, accumulator} {
 		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &row.Buckets[i]); err != nil {
 			t.Fatal(err)
 		}
@@ -318,7 +317,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "native_receipt_missing", "native_receipt_version", "native_birth", "native_contract", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks", "empty_import_lifecycle_history", "empty_import_gate_history", "empty_import_bookkeeping_history", "empty_import_accumulator_history"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "native_receipt_missing", "native_receipt_version", "native_birth", "native_contract", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks", "empty_import_lifecycle_history", "empty_import_bookkeeping_history", "empty_import_accumulator_history"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
@@ -354,7 +353,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								}
 								if emptyImport && entity.EntityID == metadataEntityID {
 									meta := entity.MaterializationMetadata
-									if !reflect.DeepEqual(entity.Fields, map[string]any{}) || entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil || meta == nil || meta.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState || meta.DataCreatedAt == nil || meta.DataUpdatedAt == nil || !meta.DataCreatedAt.Equal(importedAt) || !meta.DataUpdatedAt.Equal(importedAt) {
+									if !reflect.DeepEqual(entity.Fields, map[string]any{}) || entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Bookkeeping != nil || entity.Accumulator != nil || meta == nil || meta.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState || meta.DataCreatedAt == nil || meta.DataUpdatedAt == nil || !meta.DataCreatedAt.Equal(importedAt) || !meta.DataUpdatedAt.Equal(importedAt) {
 										t.Fatalf("genuine empty import lost birth or invented lifecycle: %+v", entity)
 									}
 								}
@@ -398,9 +397,6 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								case "empty_import_lifecycle_history":
 									record.Domain, record.NewValue = mutationlog.DomainLifecycleState, "unknown"
 									row.FoldedValue, row.StoredValue, row.FoldedType = "unknown", nil, "text"
-								case "empty_import_gate_history":
-									record.Domain, record.Path, record.NewValue = mutationlog.DomainGate, "approved", true
-									row.FoldedValue = map[string]any{"approved": true}
 								case "empty_import_bookkeeping_history":
 									record.Domain, record.Path, record.NewValue = mutationlog.DomainBookkeeping, "step", "retained"
 									row.FoldedValue = map[string]any{"step": "retained"}
@@ -411,7 +407,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								row.Domain = record.Domain
 								want := mutationlog.DriftReport{RunID: f.runID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{row}}
 								if record.Domain == mutationlog.DomainLifecycleState {
-									for _, domain := range []mutationlog.Domain{mutationlog.DomainBookkeeping, mutationlog.DomainGate, mutationlog.DomainAccumulator} {
+									for _, domain := range []mutationlog.Domain{mutationlog.DomainBookkeeping, mutationlog.DomainAccumulator} {
 										want.Rows = append(want.Rows, mutationlog.DriftRow{Kind: "value", EntityID: metadataEntityID, Domain: domain, Path: &emptyPath, FoldedPresent: true, FoldedValue: map[string]any{}, StoredValue: map[string]any(nil), FoldedType: "object", StoredType: "absent"})
 									}
 								}

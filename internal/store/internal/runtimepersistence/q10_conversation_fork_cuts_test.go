@@ -33,7 +33,7 @@ func proveQ10ConversationDataOnlyCuts(t *testing.T, ctx context.Context, owner c
 	}
 	if current.Entity.StageDefined != nil || current.Entity.CurrentState != nil || current.Entity.Revision != nil ||
 		current.Entity.EnteredStateAt != nil || current.Entity.LifecycleCreatedAt != nil || current.Entity.LifecycleUpdatedAt != nil ||
-		current.Gates != nil || current.Bookkeeping != nil || current.Accumulated != nil || current.Loops != nil || current.Fields["name"] != "After" {
+		current.Bookkeeping != nil || current.Accumulated != nil || current.Loops != nil || current.Fields["name"] != "After" {
 		t.Fatalf("current data-only witness acquired lifecycle: %+v", current)
 	}
 	for index, cut := range []struct {
@@ -73,12 +73,12 @@ func proveQ10ConversationDataOnlyCuts(t *testing.T, ctx context.Context, owner c
 			requireConversationForkParentSnapshot(t, members[source.runID], source)
 			staged, ok := members[stagedID]
 			if !ok || staged.CurrentState == nil || *staged.CurrentState != cut.state || staged.EnteredStateAt == nil ||
-				!staged.EnteredStateAt.Equal(cut.enteredAt) || staged.Fields["name"] != cut.field || staged.Gates["review"] != true ||
+				!staged.EnteredStateAt.Equal(cut.enteredAt) || staged.Fields["name"] != cut.field ||
 				staged.Bookkeeping["activation"] != "standing" || staged.Accumulator["total"] != float64(7) {
 				t.Fatalf("constructed cut lost its exact lifecycle/domain evidence: %+v", staged)
 			}
 			imported, ok := members[importedID]
-			if !ok || imported.CurrentState != nil || imported.EnteredStateAt != nil || imported.Gates != nil ||
+			if !ok || imported.CurrentState != nil || imported.EnteredStateAt != nil ||
 				imported.Bookkeeping != nil || imported.Accumulator != nil || imported.Fields["name"] != cut.field || imported.Fields["current_state"] != "business-draft" ||
 				runtimeProjectionNestedValue(t, imported.Fields, "gates", "review") != "authored-review" ||
 				runtimeProjectionNestedValue(t, imported.Fields, "bookkeeping", "activation") != "manual" ||
@@ -115,7 +115,7 @@ func proveQ10ConversationDataOnlyCuts(t *testing.T, ctx context.Context, owner c
 
 func requireConversationForkParentSnapshot(t *testing.T, root runfork.ConversationForkEntitySnapshot, source conversationForkSourceFixture) {
 	t.Helper()
-	if root.EntityID != source.runID || root.CurrentState == nil || *root.CurrentState != "waiting" || root.EnteredStateAt == nil || !root.EnteredStateAt.Equal(source.turn1At.Add(-30*time.Second)) || len(root.Fields) != 0 || len(root.Gates) != 0 || len(root.Accumulator) != 0 || len(root.Bookkeeping) != 1 || root.Bookkeeping["stage_entry"] == nil {
+	if root.EntityID != source.runID || root.CurrentState == nil || *root.CurrentState != "waiting" || root.EnteredStateAt == nil || !root.EnteredStateAt.Equal(source.turn1At.Add(-30*time.Second)) || len(root.Fields) != 0 || len(root.Accumulator) != 0 || len(root.Bookkeeping) != 1 || root.Bookkeeping["stage_entry"] == nil {
 		t.Fatalf("historical construction lost its exact fieldless parent: %+v", root)
 	}
 }

@@ -69,7 +69,6 @@ func CompareEntityStateProjections(runID string, folded, stored map[string]Entit
 		}{
 			{DomainAuthoredField, before.Fields, after.Fields},
 			{DomainBookkeeping, before.Bookkeeping, after.Bookkeeping},
-			{DomainGate, before.Gates, after.Gates},
 			{DomainAccumulator, before.Accumulator, after.Accumulator},
 		} {
 			if bucket.domain != DomainAuthoredField && (bucket.left == nil) != (bucket.right == nil) {

@@ -84,7 +84,7 @@ func inspectRunMutationDrift(ctx context.Context, tx *sql.Tx, runID string) (mut
 	}
 	folded := make(map[string]mutationlog.EntityStateProjection, len(entities))
 	for _, entity := range entities {
-		folded[entity.EntityID] = mutationlog.EntityStateProjection{CurrentState: entity.CurrentState, Fields: entity.Fields, Bookkeeping: entity.Bookkeeping, Gates: entity.Gates, Accumulator: entity.Accumulator}
+		folded[entity.EntityID] = mutationlog.EntityStateProjection{CurrentState: entity.CurrentState, Fields: entity.Fields, Bookkeeping: entity.Bookkeeping, Accumulator: entity.Accumulator}
 	}
 	stored, err := readPhysicalRunState(ctx, tx, runID)
 	if err != nil {
@@ -174,7 +174,7 @@ func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (map[st
 		for _, bucket := range []struct {
 			raw    any
 			target *map[string]any
-		}{{member.Fields, &state.Fields}, {member.Bookkeeping, &state.Bookkeeping}, {member.Gates, &state.Gates}, {member.Accumulator, &state.Accumulator}} {
+		}{{member.Fields, &state.Fields}, {member.Bookkeeping, &state.Bookkeeping}, {member.Accumulator, &state.Accumulator}} {
 			if bucket.raw == nil {
 				continue // A fieldless header has no business-field operand.
 			}

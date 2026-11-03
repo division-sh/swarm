@@ -482,7 +482,7 @@ func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, lockPostgres 
 	if state == nil {
 		return nil, fmt.Errorf("fork-local loop state for entity %s must be an object", entityID)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, state)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, state)
 	if err != nil {
 		return nil, err
 	}

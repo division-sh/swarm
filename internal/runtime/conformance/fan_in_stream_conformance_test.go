@@ -140,7 +140,7 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 
 func assertKeyedPortfolioReport(t *testing.T, instance runtimepipeline.WorkflowInstance, operatingID string, revenue int64) {
 	t.Helper()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

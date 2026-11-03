@@ -350,7 +350,7 @@ opco.spinup_requested:
   instance_id: text
   product_id: text
 opco.create_requested:
-  key: instance_id
+  _key: instance_id
   instance_id: text
   product_id: text
 `)

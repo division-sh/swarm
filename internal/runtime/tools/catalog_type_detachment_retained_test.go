@@ -30,7 +30,7 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 			}
 			reopen()
 			root := t.TempDir()
-			fields := "  label: {type: text, pattern: '^[a-z]+$', length: {min: 1, max: 10}, equal_to: peer}\n  peer: text\n  score: {type: numeric, range: {min: 1.5, max: 9.5}}\n  note: text?\n"
+			fields := "  label: text\n  peer: text\n  score: numeric\n  note: text?\n"
 			for name, body := range map[string]string{
 				"schema.yaml": "stages: {done: {final: true}}\n",
 				"events.yaml": "audit.record:\n" + fields,
@@ -77,56 +77,42 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 			if rooted.Admission().Reference() != captured.Admission().Reference() || !bytes.Equal(rooted.Artifact().LogicalBlob(), artifact.LogicalBlob()) {
 				t.Fatal("retained root differs from exact content or captured selection")
 			}
-			for _, bound := range []string{"length_min", "length_max", "range_min", "range_max"} {
-				t.Run(bound, func(t *testing.T) {
-					rebuilt, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+			t.Run("structural_type", func(t *testing.T) {
+				rebuilt, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				compiled, ok, err := rebuilt.ResolveCompiledFlowEventSchema(".", "audit.record")
+				if err != nil || !ok {
+					t.Fatalf("retained compiled event: %t %v", ok, err)
+				}
+				read := func() []byte {
+					primary, err := rebuilt.ResolveRootPrimaryEntity()
 					if err != nil {
 						t.Fatal(err)
 					}
-					compiled, ok, err := rebuilt.ResolveCompiledFlowEventSchema(".", "audit.record")
-					if err != nil || !ok {
-						t.Fatalf("retained compiled event: %t %v", ok, err)
+					shape, err := primary.StructuralType()
+					if err != nil {
+						t.Fatal(err)
 					}
-					read := func() []byte {
-						primary, err := rebuilt.ResolveRootPrimaryEntity()
-						if err != nil {
-							t.Fatal(err)
-						}
-						shape, err := primary.StructuralType()
-						if err != nil {
-							t.Fatal(err)
-						}
-						event, _ := compiled.StructuralType()
-						data, err := json.Marshal([]any{shape, event, rebuilt.RootEntityContracts(), compiled.CanonicalAcceptanceSchema(), compiled.AcceptanceSchemaDigest(), compiled.Source()})
-						if err != nil {
-							t.Fatal(err)
-						}
-						return data
+					event, _ := compiled.StructuralType()
+					data, err := json.Marshal([]any{shape, event, rebuilt.RootEntityContracts(), compiled.CanonicalAcceptanceSchema(), compiled.AcceptanceSchemaDigest(), compiled.Source()})
+					if err != nil {
+						t.Fatal(err)
 					}
-					before := read()
-					name := "label"
-					if bound == "range_min" || bound == "range_max" {
-						name = "score"
-					}
-					field, _ := compiled.StructuralField(name)
-					switch bound {
-					case "length_min":
-						*field.Refinements.Length.Min = 2
-					case "length_max":
-						*field.Refinements.Length.Max = 9
-					case "range_min":
-						*field.Refinements.Range.Min = 2.5
-					case "range_max":
-						*field.Refinements.Range.Max = 8.5
-					}
-					if after := read(); !bytes.Equal(before, after) {
-						t.Fatalf("native retained %s changed: before=%s after=%s", bound, before, after)
-					}
-					if rebuilt.SourceArtifact.BundleHash() != artifact.BundleHash() {
-						t.Fatal("retained bundle identity changed")
-					}
-				})
-			}
+					return data
+				}
+				before := read()
+				view, _ := compiled.StructuralType()
+				view.Fields[0].Name = "changed"
+				view.Fields[0].IsOptional = !view.Fields[0].IsOptional
+				if after := read(); !bytes.Equal(before, after) {
+					t.Fatalf("native retained structural type changed: before=%s after=%s", before, after)
+				}
+				if rebuilt.SourceArtifact.BundleHash() != artifact.BundleHash() {
+					t.Fatal("retained bundle identity changed")
+				}
+			})
 			t.Log("proof_surface=selected-store reopen and source-absent artifact reconstruction; not public restart")
 		})
 	}

@@ -113,7 +113,7 @@ func VerifyPipelineTransitionRejectsCoherentEventSubstitutionOnBothStoresForTest
 			} else if variant == "contradictory_inbound_event" {
 				ctx = runtimecorrelation.WithInboundEvent(ctx, other)
 			}
-			state := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			state := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil)
 			state.NextState, state.Transition = "done", &cause
 			state.TriggerEventID, state.TriggerEventType, state.TriggeredAt = acceptedID, string(acceptedType), at
 			switch variant {

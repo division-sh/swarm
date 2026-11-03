@@ -16,7 +16,7 @@ import (
 
 func insertRunDriftHeader(t *testing.T, db *sql.DB, run, entity, path string, entityType any, stage string) {
 	t.Helper()
-	if _, err := db.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,$4,'worker',$5,1,'{}','{}','{}','terminated')`, run, entity, path, entityType, stage); err != nil {
+	if _, err := db.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,$4,'worker',$5,1,'{}','{}','terminated')`, run, entity, path, entityType, stage); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -73,7 +73,7 @@ func TestVerifyRunCanonicalMembershipBothStores(t *testing.T) {
 func TestVerifyRunCanonicalHeaderDomainsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, domain := range []mutationlog.Domain{mutationlog.DomainLifecycleState, mutationlog.DomainBookkeeping, mutationlog.DomainGate, mutationlog.DomainAccumulator, mutationlog.DomainAuthoredField} {
+			for _, domain := range []mutationlog.Domain{mutationlog.DomainLifecycleState, mutationlog.DomainBookkeeping, mutationlog.DomainAccumulator, mutationlog.DomainAuthoredField} {
 				t.Run(string(domain), func(t *testing.T) {
 					db, run, entity := runDriftDatabase(t, backend, true)
 					for _, retired := range []string{"current_state", "bookkeeping", "gates", "accumulator"} {
@@ -89,8 +89,6 @@ func TestVerifyRunCanonicalHeaderDomainsBothStores(t *testing.T) {
 					switch domain {
 					case mutationlog.DomainBookkeeping:
 						column, value, path = "bookkeeping", `{"node.key":"bypass"}`, "node.key"
-					case mutationlog.DomainGate:
-						column, value, path = "gates", `{"node.key":"bypass"}`, "node.key"
 					case mutationlog.DomainAccumulator:
 						column, value, path = "accumulator", `{"node.key":"bypass"}`, "node.key"
 					case mutationlog.DomainAuthoredField:

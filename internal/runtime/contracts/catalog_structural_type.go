@@ -21,7 +21,7 @@ const (
 type ResolvedCatalogType struct {
 	Kind CatalogTypeKind
 	Name string
-	// Format preserves primitive string validation through scalar alias resolution.
+	// Format preserves primitive string validation through structural projection.
 	Format  string
 	Element *ResolvedCatalogType
 	Key     *ResolvedCatalogType
@@ -35,11 +35,10 @@ type ResolvedCatalogType struct {
 // ResolvedCatalogField carries semantic type and presence together. Optionality
 // belongs to the containing field edge, never to the field's value type.
 type ResolvedCatalogField struct {
-	Name        string
-	TypeRef     string
-	Type        ResolvedCatalogType
-	IsOptional  bool
-	Refinements SchemaRefinements
+	Name       string
+	TypeRef    string
+	Type       ResolvedCatalogType
+	IsOptional bool
 }
 
 // Clone returns a detached structural value. Callers may inspect and compose
@@ -53,7 +52,6 @@ func (t ResolvedCatalogType) Clone() ResolvedCatalogType {
 	for index, field := range t.Fields {
 		out.Fields[index] = field
 		out.Fields[index].Type = field.Type.Clone()
-		out.Fields[index].Refinements = field.Refinements.Clone()
 	}
 	return out
 }

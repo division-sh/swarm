@@ -51,18 +51,18 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
-			stage_defined, current_state, gates, bookkeeping, accumulator, revision,
+			stage_defined, current_state, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at, instance_key
 		)
 		VALUES
 			($1::uuid, 'review/primary', $4::uuid, 'mvp_spec', 'review', 'template', $7::jsonb,
-			 TRUE, 'collecting', '{"approved":true}', '{}', $10::jsonb, 1, $3, $3, $3, 'primary'),
+			 TRUE, 'collecting', '{}', $10::jsonb, 1, $3, $3, $3, 'primary'),
 			($1::uuid, 'review/secondary', $5::uuid, 'mvp_spec', 'review', 'template', $8::jsonb,
-			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3, 'secondary'),
+			 TRUE, 'done', '{}', '{}', 1, $3, $3, $3, 'secondary'),
 			($1::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', $9::jsonb,
-			 TRUE, 'collecting', '{}', '{}', '{}', 1, $3, $3, $3, NULL),
+			 TRUE, 'collecting', '{}', '{}', 1, $3, $3, $3, NULL),
 			($2::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', $9::jsonb,
-			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3, NULL)
+			 TRUE, 'done', '{}', '{}', 1, $3, $3, $3, NULL)
 	`, runA, runB, base, entityA, entityB, sharedEntity,
 		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/primary", "primary", entityA, ""), "v1"), operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/secondary", "secondary", entityB, ""), "v2"),
 		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "triage", "triage", "triage", sharedEntity, ""), "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
@@ -100,7 +100,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOperatorEntity: %v", err)
 	}
-	if full.Entity.FlowInstance != "review/primary" || full.Fields["priority"] != "high" || !full.Gates["approved"] {
+	if full.Entity.FlowInstance != "review/primary" || full.Fields["priority"] != "high" {
 		t.Fatalf("full entity = %#v", full)
 	}
 	if full.Entity.EntityType != "mvp_spec" {
@@ -201,18 +201,18 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
-			stage_defined, current_state, gates, bookkeeping, accumulator, revision,
+			stage_defined, current_state, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at, instance_key
 		)
 		VALUES
 			(?1, 'review/primary', ?4, 'mvp_spec', 'review', 'template', ?7,
-			 TRUE, 'collecting', '{"approved":true}', '{}', ?10, 1, ?3, ?3, ?3, 'primary'),
+			 TRUE, 'collecting', '{}', ?10, 1, ?3, ?3, ?3, 'primary'),
 			(?1, 'review/secondary', ?5, 'mvp_spec', 'review', 'template', ?8,
-			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3, 'secondary'),
+			 TRUE, 'done', '{}', '{}', 1, ?3, ?3, ?3, 'secondary'),
 			(?1, 'triage', ?6, 'ticket', 'triage', 'static', ?9,
-			 TRUE, 'collecting', '{}', '{}', '{}', 1, ?3, ?3, ?3, NULL),
+			 TRUE, 'collecting', '{}', '{}', 1, ?3, ?3, ?3, NULL),
 			(?2, 'triage', ?6, 'ticket', 'triage', 'static', ?9,
-			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3, NULL)
+			 TRUE, 'done', '{}', '{}', 1, ?3, ?3, ?3, NULL)
 	`, runA, runB, base, entityA, entityB, sharedEntity,
 		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/primary", "primary", entityA, ""), "v1"), operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/secondary", "secondary", entityB, ""), "v2"),
 		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "triage", "triage", "triage", sharedEntity, ""), "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
@@ -257,7 +257,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadOperatorEntity: %v", err)
 	}
-	if full.Entity.FlowInstance != "review/primary" || full.Fields["priority"] != "high" || !full.Gates["approved"] {
+	if full.Entity.FlowInstance != "review/primary" || full.Fields["priority"] != "high" {
 		t.Fatalf("full entity = %#v", full)
 	}
 	if full.Entity.EntityType != "mvp_spec" {

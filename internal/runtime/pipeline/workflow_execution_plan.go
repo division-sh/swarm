@@ -23,8 +23,6 @@ type handlerExecutionPlan struct {
 	Compute          *runtimecontracts.ComputeSpec
 	FanOutPlans      []runtimecontracts.FanOutCompiledPlan
 	AdvancesTo       string
-	SetsGate         string
-	ClearGates       bool
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 	Emit             runtimecontracts.EmitSpec
 	OnSuccess        runtimecontracts.HandlerOnSuccessSpec
@@ -52,13 +50,6 @@ func handlerGuardExpression(spec *runtimecontracts.GuardSpec) string {
 	return strings.TrimSpace(spec.Check)
 }
 
-func gateSpecString(spec *runtimecontracts.GateSpec) string {
-	if spec == nil {
-		return ""
-	}
-	return strings.TrimSpace(spec.Name)
-}
-
 func handlerExecutionPlanFromNodeHandler(source interface {
 	FanOutPlansForHandler(runtimeidentity.ExecutableNode, string) []runtimecontracts.FanOutCompiledPlan
 }, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
@@ -75,8 +66,6 @@ func handlerExecutionPlanFromNodeHandler(source interface {
 		Compute:          handler.Compute,
 		FanOutPlans:      fanOutPlans,
 		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
-		SetsGate:         gateSpecString(handler.SetsGate),
-		ClearGates:       len(handler.ClearGates) > 0,
 		DataAccumulation: handler.DataAccumulation,
 		Emit:             handler.Emit,
 		OnSuccess:        handler.OnSuccess,
@@ -90,9 +79,6 @@ func handlerExecutionPlanFromNodeHandler(source interface {
 
 func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	steps := make([]string, 0, 12)
-	if plan.ClearGates {
-		steps = append(steps, "clear_gates")
-	}
 	if strings.TrimSpace(plan.Guard) != "" || plan.GuardSpec != nil {
 		steps = append(steps, "guard")
 	}
@@ -113,9 +99,6 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	}
 	if plan.AdvancesTo != "" {
 		steps = append(steps, "advances_to")
-	}
-	if plan.SetsGate != "" {
-		steps = append(steps, "sets_gate")
 	}
 	if plan.DataAccumulation.HasWrites() || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
 		steps = append(steps, "data_accumulation")

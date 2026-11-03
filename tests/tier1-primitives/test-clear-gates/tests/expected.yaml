@@ -14,10 +14,9 @@ expected:
     - gates.cleared
 
 conformance:
-  disposition: runtime
-  verify: pass
+  disposition: retired
   proves:
     - catalog.runtime.primitives
-  public_companion:
-    path: tests/visible-smoke.yaml
-    proof_role: protocol-only
+  retirement:
+    reason: "private boolean gates are retired"
+    replacement: "none: retired private-gate behavior"

@@ -1159,7 +1159,7 @@ contract_formats:
       lists use the explicit scalar metadata slot `type: '[T]?'`; a `?` inside a list
       element, map key/value, named type, or any other non-trailing position is
       invalid. The retired event-level `required:` list fails closed on
-      presence, including through a YAML merge. Optional `key:` names one
+      presence, including through a YAML merge. Optional `_key:` names one
       required declared payload field whose admitted semantics are boolean,
       number, or string; it is the sole event business-key authoring surface.
       Validation ownership is layered, not competing: supported emit
@@ -1173,20 +1173,10 @@ contract_formats:
     format:
       payloadless_event: "investigation.timed_out:"
       event_name: |
-        key: entity_id (optional; must name a required scalar payload field)
+        _key: entity_id (optional; must name a required scalar payload field)
         required_field: type
         optional_field: type?
-        nested_field:
-          type: NamedType
-          description: Human-readable annotation
-          pattern: ^[0-9a-f]{40}$
-          length:
-            min: 40
-            max: 40
-          range:
-            min: 0
-            max: 100
-          equal_to: sibling_field
+        nested_field: NamedType # Descriptions are YAML comments.
     payloadless_declaration:
       owner: internal/runtime/contracts.admitEventCatalogEntry
       rule: |
@@ -2057,11 +2047,11 @@ contract_formats:
             admitted receiver-owner evidence exists. Handler dependency classification describes reads and effects only,
             never permission to construct. Flow instance keys and compiled input/edge
             resolution select the receiving instance; handlers cannot acquire or select another receiver. Classification
-            accounts for durable state buckets, lifecycle transitions and gates, selected termination,
+            accounts for durable state buckets, lifecycle transitions, selected termination,
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
             declared fields; it still requires an exact constructed lifecycle header. Compiled parent-to-child topology supplies source/causal context,
-            not ownership of the parent's state. References to persisted platform entity identity, state, or gates are existing-entity
+            not ownership of the parent's state. References to persisted platform entity identity or state are existing-entity
             requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
             An entity-optional handler that emits an outcome consumes the existing engine mutation and exact header revision
             compare-and-set. Its ordinary commit may advance the header revision and update timestamp, retaining business fields,
@@ -2965,85 +2955,18 @@ type_system:
       intact. Set, append and update consume this same value owner. Merge requires
       an actual object patch and object destination before mutation; a json
       declaration alone is not evidence that either is an object. An existing {}
-      default does not narrow the declared value domain. equal_to requires the
-      same declared domain: opaque json and object are not interchangeable.
-  schema_refinements:
-    description: |
-      Declared event payload fields, named-type fields, and entity fields
-      may carry only the closed schema-refinement vocabulary listed here.
-      These refinements extend the shared type/schema owner; they are not a
-      handler-level validation row, not a rule artifact grammar, not CEL, and
-      not a generic JSON Schema drawer. Unsupported refinement keys and
-      malformed refinement declarations are contract-load failures.
-    vocabulary:
-      required_presence: |
-        Declared event payload fields and entity fields remain required by
-        default unless another explicit supported contract form states
-        otherwise. Presence is enforced by the existing event/entity schema
-        owners.
-      pattern: |
-        `pattern: <regular expression>` is allowed only on text/string-like
-        fields. The pattern must compile during contract loading.
-      length: |
-        `length: {min, max}` is allowed only on text/string-like fields and
-        list fields. Text length is character length; list length is item
-        count. At least one bound is required. Each present bound must have
-        YAML integer kind, be nonnegative, and fit the integer carrier;
-        fractional or floating-kind values (including 1.0), null, text,
-        booleans, containers and overflow are load-time errors, not omission
-        or zero. Zero is present. `min <= max` when both are present.
-      enum: |
-        Enums remain closed named sets in the shared type system. Field-local
-        enum dialects are not introduced by this slice.
-      range: |
-        `range: {min, max}` is allowed only on integer/numeric fields. At
-        least one bound is required. Each present bound must be a finite
-        YAML integer or floating-point number; negative fractions are valid.
-        Null, non-finite values and nonnumeric kinds are load-time errors.
-        Missing bounds remain absent; zero is present. `min <= max` when
-        both are present. Existing semantic-JSON number restrictions still
-        apply when these bounds are projected into an acceptance schema.
-      equal_to: |
-        `equal_to: <sibling_field>` declares pure same-object field equality.
-        The target must be a declared sibling field with the same resolved
-        type. Equality compares admitted semantic values rather than runtime
-        carrier types, so numerically equal integer, decimal, and exponent
-        representations agree. Non-equality predicates, provenance checks,
-        external file checks, rule IDs, and failure routing are not schema
-        refinements.
-    runtime_consumption: |
-      Event payload admission, entity materialization/write normalization,
-      and generated entity/tool schemas that derive from the shared
-      type/schema owner MUST consume the same refinement model. A consumer may
-      omit a refinement only when it is a different semantic concept or an
-      explicitly tracked surviving follow-up.
-    validation_row_boundary: |
-      Machine-evaluated validation rows are governed by
-      policy_validation_contracts. They consume the stable-ID criteria artifact
-      family with a machine evaluator, bind computed.validation.* results only,
-      and leave branch routing to policy-sheet selection rows.
+      default does not narrow the declared value domain.
   field_forms:
     terse: 'field_name: TypeName'
-    verbose: |
-      field_name:
-        type: TypeName
-        initial: <value>          # entities only
-        immutable: true           # entities only
-        description: Human-readable annotation
-        pattern: ^[0-9a-f]{40}$
-        length:
-          min: 40
-          max: 40
-        range:
-          min: 0
-          max: 100
-        equal_to: sibling_field
-        _unused_reason: Reason    # entities only; verify suppression for E1
-        _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
+    indexed: 'field_name: {type: TypeName, indexed: true} # state fields only'
+    metadata: |
+      Descriptions are YAML comments. Authored description, pattern, length,
+      range, equal_to, immutable and _description keys are not admitted.
+      Agent tool schemas derive only from type names, field names and types.
+      External JSON Schema constraints retain their separate platform owner.
     optional_record_edge: |
       Event and named-record fields may append exactly one trailing `?` to the
-      complete type in either terse or verbose form, for example `label: text?`
-      or `child: {type: Child?}`. This denotes omission-capable field presence,
+      complete type, for example `label: text?`. This denotes omission-capable field presence,
       not `Optional<T>` type syntax and not a nullable value. Top-level entity
       field presence is governed by entity_contracts: bare roots may be
       progressively unassigned; supplied named records remain complete.
@@ -3169,40 +3092,18 @@ type_system:
       for their required members; missing parents are never synthesized.
 entity_contracts:
   description: |
-    Entity contracts are declared in entities.yaml owned by a single
-    flow. Ownership is implicit from file location. Bundle-root
-    entities.yaml remains a rare bundle-scope exception.
+    State fields are declared in state.yaml owned by a single flow.
+    The internal state identity is always state; ownership is implicit from file location.
   ownership: |
-    Exactly one flow owns each entity type. Only the owner flow edits
-    the contract and creates instances of that type.
+    Each flow owns its state contract. Only that flow edits the contract and
+    creates its instances; identical field names in other flows grant no authority.
   grammar:
     form: |
-      <entity_type>:
-        _description: Human-readable description
-        <field_name>: <type>
-        <field_name>:
-          type: <type>
-          initial: <value>
-          immutable: <bool>
-          indexed: <bool>
-          description: <text>
-          pattern: <regular expression>
-          length:
-            min: <non-negative integer>
-            max: <non-negative integer>
-          range:
-            min: <number>
-            max: <number>
-          equal_to: <sibling_field>
-          _unused_reason: <reason>
-          _unused_reader_reason: <reason>
+      <field_name>: <type>
+      <indexed_field>: {type: <type>, indexed: true}
+      <initialized_field>: <literal>
     notes:
-    - Entity-level metadata is underscore-prefixed.
-    - State does not live in entity contracts.
-    - Envelope names are reserved and must not be author-declared.
-    - '`_unused_reader_reason` documents that a field is intentionally read only outside platform-visible internal handlers.
-      It suppresses only the informational `entity_reader_coverage` slice; it does not count as writer coverage, authorize
-      runtime/API reads, or change persistence semantics.'
+    - Descriptions are comments, not declaration keys. Business field names are unrestricted.
     - '`indexed: true` declares a top-level entity field for supported query/index consumers.
       It does not make that field receiver-routing authority. Template receiver selection consumes only the
       flow''s declared scalar instance identity; arbitrary business-field descriptor routing is retired.'
@@ -3216,14 +3117,6 @@ entity_contracts:
     - 'A root runtime instance resolves its entity contract only when its flow_instance equals the active run_id
       and the admitted source declares a root flow. UUID shape alone is not root ownership; child instances resolve
       through their declared flow path.'
-  sparse_refinements: |
-    Entity-root equal_to pairs may both remain unassigned, establishing no assignment fact.
-    Exactly one present participant rejects. Two present participants must satisfy the existing typed equality.
-    A supplied named record retains required-member completeness and its structural equality refinements.
-    Ordered paired writes or optional paired clears validate equality at the end of EACH executed mutation list.
-    No intermediate invalid pair escapes to a read phase, emitted event or committed state. An isolated same-value
-    write may preserve an existing pair; it is not prohibited merely because the field participates in equality.
-    Bare fields cannot be cleared; mixed bare/optional pairs can restrict otherwise optional clears.
   routing_indexes:
     status: non_routing_query_evidence
     retired_routing_slice: '#1479/#2087'
@@ -3408,7 +3301,7 @@ policy_validation_contracts:
     - dead validation-result binding detection
     - invalid-result routing consistency with declared dispositions
   split_boundaries:
-  - Schema refinements own pattern, length, range, presence, enum, and same-object equal_to checks.
+  - The shared type owner enforces presence, named enums and declared structural types; authored refinements are retired.
   - 'Receiver input pins and static interface negotiation may later absorb `pin_candidate: true` rules; this slice records the
     marker but does not promote pin declarations.'
   - Non-equality predicates, richer expression/derive rows, criteria packs, prompt-frame validation, compute/WASM validation,
@@ -3744,10 +3637,9 @@ runtime_enforcement:
       atomically. Set with an explicit typed map key replaces that map entry.
       Bracket, index, and dynamic path spellings are rejected; index and key
       are operation operands, never inferred business identities. No keyed-list
-      matching or upsert exists. Immutable fields reject
-      post-create value changes. Materialized/runtime-owned fields are rejected.
+      matching or upsert exists. Materialized/runtime-owned fields are rejected.
       Values and the final candidate must satisfy the shared entity contract,
-      including sparse equality; no tool-local mutation interpretation exists.
+      including declared types; no tool-local mutation interpretation exists.
       Contention retries retain the original operation, value, key and index
       and apply them to fresh state. An index denotes its current position,
       not the item occupying that position in an earlier snapshot. A2 keyed
@@ -3889,11 +3781,11 @@ handler_specification:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
     graph: "\nreceiver state initialization (optional; canonical receiving-flow primary entity at the admitted composition-selected instance, never another receiver election)\n  └→ query (optional — pre-fetch cross-entity\
-      \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate (optional instance-scoped stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
+      \ data into handler context)\n            └→ guard\n            └→ accumulate (optional instance-scoped stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
       \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, selected on_complete emit, or fan_out emit)\n                    \
-      \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
+      \                      └→ advances_to ─┐ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
       \                                └→ emit.fields\n                                                       └→ emit.event\n  \
       \                                                          └→ action OR activity intent\n                                            \
@@ -3954,7 +3846,7 @@ handler_specification:
       Handler preview validates and evaluates the same candidate and compiled transition evidence without entering
       mutation or lifecycle preparation. It has no admitted delivery occurrence, cannot settle a claim or report
       committed effects, and never writes state, history, arms, schedules, publications or activity requests.
-    consequence: Since independent steps (advances_to, sets_gate, data_accumulation) commit together, their relative execution
+    consequence: Since independent steps (advances_to, data_accumulation) commit together, their relative execution
       order is cosmetic. The database sees one atomic write. An implementer may write data before or after state advance —
       the result is identical.
     guards_see_pre_handler_state: Guards evaluate against entity state BEFORE any handler writes. data_accumulation from the
@@ -4006,7 +3898,7 @@ handler_specification:
         Object guards, check collections, guard ids, policy_ref, on_fail and the builtin guard registry are retired.
         Combine predicates with CEL operators. Author a conditional ordered rule for recorded no-match filtering,
         an explicit advances_to/terminate row for termination, or an ordinary emit row for escalation.
-        Query and clear_gates still run before guard evaluation; later transforms and writes cannot run on rejection.
+        Query still runs before guard evaluation; later transforms and writes cannot run on rejection.
     accumulate:
       field: accumulate
       type: object
@@ -4133,10 +4025,6 @@ handler_specification:
         false declares no cancellation; neither a destination label nor stage movement
         supplies implicit cancellation. The intent is committed with that transition,
         while canceled settlement waits for the exact work's effects and cleanup joins.
-    sets_gate:
-      field: sets_gate
-      type: string
-      purpose: Set the platform gate exposed as _entity.gates.{name} = true.
     data_accumulation:
       field: data_accumulation
       type: object
@@ -4322,7 +4210,7 @@ handler_specification:
         scope: "Every executable value slot in emit.fields (including rule and fan_out emits), activity.input,
           stage gate context/outcome emits, and data_accumulation write value/key/index. Predicate and fan_out.identity
           string carriers consume the same source classification before their existing scoped validators. Path
-          selectors and inert sets_gate.value are separate categories."
+          selectors are separate categories."
         scalar: >-
           Unquoted string scalars (plain, literal block |, or folded block >) are CEL expressions. Quoted scalars
           (single and double quotes identically) are text, including empty text, with ${CEL} interpolation. Even
@@ -5045,7 +4933,7 @@ handler_specification:
       dataflow_rule: query executes before filter and may read only direct payload/entity input or its declared entities table. filter may additionally read a non-aggregate query collection output. standalone group_by, reduce, and count may read direct input or an earlier query/filter collection output; aggregate outputs are never collection sources. Every explicit-root source must select at least one field below payload or entity.
       output_ownership_rule: Effective store_as targets for query, filter, standalone group_by, reduce, and count form one exclusive handler-local namespace. Duplicate targets and ancestor/descendant overlaps are invalid regardless of operation phase or result type.
       admission_rule: Only the declared fields are admitted; source/entities and the declared selectors own query behavior.
-      execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
+      execution_position: Before guard. Pre-fetches cross-entity data into handler context for use by guard, compute,
         or on_complete.
     reduce:
       field: reduce
@@ -5097,7 +4985,7 @@ handler_specification:
         existing entry and list. Merge/delete/update require their existing object/key/index. Present malformed
         values are never mistaken for missing collections. Replacing a root discards omitted descendants.
       atomicity: |
-        Validate path, ownership, immutable constraints, value types and local refinements for each operation.
+        Validate path, ownership and declared value types for each operation.
         Validate sibling equality at the final candidate of each executed list before later phases read it.
         The whole selected-handler transaction remains all-or-none. Repeated sets are ordered and clear/clear
         is idempotent. A clear and a value-producing effect at overlapping ancestor/descendant paths conflict
@@ -5118,7 +5006,7 @@ handler_specification:
         owner. The projection is a present [] for bare and optional list targets and must satisfy immutable and
         refinement rules. No hard-coded accumulated_count, accumulated_total, received_items or dedup_key
         field deletion. Emitted payloads observe pre-reset state; committed state and next-stage reads observe
-        post-reset state. A pure private reset establishes no entity assignment fact. Distinct from clear_gates.
+        post-reset state. A pure private reset establishes no entity assignment fact.
     activity:
       field: activity
       type: object
@@ -5292,15 +5180,6 @@ handler_specification:
       strict admission on authored presence, irrespective of its value; no alternate old grammar or translator
       exists. Value constraints, reserved expression names, private reset targets and typed mutation ownership
       are separate current semantic checks and remain enforced.
-    clear_gates:
-      field: clear_gates
-      type: boolean
-      purpose: Reset all entity gates to false. Used before re-entering a validation cycle.
-      scope: 'Clears all gates on the ENTITY, not scoped to flow schema or node. An entity has one flat gate map. clear_gates:
-        true resets every key in that map to false. Rationale: gates are entity-level state. A flow that resets an entity
-        to an earlier phase (e.g., review.rejected returning to draft) must clear all gates, not just the ones
-        its node declared.'
-      limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard, on_complete.condition,
       rules.when, data_accumulation.writes[].value, query.filter, and filter.condition. Each namespace resolves to a specific
@@ -5311,7 +5190,7 @@ handler_specification:
         resolves_to: 'Declared business fields for the current entity. entity.X reads entity_state.fields->>X
           only when X is declared by the active entity contract.'
         populated_by: 'Committed typed mutation operations and explicit creation
-          initialization. sets_gate and advances_to do not assign entity fields by themselves.'
+          initialization. advances_to does not assign entity fields by itself.'
         read_model:
           declared_fields: A bare field read requires prior assignment at its exact program point. T? permits intentional omission, without reader-time initialization.
           undeclared_fields: Referencing an undeclared entity field is a contract error. Legacy platform metadata reads such as entity.current_state, entity.gates, entity.entity_id, entity.flow_instance, entity.revision, entity.created_at, entity.updated_at, entity.entity_type, entity.workflow_name, and entity.workflow_version are invalid unless the field name is declared as business data; use _entity for supported platform metadata.
@@ -5324,12 +5203,11 @@ handler_specification:
           only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.'
       _entity:
         resolves_to: 'Read-only platform metadata/control for the current entity. Supported fields are _entity.id,
-          _entity.current_state, _entity.flow_instance, _entity.gates, and _entity.gates.<name>.'
+          _entity.current_state and _entity.flow_instance.'
         read_model:
           id: Canonical current entity id. This replaces legacy platform reads through entity.entity_id.
           current_state: Current lifecycle state owned by the flow state machine.
           flow_instance: Current flow-instance path for the entity context.
-          gates: Read-only map of platform gate booleans; dot access is supported for simple gate names and bracket access is used for gate names containing separators.
           unsupported_fields: '_entity.entity_id, _entity.entity_type, _entity.workflow_name, _entity.workflow_version, _entity.run_id, _entity.fields, _entity.accumulator, _entity.entered_state_at, _entity.revision, _entity.created_at, _entity.updated_at, and _entity.name are not exposed. revision, created_at, and updated_at must not remain readable through undeclared entity.* platform fallback.'
         write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; these values cannot authorize another receiver.
       accumulated:
@@ -5430,12 +5308,11 @@ handler_specification:
         timers: legacy/kernel timer declarations (see timer_model). Staged lifecycle
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
-        gate_state: map — gate field definitions for this node (boolean flags on entity)
       admission_rule: >-
-        The closed reserved fields are timers and gate_state. All other keys must be declared
+        The closed reserved field is timers. All other keys must be declared
         exact event names or supported flow-local wildcard patterns matching a declared event. The node map key owns
         identity. execution_type, subscribes_to, produces and event_handlers fail on presence; no metadata union or
-        compatibility container exists. state_table and state_schema fail on presence; declare state in state.yaml.
+        compatibility container exists. state_table, state_schema and gate_state fail on presence; declare state in state.yaml.
         Undeclared or misspelled handler keys fail complete bundle admission.
       effective_semantics:
         id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
@@ -5446,8 +5323,7 @@ handler_specification:
     description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
       Every field used in nodes.yaml must be defined here.
   dependency_rules:
-  - 'query → clear_gates: cross-entity data fetched before any state evaluation'
-  - 'clear_gates → guard: gates reset before guard reads them'
+  - 'query → guard: cross-entity data fetched before guard evaluation'
   - 'guard → accumulate: guard must pass before accumulation is checked'
   - 'accumulate → filter: accumulated items available before pruning'
   - 'filter → reduce: pruned items available before aggregation'
@@ -5455,9 +5331,7 @@ handler_specification:
   - 'count → compute: all list processing complete before computation'
   - 'compute → emit-site selection: computed values from compute, lookup, validate, and compute_module value rows are written before rule/on_complete selection evaluates'
   - 'emit-site selection → advances_to: the selected rule/on_complete advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
-  - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/on_complete entries do not declare or override sets_gate'
   - 'emit-site selection → data_accumulation: selected rule/on_complete data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
-  - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
   - 'projection → emit.fields: emit payload expressions observe projected entity fields'
   - 'emit.fields → emit.event: output payload constructed before event persisted'
   - 'emit.event → clear: state cleanup is staged last in the handler transaction'
@@ -5468,7 +5342,6 @@ handler_specification:
       fields:
       - guard
       - advances_to
-      - sets_gate
       - data_accumulation
       - emit
       - rules
@@ -5484,7 +5357,6 @@ handler_specification:
       - count
       - query
       - clear
-      - clear_gates
       - action
   yaml_field_order: YAML field order within a handler is cosmetic. The engine executes fields per the dependency graph, not
     per source order. A handler may list on_complete before accumulate in YAML — the engine still runs accumulate first. Authors
@@ -5512,8 +5384,6 @@ handler_specification:
         terminate value, never the displaced handler's. If it inherits the handler's
         advances_to, it consumes the handler's terminate value. Unselected entries
         grant no cancellation, and terminate cannot be declared without advances_to.
-      sets_gate: sets_gate is handler-level only in the supported handler/rule vocabulary. Rules, on_complete entries,
-        and join outcome entries do not declare or override sets_gate.
       data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/join-outcome data_accumulation in
         the same atomic transaction. Selected entry writes run before handler-level writes. This is additive composition,
         not default/override precedence.
@@ -6506,7 +6376,7 @@ engine:
       description: Events are serialized per entity, concurrent across entities.
       per_entity_serialization: All events for the same entity are processed one at a time. When a handler is processing an
         event for entity X, any other event for entity X waits until the handler completes and commits. This prevents race
-        conditions on entity state, accumulator, and gates.
+        conditions on entity state and accumulator.
       cross_entity_concurrency: Events for different entities are fully concurrent. Handling entity X does not block entity
         Y. The platform can process thousands of entities simultaneously.
       entity_lock: 'The platform acquires an entity-level lock before handler execution. Lock scope: one entity, one handler.
@@ -6553,7 +6423,6 @@ engine:
       description: All side effects of one handler execution are atomic. Either everything commits or nothing does.
       within_atomic_boundary:
       - Entity state change (advances_to)
-      - Gate updates (sets_gate)
       - Accumulator state updates (data_accumulation, accumulate tracking)
       - New events persisted to event store (emit)
       outside_atomic_boundary:
@@ -6601,20 +6470,14 @@ engine:
       storage: Constructed instance accumulator and loop buckets in flow_instances.accumulator, with no lifecycle copy in entity_state. Separately declared node-local state retains its existing table owner.
       mutation: Written by accumulate tracking (record arrival), data_accumulation (write payload fields), and compute steps
         (store computed values). It is cleared only by an explicit supported clear operation; stream admission has no completion cleanup.
-    gate_state:
-      description: Boolean flags on the entity. Used by validation-style flows to track which sub-steps have completed. Guards
-        can check gate state as conditions.
-      storage: flow_instances.gates, with no lifecycle copy in entity_state.
-      mutation: 'Set via sets_gate handler field. Default behavior: set to true, never reset. If an entity needs to re-enter
-        a validation cycle, use clear_gates handler field to reset all gates to false before re-entering.'
     scoping: All state is scoped by entity_id + flow instance path. Two entities in the same flow have independent state.
       Two instances of the same flow template have independent state. There is no shared mutable state between entities or
       between flow instances.
     querying: State is queryable at any time without side effects. The platform may provide a query_flow_state tool for agents
-      to read entity state, accumulator, and gates without emitting events.
+      to read entity state and accumulator without emitting events.
     terminal_state_behavior:
       description: When an entity reaches a final stage (from schema.yaml stages final metadata), all state is preserved. Entity
-        state, accumulator state, gate state, and event history remain queryable indefinitely.
+        state, accumulator state, and event history remain queryable indefinitely.
       no_cleanup: The platform does NOT clear entity data on terminal state. Terminated entities retain all accumulated data
         and decision history for post-mortem analysis.
       behavior:
@@ -7065,7 +6928,7 @@ engine:
               notify_all_children_item_metadata_observation: Notify-all-children witnesses observe committed outcome-to-event rows through the original selected native read coordinator, retaining the event/outcome run equality, exact triggering source event and fixed child event name, all ordinal ties, native payload bytes and driver timestamp rendering. They separately read latest stored entity fields by exact concrete flow_instance ordered by updated_at with LIMIT 1, without adding a run or eligibility filter. Existing payload decoding, ordinal/account checks, metadata comparison, poll bounds and replay assertions stay with their consumers. Six whole-store diagnostic sections retain their exact columns, scopes and order as independent original-owner reads; the delivery section delegates its fixed physical query to the closed executable-delivery projection owner, never a parallel runtime-adapter SQL owner. A failed section is explicit, returns no partial section and cannot poison later sections or grant runtime success. Closed fault wrappers project only their original embedded native owner; no raw-handle map, reconstructed coordinator, SQL, table, predicate or callback authority crosses the public fixture boundary.
               fork_receiver_execution_faults: The active fork-receiver header fault changes only current_state from active to done for the exact run and entity, requiring exactly one row without adding a path filter or workflow transition. The exact delivery-claim age fault consumes the actual held opaque claim and changes only the original UTC now-minus-two-hours started/created and now-minus-one-hour updated/expiry cuts. Its obligation predicate retains delivery, run, version and in-progress status; its attempt predicate retains delivery, version, token and open-marker. Both statements require one row in a single original unrevisioned native write transaction, and any mismatch rolls back the complete fault. Neither operation changes business fields, revisions, companions, status, history or claim identity; real ClaimDelivery alone mints a successor. Public fixture bridges are SQL-free error-only operations, not selectors, raw getters, reconstructed coordinators or mutation-admission overrides.
               conformance_storage_column_observation: Conversation, runtime-log, mutation and delivery conformance preflights check their fixed canonical column inventories through one original admitted native read transaction per surface, without exposing a public table/column selector or a raw getter. Qualified zero-row queries prove PostgreSQL public-schema and SQLite main-store columns are available without introducing a post-admission catalog interpreter; table-qualified columns prevent SQLite string-literal fallback from accepting a missing identifier. A missing column names its exact canonical table and column, and cancellation or unavailable ownership fails closed. These witnesses neither bootstrap a second store nor substitute for canonical schema admission or actual conversation, diagnostic, mutation and delivery workloads. The obsolete generic table-column selector is removed rather than preserved as another storage authority.
-              tracked_mutation_projection_observation: Mutation-reconstruction witnesses obtain the exact run/entity's physical current state, fields, bookkeeping, gates and accumulator together with every mutation domain, path and stored new-value byte sequence in one original native read snapshot. The original projection COALESCE defaults remain; mutation SQL NULL remains absence rather than synthesized JSON null. History retains ascending created_at and mutation_id ordering and does not add provenance, eligibility or lifecycle-companion predicates. Invalid, absent, cancelled, closed or late-failing storage discards the complete snapshot. The existing mutation-log reconstruction owner, JSON decoding, empty-history rejection and full projection equality remain the consumer's assertions. Native workflow/tool fixtures consume existing selected construction owners instead of returning a raw pool for this witness.
+              tracked_mutation_projection_observation: Mutation-reconstruction witnesses obtain the exact run/entity's physical current state, fields, bookkeeping and accumulator together with every mutation domain, path and stored new-value byte sequence in one original native read snapshot. The original projection COALESCE defaults remain; mutation SQL NULL remains absence rather than synthesized JSON null. History retains ascending created_at and mutation_id ordering and does not add provenance, eligibility or lifecycle-companion predicates. Invalid, absent, cancelled, closed or late-failing storage discards the complete snapshot. The existing mutation-log reconstruction owner, JSON decoding, empty-history rejection and full projection equality remain the consumer's assertions. Native workflow/tool fixtures consume existing selected construction owners instead of returning a raw pool for this witness.
               notify_execution_observation: Notification execution witnesses consume the original selected native read coordinator for successful-turn cardinality, lifecycle transition facts, persisted run/flow cardinality and fan-out progress/failure diagnostics. Physical revision and fact cardinality is delegated to an existing classified native revision-ledger accessor within that same repeatable read snapshot, not a separate fixture-owned revision SQL file; it grants no historical payload admission, exposes no ledger bodies or query selector, and a late ledger failure discards the whole diagnostic. Existing predicates, ordering, NULL defaults, poll spacing, deadlines and post-progress diagnostic cuts remain unchanged; refused or unavailable storage supplies no partial evidence. Public fixtures receive detached facts rather than SQL, callbacks or a raw-bearing fixture. The exact latest agent-delivery-status observation remains a separately allocated shared operation under '#2555', not a duplicate owner in this batch.
               pipeline_connector_observation: Fixed handler-selection witnesses retain physical context/disposition/declaration coordinates and display text for exact node deliveries, delegating executable-delivery joins to the closed delivery projection owner within the original selected native read transaction. Connector witnesses retain all physical activity attempts for an exact run ordered by started_at, including orphaned requests, and independently count serialized credential matches in event payloads and attempt result/failure storage. Filtering by tool and exact source, earliest-attempt selection, terminal journal loading, cardinality, polls and no-secret assertions remain with the original consumer. The private operation uses the selected native read coordinator; no raw SQL, dialect, callback, generic selector or reconstructed owner crosses its detached storetest bridge.
               pipeline_handoff_observation: The fixed incomplete-handoff witness composes delivery-owned detached status and missing-handoff facts with pipeline-owned exact platform/pipeline receipt existence in one original selected native read transaction. The pipeline owner counts each delivery once when any of pending/in-progress, NULL continuation handoff, or absent exact receipt applies; overlapping arms never multiply a row and multiple deliveries for one event remain distinct. Receipt existence may be cached only within that snapshot and never decodes receipt payloads or grants execution eligibility. Foreign run/event/subscriber facts cannot satisfy the witness. An unavailable relation, cancelled/closed owner or late read failure yields no partial count, including an empty delivery set. Neither owner interprets the other's SQL row family; public fixture bridges remain SQL-free and return only the detached count.
@@ -7076,15 +6939,15 @@ engine:
               workflow_projection_shape_faults: Six named hostile projection cuts operate only after lawful native construction, through the exact selected writer coordinator. Fixed fields-array, numeric-gate, accumulator-array, malformed-transition-history, conflicting-instance-id and slash-only-path writes retain their original JSON payloads and exact run/entity or run/instance-path predicates. Exactly one existing row must change before commit; absence, invalid identity, closed ownership, cancellation or writer failure yields no successful outcome and joins cleanup. SQLite faults participate in the original writer admission and cancellation, never a reconstructed coordinator. The component decoder's actual malformed-storage rejection remains the consumer proof on both backends. Public fixture ports accept only exact coordinates for these named cuts, not SQL, arbitrary payloads, selectors, transaction contexts or callbacks.
               receiver_predecessor_evidence_faults: Two named faults start from real native construction and actual fork materialization, and consume the original selected writer. The pipeline owner copies exactly one validated corresponding native ancestor receipt to a positively validated historical receiver, preserving source projection/version/time and changing no header/readiness or other receipt. An existing destination receipt must first match its complete fixed-cut projection; that one row is then replaced, without changing its key or creation time. An absent row is inserted. A contradictory destination refuses before any further write. This intentionally contradictory row is never construction authority. The fixed-cut owner validates the original persisted origin and captured receiver, then verifies a distinct bounded positive revision is absent for the exact source run; the run-lifecycle owner CAS changes only that destination's forked_from_revision against every original fork coordinate. Source writes are frozen for this negative. Source revision/fact rows, headers, business state, readiness, receipts, status and timestamps remain unchanged. Invalid, foreign, duplicate, stale, canceled or closed cuts refuse without mutation. No revision deletion, cascade, fabricated event, generic origin setter, query callback or raw fixture authority is exposed.
               workflow_projection_ambiguity_fault: The existing exact run/entity ambiguity cut adds one competing physical authored-data row with the source run, path and entity contract and a fresh competing identity. It copies no lifecycle columns and changes no header; exactly one source row must be selected before the original native writer commits. Canonical active-route recovery must refuse multiple matching declared field rows rather than select a winner or reconstruct ownership from a field-row stage. Same-path other-run headers and data remain distinct. This hostile component witness does not construct an instance or publish execution or revision authority.
-              workflow_projection_header_list_witness: The native list witness constructs its fieldless and fielded instances through the existing selected activation owner, then consumes canonical ListWorkflowInstances. Exactly two constructed identities and paths, header stage and revision, gates, bookkeeping and accumulator must survive; fieldless instances acquire no invented fields and the complete fielded business object survives, including declared fields with lifecycle-like names. Only the two original construction writes occur; no obsolete field-row shadow fault or compatibility port survives. An independent fresh-schema component witness requires the nine live authored-data columns and absence of current_state, gates, bookkeeping, accumulator, revision and entered_state_at on entity_state. Each attempted shadow write must fail with its exact undefined-column diagnostic while the complete constructed header/data target and exact row counts remain unchanged. No alternate list reader, raw getter, payload selector or reconstructed transaction owner is exposed. Refusal, cancellation, original writer admission and joined cleanup remain covered by the live named malformed-projection faults rather than a retired-column writer.
+              workflow_projection_header_list_witness: The native list witness constructs its fieldless and fielded instances through the existing selected activation owner, then consumes canonical ListWorkflowInstances. Exactly two constructed identities and paths, header stage and revision, bookkeeping and accumulator must survive; fieldless instances acquire no invented fields and the complete fielded business object survives, including declared fields with lifecycle-like names. Only the two original construction writes occur; no obsolete field-row shadow fault or compatibility port survives. An independent fresh-schema component witness requires the nine live authored-data columns and absence of current_state, gates, bookkeeping, accumulator, revision and entered_state_at on entity_state. Each attempted shadow write must fail with its exact undefined-column diagnostic while the complete constructed header/data target and exact row counts remain unchanged. No alternate list reader, raw getter, payload selector or reconstructed transaction owner is exposed. Refusal, cancellation, original writer admission and joined cleanup remain covered by the live named malformed-projection faults rather than a retired-column writer.
               workflow_mutation_native_component_fixture: Mutation callback and competing-transition witnesses use canonical native run/source construction, acknowledged selected activation, opaque workflow reads and the existing selected engine-mutation owner. Callback rollback, both overlapping snapshots, commit ordering, single-writer fields and compiled transition history remain actual execution assertions on both backends. Stale writes must prove the canonical typed lifecycle conflict with exact revision, prior state and route, not helper-specific text. A transition against the already-constructed scenario run explicitly uses an existing-run event and acquires its exact declared-handler delivery through the selected publication and claim owners before the race begins. Missing or foreign claims refuse without persistence. Transition preparation and finalization stay in one shared component helper; no raw coordinator, SQL callback or fabricated transaction-context protocol is supplied. Gated workers are released and joined before cleanup can retire the original native ownership.
               workflow_lookup_miss_header_observation: Lookup-miss witnesses count all physical flow_instances rows through one original native read transaction, preserving the original whole-store scope with no run, lifecycle, type or eligibility filter. The count is a detached scalar and missing, cancelled or closed ownership supplies no successful evidence. Actual opaque workflow mutation/read owners must preserve typed exact-key misses, prevent callback invocation and leave that cardinality unchanged; a database, transaction, count-query selector or reconstructed test coordinator never crosses the component fixture boundary.
-              workflow_platform_bookkeeping_fixture: The complete-carrier mutation witness first performs acknowledged native construction, then changes only the exact run/instance-path header bookkeeping to the fixed platform_fact=preserve object through the original selected writer. Fields, gates, accumulator, config and the field-row companion are not changed by that named cut. Exactly one existing header must change before commit; missing coordinates, cancellation and failed ownership provide no successful outcome. The actual opaque read and selected engine-mutation owner must preserve that platform fact and the ready gate while updating the business status field. The fixed coordinate-only storetest bridge exposes no SQL, arbitrary value, selector or transaction callback. Original SQLite writer admission, cancellation and joined cleanup remain required execution proof.
+              workflow_platform_bookkeeping_fixture: The complete-carrier mutation witness first performs acknowledged native construction, then changes only the exact run/instance-path header bookkeeping to the fixed platform_fact=preserve object through the original selected writer. Fields, accumulator, config and the field-row companion are not changed by that named cut. Exactly one existing header must change before commit; missing coordinates, cancellation and failed ownership provide no successful outcome. The actual opaque read and selected engine-mutation owner must preserve that platform fact while updating the business status field. The fixed coordinate-only storetest bridge exposes no SQL, arbitrary value, selector or transaction callback. Original SQLite writer admission, cancellation and joined cleanup remain required execution proof.
               workflow_identity_lookalike_fixture: The private-publication refusal witness changes only the fixed authored and bookkeeping identity-lookalike value maps of one lawfully constructed header/data pair through the existing selected projection-fault writer. Both rows must match the exact run, entity, instance path and entity type in one native transaction; absence, fieldless membership, mismatched companions, invalid coordinates, cancellation or closed ownership refuse without a partial write. Actual constructed identity, lifecycle status, clocks, revision and immutable mutation history remain unchanged. The public fixture accepts only coordinates, not SQL, arbitrary values or callbacks. Both-store preservation and the original API target-lookup, private-event refusal and event/idempotency conservation assertions remain required.
               workflow_claimed_handler_component_fixture: Existing-owner handler witnesses share one native fixture family consuming canonical run/source construction, acknowledged selected activation, native durable publication and actual claimed-delivery renewal before executing the existing engine handler. Context, persisted run, construction readiness, catalog and EventBus bind the identical admitted artifact and canonical source version; fixed placeholder versions or another fixture artifact are not substitutes. Independent handler cases receive separate admitted runs rather than resetting construction through test-only upserts. Actual selected mutation and claim commits, stored field/gate/accumulator results, full emitted payloads, complete-empty cold reads, wrong-owner refusal and unchanged state after invalid candidates remain execution obligations on both backends. Claim heartbeats join when execution leaves the helper, including assertion-failure paths, before later coordinators, catalog release or selected-store close. No fake publication plan, reconstructed store, raw SQL, transaction callback or alternate lifecycle owner crosses this fixture boundary.
               workflow_engine_state_component_fixture: Missing-state observation and typed carrier round trips use the same selected artifact-bound component fixture and canonical engine read/mutation owners on both stores. Reads cannot construct missing state or materialize defaults. A write-only engine witness uses acknowledged construction and retains complete field/gate/bucket type assertions, its exact admitted root-run coordinate, and the canonical source version. Expected selected mutation and delivery-claim commit counts are separate proof facts; read-only and write-only roots cannot manufacture claims to satisfy a handler-shaped ledger. Declared entity fields originate in the admitted source rather than post-admission edits to a synthetic contract. These proof fixtures do not supply SQL handles, callbacks, reconstructed stores or publication receipts.
               workflow_execution_flow_query_fixture: Entity-query component witnesses consume the original native selected store through the existing pipeline evaluator and query owner, with their exact admitted source and run. Root/child flow identity, admitted structural payload types, predicates, absent/present cardinalities and populated metadata remain proof obligations; display names cannot substitute for execution flow. Canonical acknowledged construction and source version replace raw fixture upserts, without changing the source declarations, query scope, populated business/system fields or integer count assertions. Read-only query execution must record zero engine mutation and delivery claim commits on both backends. No reconstructed coordinator, SQL handle, callback or alternate query interpreter is permitted.
-              workflow_delivery_target_prestate_fixture: Missing exact target refusal and constructed scenario pre-state witnesses use the same original selected store and admitted source/run through canonical target preparation, acknowledged construction and engine mutation/read owners. Refusal cannot materialize any workflow. Positive handler execution starts from the exact prepared fields, gates, entity, revision and occurrence timestamps, publishes an existing-run event with its original target envelope and routing source, acquires the actual selected claim/renewal and joins its heartbeat before cleanup. Full preserved state and timestamp assertions, one mutation/claim for the positive witness and zero mutation/claims for refusal remain required on both backends. Fixture-only event rows, reconstructed stores and synthetic claims cannot stand in for those owners.
+              workflow_delivery_target_prestate_fixture: Missing exact target refusal and constructed scenario pre-state witnesses use the same original selected store and admitted source/run through canonical target preparation, acknowledged construction and engine mutation/read owners. Refusal cannot materialize any workflow. Positive handler execution starts from the exact prepared fields, entity, revision and occurrence timestamps, publishes an existing-run event with its original target envelope and routing source, acquires the actual selected claim/renewal and joins its heartbeat before cleanup. Full preserved state and timestamp assertions, one mutation/claim for the positive witness and zero mutation/claims for refusal remain required on both backends. Fixture-only event rows, reconstructed stores and synthetic claims cannot stand in for those owners.
               workflow_composition_business_component_fixture: Repeated receiver business-write witnesses consume canonical initial field compilation, acknowledged construction, original selected reads and native handler mutation. Every event is admitted once through canonical publication admission before selected publication, claim and execution; a zero requested time is normalized at that admission, not later independently for each consumer. Distinct business keys cannot change the already-constructed receiver identity or create additional workflow instances. Full business value, untouched default/status, lifecycle and single-instance assertions remain on both stores, with exact per-event selected mutation/claim counts. Real claim heartbeats stop and join at each execution boundary, including assertion failures, before subsequent coordinators or catalog/store teardown. Component proof is not public construction or store-reopen qualification.
               workflow_engine_physical_refusal_fixture: Engine wrong-root and unconstructed-carrier refusal witnesses use the native source/run/coordinator and existing mutation owner, retaining their complete candidate, typed/error-text and zero-row assertions. Bounded physical observation counts exactly all entity_state, flow_instances and entity_mutations rows in one original selected read transaction, with no run, type, lifecycle, eligibility or history filter. The existing classified header-count owner is reused, not duplicated. The read returns only detached fixed cardinalities and returns zero facts on cancellation, invalid/closed ownership or any query/commit failure, never partial counts. Public fixture consumers cannot provide SQL, callbacks or table/query selectors. These counts are storage proof, not execution-admission or public diagnostic semantics.
               workflow_engine_contract_drift_component_fixture: A deliberately contradictory prepared component record may be persisted by the existing native construction owner to prove the engine's canonical source-contract refusal; this is not proof of public source-derived preparation or execution eligibility. The witness retains the malformed type, original fields/state/revision and mutation candidate, rejects the exact mismatch before any engine write, and reads the identical stored carrier afterward. A fixed positive physical-count read through the same selected fixture verifies that observation is real rather than fabricated empty storage. No raw pool reconstruction, direct SQL seed, permissive decoder or alternate contract interpreter supplies the witness.
@@ -9251,7 +9114,7 @@ engine:
       for exact retry. Event- and transition-caused wakeups on the same instance remain projected. Route retirement without matching
       timer-projection retirement, terminal timer mutation as compensation, and unjoined rearm are prohibited. Exact replay
       compares the immutable creation projection and immutable readiness plan; mutable current state, fields, bookkeeping,
-      gates, accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
+      accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
       concurrent create conflict is rechecked under the same instance-serialized transaction and returns exact replay only
       when both immutable projections match. A missing or conflicting immutable creation projection fails closed. No stale
       callback snapshot, best-effort completion chain, subset inference, second wakeup owner, migration, or compatibility
@@ -9382,7 +9245,7 @@ engine:
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
     context_variables:
-      entity: Current sparse entity fields plus typed envelope and gates. A declared bare field needs definite assignment before value access; optional absence uses has or optional selection. No read-time default is synthesized.
+      entity: Current sparse entity fields plus typed envelope. A declared bare field needs definite assignment before value access; optional absence uses has or optional selection. No read-time default is synthesized.
       payload: Current event payload fields
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
@@ -10184,7 +10047,7 @@ engine:
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
         retired node fields, undeclared direct handler keys, malformed reserved node fields
-        (timers, gate_state), and malformed external tool-provider dispatch
+        (timers), and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
     - id: policy_conflict_detection
@@ -10307,11 +10170,6 @@ engine:
         participant in the flow. Or the timer's fire_event is not in events.yaml. Timer fire/start/cancel references are
         derived internal event producer/consumer roles; all authored event role metadata is retired. Root exports are
         observable without internal consumers; private timer output needs an actual consuming relation.
-      when: boot-only
-    - id: gate_schema_validation
-      severity: error
-      scope: per-node
-      trigger: A handler's sets_gate references a gate name not declared in the node's gate_state schema.
       when: boot-only
     - id: output_pin_key_carries_validation
       status: retired_by_2352
@@ -10485,7 +10343,7 @@ compliance:
     - 'An arrival join consumes the publication-bound exact lifecycle entry. Its last member, until or deadline stores one close and one declaration-bound continuation; outcome effects do not run inline on the last arrival.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
     - 'If handler has rules: match payload field, select the matching rule-local emit if present.'
-    - 'Resolve side effects per handler_specification.rules_handler_interaction.side_effect_resolution: advances_to uses handler default with selected-entry override, sets_gate is handler-level only, and data_accumulation composes selected-entry writes before handler-level writes.'
+    - 'Resolve side effects per handler_specification.rules_handler_interaction.side_effect_resolution: advances_to uses handler default with selected-entry override, and data_accumulation composes selected-entry writes before handler-level writes.'
     - 'If the active emit site has emit: publish the selected follow-up event.'
   product_boundary:
     description: Rules for product-specific code isolation.
@@ -10699,7 +10557,6 @@ tool_model:
           name: string (nullable)
           stage_defined: boolean|null - header stage posture; null for data-only imports
           current_state: string|null - exact named header stage; null for imports and constructed no-stage members
-          gates: object|null - header gate map; null for data-only imports
           fields: object — complete stored sparse field map; unassigned declared fields are omitted, not null or defaulted
           accumulator: object|null - header accumulator state; null for data-only imports
           revision: integer|null - positive header revision; null for data-only imports
@@ -13634,7 +13491,7 @@ tool_model:
           Optional list entries use `{event, fields, when, author_subject}`. Authored `event` uses a short local name;
           directory BODY admission qualifies it once into the exact `inbound.<provider-directory>.<local>` literal.
           Each field declares `from`, one required post-conversion JSON `schema`, optional `optional`, and an optional closed
-          conversion. The schema is the sole admitted-value owner: runtime normalization, imported event refinements,
+          conversion. The schema is the sole admitted-value owner: runtime normalization, imported event validation,
           accepted trigger descriptors, channel assignability, carry eligibility, and capability type projection derive
           mechanically from this one block. The retired `type` spelling is rejected; there is no compatibility alias.
           The retired `author_summary_field` fails on presence, including nulls, aliases, and merges; no content preview
@@ -15283,7 +15140,7 @@ flow_model:
       description: 'One entity belongs to exactly one flow. One row in entity_state, one current_state,
         one state machine. No flow_states map. No shared mutable state across flow boundaries.'
       invariant: 'entity_state.flow_instance identifies the owning flow. Only handlers within that flow
-        may write to the entity (advances_to, sets_gate, data_accumulation, save_entity_field). The
+        may write to the entity (advances_to, data_accumulation, save_entity_field). The
         platform enforces this — cross-flow writes are rejected at runtime.'
       current_state: 'entity_state.current_state is singular and unambiguous. It reflects the state within
         the owning flow. No flow_states disambiguation needed.'
@@ -16338,7 +16195,7 @@ durable_data_resources:
     access: Agents declare data_access by exact qualified event name. Runtime access consumes the loader's package-qualified declaration record.
     file_import_shape_detail:
       owner: The compiled event schema projection supplies resolved top-level TypeRef, alias/refinement, optionality, and business-key facts to the exact-bundle catalog and selected-store declaration owner. This is a read projection of that owner, not another schema or type authority.
-      dto: An exact detail read binds bundle_hash, structured declaration (flow_path and qualified event name), and schema_digest; it carries the optional required text business-key field name and a bounded set of exact top-level file-assignable text field names with their compiled optionality. A fieldless declaration has the canonical empty fields array, never null; that representation is sealed by the shape digest and served unchanged. Text aliases/refinements are classified from resolved compiled types; JSON Schema type:string alone does not establish text eligibility. The business-key field is never file-assignable.
+      dto: An exact detail read binds bundle_hash, structured declaration (flow_path and qualified event name), and schema_digest; it carries the optional required text business-key field name and a bounded set of exact top-level file-assignable text field names with their compiled optionality. A fieldless declaration has the canonical empty fields array, never null; that representation is sealed by the shape digest and served unchanged. Text eligibility comes from resolved compiled types; JSON Schema type:string alone does not establish text eligibility. The business-key field is never file-assignable.
       admission: Registration, selected-store detail, API DTO, and both standalone and fused CLI consumers must agree on the same immutable shape. Missing, stale, conflicting, corrupt, or wrong-bundle/declaration/digest detail fails closed; no raw YAML, host source path, local type inference, or schema-string heuristic is a fallback. The source owner still validates the submitted JSONL candidate against the exact admitted declaration.
       bounds: Fetch detail for one exact selected declaration only. Keep the ordinary data.show declaration inventory a lightweight summary rather than expanding it into a full schema or payload scan. Import shape changes neither schema digest inputs nor event authoring grammar; fresh schemas only, without migration or legacy fallback.
   version_identity:
@@ -19557,7 +19414,7 @@ platform_tables:
     workflow_instance_initial_materializations:
       description: >-
         Immutable run-scoped construction identity for a workflow instance. The canonical activation transaction inserts
-        exactly one projection of the original workflow, state, config, entity fields, bookkeeping, gates, accumulator,
+        exactly one projection of the original workflow, state, config, entity fields, bookkeeping, accumulator,
         control facts, immutable instance key, creating input and exact occurrence coordinate together with the complete header and declared field
         row, if any. Exact replay compares this receipt and requires valid paired target evidence and a valid attachment
         owner. Missing fields, a contradictory field contract, a foreign workflow header or an incomplete receipt fail
@@ -20486,7 +20343,6 @@ platform_tables:
             status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draining', 'terminated')),
             stage_defined     BOOLEAN NOT NULL,
             current_state     TEXT NOT NULL CHECK (LENGTH(TRIM(current_state)) > 0),
-            gates             JSONB NOT NULL,
             bookkeeping       JSONB NOT NULL,
             accumulator       JSONB NOT NULL,
             revision          INTEGER NOT NULL CHECK (revision > 0),
@@ -21052,9 +20908,9 @@ platform_tables:
             INDEX idx_mutations_event (caused_by_event) WHERE caused_by_event IS NOT NULL
         );
       write_sources:
-        system_node_handlers: 'data_accumulation writes, compute store_as, sets_gate, advances_to (current_state),
-          clear (gate/accumulator resets). writer_type = system_node, writer_id = node ID,
-          handler_step = the handler step name (e.g., data_accumulation, compute, sets_gate).'
+        system_node_handlers: 'data_accumulation writes, compute store_as, advances_to (current_state),
+          clear. writer_type = system_node, writer_id = node ID,
+          handler_step = the handler step name (e.g., data_accumulation, compute).'
         agent_tool_calls: 'save_entity_field tool calls. writer_type = agent, writer_id = agent ID,
           handler_step = save_entity_field.'
         platform_operations: 'Canonical flow construction (initial field population), exact admitted historical/import
@@ -22982,8 +22838,8 @@ run_model:
       any point in time, (3) drift detection — verify entity_state matches the mutation history.'
     write_contract: 'Every write to entity_state MUST carry an explicit run_id and produce a corresponding
       entity_mutations row with the same run_id in the same transaction. This includes system node handler writes
-      (data_accumulation, compute, sets_gate, advances_to, clear) and agent tool writes (save_entity_field).
-      Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, `gate`, or
+      (data_accumulation, compute, advances_to, clear) and agent tool writes (save_entity_field).
+      Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, or
       `accumulator`) plus an uninterpreted path. lifecycle_state alone requires an empty path; every other domain requires
       a nonempty path. The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
     reconstruction_path_meaning: >
@@ -22996,7 +22852,7 @@ run_model:
     drift_detection: >-
       swarm verify --run <run_id> reads physical entity_mutations and canonical current state for one run in one
       selected-store read-only snapshot. The shared constructed-header projection owns exact membership and pairing:
-      flow_instances supplies lifecycle, bookkeeping, gates and accumulator; an optional correctly paired entity_state
+      flow_instances supplies lifecycle, bookkeeping and accumulator; an optional correctly paired entity_state
       row supplies declared business fields only. Fieldless headers are complete members without field rows; stale
       non-authoritative field-row lifecycle copies cannot override or veto header progress. Inventory includes final
       and non-active constructed members and separately admitted non-executable state-only/imported members; history-only
@@ -23995,7 +23851,6 @@ observation_model:
     description: The entity document after handler execution commits.
     observable_fields:
       current_state: The state after advances_to (or unchanged if no advances_to)
-      gates: Map of gate names to boolean values, after sets_gate and clear_gates
       fields: JSONB of entity fields, after data_accumulation writes
       bookkeeping: JSONB of platform bookkeeping facts, independently written by explicit platform producers
       accumulator: JSONB of accumulated items, after accumulate step
@@ -25417,13 +25272,10 @@ static_analyzer:
     accepted_coverage:
       initial:
         rule: Explicit `initial:` on the field counts as authored creation-time coverage.
-      unused_reason:
-        rule: Explicit `_unused_reason:` documents intentional no-writer intent and suppresses this slice only.
       handler_write_sites:
         rule: Handler write targets that name the field explicitly count as coverage. This includes data_accumulation, compute,
           filter/group_by/reduce/count store_as, query store_as, and clear targets.
-    rule: Emit hard invalidity when a declared entity field has no authored writer coverage, no explicit `initial:`, and no
-      `_unused_reason:`.
+    rule: Emit hard invalidity when a declared state field has no constructor supply, authored writer coverage, or creation-time initial value.
   slice_6c_accumulator_static_safety:
     ids:
     - accumulator_input_producer_path
@@ -25527,11 +25379,6 @@ static_analyzer:
       excludes:
       - external/operator readers outside platform visibility
       - hard gating or warning-level surfacing
-    accepted_suppression:
-      unused_reader_reason:
-        field_metadata: _unused_reader_reason
-        rule: Explicit `_unused_reader_reason:` with a trimmed reason of at least 10 characters declares intentional
-          external/operator readout and suppresses this lint-evidence slice only.
     rule: Emit lint evidence when a declared entity field has no detected internal reader on the supported verify surface.
   slice_9a_cross_surface_named_type_use:
     id: cross_surface_named_type_use
@@ -26502,7 +26349,7 @@ test_specification:
       catalog.runtime.primitives:
         status: active
         required_disposition: runtime
-        scope: Primitive handler transitions, guards, accumulation, gates, and emissions.
+        scope: Primitive handler transitions, guards, accumulation, and emissions.
       catalog.runtime.list_processing:
         status: active
         required_disposition: runtime
@@ -27069,16 +26916,9 @@ test_specification:
           canonical `entity.get` field map after JSON-compatible scalar
           normalization; missing, extra, or differently-valued fields fail the
           scenario.
-        gates: >
-          A row with `gates` is a detail assertion over `EntityFull.gates`.
-          Gate expectations consume the scenario literal model, so nested
-          `${...}` values are evaluated as CEL and must resolve to booleans.
-          The resulting boolean map compares exactly to the canonical
-          `entity.get` gate map. Missing, extra, non-boolean, or
-          differently-valued gates fail the scenario.
         count_interaction: >
           `count` is a count-only assertion and MUST NOT be combined with
-          `current_state`, `fields`, or `gates`. A flow-only entity row is not a
+          `current_state` or `fields`. A flow-only entity row is not a
           valid assertion. This prevents the runner from preserving two
           different interpretations of the same `expect.entities` row.
       mailbox:
@@ -29011,7 +28851,7 @@ cli_specification:
               command: swarm entity view
               classification: shared_output
               fact_owner: /v1/rpc entity.get
-              json_shape: entity.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; gates; accumulated; loops when present)
+              json_shape: entity.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; accumulated; loops when present)
               quiet_values:
               - entity_id
             entity_aggregate:
@@ -32246,10 +32086,10 @@ cli_specification:
         default_text:
           heading: Entity <entity-id>
           identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
-          sections: Labeled Fields and Gates rows plus an Accumulated presence count and `Bookkeeping <N> facts (--verbose to expand)` or `Bookkeeping none`; empty sections render explicitly as `none`; every declared false gate remains visible.
+          sections: Labeled Fields rows plus an Accumulated presence count and `Bookkeeping <N> facts (--verbose to expand)` or `Bookkeeping none`; empty sections render explicitly as `none`.
           field_projection: Fields contains authored values only. Bookkeeping is a required independent API projection and is never inferred from field names.
         verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and an expanded Bookkeeping section.
-        json: The complete validated entity.get result object, including entity identity, fields, bookkeeping, gates, accumulated data, and loops when present.
+        json: The complete validated entity.get result object, including entity identity, fields, bookkeeping, accumulated data, and loops when present.
         quiet: The canonical entity_id only.
       exit_codes:
         success: 0
@@ -32261,7 +32101,7 @@ cli_specification:
       - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
       - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing explicit token for non-loopback API targets make zero API calls
       - ENTITY_NOT_FOUND maps to resource-not-found exit 5
-      - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/bookkeeping/gates/accumulated maps fail closed with tested exit-code behavior
+      - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/bookkeeping/accumulated maps fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
     entity_aggregate:
       command: swarm entity aggregate [--group-by <field>]
@@ -33093,8 +32933,8 @@ api_specification:
         propagation is not supported. Literal outcome emit values and complete
         statically known payloads are validated at boot against that schema.
         mailbox.decide assembles the complete frozen payload and validates it
-        before the verdict CAS, including enum, format, pattern, length, range,
-        required-presence, nullability, and same-object equal_to refinements.
+        before the verdict CAS, including declared enum, format,
+        required-presence, nullability, and structural type constraints.
         Parse, verify/emission, hashing, runtime API validation, and route-time
         payload construction MUST NOT maintain separate identity, type, or
         refinement subsets.
@@ -34142,14 +33982,13 @@ api_specification:
           updated_at:
             $ref: '#/components/schemas/Timestamp'
       EntityFull:
-        description: 'Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/gates/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.'
+        description: 'Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.'
         type: object
         additionalProperties: false
         required:
         - entity
         - fields
         - bookkeeping
-        - gates
         - accumulated
         - loops
         properties:
@@ -34163,11 +34002,6 @@ api_specification:
             description: Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.
             oneOf:
             - {type: object, additionalProperties: true}
-            - {type: 'null'}
-          gates:
-            description: "Gate state. Map of gate_name \u2192 boolean."
-            oneOf:
-            - {type: object, additionalProperties: {type: boolean}}
             - {type: 'null'}
           accumulated:
             description: "Accumulator state. Map of accumulator key \u2192 JSON value; values may be scalars, objects, or\
@@ -36686,9 +36520,6 @@ api_specification:
             type: object
             additionalProperties: true
           bookkeeping:
-            type: object
-            additionalProperties: true
-          gates:
             type: object
             additionalProperties: true
           accumulator:
@@ -39726,10 +39557,6 @@ api_specification:
               fields:
                 type: object
                 additionalProperties: true
-              gates:
-                type: object
-                additionalProperties:
-                  type: boolean
       - name: scenario_execution
         required: false
         description: Exact immutable scenario profile selection atomically bound to the scenario setup run.
@@ -40395,7 +40222,7 @@ api_specification:
       errors: []
     entity.get:
       tier: should_have
-      description: Read one entity in full, including independent authored fields, platform bookkeeping, gates, and accumulator state.
+      description: Read one entity in full, including independent authored fields, platform bookkeeping, and accumulator state.
       scope:
         required:
         - read:entities

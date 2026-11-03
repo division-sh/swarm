@@ -46,21 +46,6 @@ func TestResolveAllowsSelectedRootExportWithoutInventingRoute(t *testing.T) {
 	}
 }
 
-func TestResolveRejectsPayloadDescriptionsAsConsumerAuthority(t *testing.T) {
-	for _, consumer := range []string{"external", "external_catalog_harness", "externl", "webhook"} {
-		t.Run(consumer, func(t *testing.T) {
-			entry := runtimecontracts.EventCatalogEntry{}
-			entry.Payload = runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"destination": {Type: "text", Description: consumer}}}
-			result := Resolve(ResolutionInput{
-				Source: testPinRoutingSource(map[string]runtimecontracts.EventCatalogEntry{"child.done": entry}), FlowID: "child", EventType: "child.done",
-			}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-			if result.Failure != FailureTargetRequiredMissing {
-				t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
-			}
-		})
-	}
-}
-
 func TestResolveAllowsTypedSameFlowConsumerWithoutInventingRoute(t *testing.T) {
 	source := testRootPinRoutingSource(nil)
 	bundle, ok := semanticview.Bundle(source)

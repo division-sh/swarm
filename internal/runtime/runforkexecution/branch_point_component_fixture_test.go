@@ -421,7 +421,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 	if err != nil || !found {
 		t.Fatalf("original constructed gate: found=%t err=%v", found, err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

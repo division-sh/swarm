@@ -106,7 +106,7 @@ func TestDeclarativeEmitPreservesScopedProducerSourceRoute(t *testing.T) {
 					ChainDepth:      4,
 					State: StateSnapshot{
 						EntityID:     identity.NormalizeEntityID(entityID),
-						StateCarrier: NewStateCarrier(stateMetadata, nil, nil),
+						StateCarrier: NewStateCarrier(stateMetadata, nil),
 					},
 				},
 			}

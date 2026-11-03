@@ -446,13 +446,6 @@ func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, enti
 			return nil, nil, false, err
 		}
 	}
-	gates, err := decodeMap(header.Gates, "flow_instances.gates")
-	if err != nil {
-		return nil, nil, false, err
-	}
-	if len(gates) > 0 {
-		metadata["gates"] = gates
-	}
 	stateBuckets, err := decodeMap(header.Accumulator, "flow_instances.accumulator")
 	if err != nil {
 		return nil, nil, false, err

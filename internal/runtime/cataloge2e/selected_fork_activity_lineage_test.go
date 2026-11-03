@@ -147,7 +147,7 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 		if err != nil || !found {
 			t.Fatalf("loop activity state: found=%t err=%v", found, err)
 		}
-		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, instance.StateBuckets)
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, instance.StateBuckets)
 		if err != nil {
 			t.Fatal(err)
 		}

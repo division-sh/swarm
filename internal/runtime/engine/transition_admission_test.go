@@ -32,8 +32,6 @@ func TestEnginePreservationRejectsContradictoryExecution(t *testing.T) {
 	}{
 		{"none", func(*EngineMutation) {}},
 		{"advance", func(m *EngineMutation) { m.State.NextState = "done" }},
-		{"gate", func(m *EngineMutation) { m.State.SetGate = "ready" }},
-		{"clear", func(m *EngineMutation) { m.State.ClearGates = []string{"ready"} }},
 		{"write", func(m *EngineMutation) {
 			m.State.DataAccumulation = contracts.WorkflowDataAccumulation{SourceEvent: "other"}
 		}},
@@ -71,7 +69,7 @@ func transitionTestRequest(t testing.TB, node identity.ExecutableNode, event str
 	return ExecutionRequest{
 		EntityID: "entity-1", Node: node, ExecutionFlowID: identity.NormalizeFlowID(node.FlowPath()), HandlerEventKey: event,
 		Route:   flowidentity.DeriveRoute(node.FlowPath(), semanticExecutionFixtureRunID),
-		Handler: handler, State: testStateSnapshot(state, map[string]any{}, nil, nil),
+		Handler: handler, State: testStateSnapshot(state, map[string]any{}, nil),
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("transition-"+event), events.EventType(event), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 }

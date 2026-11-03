@@ -250,11 +250,11 @@ func seedStageRecoveryFlowInstance(t *testing.T, ctx context.Context, db *sql.DB
 	t.Helper()
 	// This fieldless physical budget fixture is not executable construction.
 	// Recovery must not require a shadow entity_state row to discover it.
-	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-		VALUES (?, 'child', 'child', ?, NULL, ?, 'static', '{}', 'active', ?, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+		VALUES (?, 'child', 'child', ?, NULL, ?, 'static', '{}', 'active', ?, '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
 	if backend == "postgres" {
-		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-			VALUES ($1::uuid, 'child', 'child', $2::uuid, NULL, $3, 'static', '{}'::jsonb, 'active', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())`
+		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			VALUES ($1::uuid, 'child', 'child', $2::uuid, NULL, $3, 'static', '{}'::jsonb, 'active', $4, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())`
 	}
 	if _, err := db.ExecContext(ctx, query, runID, entityID, stage, stageDefined); err != nil {
 		t.Fatalf("seed selected child flow instance: %v", err)

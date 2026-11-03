@@ -292,7 +292,7 @@ func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context,
 		fields["local"] = 40
 		literal := pipeline.WorkflowEngineMutationCommand{State: command.State}
 		literal.State.Fields, _ = json.Marshal(fields)
-		literal.State.Bookkeeping, literal.State.Gates, literal.State.Accumulator = current.Lifecycle.State.Bookkeeping, current.Lifecycle.State.Gates, current.Lifecycle.State.Accumulator
+		literal.State.Bookkeeping, literal.State.Accumulator = current.Lifecycle.State.Bookkeeping, current.Lifecycle.State.Accumulator
 		literal.State.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 		done := make(chan struct{})
 		var rival pipeline.CommittedWorkflowEngineMutation

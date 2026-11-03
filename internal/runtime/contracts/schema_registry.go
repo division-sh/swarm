@@ -52,17 +52,10 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		} else {
 			prop, typeDescription = eventSchemaForTypeRef(field.Type, types, map[string]struct{}{})
 		}
-		description := strings.TrimSpace(field.Description)
-		if description == "" {
-			description = typeDescription
+		if field.platformDescription != "" {
+			prop["description"] = field.platformDescription
 		} else if typeDescription != "" {
-			description = typeDescription + ". " + description
-		}
-		if description != "" {
-			prop["description"] = description
-		}
-		if field.ExactSchema == nil {
-			applySchemaRefinements(prop, field.Refinements)
+			prop["description"] = typeDescription
 		}
 		properties[fieldName] = prop
 	}
@@ -259,7 +252,6 @@ func eventSchemaForCatalogType(resolved ResolvedCatalogType, types TypeCatalogDo
 			if _, description := normalizeEventFieldType(field.TypeRef); description != "" {
 				prop["description"] = description
 			}
-			applySchemaRefinements(prop, field.Refinements)
 			props[field.Name] = prop
 			if !field.IsOptional {
 				required = append(required, field.Name)
@@ -311,11 +303,10 @@ func ValidateCatalogFieldSupply(subject string, supplied map[string]any, target 
 	if _, err := (CatalogTypeReference{Type: target.Type, Catalog: catalog}).Resolve(); err != nil {
 		return fmt.Errorf("%s state type: %w", subject, err)
 	}
-	if (target.Type == "json" || target.Type == "jsonb") && target.Refinements.Empty() {
+	if target.Type == "json" || target.Type == "jsonb" {
 		return nil
 	}
 	accepted, _ := eventSchemaForTypeRef(target.Type, catalog, map[string]struct{}{})
-	applySchemaRefinements(accepted, target.Refinements)
 	if err := validateCatalogMapKeySupply(subject, supplied, accepted); err != nil {
 		return err
 	}
@@ -400,40 +391,6 @@ func catalogValueSchema(schema map[string]any) map[string]any {
 		out[name] = value
 	}
 	return out
-}
-
-func applySchemaRefinements(schema map[string]any, refinements SchemaRefinements) {
-	if schema == nil || refinements.Empty() {
-		return
-	}
-	if value := strings.TrimSpace(refinements.Pattern); value != "" {
-		schema["pattern"] = value
-	}
-	if min := refinements.Length.Min; min != nil {
-		switch strings.TrimSpace(asSchemaString(schema["type"])) {
-		case "array":
-			schema["minItems"] = *min
-		default:
-			schema["minLength"] = *min
-		}
-	}
-	if max := refinements.Length.Max; max != nil {
-		switch strings.TrimSpace(asSchemaString(schema["type"])) {
-		case "array":
-			schema["maxItems"] = *max
-		default:
-			schema["maxLength"] = *max
-		}
-	}
-	if min := refinements.Range.Min; min != nil {
-		schema["minimum"] = *min
-	}
-	if max := refinements.Range.Max; max != nil {
-		schema["maximum"] = *max
-	}
-	if value := strings.TrimSpace(refinements.EqualTo); value != "" {
-		schema["x-swarm-equalTo"] = value
-	}
 }
 
 func asSchemaString(value any) string {

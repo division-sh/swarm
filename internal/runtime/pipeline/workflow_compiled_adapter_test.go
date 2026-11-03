@@ -975,12 +975,11 @@ func requireCompiledPreviewAgreement(t *testing.T, f *compiledAdapterFixture, ev
 	}
 	if !reflect.DeepEqual(preview.Metadata, result.PreviewMetadata) ||
 		!reflect.DeepEqual(preview.Computed, result.Outcome.Computed) || !slices.Equal(preview.Emits, result.Outcome.Emits) ||
-		!slices.Equal(preview.ActionsExecuted, result.Outcome.ActionsExecuted) || preview.SetsGate != result.Outcome.SetsGate ||
-		!slices.Equal(preview.ClearGates, result.Outcome.ClearGates) || preview.FanOutCount != result.Outcome.FanOutCount {
-		t.Fatalf("preview lost execution outputs: metadata=%#v/%#v computed=%#v/%#v emits=%#v/%#v actions=%#v/%#v gates=%s/%s clear=%#v/%#v fanout=%d/%d",
+		!slices.Equal(preview.ActionsExecuted, result.Outcome.ActionsExecuted) || preview.FanOutCount != result.Outcome.FanOutCount {
+		t.Fatalf("preview lost execution outputs: metadata=%#v/%#v computed=%#v/%#v emits=%#v/%#v actions=%#v/%#v fanout=%d/%d",
 			preview.Metadata, result.PreviewMetadata, preview.Computed, result.Outcome.Computed,
-			preview.Emits, result.Outcome.Emits, preview.ActionsExecuted, result.Outcome.ActionsExecuted, preview.SetsGate, result.Outcome.SetsGate,
-			preview.ClearGates, result.Outcome.ClearGates, preview.FanOutCount, result.Outcome.FanOutCount)
+			preview.Emits, result.Outcome.Emits, preview.ActionsExecuted, result.Outcome.ActionsExecuted,
+			preview.FanOutCount, result.Outcome.FanOutCount)
 	}
 	if preview.Metadata["marker"] != after.Fields["marker"] || f.bus.publishedCount() != len(preview.Emits) {
 		t.Fatal("preview outputs disagree with actual persistence or publication")

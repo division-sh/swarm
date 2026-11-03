@@ -45,7 +45,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 					},
 					Nodes: map[string]rc.SystemNodeContract{"worker": {EventHandlers: map[string]rc.SystemNodeEventHandler{"work.received": handler}}},
 				}
-				stored := testStateSnapshot("active", map[string]any{"profile": map[string]any{}, "captured": ""}, nil, nil)
+				stored := testStateSnapshot("active", map[string]any{"profile": map[string]any{}, "captured": ""}, nil)
 				executor, err := NewExecutor(RuntimeDependencies{Source: sourceWithFixtureStages(mustCompileEngineSource(bundle), ".", "active", "active"), StateRepo: sparseSnapshotRepo{snapshot: stored}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, schemaBoundWildcardEvaluator{})
 				if err != nil {
 					t.Fatal(err)
@@ -53,7 +53,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 				_, err = executor.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 					EntityID: "work-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 					Event:   eventtest.ExistingRunRootIngress("entity-presence", events.EventType("work.received"), "", "", json.RawMessage(`{"items":["a"]}`), 0, eventtest.UUID("presence-run"), events.EventEnvelope{}, time.Time{}),
-					Handler: handler, State: testStateSnapshot("active", map[string]any{"profile": map[string]any{}, "captured": ""}, nil, map[string]map[string]any{}),
+					Handler: handler, State: testStateSnapshot("active", map[string]any{"profile": map[string]any{}, "captured": ""}, map[string]map[string]any{}),
 				})
 				if safe && err != nil {
 					t.Fatal(err)

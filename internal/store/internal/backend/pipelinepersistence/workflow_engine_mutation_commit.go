@@ -265,10 +265,6 @@ func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRec
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
-	gates, err := decode("gates", record.Gates)
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, err
-	}
 	accumulator, err := decode("accumulator", record.Accumulator)
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
@@ -277,7 +273,6 @@ func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRec
 		CurrentState: runtimemutationlog.PresentLifecycleState(record.CurrentState),
 		Fields:       fields,
 		Bookkeeping:  bookkeeping,
-		Gates:        gates,
 		Accumulator:  accumulator,
 	}, nil
 }
@@ -295,20 +290,20 @@ func loadWorkflowEngineStateProjection(
 	if decision.createState {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
-	query := `SELECT fi.current_state, es.fields, fi.bookkeeping, fi.gates, fi.accumulator
+	query := `SELECT fi.current_state, es.fields, fi.bookkeeping, fi.accumulator
 		FROM flow_instances fi LEFT JOIN entity_state es
 			ON es.run_id = fi.run_id AND es.entity_id = fi.entity_id AND es.flow_instance = fi.instance_path
 		WHERE fi.run_id = ? AND fi.entity_id = ? AND fi.instance_path = ?`
 	args := []any{record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath}
 	if postgres {
-		query = `SELECT fi.current_state, es.fields, fi.bookkeeping, fi.gates, fi.accumulator
+		query = `SELECT fi.current_state, es.fields, fi.bookkeeping, fi.accumulator
 			FROM flow_instances fi LEFT JOIN entity_state es
 				ON es.run_id = fi.run_id AND es.entity_id = fi.entity_id AND es.flow_instance = fi.instance_path
 			WHERE fi.run_id = $1::uuid AND fi.entity_id = $2::uuid AND fi.instance_path = $3 FOR UPDATE OF fi`
 	}
 	var currentState string
-	var fieldsRaw, bookkeepingRaw, gatesRaw, accumulatorRaw any
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accumulatorRaw); err != nil {
+	var fieldsRaw, bookkeepingRaw, accumulatorRaw any
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &accumulatorRaw); err != nil {
 		if err == sql.ErrNoRows {
 			return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine state route is missing: %s", record.Identity.Route.InstancePath)
 		}
@@ -328,10 +323,6 @@ func loadWorkflowEngineStateProjection(
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine persisted bookkeeping: %w", err)
 	}
-	gates, err := storeentity.DecodeJSONMap(gatesRaw)
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine persisted gates: %w", err)
-	}
 	accumulator, err := storeentity.DecodeJSONMap(accumulatorRaw)
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine persisted accumulator: %w", err)
@@ -340,7 +331,6 @@ func loadWorkflowEngineStateProjection(
 		CurrentState: runtimemutationlog.PresentLifecycleState(currentState),
 		Fields:       fields,
 		Bookkeeping:  bookkeeping,
-		Gates:        gates,
 		Accumulator:  accumulator,
 	}, nil
 }
@@ -431,7 +421,6 @@ func commitWorkflowEngineInitialValues(
 		CurrentState: before.CurrentState,
 		Fields:       copyWorkflowEngineProjectionMap(before.Fields),
 		Bookkeeping:  copyWorkflowEngineProjectionMap(before.Bookkeeping),
-		Gates:        copyWorkflowEngineProjectionMap(before.Gates),
 		Accumulator:  copyWorkflowEngineProjectionMap(before.Accumulator),
 	}
 	keys := make([]string, 0, len(initial))

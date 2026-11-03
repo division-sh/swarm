@@ -41,7 +41,7 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := testStateSnapshot("queued", map[string]any{}, nil, map[string]map[string]any{})
+	state := testStateSnapshot("queued", map[string]any{}, map[string]map[string]any{})
 	start := runtimecontracts.SystemNodeEventHandler{
 		Loop:       &runtimecontracts.LoopOperationSpec{Start: "revision", From: "queued"},
 		AdvancesTo: "drafting",
@@ -139,8 +139,7 @@ func loopTestRequest(t testing.TB, state StateSnapshot, handler runtimecontracts
 
 func loopTestNextState(result ExecutionResult) StateSnapshot {
 	return StateSnapshot{CurrentState: result.NextState, StateCarrier: NewStateCarrier(
-		result.StateMutation.Fields, result.StateMutation.Gates, result.StateMutation.StateBuckets,
-	)}
+		result.StateMutation.Fields, result.StateMutation.StateBuckets)}
 }
 
 func emittedLoopRevision(t *testing.T, result ExecutionResult) string {
@@ -207,7 +206,7 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	baseState := testStateSnapshot("drafting", map[string]any{}, nil, buckets)
+	baseState := testStateSnapshot("drafting", map[string]any{}, buckets)
 
 	for _, tc := range []struct {
 		name      string
@@ -332,7 +331,7 @@ func TestExecutorCompiledLoopOperationsRetainExactCarrier(t *testing.T) {
 		}
 		return result
 	}
-	started := execute(testStateSnapshot("queued", nil, nil, nil), "work.start", 1, "")
+	started := execute(testStateSnapshot("queued", nil, nil), "work.start", 1, "")
 	revision := started.LoopTrace.RevisionID
 	for _, event := range []string{"work.rule", "work.complete"} {
 		// The activation is valid, but cannot authorize a graph source different

@@ -67,11 +67,11 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 			ambiguousEntityID := uuid.NewString()
 			config := `{"workflow_version":"1","instance_id":"one","flow_path":"` + instancePath + `"}`
 			// Exact adapter-component headers; this is not constructor proof.
-			headerQuery := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-				VALUES ($1, $2, $3, 'review_entity', 'review', 'template', $4, 'active', 'active', TRUE, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+			headerQuery := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+				VALUES ($1, $2, $3, 'review_entity', 'review', 'template', $4, 'active', 'active', TRUE, '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
 			if !tc.sqlite {
-				headerQuery = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-					VALUES ($1::uuid, $2, $3::uuid, 'review_entity', 'review', 'template', $4::jsonb, 'active', 'active', TRUE, '{}', '{}', '{}', 1, NOW(), NOW(), NOW())`
+				headerQuery = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+					VALUES ($1::uuid, $2, $3::uuid, 'review_entity', 'review', 'template', $4::jsonb, 'active', 'active', TRUE, '{}', '{}', 1, NOW(), NOW(), NOW())`
 			}
 			for _, owner := range []struct{ runID, entityID string }{{retiredRunID, retiredEntityID}, {currentRunID, currentEntityID}, {ambiguousRunID, ambiguousEntityID}} {
 				if _, err := db.ExecContext(ctx, headerQuery, owner.runID, instancePath, owner.entityID, config); err != nil {

@@ -269,7 +269,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 			inputs += fmt.Sprintf("  - %s\n", input)
 			outputs += "  - " + output + "\n"
 			for _, event := range []string{input, output} {
-				events += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  %s: %s\n", event, command.field, command.typ)
+				events += fmt.Sprintf("%s:\n  _key: case_id\n  case_id: text\n  %s: %s\n", event, command.field, command.typ)
 			}
 			handlers += fmt.Sprintf("  %s:\n    advances_to: active\n    emit:\n      event: %s\n      fields:\n        case_id: payload.case_id\n        %s: payload.%s\n", input, output, command.field, command.field)
 			mode := "select"
@@ -292,7 +292,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		schema = schema[:begin] + loopInputs + schema[end:]
 		schema = strings.Replace(schema, "    to: sink\n", "    to: sink\n    resolution: select-or-create\n", 1)
 		writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
-		writeClosedVariantFile(t, root, prefix+"events.yaml", "loop.escaped:\n  key: revision_id\n  revision_id: text\n")
+		writeClosedVariantFile(t, root, prefix+"events.yaml", "loop.escaped:\n  _key: revision_id\n  revision_id: text\n")
 		writeClosedVariantFile(t, root, prefix+"state.yaml", "case_id: text\n")
 		raw, err = os.ReadFile(filepath.Join(root, prefix+"sink/schema.yaml"))
 		if err != nil {

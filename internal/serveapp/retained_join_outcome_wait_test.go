@@ -33,7 +33,7 @@ func readNativeRetainedRootJoins(t *testing.T, reader pipeline.WorkflowTargetPer
 	if err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, instance.StateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(nil, nil, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

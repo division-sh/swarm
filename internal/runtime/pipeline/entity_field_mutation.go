@@ -116,12 +116,9 @@ func (pc *PipelineCoordinator) applyEntityFieldMutationAttempt(ctx context.Conte
 	}
 	fields, err := entityruntime.ApplyMutations(contract, snapshot.Fields, []entityruntime.Mutation{command.Mutation})
 	if err != nil {
-		if errors.Is(err, entityruntime.ErrImmutableMutation) {
-			return EntityFieldMutationResult{}, failures.Wrap(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "pipeline", "entity_field_operation", map[string]any{"action": "entity_write", "field": command.Mutation.Target}, err)
-		}
 		return EntityFieldMutationResult{}, failures.Wrap(failures.ClassSchemaInvalid, "invalid_tool_input", "pipeline", "entity_field_operation", map[string]any{"field": command.Mutation.Target}, err)
 	}
-	mutation := runtimeengine.StateMutation{StateCarrier: runtimeengine.NewStateCarrierWithOwners(fields, snapshot.Bookkeeping, snapshot.Control, snapshot.Gates, snapshot.StateBuckets)}
+	mutation := runtimeengine.StateMutation{StateCarrier: runtimeengine.NewStateCarrierWithOwners(fields, snapshot.Bookkeeping, snapshot.Control, snapshot.StateBuckets)}
 	prepared, err := repo.prepareMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: snapshot, State: mutation})
 	if err != nil {
 		return EntityFieldMutationResult{}, err

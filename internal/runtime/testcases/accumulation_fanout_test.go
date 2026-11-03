@@ -63,10 +63,4 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	if !hasAll(completed.Emits, "intake/item.review_requested") {
 		t.Fatalf("expected intake completion to emit item.review_requested, got %v", completed.Emits)
 	}
-	if completed.SetsGate != "intake_ready" {
-		t.Fatalf("expected intake_ready gate, got %q", completed.SetsGate)
-	}
-	if !hasAll(completed.ClearGates, "needs_revision") {
-		t.Fatalf("expected needs_revision gate cleared, got %v", completed.ClearGates)
-	}
 }

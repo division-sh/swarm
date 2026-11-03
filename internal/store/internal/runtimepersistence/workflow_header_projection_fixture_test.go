@@ -59,8 +59,8 @@ func seedWorkflowHeaderProjectionFixture(t *testing.T, ctx context.Context, db f
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO flow_instances
 		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
-		 current_state, gates, bookkeeping, accumulator, config, revision, entered_state_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,'static',TRUE,$6,'{}','{}',$7,$8,1,$9,$9,$9)`,
+		 current_state, bookkeeping, accumulator, config, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,'static',TRUE,$6,'{}',$7,$8,1,$9,$9,$9)`,
 		runID, path, entityID, fieldType, flow, stage, accumulator, string(config), at)
 	if err != nil {
 		t.Fatalf("seed native constructed-header projection: %v", err)

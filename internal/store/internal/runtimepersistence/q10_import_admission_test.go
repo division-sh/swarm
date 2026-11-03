@@ -25,7 +25,7 @@ func TestQ10DataOnlySetupAdmissionAndEmptyBirthBothStores(t *testing.T) {
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			request := pipeline.ScenarioSetupRequest{RunID: uuid.NewString(), CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "empty", EntityID: uuid.NewString(), FlowInstance: "import/one", EntityType: "review_item", Fields: map[string]any{}}}}
 			before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
-			for _, change := range []string{"stage", "blank_stage", "empty_gates", "gate", "unused_second_row"} {
+			for _, change := range []string{"stage", "blank_stage", "unused_second_row"} {
 				t.Run(change, func(t *testing.T) {
 					hostile := request
 					hostile.Entities = append([]pipeline.ScenarioSetupEntityRequest(nil), request.Entities...)
@@ -34,10 +34,6 @@ func TestQ10DataOnlySetupAdmissionAndEmptyBirthBothStores(t *testing.T) {
 						hostile.Entities[0].CurrentState = mutationlog.PresentLifecycleState("unknown")
 					case "blank_stage":
 						hostile.Entities[0].CurrentState = mutationlog.PresentLifecycleState("")
-					case "empty_gates":
-						hostile.Entities[0].Gates = map[string]bool{}
-					case "gate":
-						hostile.Entities[0].Gates = map[string]bool{"approved": true}
 					case "unused_second_row":
 						hostile.Entities = append(hostile.Entities, pipeline.ScenarioSetupEntityRequest{Alias: "unused", EntityID: uuid.NewString(), EntityType: "review_item", CurrentState: mutationlog.PresentLifecycleState("ready")})
 					}

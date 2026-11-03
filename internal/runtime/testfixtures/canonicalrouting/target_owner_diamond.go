@@ -32,7 +32,7 @@ connect:
     from: branch
     to: .
 `,
-		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
+		"events.yaml": "branch.start:\n  _key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
   branch.done:
     guard: instance.id != ""

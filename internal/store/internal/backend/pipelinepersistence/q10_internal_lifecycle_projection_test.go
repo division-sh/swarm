@@ -9,7 +9,7 @@ import (
 func TestQ10NoStageHistoryRetainsInternalLifecycle(t *testing.T) {
 	record := pipeline.WorkflowEngineStateRecord{
 		CurrentState: "pending", StageDefined: false,
-		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Gates: []byte(`{}`), Accumulator: []byte(`{}`),
+		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 	}
 	got, err := workflowEngineStateProjection(record)
 	if err != nil {

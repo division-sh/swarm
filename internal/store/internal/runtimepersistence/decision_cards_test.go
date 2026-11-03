@@ -1253,7 +1253,7 @@ func seedDecisionCardGateEntity(t *testing.T, db *sql.DB, postgres bool, runID, 
 	if err := gateruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	accumulator, err := json.Marshal(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+	accumulator, err := json.Marshal(runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1282,7 +1282,7 @@ func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, accumulator)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, accumulator)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -70,7 +70,7 @@ func VerifyEntityLastFieldClearAndColdReloadBothStoresForTest(t *testing.T, open
 	evaluated := loadEngineEvaluationForTest(t, ctx, repo, address)
 	_, err = owner.CommitEngineMutation(ctx, runtimeengine.EngineMutation{
 		Address: address, EvaluatedState: evaluated,
-		State: testEngineStateMutation(map[string]any{"undeclared": "poison"}, nil, nil),
+		State: testEngineStateMutation(map[string]any{"undeclared": "poison"}, nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "undeclared") {
 		t.Fatalf("unvalidated commit candidate accepted: %v", err)

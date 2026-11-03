@@ -72,10 +72,10 @@ func TestVerifyRunProjectionDomainComparison(t *testing.T) {
 		})
 	}
 	t.Run("nested_vs_atomic", func(t *testing.T) {
-		a := EntityStateProjection{Fields: map[string]any{"profile": map[string]any{"name": "old"}}, Gates: map[string]any{"node.gate": map[string]any{"open": false}}}
-		b := EntityStateProjection{Fields: map[string]any{"profile": map[string]any{"name": "new"}}, Gates: map[string]any{"node.gate": map[string]any{"open": true}}}
+		a := EntityStateProjection{Fields: map[string]any{"profile": map[string]any{"name": "old"}}, Bookkeeping: map[string]any{"node.fact": map[string]any{"open": false}}}
+		b := EntityStateProjection{Fields: map[string]any{"profile": map[string]any{"name": "new"}}, Bookkeeping: map[string]any{"node.fact": map[string]any{"open": true}}}
 		got, err := CompareEntityStateProjections("run", map[string]EntityStateProjection{"entity": a}, map[string]EntityStateProjection{"entity": b})
-		if err != nil || len(got.Rows) != 2 || *got.Rows[0].Path != "profile.name" || *got.Rows[1].Path != "node.gate" {
+		if err != nil || len(got.Rows) != 2 || *got.Rows[0].Path != "profile.name" || *got.Rows[1].Path != "node.fact" {
 			t.Fatalf("got=%+v err=%v", got, err)
 		}
 	})

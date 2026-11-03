@@ -19,11 +19,11 @@ type TrackedProjectionMutationStorage struct {
 }
 
 type TrackedEntityMutationProjectionStorage struct {
-	EntityType                              string
-	CurrentState                            *string
-	Revision                                *int64
-	Fields, Bookkeeping, Gates, Accumulator json.RawMessage
-	Mutations                               []TrackedProjectionMutationStorage
+	EntityType                       string
+	CurrentState                     *string
+	Revision                         *int64
+	Fields, Bookkeeping, Accumulator json.RawMessage
+	Mutations                        []TrackedProjectionMutationStorage
 }
 
 func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, selected any, run, entity string) (TrackedEntityMutationProjectionStorage, error) {
@@ -94,7 +94,7 @@ func trackedProjectionStorageFromInventory(inventory workflowheader.ReadInventor
 		for _, bucket := range []struct {
 			raw any
 			dst *json.RawMessage
-		}{{member.Fields, &evidence.Fields}, {member.Bookkeeping, &evidence.Bookkeeping}, {member.Gates, &evidence.Gates}, {member.Accumulator, &evidence.Accumulator}} {
+		}{{member.Fields, &evidence.Fields}, {member.Bookkeeping, &evidence.Bookkeeping}, {member.Accumulator, &evidence.Accumulator}} {
 			switch raw := bucket.raw.(type) {
 			case nil:
 			case string:

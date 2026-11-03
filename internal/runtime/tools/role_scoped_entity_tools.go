@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -91,23 +90,18 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 		entry.OutputSchema = roleScopedEntityWholeReadOutputSchema(contract)
 	case roleScopedEntityToolSaveField, roleScopedEntityToolUpdatePath:
 		typeRef := ""
-		refinements := runtimecontracts.SchemaRefinements{}
 		if spec.Subpath == "" {
 			if decl, err := entityruntime.FieldDecl(contract, spec.Field); err == nil {
 				typeRef = decl.Type
-				refinements = decl.Refinements
 			}
 		} else if typeRefForSubpath, ok := roleScopedEntitySubpathTypeRef(contract, spec.Field, spec.Subpath); ok {
 			typeRef = typeRefForSubpath
-			if field, err := entityruntime.ResolveFieldPath(contract, spec.Field+"."+spec.Subpath); err == nil {
-				refinements = field.Refinements
-			}
 		}
 		path := spec.Field
 		if spec.Subpath != "" {
 			path += "." + spec.Subpath
 		}
-		entry.InputSchema = roleScopedEntityMutationInputSchema(contract, path, typeRef, refinements)
+		entry.InputSchema = roleScopedEntityMutationInputSchema(contract, path, typeRef)
 		entry.OutputSchema = ObjectSchema(map[string]any{
 			"entity_id":              map[string]any{"type": "string"},
 			"field":                  map[string]any{"type": "string"},
@@ -121,9 +115,8 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 	return entry
 }
 
-func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, typeRef string, refinements runtimecontracts.SchemaRefinements) map[string]any {
+func roleScopedEntityMutationInputSchema(contract entityruntime.Contract, path, typeRef string) map[string]any {
 	wholeValue := entityContractJSONSchema(contract, typeRef, map[string]struct{}{})
-	applyEntitySchemaRefinements(wholeValue, refinements, false)
 	setOp := map[string]any{"type": "string", "enum": []any{entityruntime.ContainedOperationSet}}
 	whole := ObjectSchema(map[string]any{"op": setOp, "value": wholeValue}, "value")
 	props := map[string]any{"op": setOp, "value": map[string]any{}}
@@ -166,7 +159,7 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 		if err != nil {
 			continue
 		}
-		fieldProps[field] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
+		fieldProps[field] = entityContractJSONSchema(contract, decl.Type, map[string]struct{}{})
 	}
 	return ObjectSchema(fieldProps)
 }

@@ -347,17 +347,16 @@ func CopyScenarioSetup(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: scenario-setup-fixture\nstages:\n  waiting: {}\n  ready: {final: true}\ninputs:\n  - opco.product_review_requested\n")
 	writeClosedVariantFile(t, root, "events.yaml", "opco.product_review_requested:\n  product_id: text\n  note: text\n")
-	writeClosedVariantFile(t, root, "state.yaml", "product_id: \"\"\nnote: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "product_id: \"\"\nnote: text\nreview_ready: false\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `reviewer:
-  gate_state:
-    gates: [review_ready]
   opco.product_review_requested:
     data_accumulation:
       source_event: opco.product_review_requested
       writes:
         - source_field: note
           target_field: note
-    clear_gates: [review_ready]
+        - target_field: review_ready
+          value: false
     advances_to: ready
 `)
 	writeClosedVariantFile(t, root, "tests/setup-target.yaml", `# fixture: setup target and expectation
@@ -366,8 +365,7 @@ setup:
     - as: product
       type: state
       current_state: waiting
-      fields: {product_id: p-1, note: seeded}
-      gates: {review_ready: true}
+      fields: {product_id: p-1, note: seeded, review_ready: true}
 steps:
   - publish: opco.product_review_requested
     payload: {product_id: p-1, note: approved}
@@ -375,8 +373,7 @@ expect:
   entities:
     - ref: product
       current_state: ready
-      fields: {product_id: p-1, note: approved}
-      gates: {review_ready: false}
+      fields: {product_id: p-1, note: approved, review_ready: false}
 `)
 	return root
 }

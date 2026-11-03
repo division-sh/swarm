@@ -257,8 +257,6 @@ type HandlerTransitionSemantic struct {
 	Guard            *GuardSpec
 	AdvancesTo       string
 	Terminate        bool
-	SetsGate         *GateSpec
-	ClearGates       []string
 	DataAccumulation WorkflowDataAccumulation
 	Emit             EmitSpec
 	OnSuccess        HandlerOnSuccessSpec
@@ -678,10 +676,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-type GateSpec struct {
-	Name  string `yaml:"name"`
-	Value any    `yaml:"value"`
-}
 type QuerySpec struct {
 	Source       string     `yaml:"source"`
 	SourcePath   paths.Path `yaml:"-"`
@@ -724,22 +718,12 @@ type EntitySchemaGroup struct {
 	Fields []EntitySchemaField `yaml:"fields"`
 }
 type EntitySchemaField struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	Initial     any    `yaml:"initial"`
-	Primary     bool   `yaml:"primary"`
-	Indexed     bool   `yaml:"indexed"`
-	Nullable    bool   `yaml:"nullable"`
-	Description string `yaml:"description"`
-}
-type NodeGateStateSchema struct {
-	Description string          `yaml:"description"`
-	Gates       []NodeGateField `yaml:"gates"`
-	Storage     string          `yaml:"storage"`
-}
-type NodeGateField struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`
+	Initial  any    `yaml:"initial"`
+	Primary  bool   `yaml:"primary"`
+	Indexed  bool   `yaml:"indexed"`
+	Nullable bool   `yaml:"nullable"`
 }
 type RulesDocument = flowmodel.RulesDocument
 type RuleSet = flowmodel.RuleSet
@@ -825,24 +809,10 @@ type EventPayloadSpec struct {
 	Required   []string                  `yaml:"required"`
 }
 type EventFieldSpec struct {
-	Type        string            `yaml:"type"`
-	Description string            `yaml:"description"`
-	Refinements SchemaRefinements `yaml:"-"`
-	ExactSchema *ToolInputSchema  `yaml:"-" json:"-"`
-}
-type SchemaLengthRefinement struct {
-	Min *int `yaml:"min"`
-	Max *int `yaml:"max"`
-}
-type SchemaRangeRefinement struct {
-	Min *float64 `yaml:"min"`
-	Max *float64 `yaml:"max"`
-}
-type SchemaRefinements struct {
-	Pattern string                 `yaml:"pattern"`
-	Length  SchemaLengthRefinement `yaml:"length"`
-	Range   SchemaRangeRefinement  `yaml:"range"`
-	EqualTo string                 `yaml:"equal_to"`
+	Type        string           `yaml:"type"`
+	ExactSchema *ToolInputSchema `yaml:"-" json:"-"`
+	// Platform event prose is not an authored event-field declaration.
+	platformDescription string
 }
 type HTTPToolSpec struct {
 	Method         string            `yaml:"method"`
@@ -917,35 +887,26 @@ func (e EnumTypeDecl) Validate(name string) error {
 }
 
 type NamedTypeDecl struct {
-	Description string                   `yaml:"-"`
-	Fields      map[string]TypeFieldSpec `yaml:"-"`
+	Fields map[string]TypeFieldSpec `yaml:"-"`
 }
 
 type TypeFieldSpec struct {
-	Type        string            `yaml:"type"`
-	IsOptional  bool              `yaml:"-" json:"is_optional"`
-	Description string            `yaml:"description"`
-	Refinements SchemaRefinements `yaml:"-"`
+	Type       string `yaml:"type"`
+	IsOptional bool   `yaml:"-" json:"is_optional"`
 }
 
 type EntityContractsDocument map[string]EntityContract
 
 type EntityContract struct {
-	Description string                     `yaml:"-"`
-	Owner       string                     `yaml:"-"`
-	Fields      map[string]EntityFieldDecl `yaml:"-"`
+	Owner  string                     `yaml:"-"`
+	Fields map[string]EntityFieldDecl `yaml:"-"`
 }
 
 type EntityFieldDecl struct {
-	Type               string            `yaml:"type"`
-	IsOptional         bool              `yaml:"-"`
-	Initial            any               `yaml:"initial"`
-	Indexed            bool              `yaml:"indexed"`
-	Immutable          bool              `yaml:"immutable"`
-	Description        string            `yaml:"description"`
-	Refinements        SchemaRefinements `yaml:"-"`
-	UnusedReason       string            `yaml:"_unused_reason"`
-	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
+	Type       string `yaml:"type"`
+	IsOptional bool   `yaml:"-"`
+	Initial    any    `yaml:"initial"`
+	Indexed    bool   `yaml:"indexed"`
 }
 type ProjectFlowIngress struct {
 	Alias     *string                      `yaml:"alias,omitempty"`
@@ -1319,7 +1280,6 @@ type SystemNodeContract struct {
 	IdempotencyTable string                            `yaml:"-"`
 	Timers           []WorkflowTimerContract           `yaml:"timers"`
 	EventHandlers    map[string]SystemNodeEventHandler `yaml:"-"`
-	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
 	Activity         ActivitySpec             `yaml:"activity"`
@@ -1330,8 +1290,6 @@ type SystemNodeEventHandler struct {
 	Guard            *GuardSpec               `yaml:"guard"`
 	AdvancesTo       string                   `yaml:"advances_to"`
 	Terminate        bool                     `yaml:"terminate" json:"terminate,omitempty"`
-	SetsGate         *GateSpec                `yaml:"sets_gate"`
-	ClearGates       []string                 `yaml:"clear_gates"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Condition        string                   `yaml:"condition"`
 	Logic            string                   `yaml:"logic"`

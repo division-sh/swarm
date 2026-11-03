@@ -28,31 +28,30 @@ type projectionShapeFaultCase struct {
 
 func projectionShapeFaultCases() []projectionShapeFaultCase {
 	return []projectionShapeFaultCase{
-		{"ConflictingEntityType", SetWorkflowProjectionConflictingEntityTypeForTest, true, 5, `"wrong_entity_type"`},
-		{"PlatformBookkeeping", SetWorkflowProjectionPlatformBookkeepingForTest, false, 4, `{"platform_fact":"preserve"}`},
+		{"ConflictingEntityType", SetWorkflowProjectionConflictingEntityTypeForTest, true, 4, `"wrong_entity_type"`},
+		{"PlatformBookkeeping", SetWorkflowProjectionPlatformBookkeepingForTest, false, 3, `{"platform_fact":"preserve"}`},
 		{"FieldsArray", SetWorkflowProjectionFieldsArrayForTest, true, 0, "[]"},
-		{"NumericGate", SetWorkflowProjectionNumericGateForTest, false, 1, "{\"g_ready\":1}"},
-		{"AccumulatorArray", SetWorkflowProjectionAccumulatorArrayForTest, false, 2, "[]"},
-		{"MalformedTransitionHistory", SetWorkflowProjectionMalformedTransitionHistoryForTest, false, 3, "{\"workflow_version\":\"1.0.0\",\"instance_id\":\"inst-1\",\"storage_ref\":\"storage-ref\",\"transition_history\":\"bad\"}"},
-		{"ConflictingInstanceID", SetWorkflowProjectionConflictingInstanceIDForTest, false, 3, "{\"workflow_version\":\"1.0.0\",\"instance_id\":\"inst-2\",\"storage_ref\":\"storage-ref\",\"flow_path\":\"storage-ref\"}"},
-		{"SlashOnlyFlowPath", SetWorkflowProjectionSlashOnlyFlowPathForTest, false, 3, "{\"workflow_version\":\"1.0.0\",\"instance_id\":\"inst-1\",\"storage_ref\":\"storage-ref\",\"flow_path\":\"/\"}"},
+		{"AccumulatorArray", SetWorkflowProjectionAccumulatorArrayForTest, false, 1, "[]"},
+		{"MalformedTransitionHistory", SetWorkflowProjectionMalformedTransitionHistoryForTest, false, 2, "{\"workflow_version\":\"1.0.0\",\"instance_id\":\"inst-1\",\"storage_ref\":\"storage-ref\",\"transition_history\":\"bad\"}"},
+		{"ConflictingInstanceID", SetWorkflowProjectionConflictingInstanceIDForTest, false, 2, "{\"workflow_version\":\"1.0.0\",\"instance_id\":\"inst-2\",\"storage_ref\":\"storage-ref\",\"flow_path\":\"storage-ref\"}"},
+		{"SlashOnlyFlowPath", SetWorkflowProjectionSlashOnlyFlowPathForTest, false, 2, "{\"workflow_version\":\"1.0.0\",\"instance_id\":\"inst-1\",\"storage_ref\":\"storage-ref\",\"flow_path\":\"/\"}"},
 	}
 }
 
-func readProjectionShapeStorage(t *testing.T, f receiverConfigActivationFixture, run, entity string) [6]any {
+func readProjectionShapeStorage(t *testing.T, f receiverConfigActivationFixture, run, entity string) [5]any {
 	t.Helper()
-	var raw [5][]byte
+	var raw [4][]byte
 	var entityType string
-	if err := f.db.QueryRowContext(f.ctx, `SELECT es.fields,fi.gates,fi.accumulator,fi.config,fi.bookkeeping,es.entity_type FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).Scan(&raw[0], &raw[1], &raw[2], &raw[3], &raw[4], &entityType); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, `SELECT es.fields,fi.accumulator,fi.config,fi.bookkeeping,es.entity_type FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).Scan(&raw[0], &raw[1], &raw[2], &raw[3], &entityType); err != nil {
 		t.Fatal(err)
 	}
-	var out [6]any
+	var out [5]any
 	for i := range raw {
 		if err := json.Unmarshal(raw[i], &out[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
-	out[5] = entityType
+	out[4] = entityType
 	return out
 }
 
@@ -82,9 +81,9 @@ func TestWorkflowPrivateBookkeepingWitnessPreservesOtherFactsBothStores(t *testi
 				t.Fatalf("exact bookkeeping witness: rows=%d err=%v", changed, err)
 			}
 			expected := before
-			bookkeeping := maps.Clone(before[4].(map[string]any))
+			bookkeeping := maps.Clone(before[3].(map[string]any))
 			bookkeeping["private_fact"] = "must-not-leak"
-			expected[4] = bookkeeping
+			expected[3] = bookkeeping
 			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, expected) {
 				t.Fatalf("bookkeeping witness lost a kept fact: actual=%+v expected=%+v", actual, expected)
 			}

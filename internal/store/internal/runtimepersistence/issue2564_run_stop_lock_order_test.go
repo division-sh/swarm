@@ -367,7 +367,7 @@ func issue2564AssertRunStopPreservation(t *testing.T, f forkContentionFixture, b
 	if current.Revision != wantRevision || current.CurrentState != before.CurrentState || current.Fields["name"] != wantName {
 		t.Fatalf("lost business fields or phantom/reverted header revision: before=%+v after=%+v want name=%s revision=%d", before, current, wantName, wantRevision)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(current.Fields, current.Bookkeeping, current.Gates, current.StateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(current.Fields, current.Bookkeeping, current.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

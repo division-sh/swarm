@@ -163,7 +163,7 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					f.state.Accumulator, err = json.Marshal(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+					f.state.Accumulator, err = json.Marshal(runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets())
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -222,7 +222,7 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if !root {
 						assertA2ForkStructuralParent(t, parentFixture, result.ForkRunID, parentSource)
 					}
-					inherited, found, err := workflowlifecycle.LoadStageEntry(child.Buckets[2])
+					inherited, found, err := workflowlifecycle.LoadStageEntry(child.Buckets[1])
 					want := entry
 					want.RunID, want.OriginRunID = result.ForkRunID, f.runID
 					if root {
@@ -231,7 +231,7 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if err != nil || !found || inherited != want {
 						t.Fatalf("persisted inherited owner = %#v want %#v: %v", inherited, want, err)
 					}
-					carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, child.Buckets[3])
+					carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, child.Buckets[2])
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -352,7 +352,7 @@ func assertA2ForkStructuralParent(t *testing.T, fixture snapshotOwnershipFixture
 	if header.FlowInstance != forkRunID || header.EntityID != forkRunID || header.CurrentState != sourceHeader.CurrentState || header.Revision != 1 || !header.EnteredStageAt.Equal(sourceHeader.EnteredStageAt) || got.Lifecycle.Mode != source.Lifecycle.Mode || got.Lifecycle.StageDefined != source.Lifecycle.StageDefined {
 		t.Fatalf("fork-local structural parent changed captured state/entry: got=%#v source=%#v", got, source)
 	}
-	if !reflect.DeepEqual(header.Gates, sourceHeader.Gates) || !reflect.DeepEqual(header.Accumulator, sourceHeader.Accumulator) {
+	if !reflect.DeepEqual(header.Accumulator, sourceHeader.Accumulator) {
 		t.Fatal("fork-local structural parent changed gates or accumulator")
 	}
 	var sourceBookkeeping, forkBookkeeping map[string]any

@@ -158,7 +158,7 @@ func validateRunForkMaterializedEntityLifecycle(source *runForkRevisionEntityMet
 		if strings.TrimSpace(source.EntityType) == "" {
 			return fmt.Errorf("fork materialization imported state has no entity type for %s", entityID)
 		}
-		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
+		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
 			return fmt.Errorf("imported entity %s cannot carry lifecycle history", entityID)
 		}
 	default:

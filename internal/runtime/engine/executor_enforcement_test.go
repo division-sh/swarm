@@ -23,17 +23,6 @@ type persistentStateRepo struct {
 	found    bool
 }
 
-func cloneBoolMap(in map[string]bool) map[string]bool {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]bool, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
 func (r *persistentStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	if !r.found {
 		return StateSnapshot{}, false, nil
@@ -45,9 +34,8 @@ func (r *persistentStateRepo) LoadState(context.Context, StateAddress) (StateSna
 			r.snapshot.StateCarrier.Fields,
 			r.snapshot.StateCarrier.Bookkeeping,
 			r.snapshot.StateCarrier.Control,
-			r.snapshot.StateCarrier.Gates,
-			r.snapshot.StateCarrier.StateBuckets,
-		),
+
+			r.snapshot.StateCarrier.StateBuckets),
 	}, true, nil
 }
 
@@ -57,7 +45,7 @@ func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress,
 		r.found = true
 		r.snapshot = StateSnapshot{
 			EntityID:     entityID,
-			StateCarrier: NewStateCarrier(map[string]any{}, map[string]bool{}, map[string]map[string]any{}),
+			StateCarrier: NewStateCarrier(map[string]any{}, map[string]map[string]any{}),
 		}
 	}
 	if !entityID.IsZero() {
@@ -74,9 +62,6 @@ func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress,
 	if mutation.StateCarrier.StateBuckets != nil {
 		r.snapshot.StateCarrier.StateBuckets = cloneStateBucketSet(mutation.StateCarrier.StateBuckets)
 	}
-	if mutation.StateCarrier.Gates != nil {
-		r.snapshot.StateCarrier.Gates = cloneBoolMap(mutation.StateCarrier.Gates)
-	}
 	return nil
 }
 
@@ -87,36 +72,30 @@ func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
 		mutation        StateMutation
 		prepare         func(*StateSnapshot)
 		wantAuthored    any
-		wantApproved    bool
 		wantCurrent     string
 		wantBucketCount any
 		wantActionFact  any
 	}{
 		{
-			name: "authored_only", mutation: StateMutation{StateCarrier: NewStateCarrier(map[string]any{"authored": "changed"}, nil, nil)},
+			name: "authored_only", mutation: StateMutation{StateCarrier: NewStateCarrier(map[string]any{"authored": "changed"}, nil)},
 			prepare: func(state *StateSnapshot) { state.StateCarrier.Fields["authored"] = "changed" }, wantAuthored: "changed",
-		},
-		{
-			name: "gate_only", mutation: StateMutation{StateCarrier: NewStateCarrier(nil, map[string]bool{"approved": true}, nil)},
-			prepare: func(state *StateSnapshot) { state.StateCarrier.Gates["approved"] = true }, wantAuthored: "value", wantApproved: true,
 		},
 		{
 			name: "lifecycle_only", mutation: StateMutation{NextState: "done"},
 			prepare: func(state *StateSnapshot) { state.CurrentState = "done" }, wantAuthored: "value", wantCurrent: "done",
 		},
 		{
-			name: "clear", mutation: StateMutation{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)},
+			name: "clear", mutation: StateMutation{StateCarrier: NewStateCarrier(map[string]any{}, nil)},
 			prepare: func(state *StateSnapshot) { state.StateCarrier.Fields = map[string]any{} },
 		},
 		{
-			name: "fan_out_or_accumulation", mutation: StateMutation{StateCarrier: NewStateCarrier(nil, nil, map[string]map[string]any{"join": {"count": 3}})},
+			name: "fan_out_or_accumulation", mutation: StateMutation{StateCarrier: NewStateCarrier(nil, map[string]map[string]any{"join": {"count": 3}})},
 			prepare: func(state *StateSnapshot) { state.StateCarrier.StateBuckets["join"]["count"] = 3 }, wantAuthored: "value", wantBucketCount: 3,
 		},
 		{
 			name: "action",
 			mutation: StateMutation{StateCarrier: NewStateCarrierWithOwners(
-				map[string]any{"action": "result"}, map[string]any{"action": "recorded"}, StateControl{}, nil, nil,
-			)},
+				map[string]any{"action": "result"}, map[string]any{"action": "recorded"}, StateControl{}, nil)},
 			prepare: func(state *StateSnapshot) {
 				state.StateCarrier.Fields["action"] = "result"
 				state.StateCarrier.Bookkeeping["action"] = "recorded"
@@ -134,9 +113,8 @@ func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
 					map[string]any{"authored": "value"},
 					map[string]any{"platform": "fact"},
 					StateControl{FlowPath: "root"},
-					map[string]bool{"ready": true},
-					map[string]map[string]any{"join": {"count": 2}},
-				),
+
+					map[string]map[string]any{"join": {"count": 2}}),
 			}
 			tc.prepare(&state)
 			repo.snapshot = state
@@ -166,11 +144,8 @@ func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
 			if got := loaded.StateCarrier.Fields["authored"]; !reflect.DeepEqual(got, tc.wantAuthored) {
 				t.Fatalf("authored field = %#v, want %#v", got, tc.wantAuthored)
 			}
-			if loaded.StateCarrier.Control.FlowPath != "root" || !loaded.StateCarrier.Gates["ready"] {
-				t.Fatalf("committed control/gates = %#v", loaded.StateCarrier)
-			}
-			if loaded.StateCarrier.Gates["approved"] != tc.wantApproved {
-				t.Fatalf("approved gate = %v, want %v", loaded.StateCarrier.Gates["approved"], tc.wantApproved)
+			if loaded.StateCarrier.Control.FlowPath != "root" {
+				t.Fatalf("committed control = %#v", loaded.StateCarrier)
 			}
 			wantCurrent := tc.wantCurrent
 			if wantCurrent == "" {
@@ -201,7 +176,7 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "pending",
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
+			StateCarrier: NewStateCarrier(map[string]any{}, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -244,7 +219,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "done",
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
+			StateCarrier: NewStateCarrier(map[string]any{}, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -280,7 +255,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 	newExecutor := func(score int, allowed bool) *Executor {
 		exec, err := NewExecutor(RuntimeDependencies{
 			Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending", "approved"),
-			StateRepo:     &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "pending", StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
+			StateRepo:     &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "pending", StateCarrier: NewStateCarrier(map[string]any{"score": score}, map[string]map[string]any{})}},
 			MutationOwner: stubMutationOwner{},
 			Locker:        stubLocker{},
 		}, stubEvaluator{bools: map[string]bool{
@@ -349,7 +324,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "pending",
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
+			StateCarrier: NewStateCarrier(map[string]any{}, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -385,7 +360,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		State: StateSnapshot{
 			EntityID:     "ent-1",
 			CurrentState: "pending",
-			StateCarrier: NewStateCarrier(nil, nil, map[string]map[string]any{}),
+			StateCarrier: NewStateCarrier(nil, map[string]map[string]any{}),
 		},
 	})
 	if err != nil {
@@ -422,7 +397,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		found: true,
 		snapshot: StateSnapshot{
 			CurrentState: "active",
-			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
+			StateCarrier: NewStateCarrier(map[string]any{}, map[string]map[string]any{}),
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{

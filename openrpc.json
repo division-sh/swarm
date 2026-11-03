@@ -6034,7 +6034,7 @@
     },
     {
       "name": "entity.get",
-      "description": "Read one entity in full, including independent authored fields, platform bookkeeping, gates, and accumulator state.",
+      "description": "Read one entity in full, including independent authored fields, platform bookkeeping, and accumulator state.",
       "params": [
         {
           "name": "entity_id",
@@ -13237,12 +13237,6 @@
                 "flow_instance": {
                   "description": "Concrete flow scope for the setup entity; omitted for root-flow setup rows.",
                   "type": "string"
-                },
-                "gates": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "type": "object"
                 }
               },
               "required": [
@@ -16507,10 +16501,6 @@
           "fields": {
             "additionalProperties": true,
             "type": "object"
-          },
-          "gates": {
-            "additionalProperties": true,
-            "type": "object"
           }
         },
         "required": [
@@ -19493,7 +19483,7 @@
       },
       "EntityFull": {
         "additionalProperties": false,
-        "description": "Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/gates/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.",
+        "description": "Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.",
         "properties": {
           "accumulated": {
             "description": "Accumulator state. Map of accumulator key → JSON value; values may be scalars, objects, or arrays depending on accumulate, data_accumulation, compute, or projection writers.",
@@ -19527,20 +19517,6 @@
             "description": "Typed entity fields per the entity contract. Shape depends on entity_type.",
             "type": "object"
           },
-          "gates": {
-            "description": "Gate state. Map of gate_name → boolean.",
-            "oneOf": [
-              {
-                "additionalProperties": {
-                  "type": "boolean"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "loops": {
             "description": "Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.",
             "oneOf": [
@@ -19560,7 +19536,6 @@
           "entity",
           "fields",
           "bookkeeping",
-          "gates",
           "accumulated",
           "loops"
         ],

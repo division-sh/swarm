@@ -7,8 +7,6 @@ setup:
     fields:
       status: not_ready
       counter: 0
-    gates:
-      g_processed: false
 steps:
 - publish: process.requested
   payload: {}
@@ -19,5 +17,3 @@ expect:
     fields:
       status: not_ready
       counter: 0
-    gates:
-      g_processed: false

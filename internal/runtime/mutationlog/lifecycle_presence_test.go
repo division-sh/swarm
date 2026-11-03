@@ -11,7 +11,7 @@ func TestQ10PartialDomainDiffAndReconstructionAbsence(t *testing.T) {
 			{Domain: DomainAuthoredField, Path: "current_state", NewValue: "unknown"},
 			{Domain: DomainAuthoredField, Path: "gates", NewValue: map[string]any{}},
 		})
-		if err != nil || state.CurrentState != nil || state.Gates != nil || state.Bookkeeping != nil || state.Accumulator != nil {
+		if err != nil || state.CurrentState != nil || state.Bookkeeping != nil || state.Accumulator != nil {
 			t.Fatalf("data-only history invented lifecycle: state=%#v err=%v", state, err)
 		}
 		if state.Fields["current_state"] != "unknown" {
@@ -20,16 +20,16 @@ func TestQ10PartialDomainDiffAndReconstructionAbsence(t *testing.T) {
 	})
 	t.Run("empty_import", func(t *testing.T) {
 		state, err := ReconstructEntityStateProjection(nil)
-		if err != nil || state.CurrentState != nil || state.Gates != nil || state.Bookkeeping != nil || state.Accumulator != nil || state.Fields == nil {
+		if err != nil || state.CurrentState != nil || state.Bookkeeping != nil || state.Accumulator != nil || state.Fields == nil {
 			t.Fatalf("empty history invented lifecycle: state=%#v err=%v", state, err)
 		}
 	})
 	t.Run("birth_preserves_prior_domain_entries", func(t *testing.T) {
 		state, err := ReconstructEntityStateProjection([]ProjectionMutation{
-			{Domain: DomainGate, Path: "accepted", NewValue: true},
+			{Domain: DomainAuthoredField, Path: "accepted", NewValue: true},
 			{Domain: DomainLifecycleState, NewValue: "unknown"},
 		})
-		if err != nil || state.CurrentState == nil || *state.CurrentState != "unknown" || state.Gates["accepted"] != true || state.Bookkeeping == nil || state.Accumulator == nil {
+		if err != nil || state.CurrentState == nil || *state.CurrentState != "unknown" || state.Fields["accepted"] != true || state.Bookkeeping == nil || state.Accumulator == nil {
 			t.Fatalf("birth lost domain evidence: state=%#v err=%v", state, err)
 		}
 	})

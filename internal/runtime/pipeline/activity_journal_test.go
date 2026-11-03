@@ -197,7 +197,7 @@ func seedNativeLoopActivityInstance(t *testing.T, fixture WorkflowActivityNative
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, buckets)
+	carrier := runtimeengine.NewStateCarrier(map[string]any{}, buckets)
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: runtimeflowidentity.LogicalInstanceID(path), StorageRef: path, EntityID: entityID,
 		WorkflowName: "validation", WorkflowVersion: "1.0.0",

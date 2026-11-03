@@ -174,9 +174,6 @@ type checkerContext struct {
 	timerLoaded   bool
 	timerFindings []Finding
 
-	gateSchemaLoaded   bool
-	gateSchemaFindings []Finding
-
 	inputPinLoaded   bool
 	inputPinFindings []Finding
 
@@ -244,7 +241,6 @@ var bootCheckRegistry = []Check{
 	{ID: "event_runtime_wiring_validation", Mode: CheckSource, Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Mode: CheckSource, Severity: "error", Run: checkTimerValidation},
 	{ID: "clock_schedule_validation", Mode: CheckSource, Severity: "error", Run: checkClockScheduleValidation},
-	{ID: "gate_schema_validation", Mode: CheckSource, Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "composition_connect_validation", Mode: CheckSource, Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Mode: CheckSource, Severity: "error", Run: checkPinTargetResolution},
@@ -1245,22 +1241,6 @@ func stringValueLocal(v any) string {
 		return typed
 	}
 	return ""
-}
-
-func gateNameLocal(v any) string {
-	switch typed := v.(type) {
-	case nil:
-		return ""
-	case runtimecontracts.GateSpec:
-		return strings.TrimSpace(typed.Name)
-	case *runtimecontracts.GateSpec:
-		if typed == nil {
-			return ""
-		}
-		return strings.TrimSpace(typed.Name)
-	default:
-		return strings.TrimSpace(stringValueLocal(v))
-	}
 }
 
 func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {

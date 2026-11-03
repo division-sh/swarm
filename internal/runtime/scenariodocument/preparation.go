@@ -15,7 +15,7 @@ func PrepareCLI(out CLI, evaluator *Evaluator, fixture func(string) (semanticval
 		if err := prepareTextValues(evaluator, &entity.Flow, &entity.CurrentState); err != nil {
 			return CLI{}, fmt.Errorf("setup.entities[%d]: %w", i, err)
 		}
-		if err := prepareObjects(evaluator, &entity.Fields, &entity.Gates); err != nil {
+		if err := prepareObjects(evaluator, &entity.Fields); err != nil {
 			return CLI{}, fmt.Errorf("setup.entities[%d]: %w", i, err)
 		}
 	}
@@ -29,7 +29,7 @@ func PrepareCLI(out CLI, evaluator *Evaluator, fixture func(string) (semanticval
 		if err := prepareTextValues(evaluator, &entity.CurrentState); err != nil {
 			return CLI{}, fmt.Errorf("expect.entities[%d]: %w", i, err)
 		}
-		if err := prepareObjects(evaluator, &entity.Fields, &entity.Gates); err != nil {
+		if err := prepareObjects(evaluator, &entity.Fields); err != nil {
 			return CLI{}, fmt.Errorf("expect.entities[%d]: %w", i, err)
 		}
 	}

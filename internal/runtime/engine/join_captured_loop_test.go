@@ -46,7 +46,7 @@ func TestJoinCapturedLoopCannotAdvanceReplacement(t *testing.T) {
 	}
 	frame := executionFrame{joinLoopGeneration: captured, loopActivation: &owner, loopPlan: &runtimecontracts.WorkflowLoopPlan{FlowID: "orders", ID: "revision"},
 		req:   ExecutionRequest{Handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "working"}}},
-		state: ExecutionState{State: testStateSnapshot("working", nil, nil, buckets)},
+		state: ExecutionState{State: testStateSnapshot("working", nil, buckets)},
 	}
 	if err := (&Executor{}).advanceAdmittedLoop(&frame, "reviewing"); err == nil {
 		t.Fatal("old outcome advanced the replacement activation")

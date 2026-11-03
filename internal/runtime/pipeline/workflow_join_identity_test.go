@@ -58,8 +58,7 @@ func exactJoinSemanticStateEqual(left, right WorkflowInstance) bool {
 		reflect.DeepEqual(left.TransitionHistory, right.TransitionHistory) &&
 		reflect.DeepEqual(left.StateBuckets, right.StateBuckets) &&
 		reflect.DeepEqual(left.Fields, right.Fields) &&
-		reflect.DeepEqual(left.Bookkeeping, right.Bookkeeping) &&
-		reflect.DeepEqual(left.Gates, right.Gates)
+		reflect.DeepEqual(left.Bookkeeping, right.Bookkeeping)
 }
 
 type exactJoinScope struct {
@@ -707,7 +706,7 @@ func VerifyNativeWorkflowJoinRetainedGenerationMutationRoundTripBothStoresForTes
 		if err != nil {
 			t.Fatal(err)
 		}
-		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, projection.Accumulator)
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, projection.Accumulator)
 		if err != nil {
 			t.Fatal(err)
 		}

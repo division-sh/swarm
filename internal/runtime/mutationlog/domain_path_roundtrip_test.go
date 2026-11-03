@@ -7,7 +7,7 @@ import (
 )
 
 func TestMutationDomainPathChronologicalFold(t *testing.T) {
-	for _, domain := range []Domain{DomainAccumulator, DomainGate, DomainBookkeeping} {
+	for _, domain := range []Domain{DomainAccumulator, DomainBookkeeping} {
 		t.Run(string(domain), func(t *testing.T) {
 			records := []ProjectionMutation{
 				{Domain: DomainLifecycleState, NewValue: "pending"},
@@ -27,8 +27,6 @@ func TestMutationDomainPathChronologicalFold(t *testing.T) {
 			switch domain {
 			case DomainAccumulator:
 				atomic = got.Accumulator
-			case DomainGate:
-				atomic = got.Gates
 			case DomainBookkeeping:
 				atomic = got.Bookkeeping
 			}

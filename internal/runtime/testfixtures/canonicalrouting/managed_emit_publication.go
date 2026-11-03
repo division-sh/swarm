@@ -89,7 +89,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 	rootEvents := "work.requested:\n  case_id: text\nsibling.requested:\n  case_id: text\n"
 	if mode == "template" {
 		rootSchema = "# fixture: managed-driver\ninputs:\n  - work.requested\n  - sibling.requested\n  - sibling.ack\n  - source.ack\noutputs:\n  - work.dispatch\n  - sibling.requested\n  - sibling.ack\n  - source.ack\nconnect:\n  - {event: work.dispatch, from: ., to: source, rename: work.requested, resolution: select-or-create}\n  - {event: sibling.requested, from: ., to: sibling}\n  - {event: work.ack, from: sibling, to: ., rename: sibling.ack}\n  - {event: work.ack, from: source, to: ., rename: source.ack}\n"
-		rootEvents = "work.requested:\n  key: case_id\n  case_id: text\nwork.dispatch:\n  key: case_id\n  case_id: text\nsibling.requested:\n  case_id: text\n"
+		rootEvents = "work.requested:\n  _key: case_id\n  case_id: text\nwork.dispatch:\n  _key: case_id\n  case_id: text\nsibling.requested:\n  case_id: text\n"
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  work.requested:\n    emit: {event: work.dispatch, fields: {case_id: payload.case_id}}\n")
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)

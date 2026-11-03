@@ -131,7 +131,7 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 		}
 		ctx = events.WithDeliveryContext(deliverylifecycle.WithRoute(deliverylifecycle.WithClaim(ctx, claim), route), incoming)
 	}
-	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
+	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil)})
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("capture: %v %#v", err, result.FanOutIntent)
 	}

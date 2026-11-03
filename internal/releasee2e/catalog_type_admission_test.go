@@ -230,7 +230,7 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			source := filepath.Join(base, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples/routing/template-select-or-create"), source)
 			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "account.requested:\n  account_id: text\n")
-			writeReleaseFile(t, filepath.Join(source, "producer/events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n")
+			writeReleaseFile(t, filepath.Join(source, "producer/events.yaml"), "account.ready:\n  _key: account_id\n  account_id: text\n")
 			writeReleaseFile(t, filepath.Join(source, "account/state.yaml"), "account_id: text\n")
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {

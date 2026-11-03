@@ -347,7 +347,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				}
 				assertExactJoinDeliveryStatus(t, selected, ctx, completionID, joinNode.Key(), "delivered")
 				instance := waitForExactJoinState(t, ctx, coordinator, route, "ready")
-				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -515,7 +515,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					cancel()
 					assertExactJoinDeliveryStatus(t, selected, ctx, eventID, joinNode.Key(), "delivered")
 					instance := waitForExactJoinState(t, ctx, coordinator, route, outcome.terminalState)
-					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -592,7 +592,7 @@ func exactJoinPersistedArm(t *testing.T, instance runtimepipeline.WorkflowInstan
 
 func exactJoinPersistedArmForOwner(t *testing.T, instance runtimepipeline.WorkflowInstance, owner runtimeflowidentity.RunScopedFlowInstance) joinruntime.Activation {
 	t.Helper()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

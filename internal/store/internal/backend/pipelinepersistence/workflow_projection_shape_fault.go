@@ -15,10 +15,6 @@ func SetWorkflowProjectionFieldsArrayForTest(ctx context.Context, tx *sql.Tx, ru
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET fields = '[]' WHERE run_id = $2 AND entity_id = $1`, key, run))
 }
 
-func SetWorkflowProjectionNumericGateForTest(ctx context.Context, tx *sql.Tx, run, key string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET gates = '{"g_ready":1}' WHERE run_id = $2 AND instance_path = $1`, key, run))
-}
-
 func SetWorkflowProjectionAccumulatorArrayForTest(ctx context.Context, tx *sql.Tx, run, key string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET accumulator = '[]' WHERE run_id = $2 AND instance_path = $1`, key, run))
 }

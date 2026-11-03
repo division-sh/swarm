@@ -149,7 +149,7 @@ func constructFanOutCompletionReceiver(t *testing.T, ctx context.Context, f rece
 		Identity: owner, EntityID: instance.EntityID, WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		ParentInstance: child.Identity().ParentRoute.FlowInstance,
 		Mode:           instance.Mode, Status: instance.Status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
-		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Gates: []byte(`{}`), Accumulator: []byte(`{}`), Config: config, InitialFields: []byte(`{}`),
+		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: config, InitialFields: []byte(`{}`),
 		EnteredStageAt: instance.EnteredStageAt, CreatedAt: instance.CreatedAt, UpdatedAt: at.Add(time.Second),
 		ExpectedState: instance.CurrentState, ExpectedRevision: instance.Revision, Transition: pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion,
 	}
