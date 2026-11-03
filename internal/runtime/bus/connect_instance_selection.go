@@ -42,12 +42,6 @@ type connectInstanceSelection struct {
 }
 
 func (s connectInstanceSelection) Empty() bool { return s.receiver.Readback().FlowID == "" }
-func (s connectInstanceSelection) ActivationVariables() map[string]string {
-	if s.Activation == nil {
-		return nil
-	}
-	return cloneRouteActivationVariables(s.Activation.ActivationVariables)
-}
 func (s connectInstanceSelection) ActionCode() string {
 	if s.Empty() {
 		return ""
