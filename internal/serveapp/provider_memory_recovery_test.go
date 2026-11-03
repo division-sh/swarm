@@ -61,7 +61,10 @@ func (s *memoryConsumedStore) ConsumeCompletionResponse(ctx context.Context, att
 	return err
 }
 
-type memoryConsumedPublisher struct{ runtimellm.EventPublisher }
+type memoryConsumedPublisher struct {
+	runtimellm.EventPublisher
+	runtimeeffects.CompletionSpendProjector
+}
 type memoryConsumedRuntime struct {
 	*runtimellm.OpenAICompatibleRuntime
 }
@@ -85,7 +88,9 @@ func runMemoryConsumedProcess(t *testing.T, raw string) {
 		model := &memoryConsumedRuntime{}
 		publisher := &memoryConsumedPublisher{}
 		opts.TestLLMRuntime = model
-		opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { publisher.EventPublisher = rt.Bus }
+		opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+			publisher.EventPublisher, publisher.CompletionSpendProjector = rt.Bus, rt.Budget
+		}
 		original := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			stores, err := original(ctx, selection, cfg)
@@ -105,7 +110,7 @@ func runMemoryConsumedProcess(t *testing.T, raw string) {
 			modelRuntime, err := (runtimellm.RuntimeFactory{
 				Cfg: cfg, Sessions: deps.SessionRegistry, LiveSessions: deps.LiveSessionAcquirer, Conversations: deps.ConversationStore,
 				Events: publisher, Credentials: credentials,
-				CompletionController: runtimeeffects.NewCompletionController(deps.EffectsStore, observed, deps.CompletionHeartbeatStore, nil),
+				CompletionController: runtimeeffects.NewCompletionController(deps.EffectsStore, observed, deps.CompletionHeartbeatStore, publisher).WithExecutionPosture(executionposture.Live),
 			}).Build()
 			if err != nil {
 				return nil, err
