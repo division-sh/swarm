@@ -256,7 +256,7 @@ func writeProviderSearchJourneySource(t *testing.T, customURL string) string {
 		handlers[output] = map[string]any{"guard": true}
 		write(name+"/manifest.yaml", manifest)
 		write(name+"/events.yaml", map[string]any{output: map[string]any{"title": "string", "url": "string", "snippet": "string"}})
-		write(name+"/schema.yaml", map[string]any{"pins": map[string]any{"inputs": []string{input}, "outputs": []string{output}}})
+		write(name+"/schema.yaml", map[string]any{"inputs": []string{input}, "outputs": []string{output}})
 		write(name+"/agents.yaml", map[string]any{"researcher": map[string]any{
 			"role": "researcher", "model": "regular", "intent": map[string]any{"inline": "Search using web_search, then call emit_search_" + name + "_completed with title, url and snippet from the normalized result."},
 			"native_tools": map[string]any{"web_search": true}, "subscriptions": []string{input}, "emit_events": []string{output},
@@ -270,7 +270,7 @@ func writeProviderSearchJourneySource(t *testing.T, customURL string) string {
 		write(name+"/policy.yaml", map[string]any{"web_search_provider": policy})
 	}
 	write("events.yaml", events)
-	write("schema.yaml", map[string]any{"pins": map[string]any{"inputs": inputs}, "connect": connections})
+	write("schema.yaml", map[string]any{"inputs": inputs, "connect": connections})
 	write("nodes.yaml", map[string]any{"observer": handlers})
 	return root
 }

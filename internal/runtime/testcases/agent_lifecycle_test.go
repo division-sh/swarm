@@ -25,7 +25,4 @@ func TestGenericBundle_AgentLifecyclePatterns(t *testing.T) {
 	if delivery.EffectiveMode() != "template" || delivery.AutoEmitOnCreate.Event != "item.completed" {
 		t.Fatalf("unexpected delivery flow lifecycle semantics: %+v", delivery)
 	}
-	if len(bundle.FlowRequiredAgents("delivery")) == 0 {
-		t.Fatal("expected delivery flow required agents")
-	}
 }

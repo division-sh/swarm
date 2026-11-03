@@ -637,7 +637,7 @@ func VerifyDeliveryTargetApplicationCarriesConstructedScenarioPreStateThroughMut
 		}
 	}()
 	result, err := pc.executeNodeContractHandler(deliveryCtx, node, runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"},
+		Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"},
 	}, workflowTriggerContext{Event: evt}, false)
 	if err != nil {
 		t.Fatalf("execute exact entity-only pre-state: %v", err)

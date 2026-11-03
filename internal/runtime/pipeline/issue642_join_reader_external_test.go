@@ -94,7 +94,7 @@ func TestIssue642JoinWriterFixedCutReaderBothStores(t *testing.T) {
 func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, scenario issue642JoinReaderScenario) *issue642JoinReaderFixture {
 	t.Helper()
 	files := a2CountJoinFiles(scenario.count)
-	files["schema.yaml"] += "    - reader.cut\n"
+	files["schema.yaml"] += "  - reader.cut\n"
 	files["events.yaml"] += "reader.cut:\npoll.tick:\n"
 	if scenario.deadline {
 		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "      output: payload.result\n", "      output: payload.result\n      deadline: {after: 1h, from: stage_entry}\n", 1)
@@ -107,7 +107,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	subscriptions := []events.EventType{"item.completed"}
 	if scenario.stageExit {
 		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  awaiting: {}\n", "  awaiting: {}\n  aborted: {}\n", 1)
-		files["schema.yaml"] += "    - manual.abort\n"
+		files["schema.yaml"] += "  - manual.abort\n"
 		files["events.yaml"] += "manual.abort:\n"
 		files["nodes.yaml"] += "  manual.abort:\n    advances_to: aborted\n"
 		subscriptions = append(subscriptions, "manual.abort")

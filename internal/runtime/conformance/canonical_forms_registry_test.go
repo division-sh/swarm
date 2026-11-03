@@ -667,13 +667,12 @@ func TestTypedFieldDecoderFamilyUsesYAMLSourceProjectionOnly(t *testing.T) {
 	}
 	want := map[string]bool{
 		"projectTypeCatalogDocument":     false,
-		"projectNamedTypeDeclarations":   false,
 		"projectNamedTypeDeclaration":    false,
 		"projectTypeFieldSpec":           false,
 		"projectEntityContractsDocument": false,
 		"projectEntityContract":          false,
 		"projectEntityFieldDecl":         false,
-		"decodeWave1FieldValue":          false,
+		"projectDeclaredFieldType":       false,
 	}
 	for _, declaration := range parsed.Decls {
 		function, ok := declaration.(*ast.FuncDecl)

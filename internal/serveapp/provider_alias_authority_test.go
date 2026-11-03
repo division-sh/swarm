@@ -535,7 +535,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 				rootSchema += "  - {event: " + name + ", from: " + alias + ", to: " + receiver + "}\n"
 			}
 		}
-		files[alias+"/schema.yaml"] = "stages: []\n" + pins + "  outputs: [" + strings.Join(connectedNames, ", ") + "]\n"
+		files[alias+"/schema.yaml"] = "stages: []\n" + pins + "outputs: [" + strings.Join(connectedNames, ", ") + "]\n"
 		account := "420079"
 		if alias == "beta" {
 			account = "420080"

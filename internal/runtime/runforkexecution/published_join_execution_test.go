@@ -129,11 +129,11 @@ func publishedJoinFixture(t *testing.T) string {
 		}
 		updated := strings.Replace(string(body), replacement[0], replacement[1], 1)
 		if name == "schema.yaml" {
-			const input = "    - item.completed\n"
+			const input = "  - item.completed\n"
 			if strings.Count(updated, input) != 1 {
 				t.Fatal("published join fixture lost its exact input declaration")
 			}
-			updated = strings.Replace(updated, input, input+"    - join.prepared\n", 1)
+			updated = strings.Replace(updated, input, input+"  - join.prepared\n", 1)
 		}
 		if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
 			t.Fatal(err)

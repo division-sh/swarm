@@ -334,7 +334,7 @@ func writeGeneratedToolEvidenceSource(t *testing.T, cell string) string {
 	}
 	payload := map[string]any{"conversation": "string", "sequence": "integer", "task": "string"}
 	write("events.yaml", map[string]any{"evidence.submitted": payload, "evidence.requested": payload})
-	write("schema.yaml", map[string]any{"pins": map[string]any{"inputs": []string{"evidence.submitted", "evidence.completed"}, "outputs": []string{"evidence.requested"}}, "connect": []map[string]any{
+	write("schema.yaml", map[string]any{"inputs": []string{"evidence.submitted", "evidence.completed"}, "outputs": []string{"evidence.requested"}, "connect": []map[string]any{
 		{"event": "evidence.requested", "from": ".", "to": "worker", "resolution": "select-or-create"}, {"event": "evidence.completed", "from": "worker", "to": "."},
 	}})
 	write("nodes.yaml", map[string]any{
@@ -347,9 +347,9 @@ func writeGeneratedToolEvidenceSource(t *testing.T, cell string) string {
 	switch cell {
 	case "nested_object":
 		valueType = "tool_value"
-		write("worker/types.yaml", map[string]any{"types": map[string]any{
+		write("worker/types.yaml", map[string]any{
 			"tool_value": map[string]any{"note": "string", "detail": "tool_detail"}, "tool_detail": map[string]any{"label": "string"},
-		}})
+		})
 	case "array":
 		valueType = []string{"string"}
 	}

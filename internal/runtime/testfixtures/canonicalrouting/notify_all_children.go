@@ -20,9 +20,9 @@ const canonicalNotifyAllChildrenAgents = `account-worker:
   intent: prompts/account-worker.md
   model: regular
   subscriptions:
-  - account.notify.requested
+    - account.notify.requested
   emit_events:
-  - account.notification.completed
+    - account.notification.completed
   mock:
     kind: python
     module: mocks/account-worker.py

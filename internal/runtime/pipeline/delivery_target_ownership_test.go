@@ -653,13 +653,18 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 				Condition: "state.status == 'ready'",
 			}),
 			"pin-creator":  deliveryTargetOwnershipEventNode("pin-creator", "work.created", runtimecontracts.SystemNodeEventHandler{}),
-			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}),
+			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "selected_items", Key: "id"}}),
 			"pin-upserter": deliveryTargetOwnershipEventNode("pin-upserter", "work.upserted", runtimecontracts.SystemNodeEventHandler{}),
 			"key-selector": deliveryTargetOwnershipEventNode("key-selector", "work.keyed", runtimecontracts.SystemNodeEventHandler{
 				Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"},
 			}),
 			"key-upserter": deliveryTargetOwnershipEventNode("key-upserter", "work.keyed", runtimecontracts.SystemNodeEventHandler{}),
 		},
+	}
+	for _, name := range []string{"work.selected", "work.keyed"} {
+		flow.Events[name] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{
+			Type: "object", Properties: map[string]runtimecontracts.EventFieldSpec{"id": {Type: "text"}}, Required: []string{"id"},
+		}}
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	root.Children[0].Parent = &root
@@ -669,7 +674,10 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "review": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema, "review": flow.Schema},
-	}, false, []string{"review"})
+	}, false, []string{"review"}, map[string]string{
+		"review/state.yaml": "instance_key: text\nitems: [Item]\nselected_items: [Item]\n",
+		"review/types.yaml": "Item:\n  id: text\n",
+	})
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile delivery-target ownership semantics: %v", err)
 	}
