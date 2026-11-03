@@ -727,12 +727,24 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	control("run.continue", childRunID)
 	status(sourceRunID, "paused")
 	status(childRunID, "live")
+	beforeStopRefusal := readWorkspaceProofApplication(t, owner)
+	refusedStop := requireServedJSONRPCError(t, endpoint, "run.stop", map[string]any{"run_id": childRunID, "idempotency_key": uuid.NewString()})
+	if refusedStop.Data["code"] != apiv1.RunNotPausedCode || !reflect.DeepEqual(beforeStopRefusal, readWorkspaceProofApplication(t, owner)) {
+		t.Fatalf("live stop escaped its initial admission refusal or mutated state: %+v", refusedStop)
+	}
+	if supervisor.runtimeContexts.LookupBundleHashStatus(sourceHash).Loaded() {
+		t.Fatal("paused-source stop proof requires the target runtime to remain unloaded")
+	}
+	stopRuntime := supervisor.CurrentRuntime()
 	stop := map[string]any{"run_id": sourceRunID, "idempotency_key": "W4-unloaded-source-stop"}
 	var stopped, replayed map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &stopped)
 	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &replayed)
 	if stopped["ok"] != true || !reflect.DeepEqual(stopped, replayed) {
 		t.Fatalf("paused unloaded stop lost its canonical replay: first=%v replay=%v", stopped, replayed)
+	}
+	if supervisor.runtimeContexts.LookupBundleHashStatus(sourceHash).Loaded() || supervisor.CurrentRuntime() != stopRuntime {
+		t.Fatal("stopping the paused target loaded or replaced a runtime")
 	}
 	status(sourceRunID, "cancelled")
 	status(childRunID, "live")
