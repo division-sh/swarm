@@ -144,10 +144,10 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 			state.phase = "ready"
 			if err != nil {
 				state.phase = "failed"
-				failure := failures.FromError(err, "runtime_context", "continue_load").Failure
+				failure, detail := continuedRunFailure(err, stage)
 				state.failure = &failure
 				state.stage = stage
-				state.detail = continuedRunFailureDetail(err)
+				state.detail = detail
 			}
 			s.continuedRuns[runID] = state
 		}
@@ -260,4 +260,47 @@ func continuedRunFailureDetail(err error) string {
 		}
 	}
 	return message
+}
+
+func continuedRunFailure(err error, stage string) (failures.Envelope, string) {
+	if _, typed := failures.As(err); !typed {
+		var class failures.Class
+		var code, detail string
+		switch continuedRunContextCause(err) {
+		case context.DeadlineExceeded:
+			class, code, detail = failures.ClassTimeout, "continued_run_load_timeout", "load timeout"
+		case context.Canceled:
+			class, code, detail = failures.ClassLifecycleConflict, "continued_run_load_cancelled", "load cancelled"
+		}
+		if code != "" {
+			cause := failures.Wrap(class, code, "runtime_context", "continue_load", map[string]any{"stage": stage}, err)
+			return failures.FromError(cause, "runtime_context", "continue_load").Failure, detail
+		}
+	}
+	return failures.FromError(err, "runtime_context", "continue_load").Failure, continuedRunFailureDetail(err)
+}
+
+// A joined independent failure is not reclassified as mere cancellation.
+func continuedRunContextCause(err error) error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var cause error
+		for _, child := range joined.Unwrap() {
+			found := continuedRunContextCause(child)
+			if found == nil || (cause != nil && found != cause) {
+				return nil
+			}
+			cause = found
+		}
+		return cause
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return continuedRunContextCause(wrapped.Unwrap())
+	}
+	if err == context.DeadlineExceeded || err == context.Canceled {
+		return err
+	}
+	return nil
 }
