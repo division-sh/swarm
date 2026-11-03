@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime/debug"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -44,6 +46,7 @@ func (am *AgentManager) unpublishedActivationState(ctx context.Context, token ef
 				return cell.view.ConfigRevision, cell.view.Topology, nil
 			}
 		}
+		log.Printf("S2_ACTIVATION_REFUSAL token=%+v manager_phase=%s accepted=%t attempt=%p grace=%t caller_error=%v stack=%s", token, am.lifecycle.phase, acceptedReadiness, readinessAttemptFromContext(ctx), am.lifecycle.registrationWithinShutdownGrace(ctx, acceptedReadiness), ctx.Err(), debug.Stack())
 	}
 	return "", agenttopology.Admission{}, failures.New(failures.ClassLifecycleConflict, "activation_probe_generation_not_current", "agent-lifecycle", "observe_workspace_gateway", nil)
 }
