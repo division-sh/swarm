@@ -111,6 +111,17 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 				t.Fatalf("stop served run: %+v err=%v", outcome, err)
 			}
 			v4 := importData(durabledata.VersionHead(v3.Candidate.VersionID), "fourth")
+			readLiveFork := func(runID string, want durabledata.VersionID) {
+				t.Helper()
+				items, err := store.LoadRunResourceAccess(fixture.ctx, runID, []durabledata.DeclarationRef{ref})
+				if err != nil || len(items) != 1 || items[0].VersionID != want {
+					t.Fatalf("live fork actor read: items=%+v err=%v want=%s", items, err, want)
+				}
+				pinned, err := store.LoadPinnedSource(fixture.ctx, runID, catalog.BundleHash, ref)
+				if err != nil || pinned.VersionID != v4.Candidate.VersionID {
+					t.Fatalf("live fork rewrote immutable source: source=%+v err=%v want=%s", pinned, err, v4.Candidate.VersionID)
+				}
+			}
 			read(first.RunID, v3.Candidate.VersionID)
 			read(second.RunID, v4.Candidate.VersionID)
 			conflict, err := store.ExecuteDataSourceOperation(fixture.ctx, durabledata.SourceCommand{
@@ -150,9 +161,9 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("select fork live: %v", err)
 			}
-			read(forkRunID, v5.Candidate.VersionID)
+			readLiveFork(forkRunID, v5.Candidate.VersionID)
 			v6 := importData(durabledata.VersionHead(v5.Candidate.VersionID), "sixth")
-			read(forkRunID, v6.Candidate.VersionID)
+			readLiveFork(forkRunID, v6.Candidate.VersionID)
 			if outcome, err := store.PauseRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
 				t.Fatalf("pause live fork: %+v err=%v", outcome, err)
 			}
@@ -165,7 +176,7 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 			if outcome, err := store.ContinueRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
 				t.Fatalf("continue selected fork: %+v err=%v", outcome, err)
 			}
-			read(forkRunID, v7.Candidate.VersionID)
+			readLiveFork(forkRunID, v7.Candidate.VersionID)
 			if outcome, err := store.PauseRunControlOutcome(fixture.ctx, runcontrol.TransitionRequest{RunID: forkRunID, Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
 				t.Fatalf("pause before fork stop: %+v err=%v", outcome, err)
 			}
