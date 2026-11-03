@@ -476,12 +476,9 @@ func roleScopedCurrentEntityID(ctx context.Context) string {
 		// producer. Construction dependencies are not current-entity authority.
 		source := inbound.RoutingSource()
 		switch source.Kind() {
-		case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+		case events.RoutingSourceRoot, events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
 			entityID = strings.TrimSpace(source.Route().EntityID)
 		}
-	}
-	if entityID == strings.TrimSpace(inbound.RunID()) {
-		return ""
 	}
 	return entityID
 }
