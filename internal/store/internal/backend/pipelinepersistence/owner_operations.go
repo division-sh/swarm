@@ -1317,11 +1317,9 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 			if err := validateGroupedSingletonSettlementTx(txctx, tx, state); err != nil {
 				return err
 			}
-			if current, err := s.sqlitePipelineClaimState(claim); err != nil || current != state {
-				if err != nil {
-					return err
-				}
-				return runtimepipelineobligation.ErrStaleClaim
+			current, readErr := s.sqlitePipelineClaimState(claim)
+			if err := decisionPipelineClaimReadback(current, state, readErr); err != nil {
+				return err
 			}
 			if err := requirePipelineExecutionTx(txctx, tx, claim.EventID(), false, s); err != nil {
 				return err
@@ -1350,6 +1348,16 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 		return runtimepipelineobligation.SettlementOutcome{}, pipelineObligationMutationError(outcome)
 	}
 	return runtimepipelineobligation.CommittedSettlement(true), outcome.Err()
+}
+
+func decisionPipelineClaimReadback(current, expected *pipelineClaimState, err error) error {
+	if err != nil || current != expected {
+		if err != nil {
+			return err
+		}
+		return runtimepipelineobligation.ErrStaleClaim
+	}
+	return nil
 }
 
 func markDecisionRouteProcessedTx(ctx context.Context, tx pipelineExecer, attempt *mutationprotocol.Attempt, eventID string, postgres bool, now time.Time) error {

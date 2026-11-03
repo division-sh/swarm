@@ -88,29 +88,9 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 	if err != nil {
 		return nil, err
 	}
-	var candidate channelonboarding.Candidate
-	for _, plan := range projection.ChannelPlans {
-		if plan.Provider() != provider {
-			continue
-		}
-		if candidate.Provider != "" {
-			return nil, fmt.Errorf("more than one admitted channel implements %s", provider)
-		}
-		identity, err := plan.InterfaceIdentity()
-		if err != nil {
-			return nil, err
-		}
-		profile, ok := plan.OnboardingProfile()
-		if !ok {
-			return nil, channelonboarding.ErrInvalidRequest
-		}
-		candidate = channelonboarding.Candidate{DeploymentRegistration: true, Provider: provider, Interface: identity,
-			Plan: plan, Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()),
-			Ceremony: channelonboarding.CeremonyAccountLink, ProviderCredentialRole: profile.ProviderCredential(),
-			SigningCredentialRole: profile.SigningCredential()}
-	}
-	if candidate.Provider == "" || candidate.Validate() != nil {
-		return nil, fmt.Errorf("no admitted deployment channel for %s", provider)
+	candidate, err := deploymentChannelCandidate(provider, projection.ChannelPlans)
+	if err != nil {
+		return nil, err
 	}
 	directory, err := resolveCLISwarmDirFromConfig(root, opts.swarmDirResolutionOptions(), loaded.cli)
 	if err != nil {
@@ -145,6 +125,34 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 		}
 	}
 	return c, c.initializeRegistration(ctx, directory.Path, loaded.Config.Channels.HITL, candidate, projection.ProviderTriggers, opts)
+}
+
+func deploymentChannelCandidate(provider string, plans []packs.SatisfactionPlan) (channelonboarding.Candidate, error) {
+	var candidate channelonboarding.Candidate
+	for _, plan := range plans {
+		if plan.Provider() != provider {
+			continue
+		}
+		if candidate.Provider != "" {
+			return channelonboarding.Candidate{}, fmt.Errorf("more than one admitted channel implements %s", provider)
+		}
+		identity, err := plan.InterfaceIdentity()
+		if err != nil {
+			return channelonboarding.Candidate{}, err
+		}
+		profile, ok := plan.OnboardingProfile()
+		if !ok {
+			return channelonboarding.Candidate{}, channelonboarding.ErrInvalidRequest
+		}
+		candidate = channelonboarding.Candidate{DeploymentRegistration: true, Provider: provider, Interface: identity,
+			Plan: plan, Posture: channelonboarding.ActivationPosture(profile.ActivationPosture()),
+			Ceremony: channelonboarding.CeremonyAccountLink, ProviderCredentialRole: profile.ProviderCredential(),
+			SigningCredentialRole: profile.SigningCredential()}
+	}
+	if candidate.Provider == "" || candidate.Validate() != nil {
+		return channelonboarding.Candidate{}, fmt.Errorf("no admitted deployment channel for %s", provider)
+	}
+	return candidate, nil
 }
 
 func (c *DeploymentChannelControl) registrationContext(ctx context.Context) (context.Context, error) {
