@@ -134,18 +134,6 @@ func (m runCompletionSystemNodeModule) WorkflowNodes() []runtimepipeline.Workflo
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }
 
-func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {
-	t.Helper()
-	var eventID string
-	if err := db.QueryRow(`SELECT trigger_event_id::text FROM runs WHERE run_id = $1::uuid`, runID).Scan(&eventID); err != nil {
-		t.Fatalf("load trigger event id: %v", err)
-	}
-	if strings.TrimSpace(eventID) == "" {
-		t.Fatal("trigger_event_id is empty")
-	}
-	return eventID
-}
-
 func assertSystemNodeDeliverySettled(t *testing.T, db *sql.DB, eventID, nodeID string) {
 	t.Helper()
 	var status, reason string

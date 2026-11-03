@@ -1302,15 +1302,6 @@ func seedActiveRuntimeBusAgentForSource(t *testing.T, ctx context.Context, selec
 	return identity
 }
 
-func loadRunStateForEvent(t *testing.T, ctx context.Context, selected any, eventID string) (string, string, string) {
-	t.Helper()
-	out, err := storetest.ReadStandaloneRunStorage(ctx, selected, eventID)
-	if err != nil {
-		t.Fatalf("load run state for %s: %v", eventID, err)
-	}
-	return out.RunID, out.Status, out.TriggerEventType
-}
-
 func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, selected any, eventID string) int {
 	t.Helper()
 	count, err := storetest.CountAgentEventDeliveryStorage(ctx, selected, eventID)
@@ -3465,21 +3456,6 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("agent receipt changed run status for %s = %q, want running", tc.eventType, runStatus)
 			}
 		})
-	}
-}
-
-func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID string) {
-	t.Helper()
-	candidate, err := storetest.ReadStandaloneCompletionCandidate(ctx, pg, eventID)
-	if err != nil {
-		t.Fatalf("load standalone completion candidate: %v", err)
-	}
-	result, err := pg.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.FinalCatalog{})
-	if err != nil {
-		t.Fatalf("execute standalone completion candidate: %v", err)
-	}
-	if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-		t.Fatalf("standalone completion outcome = %s, want %s", result.Outcome, runtimerunlifecycle.OutcomeTerminallyEligible)
 	}
 }
 
