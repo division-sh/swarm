@@ -862,7 +862,7 @@ func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string)
 		"manifest.yaml":                  []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":                    []byte("stages: []\n"),
 		"ingress/manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"ingress/schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n"),
+		"ingress/schema.yaml":            []byte("stages: []\ninputs: [inbound.telegram.raw, inbound.telegram.text_message]\n"),
 		"ingress/telegram/manifest.yaml": []byte(fmt.Sprintf("version: %s\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n", version)),
 		"ingress/telegram/trigger.yaml": []byte(fmt.Sprintf(`payload_object_required: true
 delivery_id: {literal: delivery-1, required: true}

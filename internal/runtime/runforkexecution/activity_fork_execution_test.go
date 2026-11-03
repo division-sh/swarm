@@ -516,8 +516,7 @@ func selectedContractActivityDeclaredSourceWithResultConsumer(t *testing.T, serv
 		"flow_a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `stages:
   pending: {}
-pins:
-  inputs: [review.start, review.requested, review.retry, review.close]
+inputs: [review.start, review.requested, review.retry, review.close]
 connect:
   - {event: review.start, from: ., to: flow_a}
   - {event: review.requested, from: ., to: flow_a}
@@ -535,8 +534,7 @@ loops:
     revision_field: revision_id
     max_attempts: 3
     escape: {advances_to: exhausted}
-pins:
-  inputs: [review.start, review.requested, review.retry, review.close]
+inputs: [review.start, review.requested, review.retry, review.close]
 `,
 
 		"flow_a/state.yaml": "name: \"activity-fork-proof\"\n",

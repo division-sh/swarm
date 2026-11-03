@@ -104,7 +104,7 @@ func acknowledgedRootInputEndpoint(t testing.TB) (semanticview.Source, APIEventP
 	t.Helper()
 	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"schema.yaml":   []byte("stages: []\npins:\n  inputs: [task.requested]\n"),
+		"schema.yaml":   []byte("stages: []\ninputs: [task.requested]\n"),
 		"events.yaml":   []byte("task.requested:\n"),
 	})
 	if err != nil {

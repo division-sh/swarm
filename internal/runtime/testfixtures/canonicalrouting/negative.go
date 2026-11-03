@@ -13,8 +13,8 @@ func CopyRetiredPinMarker(t testing.TB, input bool) string {
 		direction, field = "inputs", "source"
 	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  "+direction+":\n    - work.requested\n",
-		"  "+direction+":\n    - {event: work.requested, "+field+": harness}\n")
+		direction+":\n  - work.requested\n",
+		direction+":\n  - {event: work.requested, "+field+": harness}\n")
 	return root
 }
 
@@ -26,8 +26,8 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 		"    rename: deploy.completed\n",
 		"    rename: deploy.completed\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "schema.yaml"),
-		"    - deploy.completed\n",
-		"    - deploy.completed\n    - deploy.audited\n")
+		"  - deploy.completed\n",
+		"  - deploy.completed\n  - deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "nodes.yaml"),
 		"    advances_to: done\n",
 		"    advances_to: done\n  deploy.audited:\n    advances_to: done\n")
@@ -91,7 +91,7 @@ func ApplyTemplateReplyNegativeMutation(t testing.TB, root string, mutation Temp
 		applyClosedReplacement(t, compositionFile, "    replies_to: provider.requested\n", "")
 	case TemplateReplyMissingCorrelationField:
 		applyClosedReplacement(t, filepath.Join(root, "requester", "events.yaml"),
-			"  key: provider_request_id\n  provider_request_id: text\n", "")
+			"  _key: provider_request_id\n  provider_request_id: text\n", "")
 	case TemplateReplyAmbiguousRequestEdge:
 		applyClosedReplacement(t, compositionFile,
 			"  - event: provider.requested\n    from: requester\n    to: provider\n",

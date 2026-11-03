@@ -54,14 +54,14 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 				files["events.yaml"] += "work.requested:\n  token: text\n"
 				files["nodes.yaml"] += "emitter:\n  work.requested:\n    emit:\n      event: work.first\n      fields:\n        token: payload.token\n"
 			case PendingInputDuplicateEndpoint:
-				files["schema.yaml"] += "    - work.first\n"
+				files["schema.yaml"] += "  - work.first\n"
 			case PendingInputMixedCompletion:
-				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "done: {final: true}", "archived: {final: true}") + "    - work.marked\n"
+				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "done: {final: true}", "archived: {final: true}") + "  - work.marked\n"
 				files["events.yaml"] += "work.marked:\n  token: text\n"
 				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "  work.first:\n    advances_to: done\n", "", 1)
 				files["nodes.yaml"] += "marker:\n  work.marked:\n    advances_to: archived\n"
 			}
-			files["schema.yaml"] += "  outputs: [work.seeded, " + eventName + "]\nconnect:\n  - {event: work.seeded, from: ., to: child}\n  - {event: " + eventName + ", from: ., to: child}\n"
+			files["schema.yaml"] += "outputs: [work.seeded, " + eventName + "]\nconnect:\n  - {event: work.seeded, from: ., to: child}\n  - {event: " + eventName + ", from: ., to: child}\n"
 			if variant == PendingInputMixedCompletion {
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "connect:\n", "connect:\n  - {event: work.seeded, from: ., to: a_finished}\n  - {event: work.first, from: ., to: a_finished}\n", 1)
 			}

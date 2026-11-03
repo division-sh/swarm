@@ -428,7 +428,7 @@ func dynamicFlowCreationAtomicityBundle(t *testing.T) *runtimecontracts.Workflow
 	root := t.TempDir()
 	for name, content := range map[string]string{
 		"schema.yaml":        "stages: []\n",
-		"review/schema.yaml": "instance: name\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
+		"review/schema.yaml": "instance: name\nstages:\n  pending: {}\ninputs:\n  - task.started\nauto_emit_on_create:\n  event: task.started\n",
 		"review/state.yaml":  "name: text\n",
 		"review/events.yaml": "task.started:\n  name: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	} {

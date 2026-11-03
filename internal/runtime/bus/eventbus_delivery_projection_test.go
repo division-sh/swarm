@@ -387,7 +387,7 @@ func preparedProjectionEvent(label string, envelope events.EventEnvelope) events
 func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing.T) {
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [validation.requested]\n",
+		"schema.yaml":   "stages: []\ninputs: [validation.requested]\n",
 		"events.yaml":   "validation.requested:\n",
 	}))
 	for _, mode := range []string{"direct", "subscribed_post_commit"} {

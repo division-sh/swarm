@@ -265,7 +265,7 @@ func TestS1ProviderSourceDoesNotPromoteVisibilityToHolderOwnership(t *testing.T)
 	for _, withPolicy := range []bool{false, true} {
 		members := map[string][]byte{
 			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-			"schema.yaml":   []byte("stages: []\npins:\n  inputs: [inbound.whatsapp.text_message]\n"),
+			"schema.yaml":   []byte("stages: []\ninputs: [inbound.whatsapp.text_message]\n"),
 		}
 		for name, body := range packfixture.NeutralProviderMembers() {
 			members["whatsapp/"+name] = body

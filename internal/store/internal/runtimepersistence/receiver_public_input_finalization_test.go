@@ -38,10 +38,10 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			root := filepath.Join(t.TempDir(), "receiver")
 			for name, contents := range map[string]string{
 				"manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
-				"schema.yaml":                 "pins:\n  inputs: [conversation.received]\n  outputs: [conversation.received]\nconnect:\n  - {event: conversation.received, from: ., to: telegram-chat, resolution: select-or-create}\n",
+				"schema.yaml":                 "inputs: [conversation.received]\noutputs: [conversation.received]\nconnect:\n  - {event: conversation.received, from: ., to: telegram-chat, resolution: select-or-create}\n",
 				"events.yaml":                 "conversation.received:\n  conversation_reference: text\n  conversation_scope: text\n  external_account: text\n  provider_message_reference: integer\n  text: text\n",
 				"telegram-chat/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-				"telegram-chat/schema.yaml":   "instance: conversation_reference\nauto_emit_on_create:\n  event: chat.initialized\npins:\n  inputs: [conversation.received]\n",
+				"telegram-chat/schema.yaml":   "instance: conversation_reference\nauto_emit_on_create:\n  event: chat.initialized\ninputs: [conversation.received]\n",
 				"telegram-chat/state.yaml":    "conversation_reference: text\ntext: text\nprovider_message_reference: integer\nenabled: false\n",
 				"telegram-chat/events.yaml":   "chat.initialized:\n  conversation_reference: text\n  text: text\n  provider_message_reference: integer\n  enabled: boolean\n",
 				"telegram-chat/nodes.yaml":    "receiver:\n  conversation.received:\n    guard: payload.conversation_reference != ''\n  chat.initialized:\n    data_accumulation:\n      writes: [text, provider_message_reference, enabled]\n",

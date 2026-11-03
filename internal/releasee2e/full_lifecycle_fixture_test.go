@@ -54,8 +54,8 @@ func addFullLifecycleBusinessInput(t *testing.T, root string) {
 	// Stage order defines the initial stage; retain it while changing only pins.
 	schema := string(raw)
 	for _, replacement := range [][2]string{
-		{"  inputs:\n    - inbound.telegram.text_message", "  inputs:\n    - inbound.telegram.text_message\n    - lifecycle.message"},
-		{"  outputs:\n    - inbound.telegram.text_message", "  outputs:\n    - lifecycle.message_ready"},
+		{"inputs:\n  - inbound.telegram.text_message", "inputs:\n  - inbound.telegram.text_message\n  - lifecycle.message"},
+		{"outputs:\n  - inbound.telegram.text_message", "outputs:\n  - lifecycle.message_ready"},
 		{"  - event: inbound.telegram.text_message\n    from: .\n    to: telegram-chat\n", "  - event: lifecycle.message_ready\n    from: .\n    to: telegram-chat\n    rename: inbound.telegram.text_message\n"},
 	} {
 		if strings.Count(schema, replacement[0]) != 1 {
@@ -69,7 +69,7 @@ func addFullLifecycleBusinessInput(t *testing.T, root string) {
 			t.Fatalf("lifecycle business input would overwrite %s: %v", name, err)
 		}
 	}
-	writeReleaseFile(t, filepath.Join(root, "types.yaml"), "enums:\n  LifecycleConversationScope: {values: [direct, shared], default: direct}\n")
+	writeReleaseFile(t, filepath.Join(root, "types.yaml"), "LifecycleConversationScope: [\"direct\", \"shared\"]\n")
 	writeReleaseFile(t, filepath.Join(root, "events.yaml"), `lifecycle.message:
   text: text
   external_account: text

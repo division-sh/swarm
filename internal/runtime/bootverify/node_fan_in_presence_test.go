@@ -11,7 +11,7 @@ import (
 
 func TestNodeRejectsRetiredJoinAndAccumulatorFieldsThroughSupportedSource(t *testing.T) {
 	for _, owner := range []struct{ name, body string }{
-		{"accumulate", "        into: observations\n        from: payload.window\n        key: payload.member_id\n"},
+		{"accumulate", "        target: observations\n        key: member_id\n"},
 		{"join", "        stage: awaiting\n        members: {count: 1, by: payload.member_id}\n        output: payload.aggregation\n        on_complete: {advances_to: done}\n        deadline: {after: 1h, from: stage_entry}\n        on_deadline: {advances_to: failed}\n"},
 	} {
 		t.Run(owner.name, func(t *testing.T) {
@@ -77,6 +77,10 @@ func writeJoinRetirementSource(t *testing.T, owner, body string) string {
   dedup_by: text
   aggregation: text
 `)
+	if owner == "accumulate" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "observations: [Observation]\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "Observation:\n  member_id: text\n  window: text\n  dedup_by: text\n  aggregation: text\n")
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `collector:
   item.reported:
       _note: &empty ''

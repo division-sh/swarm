@@ -434,8 +434,8 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":            "stages: []\n",
 		"events.yaml":            "operations.requested:\noperations.snapshot:\n",
-		"types.yaml":             "types:\n  OperationProfile:\n    leaf: text\n    sibling: text\n",
-		"operations/schema.yaml": "instance: receiver_key\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construct.requested]\n",
+		"types.yaml":             "OperationProfile:\n  leaf: text\n  sibling: text\n",
+		"operations/schema.yaml": "instance: receiver_key\nstages:\n  active: {}\n  done: {final: true}\ninputs: [construct.requested]\n",
 		"operations/state.yaml": `receiver_key: text
 items: ["equal"]
 labels: map[text]text

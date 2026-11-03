@@ -68,8 +68,8 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 
 func listRetirementPublicSource() map[string]string {
 	return map[string]string{
-		"schema.yaml": "stages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs: [proof.append, proof.finish]\n",
-		"types.yaml":  "types:\n  ProbeItem:\n    name: text\n    tags: [text]\n",
+		"schema.yaml": "stages:\n  ready: {}\n  done: {final: true}\ninputs: [proof.append, proof.finish]\n",
+		"types.yaml":  "ProbeItem:\n  name: text\n  tags: [text]\n",
 		"state.yaml":  "entries: [ProbeItem]\n",
 		"events.yaml": "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
 		"nodes.yaml": `collector:

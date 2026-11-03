@@ -1000,12 +1000,10 @@ func inboundPublicationProofBundle(t *testing.T, flowPath string) *runtimecontra
 	t.Helper()
 	root := t.TempDir()
 	const manifest = "version: 1.0.0\nplatform_version: '*'\n"
-	rootSchema := `pins:
-  outputs: [inbound.github.push.normalized]
+	rootSchema := `outputs: [inbound.github.push.normalized]
 `
-	leafSchema := `pins:
-  inputs: [inbound.github.push, inbound.github.push.normalized]
-  outputs: [inbound.github.push.normalized]
+	leafSchema := `inputs: [inbound.github.push, inbound.github.push.normalized]
+outputs: [inbound.github.push.normalized]
 `
 	files := map[string]string{
 		"manifest.yaml":             manifest,

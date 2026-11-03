@@ -72,7 +72,7 @@ func supportedArrivalJoinFixture(t *testing.T, flowID string) string {
 			writeSelectedContractFixtureFile(t, filepath.Join(root, name), string(body))
 		}
 		writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n")
-		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "pins:\n  inputs: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n")
+		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "inputs: [item.completed]\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n")
 		if err := os.Remove(filepath.Join(root, flowID, "events.yaml")); err != nil {
 			t.Fatal(err)
 		}

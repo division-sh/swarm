@@ -24,7 +24,7 @@ func TestS1StandingAndSchemaOwnersKeepExactProviderKeys(t *testing.T) {
 		"manifest.yaml":         []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":           []byte("stages: []\n"),
 		"child/manifest.yaml":   []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"child/schema.yaml":     []byte("stages: []\npins: {inputs: [inbound.acme.raw], outputs: [inbound.acme.raw]}\n"),
+		"child/schema.yaml":     []byte("stages: []\ninputs: [inbound.acme.raw]\noutputs: [inbound.acme.raw]\n"),
 		"sibling/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"sibling/schema.yaml":   []byte("stages: []\n"),
 	}

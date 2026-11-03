@@ -126,12 +126,12 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	childSchema = []byte(strings.Replace(string(childSchema), "    - worker.ready", "    - worker.inspect\n    - worker.ready", 1))
+	childSchema = []byte(strings.Replace(string(childSchema), "  - worker.ready", "  - worker.inspect\n  - worker.ready", 1))
 	rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "to: worker-flow}", "to: worker-flow, resolution: select}"))
 	if declarations == 0 {
-		childSchema = []byte(strings.Replace(string(childSchema), "  outputs:\n    - worker.observed\n", "", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "    - worker.ready\n", "", 1))
-		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "    - worker.ready\n", ""))
+		childSchema = []byte(strings.Replace(string(childSchema), "outputs:\n  - worker.observed\n", "", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "  - worker.ready\n", "", 1))
+		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "  - worker.ready\n", ""))
 		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.ready, from: ., to: worker-flow, resolution: select}\n", "", 1))
 		rootEventsPath := filepath.Join(root, "events.yaml")
 		rootEvents, err := os.ReadFile(rootEventsPath)
@@ -144,9 +144,9 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 		}
 	}
 	if frontier == "mixed" || frontier == "mixed_progress" {
-		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "    - worker.inspect\n", ""))
+		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "  - worker.inspect\n", ""))
 		rootSchema = []byte(strings.Replace(string(rootSchema), "  - {event: worker.inspect, from: ., to: worker-flow, resolution: select}\n", "", 1))
-		childSchema = []byte(strings.Replace(string(childSchema), "    - worker.inspect\n", "", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "  - worker.inspect\n", "", 1))
 		rootEvents, err := os.ReadFile(filepath.Join(root, "events.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -157,9 +157,9 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 		}
 	}
 	if strings.HasPrefix(frontier, "activity_loop") {
-		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "    - worker.inspect\n", "    - worker.inspect\n    - worker.retry\n"))
+		rootSchema = []byte(strings.ReplaceAll(string(rootSchema), "  - worker.inspect\n", "  - worker.inspect\n  - worker.retry\n"))
 		rootSchema = append(rootSchema, []byte("  - {event: worker.retry, from: ., to: worker-flow, resolution: select}\n")...)
-		childSchema = []byte(strings.Replace(string(childSchema), "  inputs:\n", "  inputs:\n    - worker.retry\n", 1))
+		childSchema = []byte(strings.Replace(string(childSchema), "inputs:\n", "inputs:\n  - worker.retry\n", 1))
 		childEvents, err := os.ReadFile(filepath.Join(root, "worker-flow/events.yaml"))
 		if err != nil {
 			t.Fatal(err)
@@ -224,16 +224,16 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 		return string(raw)
 	}
 	schema := read("schema.yaml")
-	schema = replaceSelectedReadiness(t, schema, "  inputs:\n", "  inputs:\n    - source.prepare\n    - source.recorded\n")
-	schema = replaceSelectedReadiness(t, schema, "  outputs:\n", "  outputs:\n    - source.prepare\n")
+	schema = replaceSelectedReadiness(t, schema, "inputs:\n", "inputs:\n  - source.prepare\n  - source.recorded\n")
+	schema = replaceSelectedReadiness(t, schema, "outputs:\n", "outputs:\n  - source.prepare\n")
 	schema += "  - {event: source.prepare, from: ., to: worker-flow, resolution: select}\n"
 	events := read("events.yaml") + "\nsource.prepare:\n  worker_id: text\nsource.recorded:\n  worker_id: text\n"
 	child := read("worker-flow/schema.yaml")
-	child = replaceSelectedReadiness(t, child, "  inputs:\n", "  inputs:\n    - source.prepare\n")
+	child = replaceSelectedReadiness(t, child, "inputs:\n", "inputs:\n  - source.prepare\n")
 	childNodes := read("worker-flow/nodes.yaml")
 	if declarations == 2 && frontier == "agent" {
 		events = replaceSelectedReadiness(t, events, "worker.ready:\n  worker_id: text\n", "worker.ready:\n  worker_id: text\n  observed_count: integer?\n")
-		childNodes = replaceSelectedReadiness(t, childNodes, "  worker.observed:\n    advances_to: complete\n", "  worker.observed:\n    data_accumulation:\n      writes:\n        - target_field: observed_count\n          value: state.observed_count + 1\n    on_complete:\n      - condition: state.observed_count == 1\n        advances_to: complete\n")
+		childNodes = replaceSelectedReadiness(t, childNodes, "  worker.observed:\n    advances_to: complete\n", "  worker.observed:\n    data_accumulation:\n      writes:\n        - target_field: observed_count\n          value: state.observed_count + 1\n    on_complete:\n      - condition: state.observed_count == 2\n        advances_to: complete\n")
 		writeClosedVariantFile(t, root, "worker-flow/state.yaml", read("worker-flow/state.yaml")+"observed_count: 0\n")
 	}
 	if frontier == "mixed" {
@@ -245,10 +245,10 @@ func CopySelectedForkLocalReadiness(t testing.TB, declarations int, frontier str
 	}
 	if strings.HasPrefix(frontier, "activity_loop") {
 		// The loop start is itself the frontier, not an extra forwarding handler.
-		schema = strings.ReplaceAll(schema, "    - worker.inspect\n", "")
+		schema = strings.ReplaceAll(schema, "  - worker.inspect\n", "")
 		schema = replaceSelectedReadiness(t, schema, "  - {event: worker.inspect, from: ., to: worker-flow, rename: worker.inspect.requested, resolution: select}\n", "")
 		events = replaceSelectedReadiness(t, events, "worker.inspect:\n  worker_id: text\n", "")
-		child = replaceSelectedReadiness(t, child, "    - worker.inspect.requested\n", "")
+		child = replaceSelectedReadiness(t, child, "  - worker.inspect.requested\n", "")
 		forwarder := fmt.Sprintf("\n%s-entry:\n  %s:\n    emit:\n      event: %s\n      fields:\n        worker_id: payload.worker_id\n", strings.ReplaceAll(event, ".", "-"), event+".requested", event)
 		childNodes = replaceSelectedReadiness(t, childNodes, forwarder, "")
 		child += "\nauto_emit_on_create:\n  event: " + event + "\n"

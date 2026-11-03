@@ -21,7 +21,7 @@ func issue2567VerifySource(t *testing.T) string {
 	}
 	for name, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: {waiting: {}, done: {final: true}}\npins: {inputs: [work.requested]}\n",
+		"schema.yaml":   "stages: {waiting: {}, done: {final: true}}\ninputs: [work.requested]\n",
 		"events.yaml":   "work.requested:\n",
 		"nodes.yaml":    "worker:\n  work.requested: {advances_to: done}\n",
 	} {

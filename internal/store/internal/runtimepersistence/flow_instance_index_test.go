@@ -37,7 +37,7 @@ func TestR7DirectoryScalarSelectorsBothStores(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 					"schema.yaml":        "stages: []\n",
 					"events.yaml":        "checkpoint:\n",
-					"worker/schema.yaml": "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+					"worker/schema.yaml": "instance: item_id\ninputs:\n  - item.created\n",
 					"worker/state.yaml":  "item_id: " + scalar.kind + "\n",
 					"worker/events.yaml": "item.created:\n  item_id: " + scalar.kind + "\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}, nil)
@@ -204,7 +204,7 @@ func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":        "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":        "instance: item_id\ninputs:\n  - item.created\n",
 				"events.yaml":        "item.created:\n  item_id: text\n",
 				"state.yaml":         "item_id: text\n",
 				"detail/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
@@ -604,7 +604,7 @@ func TestR7DirectoryDeclarationCannotHideCorruptKeyedConstructionBothStores(t *t
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":        "stages: []\n",
-				"worker/schema.yaml": "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"worker/schema.yaml": "instance: item_id\ninputs:\n  - item.created\n",
 				"worker/state.yaml":  "item_id: text\n",
 				"worker/events.yaml": "item.created:\n  item_id: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			}, nil)

@@ -123,9 +123,8 @@ func TestHandlerEmitEnvelope_RootFlowOutputUsesLocalEntity(t *testing.T) {
 
 		"manifest.yaml":         "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"scoring/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"scoring/schema.yaml": `pins:
-  outputs:
-    - scoring.requested
+		"scoring/schema.yaml": `outputs:
+  - scoring.requested
 `,
 		"scoring/nodes.yaml": `scoring-node:
   {}

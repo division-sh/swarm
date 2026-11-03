@@ -504,8 +504,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err := yaml.Unmarshal(schemaBytes, &schema); err != nil {
 		t.Fatal(err)
 	}
-	pins := schema["pins"].(map[string]any)
-	pins["inputs"] = append(pins["inputs"].([]any), "inbound.telegram_raw.raw")
+	schema["inputs"] = append(schema["inputs"].([]any), "inbound.telegram_raw.raw")
 	schemaBytes, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)

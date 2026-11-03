@@ -61,7 +61,7 @@ score: numeric
 					}
 					continue
 				}
-				for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "gates", "accumulator", "lifecycle_created_at", "lifecycle_updated_at"} {
+				for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "accumulator", "lifecycle_created_at", "lifecycle_updated_at"} {
 					if value, present := row[key]; !present || value != nil {
 						t.Fatalf("imported %s must be present and null: %v", key, row)
 					}

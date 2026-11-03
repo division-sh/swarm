@@ -31,8 +31,8 @@ func TestQ10AgentNullLifecycleGrouping(t *testing.T) {
 			t.Fatalf("membership/count changed: %v %v", groups, metrics)
 		}
 	}
-	projected := projectAgentEntityStateRow(map[string]any{"current_state": nil, "stage_defined": nil, "gates": nil, "accumulator": nil, "lifecycle_created_at": nil, "lifecycle_updated_at": nil, "bookkeeping": map[string]any{"private": true}, "loops": []any{}})
-	for _, key := range []string{"current_state", "stage_defined", "gates", "accumulator", "lifecycle_created_at", "lifecycle_updated_at"} {
+	projected := projectAgentEntityStateRow(map[string]any{"current_state": nil, "stage_defined": nil, "accumulator": nil, "lifecycle_created_at": nil, "lifecycle_updated_at": nil, "bookkeeping": map[string]any{"private": true}, "loops": []any{}})
+	for _, key := range []string{"current_state", "stage_defined", "accumulator", "lifecycle_created_at", "lifecycle_updated_at"} {
 		if value, ok := projected[key]; !ok || value != nil {
 			t.Fatalf("required null %s lost: %v", key, projected)
 		}

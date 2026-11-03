@@ -39,7 +39,7 @@ func nativeEmitPersistenceBundleForTest(t *testing.T) *runtimecontracts.Workflow
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  researching: {}\n  mvp_speccing: {}\n",
 		"state.yaml":    "business_brief: BusinessBrief\n",
-		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
+		"types.yaml":    "BusinessBrief:\n  summary: text\n",
 		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
 		"nodes.yaml":    "node-a:\n  research.completed:\n    advances_to: mvp_speccing\n",
 	})

@@ -21,7 +21,7 @@ func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			const manifest = "version: 1.0.0\nplatform_version: '*'\n"
-			const pins = "pins: {inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]}\n"
+			const pins = "inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]\n"
 			for _, holder := range []string{".", "beta"} {
 				if err := os.MkdirAll(filepath.Join(root, holder, "telegram"), 0o700); err != nil {
 					t.Fatal(err)
@@ -29,7 +29,7 @@ func TestServedClockRetainsWithoutIngressCredentialsBothStores(t *testing.T) {
 			}
 			for name, body := range map[string]string{
 				"manifest.yaml":      manifest,
-				"schema.yaml":        "stages: []\nschedules: {poll: {every: 1h, emit: poll.tick}}\npins:\n  inputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]\n  outputs: [poll.tick]\n",
+				"schema.yaml":        "stages: []\nschedules: {poll: {every: 1h, emit: poll.tick}}\ninputs: [inbound.telegram.raw, inbound.telegram.callback_action, inbound.telegram.text_message]\noutputs: [poll.tick]\n",
 				"events.yaml":        "poll.tick:\n",
 				"beta/manifest.yaml": manifest,
 				"beta/schema.yaml":   "stages: []\n" + pins,
@@ -132,8 +132,7 @@ func copyClockMixedIngress(t *testing.T) string {
 		t.Fatal(err)
 	}
 	schema["schedules"] = map[string]any{"poll": map[string]any{"every": "1h", "emit": "poll.tick"}}
-	pins := schema["pins"].(map[string]any)
-	pins["outputs"] = append(pins["outputs"].([]any), "poll.tick")
+	schema["outputs"] = append(schema["outputs"].([]any), "poll.tick")
 	updated, err := yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)

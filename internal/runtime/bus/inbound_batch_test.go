@@ -649,7 +649,7 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 		"manifest.yaml":                  []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":                    []byte("stages: []\n"),
 		"telegram-ingress/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"telegram-ingress/schema.yaml":   []byte("stages: []\npins:\n  inputs: [inbound.telegram.raw]\n"),
+		"telegram-ingress/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 	} {
 		if err := os.WriteFile(filepath.Join(root, label), body, 0o600); err != nil {
 			t.Fatal(err)

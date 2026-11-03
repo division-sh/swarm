@@ -39,7 +39,6 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 			{"double", "double", contracts.CatalogTypeNumber, float64(1.25), float64(2.75), float64(3.5)},
 			{"numeric", "numeric", contracts.CatalogTypeNumber, float64(4.25), float64(5.75), float64(6.5)},
 			{"boolean", "boolean", contracts.CatalogTypeBoolean, true, false, false},
-			{"named_scalar", "Score", contracts.CatalogTypeInteger, int64(7), int64(9), int64(8)},
 			{"enum", "Decision", contracts.CatalogTypeText, "yes", "no", "maybe"},
 			{"named_record", "JoinResult", contracts.CatalogTypeObject,
 				map[string]any{"label": "first", "rank": int64(1), "weight": float64(1.25), "accepted": true, "decision": "yes"},
@@ -221,21 +220,15 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 func a2JoinResultTypeFiles(resultType string) map[string]string {
 	return map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":   "stages:\n  awaiting: {}\n  ready: {final: true}\npins:\n  inputs:\n    - item.completed\n    - halt.requested\n",
+		"schema.yaml":   "stages:\n  awaiting: {}\n  ready: {final: true}\ninputs:\n  - item.completed\n  - halt.requested\n",
 		"state.yaml":    fmt.Sprintf("final_expected: integer\nfinal_completed: integer\nfinal_results: [%s]\nfinal_reason: text\n", resultType),
-		"types.yaml": `scalars:
-  Score: integer
-enums:
-  Decision:
-    values: [yes, no, maybe]
-    default: yes
-types:
-  JoinResult:
-    label: text
-    rank: integer
-    weight: double
-    accepted: boolean
-    decision: Decision
+		"types.yaml": `Decision: ["yes", "no", "maybe"]
+JoinResult:
+  label: text
+  rank: integer
+  weight: double
+  accepted: boolean
+  decision: Decision
 `,
 		"events.yaml": fmt.Sprintf("item.completed:\n  member_id: text\n  result: %s\nhalt.requested:\n", resultType),
 		"nodes.yaml": `collector:

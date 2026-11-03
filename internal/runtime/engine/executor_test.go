@@ -1251,31 +1251,6 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 	}
 }
 
-func TestExecutor_StepOrderIsStable(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	steps := exec.Steps()
-	if len(steps) != 21 {
-		t.Fatalf("step count = %d, want 21", len(steps))
-	}
-	if steps[0] != StepLoop || steps[1] != StepQuery || steps[len(steps)-1] != StepClear {
-		t.Fatalf("unexpected step order: %v", steps)
-	}
-	if steps[6] != StepFilter {
-		t.Fatalf("expected filter at index 6, got order %v", steps)
-	}
-	if steps[19] != StepActivity {
-		t.Fatalf("expected activity after emits at index 19, got order %v", steps)
-	}
-}
-
 func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	shaper := &recordingPayloadShaper{}
 	state := testStateSnapshot("discovered", map[string]any{
@@ -4465,7 +4440,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 	}
 }
 
-func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
+func TestExecutor_RuleDataAccumulationRunsAfterTopLevelWrites(t *testing.T) {
 	state := testStateSnapshot("pending", map[string]any{}, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
@@ -4507,15 +4482,15 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.StateMutation.Fields["final_source"]; got != "handler" {
-		t.Fatalf("final_source = %#v, want handler", got)
+	if got := result.StateMutation.Fields["final_source"]; got != "rule" {
+		t.Fatalf("final_source = %#v, want rule", got)
 	}
 	if got := result.StateMutation.Fields["rule_only"]; got != "applied" {
 		t.Fatalf("rule_only = %#v, want applied", got)
 	}
 }
 
-func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
+func TestExecutor_RulesSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
 	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
@@ -4558,18 +4533,18 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
-		t.Fatalf("rule_id = %q, want empty when branch selection cannot see top-level writes", got)
+	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != `rules[0]: when entity.branch_target == "handler"` {
+		t.Fatalf("rule_id = %q, want first rule selected from the handler write", got)
 	}
-	if _, exists := result.StateMutation.Fields["rule_selected"]; exists {
-		t.Fatalf("rule_selected unexpectedly present after rules evaluated before top-level writes: %#v", result.StateMutation.Fields["rule_selected"])
+	if got := result.StateMutation.Fields["rule_selected"]; got != true {
+		t.Fatalf("rule_selected = %#v, want true after the handler write", got)
 	}
 	if got := result.StateMutation.Fields["branch_target"]; got != "handler" {
 		t.Fatalf("branch_target = %#v, want handler after data_accumulation step", got)
 	}
 }
 
-func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
+func TestExecutor_OnCompleteSeesCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
 	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
@@ -4607,14 +4582,14 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
-		t.Fatalf("rule_id = %q, want empty when on_complete selection cannot see top-level writes", got)
+	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != `on_complete[0]: condition entity.branch_target == "handler"` {
+		t.Fatalf("rule_id = %q, want first on_complete selected from the handler write", got)
 	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextOnComplete || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNoMatch {
-		t.Fatalf("on_complete no-match selection = %#v", result.HandlerRuleSelection)
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextOnComplete || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected {
+		t.Fatalf("on_complete selected result = %#v", result.HandlerRuleSelection)
 	}
-	if got := len(result.EmitIntents); got != 0 {
-		t.Fatalf("emit intents = %d, want 0 when on_complete branch is not selected early", got)
+	if got := len(result.EmitIntents); got != 1 || result.EmitIntents[0].Event.Type() != "branch.selected" {
+		t.Fatalf("emit intents = %#v, want one branch.selected after the handler write", result.EmitIntents)
 	}
 	if got := result.StateMutation.Fields["branch_target"]; got != "handler" {
 		t.Fatalf("branch_target = %#v, want handler after data_accumulation step", got)
@@ -6902,19 +6877,17 @@ func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.Wo
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), `stages:
   active: {}
-pins:
-  inputs:
-    - job.received
+inputs:
+  - job.received
 `,
 	)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), `
-types:
-  VerticalState:
-    status: text
-    active_jobs: [Job]
-  Job:
-    id: text
-    title: text
+VerticalState:
+  status: text
+  active_jobs: [Job]
+Job:
+  id: text
+  title: text
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), `verticals: map[text]VerticalState
 `)

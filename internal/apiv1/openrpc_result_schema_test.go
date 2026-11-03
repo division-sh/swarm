@@ -176,7 +176,6 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 		},
 		"fields":      map[string]any{"priority": "high", "activation": "manual"},
 		"bookkeeping": map[string]any{"activation": "standing"},
-		"gates":       map[string]any{"approved": true},
 		"loops":       []any{},
 		"accumulated": map[string]any{
 			"score":       float64(3),
@@ -201,7 +200,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 			}
 			result := map[string]any{
 				"entity": summary, "fields": map[string]any{"current_state": "authored", "revision": float64(0)},
-				"bookkeeping": nil, "gates": nil, "accumulated": nil, "loops": nil,
+				"bookkeeping": nil, "accumulated": nil, "loops": nil,
 			}
 			if kind != "data_only" {
 				summary["stage_defined"], summary["revision"] = false, float64(1)
@@ -235,7 +234,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 					}
 				})
 			}
-			for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+			for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
 				t.Run("missing_"+key, func(t *testing.T) {
 					original := result[key]
 					delete(result, key)
@@ -246,7 +245,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 					}
 				})
 			}
-			for key, value := range map[string]any{"bookkeeping": []any{}, "gates": map[string]any{"approved": "yes"}, "accumulated": []any{}, "loops": map[string]any{}} {
+			for key, value := range map[string]any{"bookkeeping": []any{}, "accumulated": []any{}, "loops": map[string]any{}} {
 				t.Run("invalid_"+key, func(t *testing.T) {
 					original := result[key]
 					result[key] = value

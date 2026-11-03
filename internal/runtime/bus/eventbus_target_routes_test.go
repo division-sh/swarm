@@ -1342,7 +1342,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.node_only]\n",
+		"schema.yaml":   "stages: []\ninputs: [custom.node_only]\n",
 		"events.yaml":   "custom.node_only:\n",
 		"nodes.yaml":    "workflow-node:\n  custom.node_only: {}\n",
 	}))
@@ -1483,7 +1483,7 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.mixed_node_agent]\n",
+		"schema.yaml":   "stages: []\ninputs: [custom.mixed_node_agent]\n",
 		"events.yaml":   "custom.mixed_node_agent:\n",
 		"nodes.yaml":    "workflow-node:\n  custom.mixed_node_agent: {}\n",
 	}))
@@ -2598,12 +2598,12 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 		t.Run(fmt.Sprint(explicitTarget), func(t *testing.T) {
 			files := map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-				"schema.yaml":   "stages: []\npins:\n  inputs: [thing.created]\n",
+				"schema.yaml":   "stages: []\ninputs: [thing.created]\n",
 				"events.yaml":   "thing.created:\n",
 			}
 			for flowID, nodeID := range map[string]string{"validation": "entity-writer", "audit": "audit-writer"} {
 				files[flowID+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-				files[flowID+"/schema.yaml"] = "stages: []\npins:\n  inputs: [thing.created]\n"
+				files[flowID+"/schema.yaml"] = "stages: []\ninputs: [thing.created]\n"
 				files[flowID+"/events.yaml"] = "thing.created:\n"
 				files[flowID+"/nodes.yaml"] = nodeID + ":\n  thing.created:\n    guard: _entity.id != \"\"\n"
 			}
@@ -2663,12 +2663,12 @@ func duplicateIDScopedRootInputAuthorityFixture(t *testing.T) (semanticview.Sour
 	t.Helper()
 	files := map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [thing.created]\n",
+		"schema.yaml":   "stages: []\ninputs: [thing.created]\n",
 		"events.yaml":   "thing.created:\n",
 	}
 	for _, id := range []string{"ordinary", "validation"} {
 		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [thing.created]\n"
+		files[id+"/schema.yaml"] = "stages: []\ninputs: [thing.created]\n"
 		files[id+"/events.yaml"] = "thing.created:\n"
 		files[id+"/nodes.yaml"] = `shared-writer:
   thing.created:
@@ -3298,14 +3298,14 @@ func routedRootInputFlowNodeBundle(t *testing.T, rootInput bool) *runtimecontrac
 	t.Helper()
 	schema := "stages: []\n"
 	if rootInput {
-		schema += "pins:\n  inputs: [thing.created]\n"
+		schema += "inputs: [thing.created]\n"
 	}
 	return loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml":            "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":              schema,
 		"events.yaml":              "thing.created:\n",
 		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"validation/schema.yaml":   "stages: []\npins:\n  inputs: [thing.created]\n",
+		"validation/schema.yaml":   "stages: []\ninputs: [thing.created]\n",
 		"validation/events.yaml":   "thing.created:\n",
 		"validation/nodes.yaml":    "entity-writer:\n  thing.created:\n    guard: _entity.id != \"\"\n",
 	})
@@ -3315,7 +3315,7 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs:\n    - thing.created\n",
+		"schema.yaml":   "stages: []\ninputs:\n  - thing.created\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
   thing.created:

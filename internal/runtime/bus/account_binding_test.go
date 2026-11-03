@@ -34,7 +34,7 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 				"schema.yaml": []byte("stages:\n  active: {}\n")}
 			for index, flow := range flows {
 				members[flow+"/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
-				members[flow+"/schema.yaml"] = []byte("stages:\n  active: {}\npins:\n  inputs: [inbound." + provider + "." + eventName + "]\n")
+				members[flow+"/schema.yaml"] = []byte("stages:\n  active: {}\ninputs: [inbound." + provider + "." + eventName + "]\n")
 				if flow == "fixed" {
 					members[flow+"/policy.yaml"] = []byte(fmt.Sprintf("operator_account: %q\n", accounts[index]))
 				} else {

@@ -41,7 +41,7 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 		t.Run(tc.name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "tool-parity")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins: {inputs: [tool.test_started]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\ninputs: [tool.test_started]\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "tool.test_started:\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf("agent-1:\n  role: worker\n  model: regular\n  intent: {inline: Exercise the configured runtime tool.}\n  subscriptions: [tool.test_started]\n  tools: [%s]\n  permissions: [%s]\n", tc.configuredTool, strings.Join(tc.permissions, ", ")))
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(filepath.Clean("../.."), root, runtimecontracts.DefaultPlatformSpecFile(filepath.Clean("../..")))

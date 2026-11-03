@@ -22,7 +22,7 @@ func copyRootIngressServedCompletionAttribution(t testing.TB, sibling bool) stri
 	root := CopyRootIngressServedLiveAgent(t)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n  item_id: text?\n", "item.processed:\n  item_id: text?\nexternal.observed:\n")
 	applyClosedReplacement(t, filepath.Join(root, "agents.yaml"), "  model: regular\n", "  model: regular\n  emit_events: [external.observed]\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n  outputs: [external.observed]\nconnect:\n  - {event: external.observed, from: ., to: observation}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.processed\n", "  - item.processed\noutputs: [external.observed]\nconnect:\n  - {event: external.observed, from: ., to: observation}\n")
 	writeClosedVariantFile(t, root, "observation/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "observation/schema.yaml", "inputs: [external.observed]\n")
 	if sibling {

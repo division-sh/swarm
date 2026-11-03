@@ -27,7 +27,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		rootSchema = strings.Replace(rootSchema, "inputs: [test.node_emitted.selector, test.node_emitted.upserter]", "inputs: [test.node_emitted.selector, test.node_emitted.upserter, test.fixture_parent.construct]", 1)
 	}
 	if targetFlow != "." {
-		rootSchema += "  outputs: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
+		rootSchema += "outputs: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
 		for _, name := range []string{"test.node_emitted.selector", "test.node_emitted.upserter"} {
 			policy := ""
 			if modes[targetFlow] == "template" {

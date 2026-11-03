@@ -516,7 +516,7 @@ func TestEmbeddedConnectorPublicationSnapshotRetainsEveryNonDiagnosticEvent(t *t
 func writeConnectorPublicSource(t *testing.T, root string, endpoints map[string]string, githubInput map[string]any, command func(string, ...string) string) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [slack.requested, notion.requested, microsoft_graph.requested, github.requested, inbound.github.issue_opened, inbound.slack.message]\n")
+	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\ninputs: [slack.requested, notion.requested, microsoft_graph.requested, github.requested, inbound.github.issue_opened, inbound.slack.message]\n")
 	inputs := map[string]any{}
 	nodes := map[string]any{}
 	literal := func(value any) *yaml.Node {

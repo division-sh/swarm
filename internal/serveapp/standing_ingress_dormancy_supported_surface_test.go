@@ -62,7 +62,7 @@ func TestDormantIngressDevPublishesNoAuthority(t *testing.T) {
 	}
 	for name, body := range map[string]string{
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":            "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n",
+		"schema.yaml":            "stages: []\ninputs: [inbound.telegram.raw, inbound.telegram.text_message]\n",
 		"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n",
 		"telegram/trigger.yaml":  string(trigger),
 	} {
@@ -126,7 +126,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			}
 			for name, body := range map[string]string{
 				"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
-				"schema.yaml":            "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n",
+				"schema.yaml":            "stages: []\ninputs: [inbound.telegram.raw, inbound.telegram.text_message]\n",
 				"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n",
 				"telegram/trigger.yaml":  string(trigger),
 			} {
@@ -311,7 +311,7 @@ func TestDormantIngressDoesNotWaiveLiveModelReadiness(t *testing.T) {
 			}
 			for name, body := range map[string]string{
 				"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
-				"schema.yaml":            "stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n",
+				"schema.yaml":            "stages: []\ninputs: [inbound.telegram.raw, inbound.telegram.text_message]\n",
 				"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, callback_action, text_message], verify_secret: webhook_signing_secret, persist_dedupe_markers: true}, cannot: [execute code]}\n",
 				"telegram/trigger.yaml":  string(trigger),
 				"agents.yaml":            "phrase-bot:\n  role: phrase_bot\n  intent: {inline: Require the independently selected Live model before handling inbound text.}\n  model: regular\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: []\n",

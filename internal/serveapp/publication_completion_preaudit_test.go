@@ -272,15 +272,14 @@ func startPublicationCompletionRuntime(t *testing.T, backend servedparity.Backen
 	for name, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml": `stages: []
-pins:
-  inputs: [work.requested]
-  outputs: [work.requested]
+inputs: [work.requested]
+outputs: [work.requested]
 connect:
   - {event: work.requested, from: ., to: reviews}
 `,
 		"events.yaml":           "work.requested:\n  seed: boolean\n",
 		"reviews/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"reviews/schema.yaml":   "stages: []\npins:\n  inputs: [work.requested]\n",
+		"reviews/schema.yaml":   "stages: []\ninputs: [work.requested]\n",
 		"reviews/nodes.yaml": `start:
   work.requested: {}
 `,
