@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -69,6 +71,7 @@ func TestResourceReadSelectedStore(t *testing.T) {
 					t.Fatal(err)
 				}
 				actor.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, "support", "selected-store", "support/selected-store")
+				actor.FlowPath = "support/selected-store"
 				ref := flowdataResourceRef(t, source)
 				const runID = "11111111-1111-4111-8111-111111111111"
 				ctx := models.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), actor)
@@ -131,7 +134,48 @@ func TestResourceReadSelectedStore(t *testing.T) {
 				if page.ItemCount != 1 || page.Continuation.State != "more" {
 					t.Fatalf("first page %+v", page)
 				}
-				importRows("{\"id\":\"c\",\"payload\":\"current head is not this run\"}\n", first.Head.After)
+				second := importRows("{\"id\":\"c\",\"payload\":\"current head is not this run\"}\n", first.Head.After)
+				rooted, err := bundle.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				fact, err := runtimecorrelation.NewSourceArtifactFact(catalog.BundleHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				liveContext := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
+				liveContext = runtimeauthoractivity.WithScope(liveContext, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+				live, err := selected.(runlifecycle.FlowRunOwner).ReconcileFlowRun(liveContext, runlifecycle.LiveRunScope{FlowPath: "support"}, fact)
+				if err != nil || !live.Created {
+					t.Fatalf("create served live run with current head: %+v err=%v", live, err)
+				}
+				liveContext = runtimecorrelation.WithRunID(liveContext, live.RunID)
+				liveExecutor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source, DataAccessStore: selected})
+				assertLiveRead := func(want durabledata.VersionID) {
+					t.Helper()
+					read, err := liveExecutor.Execute(liveContext, "read_flow_data", map[string]any{
+						"kind": "resource_rows", "declaration": ref, "page": map[string]any{"limit": 1},
+					})
+					if err != nil || read.(map[string]any)["version_id"] != want {
+						t.Fatalf("served data tool read=%+v err=%v want=%s", read, err, want)
+					}
+					projection, err := dataaccess.Build(liveContext, source, selected, live.RunID, actor)
+					if err != nil {
+						t.Fatalf("served /data projection: %v", err)
+					}
+					var matched bool
+					for _, item := range projection.Items {
+						if item.Resource != nil && item.Resource.Declaration == ref && item.Resource.VersionID == want {
+							matched = true
+						}
+					}
+					if !matched {
+						t.Fatalf("served /data projection lost version %s: %+v", want, projection.Items)
+					}
+				}
+				assertLiveRead(second.Candidate.VersionID)
+				third := importRows("{\"id\":\"d\",\"payload\":\"later served head\"}\n", second.Head.After)
+				assertLiveRead(third.Candidate.VersionID)
 				selected = reopen()
 				executor = runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source, DataAccessStore: selected})
 				after, err := executor.Execute(ctx, "read_flow_data", input)

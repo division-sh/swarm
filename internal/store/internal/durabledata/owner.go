@@ -388,6 +388,11 @@ func (o *Owner) commitSourceEvaluationTx(ctx context.Context, tx *sql.Tx, evalua
 			evaluation.compiled.VersionID, operationKind, evaluation.command.SourceInvocationID, result.CompletedAt); err != nil {
 			return fmt.Errorf("record resource head history: %w", err)
 		}
+		if err := advanceLiveRunHeadPinsTx(ctx, tx, liveHeadDeclaration{
+			flowPath: evaluation.command.Declaration.FlowPath, eventName: evaluation.command.Declaration.EventName,
+		}, string(evaluation.compiled.Manifest.SchemaDigest), string(evaluation.compiled.VersionID), result.CompletedAt); err != nil {
+			return err
+		}
 	}
 	evaluation.result = result
 	return nil

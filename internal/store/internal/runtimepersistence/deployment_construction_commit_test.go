@@ -174,6 +174,19 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 				if err != nil || firstSource.VersionID == imported.Candidate.VersionID {
 					t.Fatalf("new rows did not retain their own version: %+v err=%v", firstSource, err)
 				}
+				served, err := selected.(runlifecycle.FlowRunOwner).ReconcileFlowRun(f.ctx,
+					runlifecycle.LiveRunScope{FlowPath: "nested"}, mustStoreTestSourceArtifactFact(catalog.BundleHash))
+				if err != nil || !served.Created {
+					t.Fatalf("reconcile served run at publication head: %+v err=%v", served, err)
+				}
+				readServed := func(want durabledata.VersionID) {
+					t.Helper()
+					items, err := selected.(durabledata.ResourceAccessStore).LoadRunResourceAccess(f.ctx, served.RunID, []durabledata.DeclarationRef{ref})
+					if err != nil || len(items) != 1 || items[0].VersionID != want {
+						t.Fatalf("served binding items=%+v err=%v want=%s", items, err, want)
+					}
+				}
+				readServed(firstSource.VersionID)
 				next := rows
 				next.PublicationID = uuid.NewString()
 				next.RunCreation.PublicationID = next.PublicationID
@@ -193,6 +206,7 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				readServed(latest.VersionID)
 				pruned, err := resourceOwner.Prune(ctx, durabledata.PruneCommand{PruneInvocationID: uuid.NewString(), Actor: "operator",
 					Declaration: ref, VersionID: firstSource.VersionID, ExpectedHead: durabledata.VersionHead(latest.VersionID)})
 				if err != nil || pruned.Outcome != "refused_pinned" {

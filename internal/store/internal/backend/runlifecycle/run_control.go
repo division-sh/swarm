@@ -15,6 +15,7 @@ import (
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	storedata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -246,6 +247,11 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 		State: target,
 	}); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("continue run lifecycle: %w", err)
+	}
+	if target == runtimerunlifecycle.StateLive {
+		if err := storedata.BindLiveRunHeadsTx(ctx, tx, state.RunID, state.BundleHash, true, req.Now.UTC()); err != nil {
+			return runtimeruncontrol.State{}, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE run_control_state

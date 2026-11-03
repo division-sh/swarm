@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Build projects the exact immutable bytes authorized for one concrete actor
-// from compiled grants and the selected run's persisted version pins.
+// Build projects exact bytes for one concrete actor from compiled grants and
+// the selected run's persisted version bindings.
 func Build(ctx context.Context, source semanticview.Source, store durabledata.ResourceAccessStore, runID string, actor models.AgentConfig) (durabledata.AccessList, error) {
 	runID = strings.TrimSpace(runID)
 	parsed, err := uuid.Parse(runID)
