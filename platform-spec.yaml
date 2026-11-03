@@ -7618,8 +7618,11 @@ engine:
           A canceled retirement caller bounds only its wait, not the fence or the worker's cancellation. Repeated
           retirement joins the same completion and returns its preserved terminal failure. Only the coordinator's
           typed retirement refusal and its actual owning cancellation are ordinary termination. Independent store,
-          dispatch, invariant and lease-cleanup errors remain fatal even when joined with cancellation. Startup
-          returns synchronous failures; a running worker records and reports its terminal failure exactly once.
+          dispatch, invariant and lease-cleanup errors remain fatal even when joined with cancellation.
+          A new handoff refused by the exact occurrence fence of the coordinator's own shutdown is reported as its
+          typed retirement refusal; accepted carriers join and complete their handoff and acknowledgement before
+          that retirement publishes its terminal result.
+          Startup returns synchronous failures; a running worker records and reports its terminal failure exactly once.
           No callback, string matching, retry or second lifecycle owner may reinterpret that result.
           Runtime shutdown fences and joins autonomous continuation dispatch before manager teardown invalidates
           the committed-readiness dependency used by dispatch. Already accepted route carriers keep their existing
