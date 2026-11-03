@@ -73,6 +73,16 @@ func TestProjectSelectedContractSourceEventPreservesProducerAndIsIdempotent(t *t
 		{"template producer", eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one"), eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.source.Life() > 0 {
+				tc.source, err = tc.source.WithLife(7)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tc.wantSource, err = tc.wantSource.WithLife(7)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			input := RunForkSelectedContractSourceEvent{
 				SourceEventID: "source-event", EventName: "producer/work.ready", ExecutionMode: executionmode.Live,
 				RoutingSource: tc.source, Scope: "independent-business-scope",

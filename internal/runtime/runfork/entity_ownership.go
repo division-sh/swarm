@@ -60,7 +60,7 @@ func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.Routi
 		if route.EntityID != "" {
 			route.EntityID = forkRunID
 		}
-		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
+		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode(), source.Life())
 	}
 	root := rootProducerSource(source, sourceRunID, forkRunID)
 	if root {
@@ -68,7 +68,7 @@ func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.Routi
 			return source, fmt.Errorf("root producer belongs to neither admitted run")
 		}
 		route.EntityID = forkRunID
-		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
+		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode(), source.Life())
 	}
 	if route.EntityID == sourceRunID || route.EntityID == forkRunID || route.FlowInstance == sourceRunID || route.FlowInstance == forkRunID {
 		return source, fmt.Errorf("non-root producer cannot own the root entity")

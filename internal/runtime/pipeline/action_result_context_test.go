@@ -33,7 +33,18 @@ func TestPreviewProducerConsumesExecutionCoordinate(t *testing.T) {
 			}
 		})
 	}
-	ctx := withWorkflowNodeDeliveryRoute(context.Background(), events.DeliveryRoute{
+	life := events.InstanceLife{RunID: testPipelineRunID, FlowInstance: testPipelineRunID, Life: 7}
+	ctx := events.WithDeliveryContext(context.Background(), events.DeliveryContext{Life: &life})
+	got, err := workflowNodeProducerSource(ctx, source, node, ".", testPipelineRunID, route)
+	if err != nil || got.Life() != life.Life || got.Route() != route {
+		t.Fatalf("producer lost captured execution life: %+v %v", got, err)
+	}
+	life.FlowInstance = "sibling"
+	ctx = events.WithDeliveryContext(context.Background(), events.DeliveryContext{Life: &life})
+	if _, err := workflowNodeProducerSource(ctx, source, node, ".", testPipelineRunID, route); err == nil {
+		t.Fatal("producer accepted a sibling's captured life")
+	}
+	ctx = withWorkflowNodeDeliveryRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(route),
 	})
 	if _, err := workflowNodeProducerSource(ctx, source, node, ".", testPipelineRunID, route); err == nil {

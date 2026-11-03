@@ -49,6 +49,9 @@ func (c DeliveryContext) Validate() error {
 		if err := c.Life.Validate(); err != nil {
 			return err
 		}
+		if c.RunID != "" && c.RunID != c.Life.RunID {
+			return fmt.Errorf("delivery life crosses its execution run")
+		}
 	}
 	seen := make(map[string]bool, len(c.Joins))
 	for _, receipt := range c.Joins {

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func (e *Executor) agentExecutionRoutingSource(ctx context.Context, actor actors.AgentConfig) (events.RoutingSource, error) {
@@ -21,7 +22,14 @@ func (e *Executor) agentExecutionRoutingSource(ctx context.Context, actor actors
 		return events.RoutingSource{}, fmt.Errorf("agent producer requires its exact execution run")
 	}
 	if agent.Route.Presence == agentidentity.RouteRoot {
-		return pinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, actor.EffectiveEntityID(), nil)
+		producer, err := pinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, actor.EffectiveEntityID(), nil)
+		if err != nil {
+			return events.RoutingSource{}, err
+		}
+		if life := events.DeliveryContextFromContext(ctx).Life; life != nil {
+			return producer.WithInstanceLife(agent.RunID, *life)
+		}
+		return producer, nil
 	}
 	if e.workflowInstances == nil {
 		return events.RoutingSource{}, fmt.Errorf("agent producer requires constructed flow persistence")
@@ -40,5 +48,18 @@ func (e *Executor) agentExecutionRoutingSource(ctx context.Context, actor actors
 	if err != nil {
 		return events.RoutingSource{}, err
 	}
-	return pinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, actor.EffectiveEntityID(), constructed)
+	producer, err := pinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, actor.EffectiveEntityID(), constructed)
+	if err != nil {
+		return events.RoutingSource{}, err
+	}
+	if life := events.DeliveryContextFromContext(ctx).Life; life != nil {
+		if life.Life != instance.Life {
+			return events.RoutingSource{}, pipeline.InstanceRestarted(owner, life.Life, instance.Life)
+		}
+		return producer.WithInstanceLife(agent.RunID, *life)
+	}
+	if instance.Life != 1 {
+		return events.RoutingSource{}, fmt.Errorf("agent producer requires its captured instance life")
+	}
+	return producer, nil
 }

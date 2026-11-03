@@ -45,7 +45,7 @@ func fromAdmittedOuterMarshalClone(admitted events.AdmittedEvent, settlement eve
 		SourceEventID: event.ParentEventID(), CreatedAt: event.CreatedAt().UTC().Truncate(time.Microsecond),
 		RoutingSourceKind:      event.RoutingSource().Kind().StorageCode(),
 		RoutingSourceAuthority: event.RoutingSource().Authority().StorageCode(),
-		SourceRoute:            marshalRoute(event.RoutingSource().Route()), TargetRoute: marshalRoute(envelope.Target),
+		SourceRoute:            marshalSourceRoute(event.RoutingSource()), TargetRoute: marshalRoute(envelope.Target),
 		TargetSet: marshalRouteSet(envelope.TargetSet), RouteSettlement: rawSettlement,
 	}
 	if provenance, ok := event.OperatorReference(); ok {
@@ -116,6 +116,50 @@ func admittedSerializationFixture(tb testing.TB, plans int, path string) (events
 }
 
 func TestFromAdmittedSerializationBytesAndErrors(t *testing.T) {
+	t.Run("captured_source_life", func(t *testing.T) {
+		base := validRecord(t)
+		source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/one", EntityID: "33333333-3333-4333-8333-333333333333"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source, err = source.WithLife(7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := eventtest.RunCreatingRootIngressWithRoutingSource(base.EventID, events.EventType(base.EventName), base.ProducedBy, base.TaskID, base.Payload, base.ChainDepth, base.RunID, "", events.EventEnvelope{}, source, base.CreatedAt)
+		event, err = eventtest.AdmitPayload(event, "worker", base.EventName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		settlement, err := base.DecodeSettlement()
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := FromAdmitted(admitted, settlement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := record.Decode()
+		if err != nil || decoded.Event().RoutingSource() != source {
+			t.Fatalf("durable event lost captured source life: %+v %v", decoded.Event().RoutingSource(), err)
+		}
+		for _, bad := range []string{`{"flow_id":"worker","flow_instance":"worker/one","entity_id":"33333333-3333-4333-8333-333333333333"}`, `{"flow_id":"worker","flow_instance":"worker/one","life":0}`, `{"flow_id":"worker","flow_instance":"worker/one","life":-1}`} {
+			hostile := record.Clone()
+			hostile.SourceRoute = []byte(bad)
+			if _, err := hostile.Decode(); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("decoder repaired absent/nonpositive source life: %s %v", bad, err)
+			}
+		}
+		other := record.Clone()
+		other.SourceRoute = bytes.Replace(record.SourceRoute, []byte(`"life":7`), []byte(`"life":8`), 1)
+		if record.Equal(other) {
+			t.Fatal("durable equality ignored source life")
+		}
+	})
 	for _, value := range []string{"consumer", "consumer/<tag>&\"quote\"\\slash\n\t\x00tail", "consumer/\u2028\u2029\u00e9", "consumer/\xff\xfe-invalid"} {
 		for _, plans := range []int{0, 1, 32} {
 			admitted, settlement, _ := admittedSerializationFixture(t, plans, value)
