@@ -120,11 +120,12 @@ func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	runID := "11111111-1111-4111-8111-111111111111"
 	for _, tc := range []struct {
-		name       string
-		args       []string
-		wantMethod string
-		wantOutput []string
-		notOutput  string
+		name        string
+		args        []string
+		wantMethod  string
+		wantOutput  []string
+		notOutput   string
+		loadFailure bool
 	}{
 		{
 			name:       "diagnose default",
@@ -138,6 +139,13 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 			wantMethod: "run.get",
 			wantOutput: []string{"Run run-1  running", "origin  event scan.requested (event-root)"},
 			notOutput:  "blocker",
+		},
+		{
+			name:        "continued target load failure",
+			args:        []string{"run", "status", runID},
+			wantMethod:  "run.diagnose",
+			loadFailure: true,
+			wantOutput:  []string{"runtime stage", "load_target", "runtime detail", "target startup unavailable"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,7 +164,11 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 				if tc.wantMethod == "run.get" {
 					return map[string]any{"run": validDiagnosticRunHeader("run-1")}
 				}
-				return validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
+				result := validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
+				if tc.loadFailure {
+					result["runtime_readiness"] = map[string]any{"ready": false, "reason": "runtime_failed", "stage": "load_target", "detail": "target startup unavailable"}
+				}
+				return result
 			})
 			defer server.Close()
 
