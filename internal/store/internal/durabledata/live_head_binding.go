@@ -5,11 +5,35 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 )
 
 type liveHeadDeclaration struct {
 	flowPath  string
 	eventName string
+}
+
+// A selected fork retains its immutable construction pin. Only its live read
+// follows the declaration head; paused and terminal reads use the fork cut.
+func (o *Owner) readRunResourceBindingTx(ctx context.Context, tx *sql.Tx, runID string, ref runtimedata.DeclarationRef) (runtimedata.SchemaDigest, runtimedata.VersionID, error) {
+	var digest, version sql.NullString
+	err := tx.QueryRowContext(ctx, o.query(`
+		SELECT CASE WHEN r.origin_kind='fork_materialization' AND r.status='live' THEN d.schema_digest ELSE p.schema_digest END,
+		       CASE WHEN r.origin_kind='fork_materialization' AND r.status='live' THEN h.version_id ELSE p.version_id END
+		FROM runs r
+		LEFT JOIN resource_version_pins p ON p.run_id=r.run_id AND p.flow_path=%s AND p.event_name=%s
+		LEFT JOIN resource_bundle_declarations d ON d.bundle_hash=r.bundle_hash AND d.flow_path=%s AND d.event_name=%s
+		LEFT JOIN resource_heads h ON h.flow_path=d.flow_path AND h.event_name=d.event_name
+		WHERE r.run_id=%s
+	`, 5), ref.FlowPath, ref.EventName, ref.FlowPath, ref.EventName, runID).Scan(&digest, &version)
+	if err != nil {
+		return "", "", err
+	}
+	if !digest.Valid || !version.Valid {
+		return "", "", sql.ErrNoRows
+	}
+	return runtimedata.SchemaDigest(digest.String), runtimedata.VersionID(version.String), nil
 }
 
 // BindLiveRunHeadsTx selects current declaration heads for a served run in the
