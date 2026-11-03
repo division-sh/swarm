@@ -55,6 +55,12 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 			llmselection.NativeCompactionMethod("anthropic", "https://api.anthropic.com/v1/messages", "claude-opus-4-6-suffix") != "" {
 			t.Fatal("protocol or model prefix inferred native capability")
 		}
+		for _, model := range []string{"claude-sonnet-4-5", "claude-haiku-4-5"} {
+			window, output := llmselection.ContextCompactionBudget("anthropic", "https://api.anthropic.com/v1/messages", model)
+			if window != 200000 || output != 1024 || llmselection.NativeCompactionMethod("anthropic", "https://api.anthropic.com/v1/messages", model) != "" {
+				t.Fatalf("legacy summary route became native or lost its budget: %s", model)
+			}
+		}
 	})
 	t.Run("only confirmed context rejection retries", func(t *testing.T) {
 		const rejected = `{"error":{"code":"context_length_exceeded"}}`
