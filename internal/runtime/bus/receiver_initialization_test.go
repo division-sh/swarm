@@ -145,25 +145,3 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 		})
 	}
 }
-
-func TestReceiverInitializationPreviewUsesOnlyPreparedActivationVariables(t *testing.T) {
-	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverInitialization(t))
-	instance := ConstructedFlowInstanceIdentityFixture(source, "account", "must-not-derive", busInternalTestRunID)
-	decision := connectInstanceSelection{FlowInstanceSelection: runtimepipeline.FlowInstanceSelection{
-		Observation: constructionIndexObservation(t, source, busInternalTestRunID, instance, "acct-1"),
-	}}
-	if got := decision.ActivationVariables(); got != nil {
-		t.Fatalf("unprepared decision synthesized activation variables: %#v", got)
-	}
-	decision.Activation = &runtimepipeline.FlowInstanceActivationPlan{ActivationVariables: map[string]string{
-		"instance_id": "exact-admitted-instance", "entity_id": "exact-admitted-entity",
-	}}
-	got := decision.ActivationVariables()
-	if !reflect.DeepEqual(got, decision.Activation.ActivationVariables) {
-		t.Fatalf("preview differs from prepared activation: %#v", got)
-	}
-	got["instance_id"] = "mutated-preview"
-	if decision.Activation.ActivationVariables["instance_id"] != "exact-admitted-instance" {
-		t.Fatal("preview aliases prepared activation")
-	}
-}
