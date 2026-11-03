@@ -154,6 +154,27 @@ func restartSelectedDeadlineChild(t *testing.T, ctx context.Context, source *roo
 		t.Fatal(err)
 	}
 	owner.ports.busDurable.RunLifecycle = nestedDeadlineServingContext{OperationOwner: owner.ports.busDurable.RunLifecycle, sourceRun: sourceRun, contexts: contexts}
+	var receiptsBeforeActivation storetest.SelectedForkStorageTableSnapshot
+	receiptsObserved := false
+	discards := 0
+	owner.ports.fork = &selectedOperationActivationProbe{
+		SelectedContractForkLifecycle: owner.ports.fork,
+		discards:                      &discards,
+		before: func(ctx context.Context) {
+			snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			var found bool
+			receiptsBeforeActivation, found = snapshot["event_receipts"]
+			if !found {
+				t.Error("deadline activation has no native pipeline receipt snapshot")
+				return
+			}
+			receiptsObserved = true
+		},
+	}
 	persisted, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 	if err != nil || !reflect.DeepEqual(rows, persisted) {
 		t.Fatalf("native reopen changed open reply levels: %+v error=%v", persisted, err)
@@ -224,6 +245,24 @@ func restartSelectedDeadlineChild(t *testing.T, ctx context.Context, source *roo
 		ack, found, err := ops.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 		if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != staged.ForkRunID || ack.BindingID != before.BindingID || !reflect.DeepEqual(ack.Request, before.Request) || !ack.Result.ForkPoint.SameIdentity(staged.ForkPoint) {
 			t.Errorf("deadline successor changed the operation/cut acknowledgment: %+v error=%v", ack, err)
+		}
+		snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(wait, selected)
+		if err != nil {
+			t.Error(err)
+		} else {
+			after, found := snapshot["event_receipts"]
+			if !receiptsObserved || !found || !reflect.DeepEqual(receiptsBeforeActivation.Columns, after.Columns) {
+				t.Error("deadline activation lost its native pipeline receipt observation")
+			}
+			retained := make(map[string]bool, len(after.Rows))
+			for _, row := range after.Rows {
+				retained[row] = true
+			}
+			for _, row := range receiptsBeforeActivation.Rows {
+				if !retained[row] {
+					t.Errorf("activation removed or rewrote a committed pipeline receipt: %s", row)
+				}
+			}
 		}
 		if err := ordinary.Shutdown(); err != nil {
 			t.Error(err)
