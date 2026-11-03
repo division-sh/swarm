@@ -15,6 +15,7 @@ import (
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	storedata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 func (s *RunLifecycleSQLiteOwner) StopRunControlOutcome(ctx context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error) {
@@ -206,6 +207,11 @@ func (s *RunLifecycleSQLiteOwner) continueRunControlTx(ctx context.Context, tx *
 	}
 	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: state.RunID, State: target}); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("continue sqlite run lifecycle: %w", err)
+	}
+	if target == runtimerunlifecycle.StateLive {
+		if err := storedata.BindLiveRunHeadsTx(ctx, tx, state.RunID, state.BundleHash, false, req.Now.UTC()); err != nil {
+			return runtimeruncontrol.State{}, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE run_control_state SET control_status = 'running', reason = ?, controlled_by = ?,

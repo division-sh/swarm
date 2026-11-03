@@ -8892,7 +8892,7 @@ engine:
           resource_row: Declaration, run-pinned version_id, and one row with ordinal, value, and business key only when keyed.
           resource_rows: Declaration, run-pinned version_id, and rows with exact item count, encoded-items bytes, and continuation.
           cursors: Static v1 and resource v2 are distinct closed contracts. Resource cursors bind the run, canonical actor, declaration, version, and offset; both item and whole-result byte ceilings apply.
-        authorization: Static arms consume flow_data_access; resource arms consume exact compiled data_access grants and immutable run pins. The tool is not universal, does not require permissions, is not granted by tools:, and is independent of native_tools.file_io. Filename input, ambient paths, latest-head selection, and compatibility aliases are invalid.
+        authorization: Static arms consume flow_data_access; resource arms consume exact compiled data_access grants and run-scoped version bindings. A served live run's binding follows the declaration head at creation and after each accepted import; one read retains its selected version. The tool is not universal, does not require permissions, is not granted by tools:, and is independent of native_tools.file_io. Filename input, ambient reader-side head selection, and compatibility aliases are invalid.
       fail_closed_rules:
         - Empty filenames are invalid.
         - Absolute paths are invalid.
@@ -17179,7 +17179,7 @@ platform_tables:
       description: Complete immutable child evaluation and defect evidence retained by failed parent run creation.
       ddl: "CREATE TABLE resource_run_creation_child_evaluations (\n    parent_run_id        UUID NOT NULL REFERENCES resource_run_creation_operations(run_id),\n    source_invocation_id UUID NOT NULL REFERENCES resource_run_creation_child_reservations(source_invocation_id),\n    observed_head_revision BIGINT NOT NULL CHECK (observed_head_revision >= 0),\n    context_json         JSONB NOT NULL,\n    evaluation_json      JSONB NOT NULL,\n    defects_json         JSONB NOT NULL,\n    PRIMARY KEY (parent_run_id, source_invocation_id)\n);"
     resource_version_pins:
-      description: Exact immutable run dependency pins; terminal forkable runs retain their versions until the run is deleted.
+      description: Exact run dependency bindings; served live bindings follow accepted head imports, while terminal forkable runs retain their versions until the run is deleted.
       ddl: |-
         CREATE TABLE resource_version_pins (
             run_id               UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -25198,7 +25198,7 @@ workspace_model:
         process_replacement: A process-local source projection or container generation never changes writable workspace identity. For the same admitted bundle and semantic workspace key, replacement processes attach fresh containers to the existing Docker volume or resolve the existing host workspace root.
     /data:
       description: Read-only reference data projected from the exact actor's compiled static-data grants and selected run's
-        immutable resource-version pins.
+        exact resource-version bindings; served live bindings follow accepted declaration imports.
       access: read-only
       scope: actor-specific; workspace class changes only /workspace scope and never widens /data authority
       lifecycle: Materialized immediately before execution from canonical bundle/store facts and mounted for that actor.
@@ -40126,8 +40126,9 @@ api_specification:
         recipient and source admission. A keyless root is already constructed without an argument
         by serve startup; a bare event is not a run-birth request.
         Each rows publication retains its own immutable request, source-invocation and version binding.
-        Later publication of the same declaration neither replaces earlier inputs nor changes an
-        existing run pin. Imports, publication bindings, feed obligations and API completion commit
+        Later publication of the same declaration does not replace earlier inputs. Its accepted
+        import moves the served live run's declaration binding to the new head; the publication's
+        own version binding remains immutable. Imports, publication bindings, feed obligations and API completion commit
         together under the native live-run fence. Feed-only publication creates no synthetic event.
         Invalid payload admission precedes resource effects; exact replay/conflict precedes fresh
         source/feed admission, including after the transport cache expires. Original public-completion
