@@ -79,7 +79,10 @@ func TestContextCompactionPreservesMemoryAcrossRestartBothStores(t *testing.T) {
 							return llmapi.Reply{StatusCode: http.StatusBadRequest, ErrorBody: `{"error":{"code":"context_length_exceeded","message":"context limit exceeded"}}`}, nil
 						}
 						turn := turns.Add(1)
-						if turn > 1 && bytes.Contains(request.Body, []byte(summary)) && !bytes.Contains(request.Body, []byte(strings.Repeat("shadowed ", 100))) {
+						if turn > 1 {
+							if !bytes.Contains(request.Body, []byte(summary)) || bytes.Contains(request.Body, []byte(strings.Repeat("shadowed ", 100))) {
+								return llmapi.Reply{}, fmt.Errorf("summary replay lost its checkpoint or restored the shadowed prefix")
+							}
 							compacted.Store(true)
 						}
 						return llmapi.Reply{ID: fmt.Sprintf("compaction-response-%d", turn), Model: model,

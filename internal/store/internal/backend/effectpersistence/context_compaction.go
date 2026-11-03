@@ -38,7 +38,7 @@ func loadContextCompactionTx(ctx context.Context, tx *sql.Tx, postgres bool, ide
 			Identity  agentmemory.Identity `json:"agent_identity"`
 		} `json:"usage_target"`
 	}
-	if json.Unmarshal(authority, &admitted) != nil || admitted.Request.Purpose != runtimeeffects.ContextCompactionPurpose || admitted.Target.Identity.Normalize() != identity.Normalize() || admitted.Target.SessionID != prepared.Checkpoint.SessionID || fingerprint != prepared.RequestFingerprint {
+	if json.Unmarshal(authority, &admitted) != nil || admitted.Request.Purpose != runtimeeffects.ContextCompactionPurpose || admitted.Request.RequestedModel != prepared.Checkpoint.Model || admitted.Target.Identity.Normalize() != identity.Normalize() || admitted.Target.SessionID != prepared.Checkpoint.SessionID || fingerprint != prepared.RequestFingerprint {
 		return runtimellm.ContextCompactionResult{}, false, fmt.Errorf("context compaction immutable request or actor mismatch")
 	}
 	if state != string(runtimeeffects.StateSettled) {

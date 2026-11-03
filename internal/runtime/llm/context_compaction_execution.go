@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -272,11 +271,13 @@ func contextCompactionSummaryResult(backend string, raw []byte) (string, error) 
 	if json.Unmarshal(raw, &terminal) != nil {
 		return "", contextCompactionLimitation("invalid_summary_result")
 	}
-	if terminal.StopReason == "max_tokens" || terminal.Status == "incomplete" || len(terminal.Choices) != 0 && terminal.Choices[0].FinishReason == "length" {
-		return "", contextCompactionLimitation("summary_output_truncated")
+	if backend == llmselection.BackendAnthropic && terminal.StopReason != "" && terminal.StopReason != "end_turn" && terminal.StopReason != "stop_sequence" ||
+		backend == llmselection.BackendOpenAIResponses && terminal.Status != "" && terminal.Status != "completed" ||
+		backend == llmselection.BackendOpenAICompatible && len(terminal.Choices) != 0 && terminal.Choices[0].FinishReason != "" && terminal.Choices[0].FinishReason != "stop" {
+		return "", contextCompactionLimitation("summary_output_not_complete")
 	}
 	if err != nil || len(response.ToolCalls) != 0 || strings.TrimSpace(response.Message.Content) == "" {
-		return "", errors.Join(err, fmt.Errorf("context compaction requires text without a tool call"))
+		return "", errors.Join(err, contextCompactionLimitation("summary_requires_text_without_tools"))
 	}
 	return response.Message.Content, nil
 }

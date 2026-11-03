@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -69,6 +70,22 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 		dispatch.mutationErr = errors.New("independent native refusal")
 		if confirmedContextWindowRejection(dispatch, []byte(rejected)) {
 			t.Fatal("independent native refusal was swallowed")
+		}
+	})
+	t.Run("summary cannot execute tools or install empty output", func(t *testing.T) {
+		for _, raw := range []string{
+			`{"content":[{"type":"tool_use","id":"call-1","name":"emit","input":{}}]}`,
+			`{"content":[]}`,
+			`{"content":[{"type":"text","text":"partial"}],"stop_reason":"max_tokens"}`,
+			`{"content":[{"type":"text","text":"partial"}],"stop_reason":"pause_turn"}`,
+			`{"content":[{"type":"text","text":"refused"}],"stop_reason":"refusal"}`,
+			`{"content":`,
+		} {
+			_, err := contextCompactionSummaryResult("anthropic", []byte(raw))
+			failure, typed := runtimefailures.As(err)
+			if !typed || failure.Failure.Detail.Code != "context_compaction_unavailable" {
+				t.Fatalf("invalid summary lost its typed limitation: %v", err)
+			}
 		}
 	})
 	tests := []struct {
