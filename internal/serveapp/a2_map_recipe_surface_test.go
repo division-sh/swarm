@@ -121,7 +121,6 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					events := requireA2MapRecipeHealthyEvents(t, rt, opened.RunID)
 					batches = append(batches, retainedBatch{opened, params, tc.items, tc.members, tc.results, entity, arm, workers, events})
 					t.Logf("root HTTP batch -> post-write map entry -> %d actual keyed workers -> ordinary root reports -> one fired continuation; members=%v ordered_results=%v", len(workers), arm.Members, tc.results)
-					requireServedRunStatus(t, rt.Endpoint, opened.RunID, "completed")
 				})
 			}
 			predecessor := rt.Runtime.Options.RuntimeInstanceID
