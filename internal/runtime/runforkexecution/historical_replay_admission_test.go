@@ -7,10 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners(t *testing.T) {
-	selection := testContractSwapSelection()
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(selection)
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		ReplayResumeFactsPresent: true,
@@ -68,23 +65,12 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 			{Code: "source_events_advanced_after_fork_point", Message: "source advanced after fork point"},
 		},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	if admission.Owner != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
 		!admission.NonMutating ||
@@ -92,14 +78,7 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 		admission.FutureExecutionOwner != runfork.RunForkHistoricalReplayExecutionOwner {
 		t.Fatalf("admission owner/support = %#v", admission)
 	}
-	if admission.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner ||
-		admission.SelectedExecutionAdmissionOwner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
-		admission.SelectedBindingOwner != runfork.RunForkSelectedContractBindingOwner ||
-		admission.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
-		admission.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
-		admission.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
-		admission.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner ||
-		admission.ContractSwapAdmissionOwner != runfork.RunForkContractSwapBootResumeAdmissionOwner {
+	if admission.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("owner consumption = %#v", admission)
 	}
 	assertHistoricalReplayFactSet(t, admission.FactAdmissions)
@@ -123,7 +102,6 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRuntimeRestartRecovery, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "")
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactCLIApiDashboardOperator, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "")
 	if !unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
-		!unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) ||
 		!unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("unsupported blockers = %#v", admission.UnsupportedBlockers)
 	}
@@ -134,9 +112,7 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithoutMutation(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsReplayablePrimitiveWithoutMutation(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
@@ -146,23 +122,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 			Message:     "pending unstarted source delivery can be replayed",
 		}},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	assertHistoricalReplayFactSet(t, admission.FactAdmissions)
 	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionExecutableForkWork, "")
@@ -174,9 +139,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionDisposition(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionRejectsStaleTimerReconstructionDisposition(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		ReplayResumeFactsPresent: true,
@@ -187,23 +150,12 @@ func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionD
 			Message:        "stale timer reconstruction disposition",
 		}},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	timerAdmission, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactTimers)
 	if !ok {
@@ -215,9 +167,7 @@ func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionD
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractConversationLineageOwner(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
@@ -242,23 +192,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversat
 			},
 		},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	for _, fact := range []string{
 		runfork.RunForkHistoricalReplayFactSessions,
@@ -277,9 +216,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversat
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
@@ -291,23 +228,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdv
 			Message:        "selected-contract source-advanced conversation-history lineage/no-action evidence",
 		}},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactSourceAdvancedPostTFacts)
 	if !ok {
@@ -320,9 +246,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdv
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplayScopeMarkerOwner(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractReplayScopeMarkerOwner(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
@@ -333,23 +257,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplaySco
 			Message:     "selected-contract replay-scope marker lineage/no-action evidence",
 		}},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries)
 	if !ok {
@@ -362,9 +275,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplaySco
 	}
 }
 
-func TestBuildHistoricalReplayExecutionAdmissionReportsActiveSourceDeliveryCouplingOwner(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
+func TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsActiveSourceDeliveryCouplingOwner(t *testing.T) {
 	replayAdmission := runfork.RunForkReplayResumeAdmission{
 		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
@@ -376,23 +287,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsActiveSourceDeliveryCoupl
 			Message:        "selected-contract same-source active delivery lineage/no-action evidence",
 		}},
 	}
-	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
-		SelectedExecutionAdmission: selectedAdmission,
-		ReplayResumeAdmission:      replayAdmission,
-		RouteRecovery:              &routeRecovery,
+	admission, err := BuildHistoricalReplayDeliveryEventReplayAdmission(HistoricalReplayDeliveryEventReplayAdmissionRequest{
+		ForkRunID: "fork-run", SourceRunID: "source-run", ForkEventID: "fork-event",
+		ReplayResumeAdmission: replayAdmission,
 	})
 	if err != nil {
-		t.Fatalf("BuildContractSwapBootResumeAdmission: %v", err)
-	}
-
-	admission, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      replayAdmission,
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-		RouteRecovery:              &routeRecovery,
-	})
-	if err != nil {
-		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
+		t.Fatalf("BuildHistoricalReplayDeliveryEventReplayAdmission: %v", err)
 	}
 	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries)
 	if !ok {
@@ -527,28 +427,6 @@ func TestBuildHistoricalReplayExecutionRejectsNonExecutableAdmission(t *testing.
 	})
 	if err == nil || !strings.Contains(err.Error(), "event_deliveries executable fork work") {
 		t.Fatalf("error = %v, want executable event_deliveries admission failure", err)
-	}
-}
-
-func TestBuildHistoricalReplayExecutionAdmissionRejectsNonCanonicalReplayTaxonomy(t *testing.T) {
-	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	contractSwapAdmission := runfork.RunForkContractSwapBootResumeAdmission{
-		Owner:                           runfork.RunForkContractSwapBootResumeAdmissionOwner,
-		NonMutating:                     true,
-		SelectedExecutionAdmissionOwner: selectedAdmission.Owner,
-		ReplayResumeAdmissionOwner:      "cmd.swarm.local_replay_helper",
-		ForkRunID:                       selectedAdmission.ForkRunID,
-		SourceRunID:                     selectedAdmission.SourceRunID,
-		ForkEventID:                     selectedAdmission.ForkEventID,
-	}
-
-	_, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      runfork.RunForkReplayResumeAdmission{Owner: "cmd.swarm.local_replay_helper"},
-		SelectedExecutionAdmission: selectedAdmission,
-		ContractSwapAdmission:      contractSwapAdmission,
-	})
-	if err == nil || !strings.Contains(err.Error(), runfork.RunForkReplayResumeAdmissionOwner) {
-		t.Fatalf("error = %v, want canonical replay admission owner failure", err)
 	}
 }
 
