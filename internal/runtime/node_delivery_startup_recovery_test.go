@@ -994,7 +994,20 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
+			root := canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false)
+			path := filepath.Join(root, "repo-scaffold", "nodes.yaml")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const callback = "  repo_scaffold.repo_commit_succeeded: {}\n"
+			if strings.Count(string(raw), callback) != 1 {
+				t.Fatal("recovery poison fixture lost its exact callback")
+			}
+			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), callback, "  repo_scaffold.repo_commit_succeeded: {advances_to: done}\n", 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bundle := loadRuntimeBundleRoot(t, root)
 			source := semanticview.Wrap(bundle)
 			ctx, selected := backend.setup(t, source)
 			var pc *runtimepipeline.PipelineCoordinator
