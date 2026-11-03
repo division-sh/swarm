@@ -10,6 +10,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
 )
@@ -134,10 +135,11 @@ const (
 // The last admitted stamp and the point-in-time native observation are distinct:
 // a holder may still be bootstrapping before its generation is published.
 type AuthorityInspection struct {
-	Status     AuthorityInspectionStatus `json:"status"`
-	Backend    string                    `json:"backend"`
-	Authority  *Authority                `json:"last_admitted,omitempty"`
-	Possession *PossessionObservation    `json:"possession,omitempty"`
+	Status      AuthorityInspectionStatus      `json:"status"`
+	Backend     string                         `json:"backend"`
+	Authority   *Authority                     `json:"last_admitted,omitempty"`
+	Possession  *PossessionObservation         `json:"possession,omitempty"`
+	Interrupted *effects.StartupRecoveryCounts `json:"interrupted,omitempty"`
 }
 
 func EmptyAuthorityInspection(backend string) (AuthorityInspection, error) {

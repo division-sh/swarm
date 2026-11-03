@@ -193,7 +193,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					}
 					inspect := exec.Command("sh", "-c", command)
 					inspect.Env = append(releaseProviderTriggerProcessEnv(), "PATH="+binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-					if output, err := inspect.CombinedOutput(); err != nil || !strings.Contains(string(output), "selected-store lease is available") || !strings.Contains(string(output), "last admitted generation") {
+					if output, err := inspect.CombinedOutput(); err != nil || !strings.Contains(string(output), "selected-store lease is not held") || !strings.Contains(string(output), "last admitted serve") {
 						t.Fatalf("emitted command did not inspect the real project store: %v\n%s", err, output)
 					}
 					after, err := os.ReadFile(sqlitePath)

@@ -1494,6 +1494,20 @@ func TestHealthUsesHealthCheck(t *testing.T) {
 	}
 }
 
+func TestHealthPreservesStandbyReadoutWithoutClaimingReadiness(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	const line = "waiting: store held; last admitted serve 11111111-1111-1111-1111-111111111111 (generation 7)"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, line, http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"health"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != CLIExitRuntime || stdout.Len() != 0 || stderr.String() != line+"\n" {
+		t.Fatalf("standby health: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestInvestigateHealthIsRetiredWithoutRequest(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

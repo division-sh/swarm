@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,10 @@ type closeErrorAuthorityInspectionStore struct {
 
 func (s *closeErrorAuthorityInspectionStore) InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error) {
 	return s.inspection, s.inspectErr
+}
+
+func (s *closeErrorAuthorityInspectionStore) InspectStartupStatus(ctx context.Context) (runtimestartupownership.AuthorityInspection, error) {
+	return s.InspectAuthority(ctx)
 }
 
 func (s *closeErrorAuthorityInspectionStore) Close() error {
@@ -104,9 +109,10 @@ func TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap(t *testing.T
 				t.Fatal(err)
 			}
 			stdout, stderr, code := runStoreAuthorityCommandFrom(t, repo, configPath, "sqlite", "status")
-			if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available (last admitted generation 1, owner durable-status-owner).\n" {
+			if code != 0 || stderr != "" {
 				t.Fatalf("read-only status: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 			}
+			requireStoreReadout(t, stdout, "not held")
 			after, err := os.Stat(path)
 			if err != nil {
 				t.Fatal(err)
@@ -168,7 +174,7 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 	configPath := os.Getenv("SWARM_CONFIG")
 
 	stdout, stderr, code := runStoreAuthorityCommandWithStore(t, configPath, "postgres", "status")
-	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available; no process generation has been admitted.\n" {
+	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is not held; no process generation has been admitted.\n" {
 		t.Fatalf("PostgreSQL store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
 	var publicObjects int
@@ -191,9 +197,10 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr, code = runStoreAuthorityCommandWithStore(t, configPath, "postgres", "status")
-	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is held (last admitted generation 1, owner durable-postgres-status-owner).\n" {
+	if code != 0 || stderr != "" {
 		t.Fatalf("held PostgreSQL store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
+	requireStoreReadout(t, stdout, "held")
 	after, err := selectedtest.InspectProcessLeaseSnapshot(ctx, selected)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("status changed held process snapshot: before=%+v after=%+v err=%v", before, after, err)
@@ -205,9 +212,10 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr, code = runStoreAuthorityCommandWithStore(t, configPath, "postgres", "status")
-	if code != 0 || stderr != "" || stdout != "Project owner: selected-store lease is available (last admitted generation 1, owner durable-postgres-status-owner).\n" {
+	if code != 0 || stderr != "" {
 		t.Fatalf("current PostgreSQL store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
+	requireStoreReadout(t, stdout, "not held")
 }
 
 func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) {
@@ -332,8 +340,9 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 	}); err != nil {
 		t.Fatalf("bootstrap selected SQLite store: %v", err)
 	}
+	runtimeID := uuid.NewString()
 	capability, err := selected.AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
-		OwnerID: ownerID, BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+		OwnerID: ownerID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -346,9 +355,10 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 		t.Fatal(err)
 	}
 	stdout, stderr, code := runStoreAuthorityCommandFrom(t, repo, configPath, "sqlite", "status")
-	if code != 0 || stderr != "" || stdout != fmt.Sprintf("Project owner: selected-store lease is held (last admitted generation 1, owner %s).\n", ownerID) {
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "last admitted serve "+runtimeID+" (generation 1)") {
 		t.Fatalf("held SQLite store status = code:%d stdout:%q stderr:%q", code, stdout, stderr)
 	}
+	requireStoreReadout(t, stdout, "held")
 	after, err := selectedtest.InspectProcessLeaseSnapshot(context.Background(), selected)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("status changed held process snapshot: before=%+v after=%+v err=%v", before, after, err)
@@ -358,6 +368,18 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 	}
 	if err := capability.Release(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func requireStoreReadout(t *testing.T, output, held string) {
+	t.Helper()
+	pattern := `^Project owner: selected-store lease is ` + held + `; last admitted serve ([0-9a-f-]{36}) \(generation 1\); interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome-unknown\n$`
+	match := regexp.MustCompile(pattern).FindStringSubmatch(output)
+	if len(match) != 2 {
+		t.Fatalf("store readout = %q", output)
+	}
+	if id, err := uuid.Parse(match[1]); err != nil || id == uuid.Nil || id.String() != match[1] {
+		t.Fatalf("invalid last-admitted instance: %q", match[1])
 	}
 }
 

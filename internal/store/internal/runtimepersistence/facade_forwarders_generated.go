@@ -481,6 +481,10 @@ func (s *PostgresStore) InspectSelectedMaterializationReplay(ctx context.Context
 	return s.runForkPostgresOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
+func (s *PostgresStore) InspectStartupRecovery(ctx context.Context, now time.Time) (effects.StartupRecoveryCounts, error) {
+	return s.effectPostgresOwner.InspectStartupRecovery(ctx, now)
+}
+
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectPostgresOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
@@ -1727,6 +1731,10 @@ func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx con
 
 func (s *SQLiteRuntimeStore) InspectSelectedMaterializationReplay(ctx context.Context, plan runfork.RunForkPlan) ([]runfork.RunForkUnsupportedBlocker, error) {
 	return s.runForkSQLiteOwner.InspectSelectedMaterializationReplay(ctx, plan)
+}
+
+func (s *SQLiteRuntimeStore) InspectStartupRecovery(ctx context.Context, now time.Time) (effects.StartupRecoveryCounts, error) {
+	return s.effectSQLiteOwner.InspectStartupRecovery(ctx, now)
 }
 
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {

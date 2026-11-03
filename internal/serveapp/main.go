@@ -1022,10 +1022,22 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 2
 	}
 	processWorkOwner := worklifetime.NewProcess()
+	standbyReadout := func(ctx context.Context) (string, error) {
+		bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		inspection, err := cliapp.InspectSelectedStoreStartup(bounded, storeSelection, cfg)
+		if err != nil {
+			return "", err
+		}
+		if inspection.Possession == nil || inspection.Possession.Available {
+			return "booting", nil
+		}
+		return "waiting: store held; " + cliapp.LastAdmittedServeLine(inspection), nil
+	}
 	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
 		cancelServe()
 		presenter.runtimeFailure(subject, failure)
-	})
+	}, standbyReadout)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
 		return 3
@@ -1044,6 +1056,9 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}()
 	if opts.TestAPIListenerBound != nil {
 		opts.TestAPIListenerBound(apiListener.Addr())
+	}
+	if line, err := standbyReadout(ctx); err == nil && strings.HasPrefix(line, "waiting:") {
+		presenter.recordStandby(line)
 	}
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
