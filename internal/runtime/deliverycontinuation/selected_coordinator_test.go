@@ -2,12 +2,14 @@ package deliverycontinuation
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
@@ -116,4 +118,90 @@ func TestSelectedContinuationUsesExactSelectedScanAndElection(t *testing.T) {
 			t.Fatal("selected wake skipped barrier reconciliation")
 		}
 	}
+	t.Run("shutdown_fence_drains_accepted_dispatch_before_terminal_result", func(t *testing.T) {
+		process := worklifetime.NewProcess()
+		selectedOwner, err := process.NewSelectedFork(t.Context(), worklifetime.SelectedForkIdentity{
+			ExecutionID: selected.ExecutionID(), RunID: selected.ForkRunID(), Generation: selected.Generation(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entered := make(chan context.Context, 1)
+		release := make(chan struct{})
+		returned := make(chan error, 1)
+		unblock := sync.OnceFunc(func() { close(release) })
+		reported := make(chan error, 1)
+		store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{
+			Items: []runtimedelivery.ContinuationItem{{
+				DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
+				Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Authority: selected, Status: runtimedelivery.StatusPending},
+			}}, Exhausted: true,
+		}}}
+		held := retirementDispatchFunc(func(ctx context.Context, _ events.Event, _ events.DeliveryRoute) DispatchResult {
+			entered <- ctx
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			returned <- ctx.Err()
+			return Transferred()
+		})
+		c, err := NewSelected(store, selected, selectedOwner, held, func(_ context.Context, err error) { reported <- err }, func(context.Context) error { return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			unblock()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := c.Retire(ctx); err != nil {
+				t.Error(err)
+			}
+			if err := selectedOwner.RetireAndWait(ctx); err != nil {
+				t.Error(err)
+			}
+			process.Retire()
+			if _, err := process.Join(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+		if err := c.Start(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var dispatchCtx context.Context
+		select {
+		case dispatchCtx = <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("selected dispatch never acquired its exact lease")
+		}
+		if err := selectedOwner.Fence(); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		refused := c.Synchronize(ctx)
+		var refusal *retirementRefusal
+		if !errors.As(refused, &refusal) || !errors.Is(refused, errCoordinatorRetired) {
+			t.Fatalf("fresh scan lost its typed retirement refusal: %v", refused)
+		}
+		select {
+		case <-dispatchCtx.Done():
+			t.Fatal("fresh admission refusal canceled the accepted dispatch")
+		case <-c.done:
+			t.Fatal("terminal result preceded the accepted dispatch join")
+		case <-time.After(10 * time.Millisecond):
+		}
+		unblock()
+		if err := <-returned; err != nil {
+			t.Fatalf("accepted dispatch did not complete under its original lease: %v", err)
+		}
+		if err := c.Retire(ctx); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-reported:
+			t.Fatalf("retirement refusal became terminal dispatch failure: %v", err)
+		default:
+		}
+	})
 }

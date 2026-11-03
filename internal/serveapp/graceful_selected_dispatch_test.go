@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -405,6 +406,13 @@ func TestSelectedForkIdleTimerDoesNotHoldProcessDrainBothStores(t *testing.T) {
 			}
 			if err := <-stopped; err != nil {
 				t.Errorf("idle selected projection held process drain: %v", err)
+			}
+			ack, found, err := family.Operations().LoadForkOperationByID(t.Context(), op.Request.OperationID)
+			if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != op.ForkRunID {
+				t.Fatalf("accepted selected work lost its immutable handoff ACK: %+v found=%t err=%v", ack, found, err)
+			}
+			if err := ack.Result.Validate(ack.Request, ack.ForkRunID); err != nil {
+				t.Fatal(err)
 			}
 			arm, found, err := timers.LoadWorkflowTimerActivation(t.Context(), arms[0].Ref.ActivationID)
 			if err != nil || !found || arm.Status != "active" || !arm.FireAt.Equal(arms[0].FireAt) {

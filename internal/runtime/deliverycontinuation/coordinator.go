@@ -20,7 +20,21 @@ const (
 	dispatchCapacity = 32
 )
 
-var errCoordinatorRetired = errors.New("delivery continuation coordinator is retired")
+type retirementRefusal struct{ message string }
+
+func (e *retirementRefusal) Error() string { return e.message }
+
+var errCoordinatorRetired error = &retirementRefusal{message: "delivery continuation coordinator is retired"}
+
+type shutdownFenceRefusal struct{ cause error }
+
+func (e *shutdownFenceRefusal) Error() string { return errCoordinatorRetired.Error() }
+func (e *shutdownFenceRefusal) Unwrap() error {
+	if e.cause == worklifetime.ErrAdmissionFenced {
+		return errCoordinatorRetired
+	}
+	return e.cause
+}
 
 // Dispatcher re-enters the existing exact EventBus route. The selected store,
 // not the coordinator, still decides whether the delivery can be claimed.
@@ -607,6 +621,10 @@ func (c *Coordinator) finish(ctx context.Context, cancel context.CancelFunc, lea
 	retired := c.retired
 	c.retired = true
 	c.mu.Unlock()
+	var drainErr error
+	if refusal, ownShutdownFence := err.(*shutdownFenceRefusal); ownShutdownFence && refusal.cause == worklifetime.ErrAdmissionFenced {
+		drainErr = c.workOwner.WaitForQuiescence(ctx)
+	}
 	cancel()
 	c.workers.Wait()
 	for {
@@ -630,6 +648,7 @@ drained:
 	if canceledAsOrdinary && workerFailure == nil {
 		failure = nil
 	}
+	failure = errors.Join(failure, drainErr)
 	var cleanupErr error
 	if lease != nil {
 		cleanupErr = lease.Done()
@@ -644,7 +663,7 @@ drained:
 		c.report(ctx, failure)
 	}
 	close(c.done)
-	return errors.Join(err, workerFailure, cleanupErr)
+	return errors.Join(err, workerFailure, drainErr, cleanupErr)
 }
 
 func ordinaryCoordinatorStop(ctx context.Context, err error, retired bool) bool {
@@ -814,6 +833,20 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Dur
 	if c.selectedReconcile != nil {
 		lease, err := c.beginDispatchWork(ctx)
 		if err != nil {
+			if err == worklifetime.ErrAdmissionFenced && ctx.Err() == nil {
+				owner, selected := c.workOwner.(*worklifetime.SelectedForkOccurrence)
+				current, owned := worklifetime.OccurrenceFromContext(ctx)
+				if selected && owned && current == owner && owner.Identity() == (worklifetime.SelectedForkIdentity{
+					ExecutionID: c.authority.ExecutionID(), RunID: c.authority.ForkRunID(), Generation: c.authority.Generation(),
+				}) {
+					// This exact occurrence is fenced by the process shutdown drain.
+					// Retire new handoffs without canceling accepted carrier contexts.
+					c.mu.Lock()
+					c.retired = true
+					c.mu.Unlock()
+					return 0, false, &shutdownFenceRefusal{cause: err}
+				}
+			}
 			return 0, false, err
 		}
 		// Keep the recovered work and its delivery handoff in one finite reach.
