@@ -169,6 +169,7 @@ func TestConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
   emit_events: [memory.replied]
 `)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "events.yaml"), "memory.replied:\n  text: text\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(source, "hold", "prompts", "load-agent.md"), "On each customer input call emit_memory_replied with the required text field.\n")
 			root := t.TempDir()
 			configPath := writeProviderResumeConfig(t, backend, "openai_compatible", root, provider.URL)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(root, "credentials.json"))
