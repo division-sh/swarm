@@ -541,6 +541,9 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.credentialCache.snapshot())
 	req.Header.Set("anthropic-version", "2023-06-01")
+	if anthropicRequestNeedsCompactionBeta(payload) {
+		req.Header.Set("anthropic-beta", anthropicCompactionBeta)
+	}
 	var attempt *runtimeeffects.Handle
 	if managed != nil {
 		call, callErr := managedHTTPProviderCall(payload, req, managed)
@@ -640,11 +643,16 @@ func convertAnthropicResponse(parsed anthropicResponse, names map[string]string)
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
+	Model      string                      `json:"model"`
+	MaxTokens  int                         `json:"max_tokens"`
+	System     string                      `json:"system,omitempty"`
+	Messages   []anthropicMessage          `json:"messages"`
+	Tools      []anthropicTool             `json:"tools,omitempty"`
+	Compaction *anthropicCompactionRequest `json:"compaction,omitempty"`
+}
+
+type anthropicCompactionRequest struct {
+	Type string `json:"type"`
 }
 
 type anthropicMessage struct {
