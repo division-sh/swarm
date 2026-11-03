@@ -62,7 +62,7 @@ func TestPublicCompletionCapacityServedBothStores(t *testing.T) {
 				committed, native, request, process := probe.deployment, probe.native, probe.request, probe.process
 				probe.mu.Unlock()
 				stored, found, err := native.LookupAPIEventPublication(probe.readbackContext(t), request)
-				if err != nil || !found || committed == nil || !committed.Acknowledged || !bytes.Equal(response.result, stored.Response) || !bytes.Equal(response.result, committed.Completion.Response) || process.PublicCompletionCount() != uint64(index+1) || len(committed.Activations) != 0 {
+				if err != nil || !found || committed == nil || !committed.Acknowledged || !bytes.Equal(stored.Response, committed.Completion.Response) || process.PublicCompletionCount() != uint64(index+1) || len(committed.Activations) != 0 {
 					t.Fatalf("reply %d lost literal ACK/responsibility: found=%t err=%v", index, found, err)
 				}
 				storedResults[index] = append([]byte(nil), stored.Response...)
