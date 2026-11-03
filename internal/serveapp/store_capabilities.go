@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -47,6 +48,7 @@ type selectedAPICapabilities struct {
 	SelectedForkRecovery      runtimerunforkexecution.SelectedForkRecoveryEnvironment
 	RuntimeContexts           *runtime.RuntimeContextManager
 	PrepareRunRuntime         func(context.Context, string) error
+	ContinueRunRuntime        func(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error)
 	ResetCoordinator          apiv1.DestructiveResetCoordinator
 }
 
@@ -125,6 +127,7 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		if req.RuntimeSupervisor != nil {
 			executor.AcquireLiveRuntime = req.RuntimeSupervisor.acquireLiveTargetRuntime
 			caps.PrepareRunRuntime = req.RuntimeSupervisor.prepareLiveRunRuntime
+			caps.ContinueRunRuntime = req.RuntimeSupervisor.continueRunRuntime
 		}
 		caps.SelectedForkRecovery.AcquireLiveRuntime = executor.AcquireLiveRuntime
 		caps.SelectedForkRecovery.LiveContexts, caps.SelectedForkRecovery.LiveRuns = executor.RuntimeContexts, executor.LiveRuns

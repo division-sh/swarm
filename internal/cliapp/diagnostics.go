@@ -78,11 +78,19 @@ type diagnosticRunListResult struct {
 }
 
 type diagnosticRunGetResult struct {
-	Run diagnosticRunHeader `json:"run"`
+	Run              diagnosticRunHeader         `json:"run"`
+	RuntimeReadiness *diagnosticRuntimeReadiness `json:"runtime_readiness,omitempty"`
+}
+
+type diagnosticRuntimeReadiness struct {
+	Ready   bool                      `json:"ready"`
+	Reason  string                    `json:"reason,omitempty"`
+	Failure *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 type DiagnosticRunDiagnosisResult struct {
 	Run              diagnosticRunHeader                         `json:"run"`
+	RuntimeReadiness *diagnosticRuntimeReadiness                 `json:"runtime_readiness,omitempty"`
 	ObservedAt       *time.Time                                  `json:"observed_at,omitempty"`
 	NextWakeAt       *time.Time                                  `json:"next_wake_at,omitempty"`
 	OperationalState *string                                     `json:"operational_state"`
@@ -404,7 +412,7 @@ func runDiagnosticRunCommand(ctx context.Context, out, errOut io.Writer, opts di
 			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
 		return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-			writeDiagnosticRunHeader(w, result.Run)
+			writeDiagnosticRunHeader(w, result.Run, result.RuntimeReadiness)
 		}, func() ([]string, error) {
 			return []string{fmt.Sprintf("%s %s", result.Run.RunID, result.Run.Status)}, nil
 		})
@@ -1340,13 +1348,13 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 	})
 }
 
-func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader) {
+func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader, readiness *diagnosticRuntimeReadiness) {
 	if out == nil {
 		return
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{
 		Title: fmt.Sprintf("Run %s  %s", run.RunID, diagnosticRunStatusLabel(run)),
-		Rows:  diagnosticRunHeaderRows(run),
+		Rows:  append(diagnosticRunHeaderRows(run), diagnosticRuntimeReadinessRows(readiness)...),
 	})
 }
 
@@ -1407,6 +1415,7 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 	}
 	rows = append(rows, diagnosticRunInstanceRows(result)...)
 	rows = append(rows, diagnosticRunHeaderRows(result.Run)...)
+	rows = append(rows, diagnosticRuntimeReadinessRows(result.RuntimeReadiness)...)
 	if projectedRunStatus := diagnosticRunStatusLabel(result.Run); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {
 		rows = append(rows, cliLabeledDetailRow{Label: "run status", Value: projectedRunStatus})
 	}
@@ -1495,6 +1504,20 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 			{Label: "fan-out semantic rejection sample", Items: semanticRejections},
 		},
 	})
+}
+
+func diagnosticRuntimeReadinessRows(readiness *diagnosticRuntimeReadiness) []cliLabeledDetailRow {
+	if readiness == nil {
+		return nil
+	}
+	if readiness.Ready {
+		return []cliLabeledDetailRow{{Label: "runtime", Value: "ready"}}
+	}
+	rows := []cliLabeledDetailRow{{Label: "runtime", Value: "not ready (" + readiness.Reason + ")"}}
+	if readiness.Failure != nil {
+		rows = append(rows, cliLabeledDetailRow{Label: "runtime failure", Value: eventObservationFailureSummary(readiness.Failure)})
+	}
+	return rows
 }
 
 func fanOutSemanticRejectionFailureSummary(failure runtimefailures.Envelope) string {

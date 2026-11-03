@@ -9842,7 +9842,7 @@
     },
     {
       "name": "run.continue",
-      "description": "Resume an operator-paused run with paired paused lifecycle/control. A deployment/flow run claims live through the unique runs index, refusing RUN_FLOW_ALREADY_LIVE and naming the current sibling if it is already claimed. Continuing an older source never merges work handled by a fork. The committed transition wakes handed work even when no pipeline work remains.",
+      "description": "Resume an operator-paused run with paired paused lifecycle/control. A deployment/flow run claims live through the unique runs index, refusing RUN_FLOW_ALREADY_LIVE and naming the current sibling if it is already claimed. Continuing an older source never merges work handled by a fork. An acknowledged transition returns pending recovery while its accepted process lease loads the target; queued work is released after target readiness.",
       "params": [
         {
           "name": "run_id",
@@ -9863,7 +9863,7 @@
         "name": "result",
         "required": true,
         "schema": {
-          "$ref": "#/components/schemas/OkResult"
+          "$ref": "#/components/schemas/RunContinueResult"
         }
       },
       "errors": [
@@ -10799,6 +10799,9 @@
           "properties": {
             "run": {
               "$ref": "#/components/schemas/RunHeader"
+            },
+            "runtime_readiness": {
+              "$ref": "#/components/schemas/RunRuntimeReadiness"
             }
           },
           "required": [
@@ -22332,6 +22335,43 @@
         ],
         "type": "object"
       },
+      "RunContinueResult": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "recovery": {
+            "additionalProperties": false,
+            "properties": {
+              "diagnostic": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "complete",
+                  "pending",
+                  "failed",
+                  "blocked",
+                  "exhausted",
+                  "cancelled",
+                  "not_configured"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
       "RunCreationDataEnvelope": {
         "additionalProperties": false,
         "properties": {
@@ -22484,6 +22524,9 @@
           },
           "run": {
             "$ref": "#/components/schemas/RunHeader"
+          },
+          "runtime_readiness": {
+            "$ref": "#/components/schemas/RunRuntimeReadiness"
           },
           "test_quiescence": {
             "$ref": "#/components/schemas/RunTestQuiescence"
@@ -22913,6 +22956,24 @@
             "type": "object"
           }
         ]
+      },
+      "RunRuntimeReadiness": {
+        "additionalProperties": false,
+        "properties": {
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready"
+        ],
+        "type": "object"
       },
       "RunStallAttribution": {
         "additionalProperties": false,

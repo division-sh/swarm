@@ -52,6 +52,7 @@ type processLifecycleSupervisor struct {
 	selected                    *storeselected.RunFork
 	selectedResetPredecessor    *storeselected.RunFork
 	selectedProcess             *worklifetime.Process
+	continuedRuns               map[string]continuedRunLoad
 	selectedRecoveryEnvironment runtimerunforkexecution.SelectedForkRecoveryEnvironment
 	resetContainerRuntime       interface {
 		destructivereset.ManagedContainerRuntime

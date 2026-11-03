@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -51,7 +52,8 @@ type RuntimeIdentityHandlerOptions struct {
 }
 
 type RunReadHandlerOptions struct {
-	Runs RunReadStore
+	Runs             RunReadStore
+	RuntimeReadiness func(context.Context, string) (*RunRuntimeReadiness, error)
 	// Optional process-local enrichment. Store-only readers remain explicitly unavailable.
 	FanOutRuntime func(context.Context, fanoutobligation.ListPage) (fanoutobligation.ListPage, error)
 }
@@ -151,6 +153,7 @@ type AgentControlHandlerOptions struct {
 
 type RunControlHandlerOptions struct {
 	PrepareRunRuntime    func(context.Context, string) error
+	ContinueRunRuntime   func(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error)
 	SelectedForkControls SelectedForkControlAdmission
 	SelectedForkStop     SelectedForkStopOwner
 	Now                  func() time.Time

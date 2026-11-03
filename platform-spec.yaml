@@ -21241,15 +21241,18 @@ platform_tables:
         continue_post_commit_recovery:
           canonical_owner: internal/runtime/runcontrol.Controller consuming the selected-store pipeline-obligation SweepResult
           transition_rule: >
-            run.continue first commits the exact paused-to-running lifecycle and control transition. It then performs
-            immediate per-run durable recovery through the canonical pipeline-obligation owner. Failure or caller
-            cancellation after commit never becomes an ordinary transition error, because replaying that error could
-            replay an already-committed transition. The existing EventBus release path also signals its exact-generation
-            delivery continuation owner after every admitted continue, including zero pipeline candidates and postcommit
-            failure/cancellation. Handed deliveries are not republished or re-acknowledged by pipeline recovery.
+            run.continue commits the exact paused-to-running lifecycle and control transition before loading an unloaded
+            target runtime. The native transaction retains its durable completion request. An accepted process lease
+            finishes target startup, then performs per-run recovery through the canonical pipeline-obligation owner;
+            the response reports pending recovery without waiting for startup. Failure or caller cancellation after
+            commit never becomes an ordinary transition error, because replaying that error could replay an already-
+            committed transition. The EventBus release path signals its exact-generation delivery continuation owner
+            after recovery, including zero pipeline candidates and postcommit failure/cancellation. Handed deliveries
+            are not republished or re-acknowledged by pipeline recovery. Run status exposes the process-local target
+            readiness and a failed load's cause without changing the committed running state.
           result_contract: >
             TransitionResult carries one typed post-commit recovery result with the accumulated settled, examined,
-            exhausted, and blocked facts plus exactly one disposition: not_configured, exhausted, blocked, failed, or
+            exhausted, and blocked facts plus exactly one disposition: pending, not_configured, exhausted, blocked, failed, or
             cancelled. Failed and cancelled results retain their diagnostic error. Counts are effects only; they never
             imply exhaustion, completion, or transition failure. No count-only adapter, second recovery owner, fallback,
             or compatibility result survives.
@@ -34317,6 +34320,8 @@ api_specification:
             description: Earliest active timer due from the same canonical run timer-obligation snapshot. Future wakes are shown by the CLI, never awaited by test quiescence.
           run:
             $ref: '#/components/schemas/RunHeader'
+          runtime_readiness:
+            $ref: '#/components/schemas/RunRuntimeReadiness'
           operational_state:
             $ref: '#/components/schemas/OperationalState'
           blocking_layer:
@@ -37841,6 +37846,35 @@ api_specification:
             const: true
           recovery:
             $ref: '#/components/schemas/RunStopRecoveryResult'
+      RunContinueResult:
+        type: object
+        additionalProperties: false
+        required: [ok]
+        properties:
+          ok:
+            type: boolean
+            const: true
+          recovery:
+            type: object
+            additionalProperties: false
+            required: [status]
+            properties:
+              status:
+                type: string
+                enum: [complete, pending, failed, blocked, exhausted, cancelled, not_configured]
+              diagnostic:
+                type: string
+      RunRuntimeReadiness:
+        type: object
+        additionalProperties: false
+        required: [ready]
+        properties:
+          ready:
+            type: boolean
+          reason:
+            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       RuntimeNukeResult:
         type: object
         additionalProperties: false
@@ -40279,7 +40313,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.continue:
       tier: should_have
-      description: Resume an operator-paused run with paired paused lifecycle/control. A deployment/flow run claims live through the unique runs index, refusing RUN_FLOW_ALREADY_LIVE and naming the current sibling if it is already claimed. Continuing an older source never merges work handled by a fork. The committed transition wakes handed work even when no pipeline work remains.
+      description: Resume an operator-paused run with paired paused lifecycle/control. A deployment/flow run claims live through the unique runs index, refusing RUN_FLOW_ALREADY_LIVE and naming the current sibling if it is already claimed. Continuing an older source never merges work handled by a fork. An acknowledged transition returns pending recovery while its accepted process lease loads the target; queued work is released after target readiness.
       scope:
         required:
         - write:runs
@@ -40297,7 +40331,7 @@ api_specification:
         name: result
         required: true
         schema:
-          $ref: '#/components/schemas/OkResult'
+          $ref: '#/components/schemas/RunContinueResult'
       errors:
       - SELECTED_FORK_CONTROL_UNSUPPORTED
       - RUN_NOT_FOUND
@@ -40327,6 +40361,8 @@ api_specification:
           properties:
             run:
               $ref: '#/components/schemas/RunHeader'
+            runtime_readiness:
+              $ref: '#/components/schemas/RunRuntimeReadiness'
       errors:
       - RUN_NOT_FOUND
     run.list:
