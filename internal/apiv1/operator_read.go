@@ -72,6 +72,8 @@ type RunRuntimeReadiness struct {
 	Ready   bool                      `json:"ready"`
 	Reason  string                    `json:"reason,omitempty"`
 	Failure *runtimefailures.Envelope `json:"failure,omitempty"`
+	Stage   string                    `json:"stage,omitempty"`
+	Detail  string                    `json:"detail,omitempty"`
 }
 
 type runListResult struct {

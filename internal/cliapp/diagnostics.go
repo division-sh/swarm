@@ -86,6 +86,8 @@ type diagnosticRuntimeReadiness struct {
 	Ready   bool                      `json:"ready"`
 	Reason  string                    `json:"reason,omitempty"`
 	Failure *runtimefailures.Envelope `json:"failure,omitempty"`
+	Stage   string                    `json:"stage,omitempty"`
+	Detail  string                    `json:"detail,omitempty"`
 }
 
 type DiagnosticRunDiagnosisResult struct {
@@ -1516,6 +1518,12 @@ func diagnosticRuntimeReadinessRows(readiness *diagnosticRuntimeReadiness) []cli
 	rows := []cliLabeledDetailRow{{Label: "runtime", Value: "not ready (" + readiness.Reason + ")"}}
 	if readiness.Failure != nil {
 		rows = append(rows, cliLabeledDetailRow{Label: "runtime failure", Value: eventObservationFailureSummary(readiness.Failure)})
+	}
+	if readiness.Stage != "" {
+		rows = append(rows, cliLabeledDetailRow{Label: "runtime stage", Value: readiness.Stage})
+	}
+	if readiness.Detail != "" {
+		rows = append(rows, cliLabeledDetailRow{Label: "runtime detail", Value: readiness.Detail})
 	}
 	return rows
 }

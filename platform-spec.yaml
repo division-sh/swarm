@@ -37875,6 +37875,12 @@ api_specification:
             type: string
           failure:
             $ref: '#/components/schemas/FailureEnvelope'
+          stage:
+            type: string
+            description: Bounded process-owned startup stage on failure.
+          detail:
+            type: string
+            description: Bounded public failure detail; structured values and credential-shaped text are withheld.
       RuntimeNukeResult:
         type: object
         additionalProperties: false

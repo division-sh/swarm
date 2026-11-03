@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -20,6 +22,42 @@ type continuedRunLoad struct {
 	id      string
 	phase   string
 	failure *failures.Envelope
+	stage   string
+	detail  string
+}
+
+// A canceled request must not wait behind a process-owned target startup.
+// The waiter gives the existing lifecycle mutex back if cancellation wins.
+func lockContinueOperation(ctx context.Context, mu *sync.Mutex) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if mu.TryLock() {
+		if err := ctx.Err(); err != nil {
+			mu.Unlock()
+			return err
+		}
+		return nil
+	}
+	acquired := make(chan struct{})
+	go func() {
+		mu.Lock()
+		select {
+		case acquired <- struct{}{}:
+		case <-ctx.Done():
+			mu.Unlock()
+		}
+	}()
+	select {
+	case <-acquired:
+		if err := ctx.Err(); err != nil {
+			mu.Unlock()
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // The native transition is the request's commit point. Target construction and
@@ -28,7 +66,9 @@ func (s *processLifecycleSupervisor) continueRunRuntime(ctx context.Context, req
 	if s == nil {
 		return runcontrol.TransitionResult{}, errors.New("run continue requires process lifecycle ownership")
 	}
-	s.operationMu.Lock()
+	if err := lockContinueOperation(ctx, &s.operationMu); err != nil {
+		return runcontrol.TransitionResult{}, err
+	}
 	defer s.operationMu.Unlock()
 	s.mu.RLock()
 	manager, liveRuns := s.runtimeContexts, s.selectedRecoveryEnvironment.LiveRuns
@@ -93,6 +133,7 @@ func (s *processLifecycleSupervisor) continueRunRuntime(ctx context.Context, req
 func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Lease, runID string, reference sourceartifact.RootAdmissionReference, revision, id string) {
 	var use *runtime.RuntimeContextUse
 	var err error
+	stage := "validate_target"
 	defer func() {
 		if use != nil {
 			err = errors.Join(err, use.Done())
@@ -105,6 +146,8 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 				state.phase = "failed"
 				failure := failures.FromError(err, "runtime_context", "continue_load").Failure
 				state.failure = &failure
+				state.stage = stage
+				state.detail = continuedRunFailureDetail(err)
 			}
 			s.continuedRuns[runID] = state
 		}
@@ -113,6 +156,7 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 	s.operationMu.Lock()
 	err = s.validateContinuedRunTarget(lease.Context(), runID, reference, revision)
 	if err == nil {
+		stage = "load_target"
 		use, err = s.acquireLiveTargetRuntimeLocked(lease.Context(), reference)
 	}
 	s.operationMu.Unlock()
@@ -124,9 +168,11 @@ func (s *processLifecycleSupervisor) finishContinuedRun(lease *worklifetime.Leas
 		return
 	}
 	if use.Runtime() == nil || use.Runtime().RunControl == nil {
+		stage = "acquire_recovery"
 		err = errors.New("continued run has no loaded recovery owner")
 		return
 	}
+	stage = "recover_work"
 	recovery := use.Runtime().RunControl.RecoverContinuedRun(use.WorkContext(), runID)
 	err = recovery.Err
 }
@@ -185,7 +231,28 @@ func (s *processLifecycleSupervisor) continuedRunReadiness(_ context.Context, ru
 	state, tracked := s.continuedRuns[runID]
 	s.mu.RUnlock()
 	if tracked {
-		return &apiv1.RunRuntimeReadiness{Ready: state.phase == "ready", Reason: "runtime_" + state.phase, Failure: state.failure}, nil
+		return &apiv1.RunRuntimeReadiness{Ready: state.phase == "ready", Reason: "runtime_" + state.phase, Failure: state.failure, Stage: state.stage, Detail: state.detail}, nil
 	}
 	return nil, nil
+}
+
+// Only simple diagnostic prose is exported. Structured values, paths and
+// credential-shaped text remain in the private error chain, never in RPC.
+func continuedRunFailureDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.TrimSpace(err.Error())
+	if len(message) == 0 || len(message) > 96 {
+		return "details unavailable"
+	}
+	// Unknown words may contain a credential, even without a sensitive label.
+	for _, word := range strings.Fields(strings.ToLower(message)) {
+		switch word {
+		case "target", "startup", "source", "runtime", "load", "construction", "recovery", "unavailable", "failed", "cancelled", "deadline", "expired", "refused", "superseded", "missing", "closed", "stopped":
+		default:
+			return "details unavailable"
+		}
+	}
+	return message
 }
