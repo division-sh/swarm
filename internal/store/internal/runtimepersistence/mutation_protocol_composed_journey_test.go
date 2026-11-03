@@ -63,7 +63,7 @@ func mutationProtocolFanOutRoot(t *testing.T) string {
 	for _, edit := range []struct {
 		file, old, replacement string
 	}{
-		{"schema.yaml", "    - start.closed\n", "    - start.closed\n    - fanout.requested\n"},
+		{"schema.yaml", "  - start.closed\n", "  - start.closed\n  - fanout.requested\n"},
 		{"schema.yaml", "outputs: [work.requested", "outputs: [fanout.child, work.requested"},
 	} {
 		path := filepath.Join(root, edit.file)
