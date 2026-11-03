@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -941,6 +942,11 @@ func traceFollowRetryableStreamError(err error) bool {
 func runDiagnosticHealthCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	result, err := fetchDiagnosticHealthCheck(ctx, opts)
 	if err != nil {
+		var response *cliAPIHTTPError
+		if errors.As(err, &response) && response.statusCode == http.StatusServiceUnavailable && strings.HasPrefix(response.message, "waiting: store held;") {
+			fmt.Fprintln(errOut, strings.TrimSpace(response.message))
+			return commandExitError{code: CLIExitRuntime}
+		}
 		return returnCLIAPIError(errOut, err, cliAPIErrorClassifier{})
 	}
 	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {

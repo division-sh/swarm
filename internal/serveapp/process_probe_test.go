@@ -26,7 +26,7 @@ func TestServingProbeStaysAliveWithoutExecutionBeforeAdmission(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	work := worklifetime.NewProcess()
-	probe, err := startServeProcessProbe(ctx, work, "127.0.0.1:0", func(subject string, err error) { t.Errorf("%s: %v", subject, err) })
+	probe, err := startServeProcessProbe(ctx, work, "127.0.0.1:0", func(subject string, err error) { t.Errorf("%s: %v", subject, err) }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ type serveProcessProbe struct {
 	joined   chan struct{}
 }
 
-func startServeProcessProbe(ctx context.Context, work *worklifetime.Process, addr string, onFailure func(string, error)) (*serveProcessProbe, error) {
+func startServeProcessProbe(ctx context.Context, work *worklifetime.Process, addr string, onFailure func(string, error), readout func(context.Context) (string, error)) (*serveProcessProbe, error) {
 	listener, err := cliapp.ListenServeHTTPListener("api", addr)
 	if err != nil {
 		return nil, err
@@ -46,7 +46,19 @@ func startServeProcessProbe(ctx context.Context, work *worklifetime.Process, add
 	standby := newAPIServer(&ready, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "waiting for selected-store process lease", http.StatusServiceUnavailable)
 	}), nil, ctx)
-	handler := &serveProbeHandler{standby: standby.Handler}
+	booting := standby.Handler
+	handler := &serveProbeHandler{standby: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if readout == nil || (r.URL.Path != "/readyz" && r.URL.Path != "/v1/rpc" && r.URL.Path != "/v1/ws") {
+			booting.ServeHTTP(w, r)
+			return
+		}
+		line, err := readout(r.Context())
+		if err != nil {
+			http.Error(w, "booting: selected-store inspection failed", http.StatusServiceUnavailable)
+			return
+		}
+		http.Error(w, line, http.StatusServiceUnavailable)
+	})}
 	standby.Handler = handler
 	probe := &serveProcessProbe{server: standby, listener: listener, handler: handler, joined: make(chan struct{})}
 	go func() {

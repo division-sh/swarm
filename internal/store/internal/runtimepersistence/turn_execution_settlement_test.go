@@ -254,6 +254,12 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 				if transition.ProviderDrainCount != 1 {
 					t.Fatalf("captured tail missing: %+v", transition)
 				}
+				beforeInspection := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+				counts, err := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(context.Background(), time.Now().UTC())
+				if err != nil || counts != (runtimeeffects.StartupRecoveryCounts{}) {
+					t.Fatalf("cancellation counted as resume/dead-letter: %+v err=%v", counts, err)
+				}
+				historicalContextRequireUnchanged(t, beforeInspection, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
 				summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(time.Now().UTC()))
 				if err != nil || summary.OutcomeUncertain != 1 {
 					t.Fatalf("canceled physical recovery: %+v err=%v", summary, err)
