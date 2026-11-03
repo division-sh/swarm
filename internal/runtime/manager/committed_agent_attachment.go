@@ -132,7 +132,7 @@ func agentAttachmentInstalling(active *dynamicFlowActiveAttempt, executor *dynam
 
 func agentAttachmentRetained(active *dynamicFlowActiveAttempt, executor *dynamicFlowRuntimeReadinessAttempt) bool {
 	if active == nil || executor == nil || active.pending != nil || active.complete || active.retiring || active.retirementKind != 0 ||
-		active.locallyRetired || executor.successorRequired || executor.attemptOrdinal != active.receipt.Ordinal() || executor.planHash != active.planHash {
+		active.locallyRetired || executor.successorRequired || executor.acceptedReceipt != active.receipt || executor.planHash != active.planHash {
 		return false
 	}
 	select {
