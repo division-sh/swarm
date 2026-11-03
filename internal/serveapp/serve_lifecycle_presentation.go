@@ -260,6 +260,12 @@ func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) 
 	p.boot(3, "db_connection", "ok", detail)
 }
 
+func (p *serveLifecyclePresenter) recordStandby(line string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	fmt.Fprintln(p.out, line)
+}
+
 func (p *serveLifecyclePresenter) recordStartupContext(req runtimeCompositionRequest) {
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 	command := "swarm --swarm-dir " + quote(req.SwarmDir.Path)

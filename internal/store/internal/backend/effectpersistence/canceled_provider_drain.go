@@ -30,11 +30,18 @@ func observeCanceledProviderOrigin(ctx context.Context, tx *sql.Tx, postgres boo
 	if err != nil {
 		return providerOriginCancellation{}, err
 	}
+	return readProviderOriginCancellation(ctx, tx, postgres, attempt, pending)
+}
+
+func readProviderOriginCancellation(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, pending bool, mode ...recoveryReadMode) (providerOriginCancellation, error) {
 	turnID, _, err := businessTurnIdentity(attempt.Origin)
 	if err != nil {
 		return providerOriginCancellation{}, err
 	}
-	query := `SELECT cancel_reason,cancel_cause_event_id::text,cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
+	query := `SELECT cancel_reason,cancel_cause_event_id::text,cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid`
+	if recoveryLocks(mode) {
+		query += ` FOR UPDATE`
+	}
 	if !postgres {
 		query = `SELECT cancel_reason,cancel_cause_event_id,cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
 	}
