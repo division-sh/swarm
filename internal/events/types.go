@@ -501,10 +501,15 @@ type DeliveryContext struct {
 	RunID string                 `json:"run_id,omitempty"`
 	Reply *ReplyContextRef       `json:"reply,omitempty"`
 	Joins []JoinAdmissionReceipt `json:"joins,omitempty"`
+	Life  *InstanceLife          `json:"instance_life,omitempty"`
 }
 
 func (c DeliveryContext) Normalized() DeliveryContext {
 	normalized := DeliveryContext{RunID: c.RunID, Joins: normalizeJoinAdmissions(c.Joins)}
+	if c.Life != nil {
+		life := *c.Life
+		normalized.Life = &life
+	}
 	if c.Reply == nil {
 		return normalized
 	}
@@ -517,7 +522,7 @@ func (c DeliveryContext) Normalized() DeliveryContext {
 }
 
 func (c DeliveryContext) Empty() bool {
-	return c.RunID == "" && c.Normalized().Reply == nil && len(c.Joins) == 0
+	return c.RunID == "" && c.Normalized().Reply == nil && len(c.Joins) == 0 && c.Life == nil
 }
 
 func (c DeliveryContext) ReplyContextID() string {

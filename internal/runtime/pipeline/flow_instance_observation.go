@@ -240,11 +240,7 @@ func cloneIndexReadinessPlan(plan DynamicFlowRuntimeReadinessPlan) DynamicFlowRu
 	if plan.CreationEvent != nil {
 		creation := *plan.CreationEvent
 		creation.Payload = slices.Clone(creation.Payload)
-		creation.DeliveryContext.Joins = slices.Clone(creation.DeliveryContext.Joins)
-		if creation.DeliveryContext.Reply != nil {
-			reply := *creation.DeliveryContext.Reply
-			creation.DeliveryContext.Reply = &reply
-		}
+		creation.DeliveryContext = creation.DeliveryContext.Normalized()
 		plan.CreationEvent = &creation
 	}
 	return plan

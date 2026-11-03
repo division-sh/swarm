@@ -146,6 +146,12 @@ func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, int
 	if err != nil {
 		return intent, err
 	}
+	if !dependency.Empty() {
+		intent.TargetOwnership, err = intent.TargetOwnership.WithLife(construction.Life())
+		if err != nil {
+			return intent, err
+		}
+	}
 	intent.TargetBlueprint, intent.Initialization = intent.TargetOwnership.Route(), dependency
 	if !selected.Empty() {
 		intent.ReceiverBlueprint = selected
@@ -233,6 +239,13 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 		if plan.CreatingInput.EventID != event.ID() {
 			return events.ReceiverInitialization{}, fmt.Errorf("agent construction belongs to another publication")
 		}
+		if plan.Restart != nil {
+			observed, present := p.observedAgents[actor]
+			if !present || observed.Identity() != plan.Identity {
+				return events.ReceiverInitialization{}, fmt.Errorf("restarting agent requires its original physical construction")
+			}
+			return admitObservedAgentConstructionDependency(actor.RunID, observed, requested, plan.Instance.Life)
+		}
 		receiver, err := plan.Identity.Route().AgentIdentityRoute()
 		if err != nil {
 			return events.ReceiverInitialization{}, err
@@ -256,7 +269,11 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 			if err != nil {
 				return events.ReceiverInitialization{}, err
 			}
-			return admitObservedAgentConstructionDependency(actor.RunID, selected, requested)
+			instance, err := selected.WorkflowInstance()
+			if err != nil {
+				return events.ReceiverInitialization{}, err
+			}
+			return admitObservedAgentConstructionDependency(actor.RunID, selected, requested, instance.Life)
 		}
 	}
 	if p.source != nil && actor.Name.Source == agentidentity.NameSourceDeclared {
@@ -265,11 +282,15 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 	return events.ReceiverInitialization{}, nil
 }
 
-func admitObservedAgentConstructionDependency(runID string, observation pipeline.FlowInstanceObservation, requested events.RouteIdentity) (events.ReceiverInitialization, error) {
+func admitObservedAgentConstructionDependency(runID string, observation pipeline.FlowInstanceObservation, requested events.RouteIdentity, life int64) (events.ReceiverInitialization, error) {
 	identity := observation.Identity()
 	target := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 	if !requested.Empty() && requested.Normalized() != target {
 		return events.ReceiverInitialization{}, fmt.Errorf("agent receiver contradicts recorded construction")
+	}
+	owner, err := events.MustExistingEntityTarget(target).WithLife(life)
+	if err != nil {
+		return events.ReceiverInitialization{}, err
 	}
 	receipt, native, err := observation.NativeConstruction()
 	if err != nil {
@@ -288,12 +309,12 @@ func admitObservedAgentConstructionDependency(runID string, observation pipeline
 		if err != nil {
 			return events.ReceiverInitialization{}, err
 		}
-		return events.AdmitHistoricalFlowReceiverInitialization(runID, events.MustExistingEntityTarget(target), receiver,
+		return events.AdmitHistoricalFlowReceiverInitialization(runID, owner, receiver,
 			events.HistoricalReceiverConstruction{SourceRunID: historical.SourceOwner.RunID, SourceRevision: historical.SourceRevision, SourceReceiver: sourceReceiver})
 	}
 	receiver, err := identity.Route().AgentIdentityRoute()
 	if err != nil {
 		return events.ReceiverInitialization{}, err
 	}
-	return events.AdmitStoredFlowReceiverInitialization(runID, receipt.CreatingInput.EventID, events.MustExistingEntityTarget(target), receiver)
+	return events.AdmitStoredFlowReceiverInitialization(runID, receipt.CreatingInput.EventID, owner, receiver)
 }

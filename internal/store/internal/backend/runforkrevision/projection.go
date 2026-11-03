@@ -372,7 +372,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				i.projection_version AS initial_projection_version, i.projection AS initial_materialization,
 				d.created_at AS data_created_at, d.updated_at AS data_updated_at, f.life
 				FROM flow_instances f LEFT JOIN workflow_instance_initial_materializations i
-				ON i.run_id=f.run_id AND i.instance_path=f.instance_path AND i.entity_id=f.entity_id AND i.life=f.life
+				ON i.run_id=f.run_id AND i.instance_path=f.instance_path AND i.entity_id=f.entity_id
 				LEFT JOIN entity_state d
 				ON d.run_id=f.run_id AND d.entity_id=f.entity_id AND d.flow_instance=f.instance_path AND d.entity_type=f.entity_type
 				UNION ALL

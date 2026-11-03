@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 // InstallActiveForkReceiverHeaderDoneFaultTx deliberately invalidates only the
@@ -83,6 +84,13 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 	write.End(err)
 	stateWrite.End(err)
 	if err == sql.ErrNoRows {
+		header, found, readErr := workflowheader.LoadForRead(ctx, tx, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath)
+		if readErr != nil {
+			return workflowEngineStateFact{}, readErr
+		}
+		if found && header.Life != record.Life {
+			return workflowEngineStateFact{}, pipeline.InstanceRestarted(record.Identity, record.Life, header.Life)
+		}
 		return workflowEngineStateFact{}, workflowEngineStateRevisionConflict(record)
 	}
 	if err != nil {

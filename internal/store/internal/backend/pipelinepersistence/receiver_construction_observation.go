@@ -58,7 +58,7 @@ func ReadFlowConstructionPublicationTx(ctx context.Context, tx *sql.Tx, owner fl
 	var parentInstance, instanceKey sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT m.projection, fi.flow_template, fi.entity_id, r.plan, r.plan_hash, fi.parent_instance, fi.instance_key
 		FROM workflow_instance_initial_materializations m
-		JOIN flow_instances fi ON fi.run_id=m.run_id AND fi.instance_path=m.instance_path AND fi.entity_id=m.entity_id AND m.life=fi.life
+		JOIN flow_instances fi ON fi.run_id=m.run_id AND fi.instance_path=m.instance_path AND fi.entity_id=m.entity_id
 		JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
 		WHERE m.run_id=$1 AND m.entity_id=$2 AND m.instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&record.raw, &record.templateID, &record.entityID, &readiness, &planHash, &parentInstance, &instanceKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -131,7 +131,7 @@ func ReadStoredFlowConstructionReceiptTx(ctx context.Context, tx *sql.Tx, runID 
 	}
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
-		WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3 AND life=$4`, runID, instance.EntityID, instance.StorageRef, instance.Life).Scan(&raw)
+		WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, instance.EntityID, instance.StorageRef).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return pipeline.FlowConstructionReceipt{}, false, nil
 	}
@@ -158,9 +158,8 @@ func ReadFlowConstructionPublicationFieldsTx(ctx context.Context, tx *sql.Tx, ow
 		return nil, fmt.Errorf("construction evidence requires exact entity and creating-event identities")
 	}
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT m.projection FROM workflow_instance_initial_materializations m
-		JOIN flow_instances fi ON fi.run_id=m.run_id AND fi.entity_id=m.entity_id AND fi.instance_path=m.instance_path AND fi.life=m.life
-		WHERE m.run_id=$1 AND m.entity_id=$2 AND m.instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&raw); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("read immutable construction evidence: %w", err)
 	}
 	return pipeline.FlowConstructionPublicationFields(raw, owner, entityID, eventID)

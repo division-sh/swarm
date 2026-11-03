@@ -105,6 +105,7 @@ type FlowInstanceActivationPlan struct {
 type CommittedFlowInstanceActivation struct {
 	Plan                    FlowInstanceActivationPlan
 	Created                 bool
+	StartedOver             bool
 	Lifecycle               CommittedWorkflowLifecycleMutation
 	ReadinessAttemptOrdinal uint64
 	Children                []CommittedFlowInstanceActivation
@@ -155,7 +156,10 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 	if err := a.Lifecycle.Validate(); err != nil {
 		return fmt.Errorf("committed flow instance activation lifecycle: %w", err)
 	}
-	if !a.Created && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
+	if a.Created && a.StartedOver || a.StartedOver && a.Plan.Restart == nil {
+		return fmt.Errorf("committed instance restart cannot be a physical construction")
+	}
+	if !a.Created && !a.StartedOver && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
 		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
 	}
 	if len(a.Children) != len(a.Plan.Children) {
@@ -212,8 +216,8 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if err := r.State.Validate(); err != nil {
 		return fmt.Errorf("flow instance activation state: %w", err)
 	}
-	if !r.State.Transition.CreatesState() {
-		return fmt.Errorf("flow instance activation requires a creating state record")
+	if !r.State.Transition.CreatesState() && !r.State.Transition.RestartsState() {
+		return fmt.Errorf("flow instance activation requires a creating or restarting state record")
 	}
 	r.Identity = r.Identity.Normalize()
 	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
@@ -322,7 +326,11 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	state, err := workflowEngineStateRecord(flowOwner, instance, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, normalized.OccurredAt)
+	transition, expectedState, expectedRevision := WorkflowEngineStateTransitionCreateStateAndCompanion, "", int64(0)
+	if normalized.Restart != nil {
+		transition, expectedState, expectedRevision = WorkflowEngineStateTransitionRestartStateAndCompanion, normalized.Restart.FinalStage.ID(), normalized.Restart.Revision
+	}
+	state, err := workflowEngineStateRecord(flowOwner, instance, expectedState, expectedRevision, transition, normalized.OccurredAt)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
@@ -381,6 +389,9 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if p.Restart != nil {
 		if err := p.Restart.Validate(p.Instance); err != nil {
 			return err
+		}
+		if len(p.Children) != 0 {
+			return fmt.Errorf("instance restart cannot reconstruct existing descendants")
 		}
 	} else if p.Instance.Life != 1 {
 		return fmt.Errorf("ordinary construction requires first life")
