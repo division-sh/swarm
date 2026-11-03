@@ -672,6 +672,23 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
+	// Rollback proofs use other keys; keep this generated routing witness local.
+	typesPath := filepath.Join(sourceRoot, "types.yaml")
+	typesBody, err := os.ReadFile(typesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWorkflowValidationFixtureFile(t, typesPath, string(typesBody)+"PublicConversationReference: [\"0\"]\n")
+	eventsPath := filepath.Join(sourceRoot, "events.yaml")
+	eventsBody, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const referenceField = "  conversation_reference: text\n"
+	if strings.Count(string(eventsBody), referenceField) != 1 {
+		t.Fatal("generated approval fixture lost its exact conversation-reference field")
+	}
+	writeWorkflowValidationFixtureFile(t, eventsPath, strings.Replace(string(eventsBody), referenceField, "  conversation_reference: PublicConversationReference\n", 1))
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	var db *sql.DB
@@ -1418,10 +1435,10 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 		}
 		writeWorkflowValidationFixtureFile(t, path, updated)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "PublicConversationScope: [\"direct\", \"shared\"]\nPublicConversationReference: [\"0\"]\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "PublicConversationScope: [\"direct\", \"shared\"]\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `message.received:
   _key: conversation_reference
-  conversation_reference: PublicConversationReference
+  conversation_reference: text
   conversation_scope: PublicConversationScope
   external_account: text
   provider_message_reference: integer
