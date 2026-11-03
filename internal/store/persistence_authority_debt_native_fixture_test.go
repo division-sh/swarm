@@ -59,7 +59,7 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 			digest == "c183201c71250e318f7729b79a03aff654808fdadfd25e7597daa6220f782646") &&
 			!(path == "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go" &&
 				fn.Name.Name == "verifyPublishedBarrierCompletionFailure" &&
-				digest == "bc39f68af70f7fdda75ab91e05ccc946d3558d341e12cab46066e5a6ccfa8e62") {
+				digest == "b90175cd26c9c8019b43ccb0705a8a27e5e26bbb28f26e711fd7724715ee22aa") {
 			return false
 		}
 		seen[fn.Name.Name] = true
