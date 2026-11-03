@@ -297,15 +297,20 @@ func resolveProviderDrainRecoverySQLite(ctx context.Context, tx *sql.Tx, attempt
 	return resolveProviderDrainRecovery(ctx, tx, attempt, now, false)
 }
 
-func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, postgres bool) (providerDrainRecoveryResolution, error) {
+func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, postgres bool, mode ...recoveryReadMode) (providerDrainRecoveryResolution, error) {
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
 		return providerDrainRecoveryResolution{Kind: completionSettlementCurrent}, nil
 	}
-	permit, found, err := loadProviderDrainForRecovery(ctx, tx, attempt, postgres)
+	permit, found, err := loadProviderDrainForRecovery(ctx, tx, attempt, postgres, mode...)
 	if err != nil {
 		return providerDrainRecoveryResolution{}, err
 	}
-	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, attempt.Authority.Normal.Identity, attempt.Authority.Normal, !postgres)
+	var observation storeagent.AgentExecutionObservation
+	if recoveryLocks(mode) {
+		observation, err = storeagent.LockAgentExecutionTx(ctx, tx, attempt.Authority.Normal.Identity, attempt.Authority.Normal, !postgres)
+	} else {
+		observation, err = storeagent.ReadAgentExecution(ctx, tx, attempt.Authority.Normal, !postgres)
+	}
 	if err != nil {
 		return providerDrainRecoveryResolution{}, err
 	}
@@ -336,7 +341,7 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	return providerDrainRecoveryResolution{Kind: completionSettlementDrained, Drain: permit, Expired: !permit.ExpiresAt.After(now.UTC())}, nil
 }
 
-func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (providerDrainPermit, bool, error) {
+func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool, mode ...recoveryReadMode) (providerDrainPermit, bool, error) {
 	var permit providerDrainPermit
 	var expires conversationForkTimeValue
 	var generation int64
@@ -344,15 +349,18 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	var claimVersion int64
 	var err error
 	if postgres {
-		err = tx.QueryRowContext(ctx, `
+		query := `
 			SELECT drain_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
 				       origin_kind,COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
 			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND state='pending'
-			FOR UPDATE
-		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
+		`
+		if recoveryLocks(mode) {
+			query += "FOR UPDATE\n\t\t"
+		}
+		err = tx.QueryRowContext(ctx, query, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
 			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)

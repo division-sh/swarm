@@ -23,12 +23,12 @@ import (
 
 // Legacy or incomplete provenance retains terminal recovery. Only the exact
 // journal acknowledged before launch may spend the existing delivery retry.
-func providerResumeJournalTx(ctx context.Context, tx *sql.Tx, postgres bool, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, now time.Time) (*runtimeeffects.ProviderCallJournal, error) {
+func providerResumeJournalTx(ctx context.Context, tx *sql.Tx, postgres bool, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, now time.Time, mode ...recoveryReadMode) (*runtimeeffects.ProviderCallJournal, error) {
 	journal, err := validatedProviderCallJournalTx(ctx, tx, postgres, recovered, attempt)
 	if err != nil || journal == nil {
 		return nil, err
 	}
-	current, err := providerResumeTurnCurrentTx(ctx, tx, postgres, attempt, journal.Call, now)
+	current, err := providerResumeTurnCurrentTx(ctx, tx, postgres, attempt, journal.Call, now, mode...)
 	if err != nil || !current {
 		return nil, err
 	}
@@ -71,13 +71,16 @@ func validatedProviderCallJournalTx(ctx context.Context, tx *sql.Tx, postgres bo
 	return journal, nil
 }
 
-func providerResumeTurnCurrentTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, call runtimeeffects.ProviderCall, now time.Time) (bool, error) {
+func providerResumeTurnCurrentTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, call runtimeeffects.ProviderCall, now time.Time, mode ...recoveryReadMode) (bool, error) {
 	turnID, _, err := businessTurnIdentity(attempt.Origin)
 	if err != nil {
 		return false, err
 	}
 	query := `SELECT run_id::text,agent_id,bound_ns,bound_emit,first_launched_at,cancel_reason,settled_at
-		FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid FOR UPDATE`
+		FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid`
+	if recoveryLocks(mode) {
+		query += ` FOR UPDATE`
+	}
 	if !postgres {
 		query = `SELECT run_id,agent_id,bound_ns,bound_emit,first_launched_at,cancel_reason,settled_at
 			FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
@@ -105,11 +108,11 @@ func providerResumeTurnCurrentTx(ctx context.Context, tx *sql.Tx, postgres bool,
 	return true, nil
 }
 
-func providerRecoveryDisposition(ctx context.Context, tx *sql.Tx, postgres bool, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, expired bool, now time.Time) (runtimedelivery.FailureDisposition, error) {
+func providerRecoveryDisposition(ctx context.Context, tx *sql.Tx, postgres bool, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, expired bool, now time.Time, mode ...recoveryReadMode) (runtimedelivery.FailureDisposition, error) {
 	if expired || (recovered.State != string(runtimeeffects.StateLaunched) && recovered.State != string(runtimeeffects.StateResponseObserved)) {
 		return runtimedelivery.FailureDeadLetter, nil
 	}
-	journal, err := providerResumeJournalTx(ctx, tx, postgres, recovered, attempt, now)
+	journal, err := providerResumeJournalTx(ctx, tx, postgres, recovered, attempt, now, mode...)
 	if err != nil {
 		return "", err
 	}

@@ -33,6 +33,10 @@ release approval or a promise of old-store migration.
 
 ### Changed
 
+- Standby serve, `swarm health` and `/readyz` distinguish a held store from the
+  last admitted serve instance and generation. `swarm store status` reports
+  possession separately from readiness and reads interrupted-work counts without
+  taking possession or changing recovery. (#2717)
 - Operator setup docs now list native OpenAI Responses alongside the existing
   Anthropic API, Claude CLI, and OpenAI-compatible Chat Completions backends,
   including the required `OPENAI_API_KEY` credential example. Backend selection

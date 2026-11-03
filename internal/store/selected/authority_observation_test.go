@@ -6,11 +6,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type authorityObservationFixture struct {
 	probe func(context.Context) (startupownership.PossessionObservation, error)
+}
+
+func (s authorityObservationFixture) InspectSnapshot(ctx context.Context, inspect func(context.Context) error) error {
+	return inspect(ctx)
+}
+
+func (s authorityObservationFixture) InspectStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error) {
+	return effects.StartupRecoveryCounts{}, nil
 }
 
 func (s authorityObservationFixture) InspectAuthority(context.Context) (startupownership.AuthorityInspection, error) {

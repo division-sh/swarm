@@ -213,6 +213,15 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					}
 					business.EventID = listEvents.Events[0].EventID
 				}
+				status := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
+				const heldPrefix = "Project owner: selected-store lease is held; "
+				if status.err != nil || !strings.HasPrefix(status.output, heldPrefix) || strings.Contains(status.output, "ready") {
+					t.Fatalf("held read-only store status: %v\n%s", status.err, status.output)
+				}
+				lastAdmitted := strings.TrimSuffix(strings.TrimPrefix(status.output, heldPrefix), "\n")
+				if !strings.HasSuffix(lastAdmitted, "; interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome-unknown") {
+					t.Fatalf("live unexpired work counted as interrupted: %s", lastAdmitted)
+				}
 				spec.APIPort = freeReleaseTCPPort(t)
 				standby := startReleaseServe(t, spec)
 				standbyURL := fmt.Sprintf("http://127.0.0.1:%d/readyz", spec.APIPort)
@@ -228,7 +237,7 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 						if response.StatusCode != http.StatusServiceUnavailable {
 							t.Fatalf("standby ready before holder exit: HTTP %d", response.StatusCode)
 						}
-						if readErr != nil || closeErr != nil || !strings.Contains(string(body), "waiting: store held; last admitted serve ") {
+						if readErr != nil || closeErr != nil || string(body) != "waiting: store held; "+lastAdmitted+"\n" {
 							t.Fatalf("standby lacks last-admitted readout: %q read=%v close=%v", body, readErr, closeErr)
 						}
 						break
@@ -238,6 +247,13 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 						t.Fatal("standby did not expose its read-only probe")
 					case <-time.After(10 * time.Millisecond):
 					}
+				}
+				health := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "health", "--api-server", strings.TrimSuffix(standbyURL, "/readyz"), "--api-token-file", token)
+				if health.err == nil || !strings.Contains(health.output, "waiting: store held; "+lastAdmitted) {
+					t.Fatalf("standby CLI health: %v\n%s", health.err, health.output)
+				}
+				if !strings.Contains(standby.output.String(), "waiting: store held; "+lastAdmitted) {
+					t.Fatalf("standby omitted last-admitted startup line:\n%s", standby.output.String())
 				}
 				stopped := make(chan error, 1)
 				go func() { stopped <- first.signalAndWait(syscall.SIGTERM, 5*time.Second) }()

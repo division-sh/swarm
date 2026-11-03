@@ -23,6 +23,7 @@ type storeAuthorityOptions struct {
 
 type authorityInspectionStore interface {
 	InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error)
+	InspectStartupStatus(context.Context) (runtimestartupownership.AuthorityInspection, error)
 	Close() error
 }
 
@@ -72,11 +73,16 @@ func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd
 			return runtimestartupownership.AuthorityInspection{}, fmt.Errorf("inspect selected SQLite store: %w", statErr)
 		}
 	}
-	selected, err := constructAuthorityInspectionStore(ctx, selection, cfgResult.Config)
+	return InspectSelectedStoreStartup(ctx, selection, cfgResult.Config)
+}
+
+func InspectSelectedStoreStartup(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (_ runtimestartupownership.AuthorityInspection, resultErr error) {
+	selected, err := constructAuthorityInspectionStore(ctx, selection, cfg)
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	return inspectAuthorityAndClose(ctx, selected)
+	defer closeAuthorityResult(&resultErr, selected.Close)
+	return selected.InspectStartupStatus(ctx)
 }
 
 func inspectAuthorityAndClose(ctx context.Context, selected authorityInspectionStore) (inspection runtimestartupownership.AuthorityInspection, resultErr error) {
@@ -100,15 +106,25 @@ func authorityInspectionLine(inspection runtimestartupownership.AuthorityInspect
 	if inspection.Possession == nil {
 		return "Project owner: selected store has not been created."
 	}
-	lease := "available"
+	lease := "not held"
 	if !inspection.Possession.Available {
 		lease = "held"
 	}
 	if inspection.Authority == nil {
 		return fmt.Sprintf("Project owner: selected-store lease is %s; no process generation has been admitted.", lease)
 	}
-	return fmt.Sprintf("Project owner: selected-store lease is %s (last admitted generation %d, owner %s).",
-		lease, inspection.Authority.AuthorityGeneration, inspection.Authority.OwnerID)
+	return fmt.Sprintf("Project owner: selected-store lease is %s; %s", lease, LastAdmittedServeLine(inspection))
+}
+
+func LastAdmittedServeLine(inspection runtimestartupownership.AuthorityInspection) string {
+	if inspection.Authority == nil {
+		return "no serve has been admitted"
+	}
+	line := fmt.Sprintf("last admitted serve %s (generation %d)", inspection.Authority.RuntimeInstanceID, inspection.Authority.AuthorityGeneration)
+	if counts := inspection.Interrupted; counts != nil {
+		line += fmt.Sprintf("; interrupted: %d provider turns to resume, %d provider turns to dead-letter, %d HTTP tool calls outcome-unknown", counts.ProviderTurnsToResume, counts.ProviderTurnsToDeadLetter, counts.HTTPToolCallsUnknown)
+	}
+	return line
 }
 
 func constructAuthorityInspectionStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityInspectionStore, error) {

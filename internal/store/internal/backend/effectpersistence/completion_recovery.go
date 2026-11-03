@@ -111,32 +111,35 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now)
 }
 
-func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity) ([]completionRecoveryAttempt, error) {
+func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, true)
 	if err != nil {
 		return nil, err
 	}
 	args = append([]any{now, selectedExecutionID}, args...)
-	rows, err := tx.QueryContext(ctx, postgresCompletionRecoverySelect+storeagent.CompletionRecoveryAgentJoinSQL()+`
+	query := postgresCompletionRecoverySelect + storeagent.CompletionRecoveryAgentJoinSQL() + `
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
 		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$2) OR
-		  ($2='' AND o.authority_kind<>'selected_contract_fork' AND `+postgresProviderCompletionRecoveryOwnerPredicate+`
+		  ($2='' AND o.authority_kind<>'selected_contract_fork' AND ` + postgresProviderCompletionRecoveryOwnerPredicate + `
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
-		      `+storeagent.CompletionRecoveryAgentStaleSQL(false)+`
+		      ` + storeagent.CompletionRecoveryAgentStaleSQL(false) + `
 		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
 		      WHERE run.run_id=COALESCE(NULLIF(o.lineage->>'run_id',''),NULLIF(o.authority_evidence #>> '{usage_target,run_id}',''))::uuid
-		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
+		        AND run.status IN (` + runLifecycleActiveStateSQLValues + `)
 		    ))
 		  )
 		  ))
-		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
-		FOR UPDATE OF o,a
-	`, args...)
+		` + predicate + ` ORDER BY a.authorized_at,a.attempt_id
+	`
+	if recoveryLocks(mode) {
+		query += "FOR UPDATE OF o,a\n\t"
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list completion attempts for recovery: %w", err)
 	}
@@ -355,7 +358,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		state := runtimeeffects.StateTerminalFailure
 		failureClass := runtimefailures.ClassLifecycleConflict
 		failureCode := "effect_recovery_prelaunch_abandoned"
-		if recovered.State == string(runtimeeffects.StateLaunched) || recovered.State == string(runtimeeffects.StateResponseObserved) {
+		if recoveryPostlaunch(recovered.State) {
 			state = runtimeeffects.StateOutcomeUncertain
 			failureClass = runtimefailures.ClassOutcomeUncertain
 			failureCode = "effect_recovery_outcome_unconfirmed"
