@@ -10,12 +10,144 @@ until v1.0. Each entry below lists the platform-spec version it ships against.
 
 ## [Unreleased]
 
+Release target: v0.7.0 on November 7, 2026, without a second release candidate.
+These notes describe merged source; the open readiness items below are not
+release approval or a promise of old-store migration.
+
+### Added
+
+- Directory-owned workflow/provider source and scoped captured declarations retain
+  exact source roots and artifacts through restart and fork recovery. This is the
+  local pack-source model, not a hosted Hive registry. (#2791)
+- Public service-mocked journeys cover every provider family in #2853 on both
+  stores where persistence is involved, including signed webhooks, connectors,
+  search, external MCP over HTTP and stdio, and OAuth connect/refresh. Slack's
+  signed challenge/ingress and replay coverage completes the connector journey.
+  Healthy coverage additions are not claimed as product-defect reproductions.
+  (#2860, #2879, #2897, #2905, #2913)
+- Advisory synthetic DeepSeek evidence is separate from deterministic CI. The
+  stdio MCP check uses two real inference requests and verifies that the model
+  consumes the linked tool result and copies its previously hidden receipt.
+  This is not live acceptance of every provider, transport or device.
+  (#2877, #2913)
+
 ### Changed
 
 - Operator setup docs now list native OpenAI Responses alongside the existing
   Anthropic API, Claude CLI, and OpenAI-compatible Chat Completions backends,
   including the required `OPENAI_API_KEY` credential example. Backend selection
   remains `--backend`, then `llm.backend`, then the default `anthropic`.
+- Fork selects the live flow run; compatible live bundle upgrades are admitted
+  at startup. Fixed-cut work retains its admitted source, and unsafe transitions
+  refuse rather than discard work. (#2810, #2812)
+- Flat `state.yaml` owns state declarations. Own-flow `writes` is a field list
+  or scalar `all`; fieldless flows need no invented state row or state tool.
+  State readers select the flow contract instead of a global entity type.
+  This is the first grammar slice, not all of #2293. (#2807)
+- Node handler keys declare inputs, emit sites determine outputs, guards are
+  scalar CEL, and activities have explicit IDs. Timer and join identities are
+  derived by their admitted owners. The separate gates/readiness/schema/criteria
+  grammar slice is not included. (#2899)
+- Reusable agent memory survives an admitted in-place upgrade; the next turn uses
+  the new prompt/model, including resumed Claude CLI calls. Memory-off, authored
+  rotation and explicit teardown retain their distinct behavior. (#2869)
+- Stored API conversations retain ordered assistant tool calls and tool results.
+  Required reasoning is retained within the current round and dropped when the
+  turn ends. This does not change that retention decision. (#2867)
+- Provider user turns contain the payload or admitted authored content. An
+  authored projection can include `event.at` and `event.producer`; no participant
+  name or request-level user field is added. Tool results are plain values, with
+  relay retrieval instructions preserved under bounded rendering. (#2890)
+- Generated whole-state reads return declared business fields without runtime
+  metadata or the owning flow's instance-key field; a key-only state reads as
+  `{}`. The operator-notice description has no appended usage paragraph.
+  (#2890, #2912; completes #2910)
+- API tool names use deterministic encoding plus exact admitted reverse lookup.
+  Unknown/unoffered names, collisions and over-long names refuse rather than
+  widening the canonical tool surface. (#2897)
+- Graceful serve stop seals fresh work and drains accepted work and continuations
+  before retiring their dependencies, within the existing grace period/deadline.
+  Genuine expiry and incomplete cleanup remain visible. (#2895)
+
+### Fixed
+
+- WhatsApp first login works in both serve orders. Inbound replies retain the
+  holder's exact source/root, restored replies drain before readiness, and resume
+  waits for confirmed login. Boot output reports actual account readiness; early
+  provider login-handoff ordering preserves pairing. Deterministic peer proof
+  does not replace the open physical sitting. (#2847, #2854, #2857, #2863, #2873)
+- Telegram connect/list keeps private admission evidence out of public JSON.
+  Newly connected or newly held accounts can be picked up while serve runs.
+  (#2858, #2862)
+- OpenAI-compatible replay sends `content: ""` for an empty assistant reply.
+  Request-refusing 4xx responses retain provider details; 408/429 remain retryable
+  and no automatic redispatch is introduced. (#2861)
+- Anthropic Messages sends native `tool_use` and linked `tool_result` blocks with
+  their original IDs. ID-less human-task observations remain observation text
+  per entry; linked results still refuse orphan references. (#2901)
+- Interrupted read-only HTTP provider calls can resume during startup recovery
+  through the existing retry budget and fresh authority. An immutable
+  credential-free journal and replacement validation preserve provenance;
+  uncertain writes and contradictory evidence remain conservative. (#2884)
+- `swarm test` and serve read the same complete deployment LLM configuration,
+  including OpenAI-compatible base URLs and Responses settings. (#2875)
+- Signed GitHub deliveries with an authored normalized consumer retain admitted
+  raw-output metadata instead of returning HTTP 503. Authentication, schema and
+  duplicate checks remain strict; wholly unconsumed policy is unchanged. (#2879)
+- Startup-recovery refusals name the boot step/native cause and retain
+  reproducible configuration-bound diagnostics. Dev startup discloses its scratch
+  store and the retained store it bypasses. Unsupported status hints are omitted;
+  project-default inspection completion remains pending #2911. (#2906)
+- Channel/serve store selection, credential-source readback, webhook route/schema
+  diagnostics, model/cost provenance and terminal decision cards retain their
+  shipped operator surfaces. (#2819, #2729, #2723, #2766, #2767, #2270, #2782)
+
+### Removed
+
+- Retired imports/ingress/manifest-name and manifest transport spellings have no
+  aliases; directory identity and BODY transport declarations are canonical.
+  The unsigned-webhook acknowledgement control is removed. (#2791)
+- Use `operator_account` and `external_account`, not the old account-reference
+  spellings. Permanent source-freeze surfaces are removed. (#2815, #2835)
+- Old `entities.yaml`, entity-type selectors, node `execution_type`,
+  `subscribes_to`, `produces`, `event_handlers`, guard registries and `on_fail`
+  forms are retired. Use flat state declarations and direct handlers instead.
+  (#2807, #2899)
+- Per-field generated reads and runtime result envelopes are retired. External
+  tool consumers must use the current whole-read business-field map and plain
+  result values. (#2890, #2912)
+- The `--abandon-active-runs` boot flag is removed. Use the separate explicit
+  `swarm control stop --all` operation when that is intended. (#2895)
+
+### Maintenance
+
+- Routing cleanup removes copied identities, obsolete facades/ledgers and
+  redundant projections while retaining admitted/native ownership and public
+  behavior; it is not a new routing grant or a guaranteed speedup. (#2413 series)
+- Long-lived test helpers and actual payload processes are bound to the outer
+  test lifetime with checked stop/join. Renderer/grammar fixtures are current;
+  production runner/lease policy and test bounds are unchanged.
+  (#2894, #2908, #2909)
+
+### Release Readiness
+
+- S2 native commit-tail ordering (#2794) and served-live-run publication (#2881)
+  are open v0.7 work, not shipped claims. #2911 is also pending. Refresh these
+  notes after their actual landing and qualification.
+- WhatsApp's #2577 physical sitting, independent operator/customer checks and
+  next-day continuity remain open. Mocked peers and named earlier automated
+  receipts are not physical or fresh-master acceptance. Deployment-level HITL
+  Inbox/cards over registered bots remain deferred to v0.8 (#2836).
+- Back up deployment state and credentials and review source/config changes.
+  Retained memory does not promise an old-store compatibility reader or a
+  qualified binary-only migration.
+- Planned assets are native-CGO Linux amd64 and macOS arm64 archives plus
+  `SHA256SUMS`. Linux requires compatible glibc/libm/loader/libgcc_s.so.1, not
+  musl/Alpine/static; macOS is built/smoked on macOS 15, not certified on older
+  versions. Windows, signing/notarization and Homebrew are outside this workflow.
+- The final-master artifact-only rehearsal, exact asset sizes/checksums, tag and
+  publication remain pending under #2852. The October 31 rehearsal proves only
+  its own source, not the final release. No rc.2 or early release is authorized.
 
 ## [1.6.0] - 2026-06-01
 
@@ -69,5 +201,5 @@ policy patterns).
 - Docker Compose: the bundled `docker-compose.yml` is no longer supported; the
   zero-service SQLite default replaces the compose-based local-dev path.
 
-[Unreleased]: https://github.com/division-sh/swarm/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/division-sh/swarm/compare/v0.6.0...HEAD
 [1.6.0]: https://github.com/division-sh/swarm/releases/tag/v1.6.0
