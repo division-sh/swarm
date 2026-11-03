@@ -326,7 +326,7 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				activatedOperation.Request.OperationID != materializedOperation.Request.OperationID || activatedOperation.ForkRunID != staged.ForkRunID ||
 				activatedOperation.Result == nil || activatedOperation.Result.ForkPoint != sourcePlan.ForkPoint ||
 				activatedOperation.Result.ForkEventID != "" || activatedOperation.Result.BundleHash != bundleHash || activatedOperation.Result.ExecutedEventCount != 0 {
-				t.Fatalf("native activation lost exact typed-start completion: %+v found=%t err=%v", activatedOperation, found, err)
+				t.Fatalf("native activation lost exact typed-start completion: operation=%+v found=%t err=%v validate_err=%v result=%+v expected_point=%+v expected_bundle=%q expected_child=%q expected_operation=%q expected_executed=0", activatedOperation, found, err, activatedOperation.Validate(), activatedOperation.Result, sourcePlan.ForkPoint, bundleHash, staged.ForkRunID, materializedOperation.Request.OperationID)
 			}
 			pending, err := ReadSelectedExecutionStorageForTest(ctx, selected, staged.ForkRunID)
 			if err != nil || pending.State != "closed" || pending.RunStatus != string(runlifecycle.StateLive) || pending.Occurrences != 1 {

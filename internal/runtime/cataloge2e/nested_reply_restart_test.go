@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/operatorread"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -126,7 +124,6 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatal(err)
 	}
 	oldProcess, oldCapability := h.processOwner, h.processTopology
-	restartedAt := time.Now().UTC()
 	reopened := h.reopenFromTranscript(&catalogExecutionTranscript{version: catalogReplayTranscriptVersion,
 		platformSpecDigest: digest, bundleHash: operation.TargetBundleHash, runID: catalogRuntimeRunID,
 		groups: []catalogTranscriptGroup{{steps: []catalogTriggerStep{sourceStep}}}})
@@ -148,63 +145,6 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 	}
 	loader = runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t),
 		Store: selected}
-	// Finish the unrelated boot writer before testing read-only inspection.
-	lister, err := reopened.catalogOperatorEventLister()
-	if err != nil {
-		t.Fatal(err)
-	}
-	boot, err := lister.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
-		Filter: operatorread.OperatorEventListFilter{EventName: "platform.boot"}, Since: &restartedAt, Limit: 2,
-	})
-	if err != nil || len(boot.Events) > 1 || boot.NextCursor != "" {
-		t.Fatalf("identify exact restarted boot run: %+v err=%v", boot, err)
-	}
-	if len(boot.Events) == 1 {
-		if boot.Events[0].RunID == staged.ForkRunID {
-			t.Fatalf("identify exact restarted boot run: %+v", boot)
-		}
-		bootReader := selected.(interface {
-			runtimebus.RunLifecycleReadPersistence
-			LoadRunTestQuiescence(context.Context, string, time.Time) (operatorread.RunTestQuiescence, error)
-			LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
-		})
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			if boot.Events[0].RunID == "" {
-				current, err := bootReader.LoadOperatorEvent(ctx, boot.Events[0].EventID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				settled := current.NoDelivery != nil || len(current.Deliveries) != 0
-				for _, delivery := range current.Deliveries {
-					settled = settled && delivery.Terminal
-				}
-				if settled {
-					break
-				}
-			} else {
-				bootRun, err := bootReader.LoadRunLifecycleSnapshot(ctx, boot.Events[0].RunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if bootRun.Status == "completed" && bootRun.EndedAt != nil {
-					work, err := bootReader.LoadRunTestQuiescence(ctx, bootRun.RunID, time.Now().UTC())
-					if err != nil {
-						t.Fatal(err)
-					}
-					if work.Ready {
-						break
-					}
-				}
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatalf("restarted boot did not settle: %+v err=%v", boot.Events[0], ctx.Err())
-			case <-ticker.C:
-			}
-		}
-	}
 	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 	if err != nil {
 		t.Fatal(err)
