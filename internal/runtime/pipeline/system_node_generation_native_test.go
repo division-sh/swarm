@@ -25,7 +25,7 @@ func VerifySystemNodePredecessorCannotCommitAfterGenerationAdvanceForTest(t *tes
 				"schema.yaml":   "stages:\n  queued: {}\n  done: {final: true}\n",
 				"state.yaml":    "status: \"pending\"\n",
 				"events.yaml":   "source.evt:\n  status: text\nnode.completed:\n",
-				"nodes.yaml":    "writer:\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      data_accumulation:\n        writes: [status]\n      advances_to: done\n      emit: node.completed\n",
+				"nodes.yaml":    "writer:\n  source.evt:\n    data_accumulation:\n      writes:\n        - target_field: status\n          value: payload.status\n    advances_to: done\n    emit: {event: node.completed}\n",
 			})
 			bundle, _ := semanticview.Bundle(source)
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
