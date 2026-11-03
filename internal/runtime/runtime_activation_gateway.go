@@ -25,7 +25,7 @@ func (rt *Runtime) observeActivationWorkspaceGateway(ctx context.Context, actor 
 	if !ok || token.Identity != actor.Identity {
 		return fmt.Errorf("workspace activation observation requires its exact lifecycle token")
 	}
-	if err := rt.Manager.ProveUnpublishedActivation(token); err != nil {
+	if err := rt.Manager.ProveUnpublishedActivationContext(ctx, token); err != nil {
 		return err
 	}
 	grant, err := rt.currentStartupProbeAuthority()
