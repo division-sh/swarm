@@ -825,6 +825,7 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 	)
 	handler, err := apiv1.NewHandler(apiv1.Options{
 		AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,
+		ProcessWorkOwner: f.runtime.contextRuntime.Options.ProcessWorkOwner,
 	})
 	if err != nil {
 		t.Fatal(err)
