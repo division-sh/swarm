@@ -263,6 +263,13 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if err != nil {
 		return nil, err
 	}
+	compactor := r.contextCompactor()
+	if err := compactContext(ctx, s, lease, message, managed, resolvedModel, compactor, false); err != nil {
+		return nil, err
+	}
+	if err := bindFrozenContextCheckpoint(s, managed); err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -279,6 +286,9 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-responses request: %w", err)
 	}
+	if managed != nil && managed.resume != nil {
+		reqJSON = append([]byte(nil), managed.resume.Journal.Call.Request.Body...)
+	}
 	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
 	if err != nil {
 		return nil, err
@@ -286,6 +296,14 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 
 	start := time.Now()
 	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
+	if payload, retry, repairErr := compactor.retryRejectedContext(ctx, s, lease, message, managed, resolvedModel, rawResp, dispatch); retry {
+		if repairErr != nil {
+			return nil, repairErr
+		}
+		retryCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "context_compaction_retry:1")
+		rawResp, parsed, dispatch, err = r.sendAdmittedRequest(retryCtx, profile, resolvedModel, payload, managed)
+		reqJSON = payload
+	}
 	latency := time.Since(start)
 	completionUsage := apiCompletionUsageFromRaw(rawResp, "input_tokens", "output_tokens")
 	if err != nil {
@@ -496,23 +514,34 @@ func (r *OpenAIResponsesRuntime) buildRequest(s *Session, input Message, model s
 	if model == "" {
 		return openAIResponsesRequest{}, fmt.Errorf("openai-responses managed provider model is required")
 	}
-	return openAIResponsesRequest{
+	request := openAIResponsesRequest{
 		Model:        model,
 		Instructions: s.SystemPrompt,
 		Input:        items,
 		Tools:        tools,
-	}, nil
+	}
+	_, reservation := llmselection.ContextCompactionBudget(llmselection.BackendOpenAIResponses, openAIResponsesURL(r.baseURL), model)
+	if reservation != 0 {
+		request.MaxOutputTokens = reservation
+	}
+	return request, nil
 }
 
 func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte, managed *managedProviderCall) ([]byte, openAIResponsesResponse, *completionDispatch, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAIResponsesURL(r.baseURL), bytes.NewReader(payload))
+	destination := openAIResponsesURL(r.baseURL)
+	if managed != nil && managed.compactionOperationID != "" && managed.compactionMethod == "openai_native" {
+		destination += "/compact"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, destination, bytes.NewReader(payload))
 	if err != nil {
 		return nil, openAIResponsesResponse{}, nil, fmt.Errorf("build openai-responses request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
 	var attempt *runtimeeffects.Handle
-	if managed != nil {
+	if managed != nil && managed.compactionOperationID != "" {
+		attempt, err = runtimeeffects.BeginContextCompaction(ctx, "openai_responses", managed.compactionOperationID, managed.frame, payload)
+	} else if managed != nil {
 		call, callErr := managedHTTPProviderCall(payload, req, managed)
 		if callErr != nil {
 			return nil, openAIResponsesResponse{}, nil, callErr
@@ -737,10 +766,11 @@ func openAIResponsesUsage(parsed openAIResponsesResponse) (UsageTokens, bool) {
 }
 
 type openAIResponsesRequest struct {
-	Model        string                `json:"model"`
-	Instructions string                `json:"instructions,omitempty"`
-	Input        []any                 `json:"input"`
-	Tools        []openAIResponsesTool `json:"tools,omitempty"`
+	MaxOutputTokens int                   `json:"max_output_tokens,omitempty"`
+	Model           string                `json:"model"`
+	Instructions    string                `json:"instructions,omitempty"`
+	Input           []any                 `json:"input"`
+	Tools           []openAIResponsesTool `json:"tools,omitempty"`
 }
 
 type openAIResponsesTool struct {

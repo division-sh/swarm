@@ -49,6 +49,31 @@ type completion2270APIRuntime interface {
 }
 
 func TestCompletion2270APIExecutionEvidence(t *testing.T) {
+	t.Run("native compaction iteration usage", func(t *testing.T) {
+		request := runtimeeffects.CompletionRequest{Purpose: runtimeeffects.ContextCompactionPurpose, ModelAlias: "regular", RequestedModel: "requested", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"}
+		for _, cell := range []struct {
+			iterations string
+			exact      bool
+		}{
+			{`[{"type":"compaction","input_tokens":10,"output_tokens":7,"cache_read_input_tokens":3,"cache_creation_input_tokens":4},{"type":"compaction","input_tokens":5,"output_tokens":3}]`, true},
+			{`[]`, false},
+			{`[{"input_tokens":1,"input_tokens":2,"output_tokens":3}]`, false},
+			{`[{"input_tokens":1,"output_tokens":-1}]`, false},
+		} {
+			raw := []byte(`{"model":"reported","usage":{"input_tokens":0,"output_tokens":0,"iterations":` + cell.iterations + `}}`)
+			usage, err := bindCompletionUsageEvidence(request, contextCompactionUsage("anthropic", "anthropic_native", raw))
+			if err != nil || usage.ValidateEvidence() != nil {
+				t.Fatalf("usage is not valid typed evidence: %+v %v", usage, err)
+			}
+			if cell.exact {
+				if usage.Exactness != runtimeeffects.CompletionUsageExact || *usage.InputTokens != 22 || *usage.OutputTokens != 10 || *usage.CacheReadInputTokens != 3 || *usage.CacheCreationInputTokens != 4 {
+					t.Fatalf("iteration usage lost charge: %+v", usage)
+				}
+			} else if usage.Exactness != runtimeeffects.CompletionUsageUnavailable || len(usage.Evidence.Problems) == 0 {
+				t.Fatalf("malformed iterations became zero-cost evidence: %+v", usage)
+			}
+		}
+	})
 	for _, protocol := range []struct{ profile, adapter, input, output, content string }{
 		{llmselection.BackendAnthropic, "anthropic_api", "input_tokens", "output_tokens", `"content":[{"type":"text","text":"done"}]`},
 		{llmselection.BackendOpenAICompatible, "openai_compatible", "prompt_tokens", "completion_tokens", `"choices":[{"message":{"role":"assistant","content":"done"}}]`},

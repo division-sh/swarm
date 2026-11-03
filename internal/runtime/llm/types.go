@@ -196,23 +196,24 @@ func (r *Response) ForkChatCompletionAcknowledged() bool {
 }
 
 type Session struct {
-	ID                   string
-	ProviderSessionID    string
-	AgentID              string
-	Memory               agentmemory.Plan
-	MemoryIdentity       agentmemory.Identity
-	RetryReason          string
-	RetriesFromSessionID string
-	Watchdog             *ConversationWatchdog
-	TurnCount            int
-	ParseFailures        int
-	SystemPrompt         string
-	Tools                []ToolDefinition
-	Messages             []Message
-	ContextCheckpoints   []ContextCompactionCheckpoint
-	claudeState          workspace.ClaudeState
-	pendingAsync         *Message
-	adoptedFromID        string
+	acquiredCanonicalMessages int
+	ID                        string
+	ProviderSessionID         string
+	AgentID                   string
+	Memory                    agentmemory.Plan
+	MemoryIdentity            agentmemory.Identity
+	RetryReason               string
+	RetriesFromSessionID      string
+	Watchdog                  *ConversationWatchdog
+	TurnCount                 int
+	ParseFailures             int
+	SystemPrompt              string
+	Tools                     []ToolDefinition
+	Messages                  []Message
+	ContextCheckpoints        []ContextCompactionCheckpoint
+	claudeState               workspace.ClaudeState
+	pendingAsync              *Message
+	adoptedFromID             string
 }
 
 type UsageTokens struct {
@@ -328,13 +329,15 @@ func validateManagedCall(ctx context.Context, session *Session, call ManagedCall
 }
 
 type managedProviderCall struct {
-	message           Message
-	provider          agentframe.Provider
-	frame             agentframe.Frame
-	toolRound         *runtimeeffects.CompletionContinuationSnapshot
-	selectedToolRound *Response
-	resume            *runtimeeffects.ProviderCallRecovery
-	frozen            *runtimeeffects.ProviderCall
+	compactionOperationID string
+	compactionMethod      string
+	message               Message
+	provider              agentframe.Provider
+	frame                 agentframe.Frame
+	toolRound             *runtimeeffects.CompletionContinuationSnapshot
+	selectedToolRound     *Response
+	resume                *runtimeeffects.ProviderCallRecovery
+	frozen                *runtimeeffects.ProviderCall
 }
 
 func validateManagedProviderCall(ctx context.Context, session *Session, call ManagedCall, contract ProviderContract) (managedProviderCall, error) {

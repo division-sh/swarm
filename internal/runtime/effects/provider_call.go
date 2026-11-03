@@ -22,6 +22,7 @@ const ProviderCallJournalVersion = "provider-call/v1"
 // ProviderCall freezes adapter input, not permission to execute it. The native
 // owner binds it to the physical attempt before the provider can be invoked.
 type ProviderCall struct {
+	ContextCheckpointID  string                     `json:"context_checkpoint_id,omitempty"`
 	SessionID            string                     `json:"session_id"`
 	TurnCount            int                        `json:"turn_count"`
 	Memory               agentmemory.Plan           `json:"memory"`

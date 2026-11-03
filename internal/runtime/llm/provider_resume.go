@@ -66,6 +66,21 @@ func managedHTTPProviderCall(payload []byte, request *http.Request, managed *man
 	return call, nil
 }
 
+func bindFrozenContextCheckpoint(session *Session, managed *managedProviderCall) error {
+	if managed == nil || managed.frozen == nil {
+		return nil
+	}
+	checkpointID := ""
+	if len(session.ContextCheckpoints) != 0 {
+		checkpointID = session.ContextCheckpoints[len(session.ContextCheckpoints)-1].ID
+	}
+	if managed.resume != nil && managed.resume.Journal.Call.ContextCheckpointID != checkpointID {
+		return contextCompactionLimitation("frozen_checkpoint_identity_changed")
+	}
+	managed.frozen.ContextCheckpointID = checkpointID
+	return nil
+}
+
 func (c *Conversation) recoverInterruptedProviderCall(ctx context.Context, previous *Response) (*Response, bool, error) {
 	controller, ok := runtimeeffects.ControllerFromContext(ctx)
 	if !ok {

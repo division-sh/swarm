@@ -585,7 +585,11 @@ func requireAttemptSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, 
 	if strings.TrimSpace(req.SessionGrantID) == "" || strings.TrimSpace(req.SessionLockOwner) == "" {
 		return fmt.Errorf("memory provider attempt requires its exact session grant")
 	}
-	current, err := exactSessionGrantCurrentTx(ctx, tx, postgres, authority.Target.SessionID, authority.Target.RunID, req.SessionGrantID, req.SessionLockOwner)
+	var checkpoint []string
+	if req.ProviderCall != nil {
+		checkpoint = []string{req.ProviderCall.ContextCheckpointID}
+	}
+	current, err := exactSessionGrantCurrentTx(ctx, tx, postgres, authority.Target.SessionID, authority.Target.RunID, req.SessionGrantID, req.SessionLockOwner, checkpoint...)
 	if err != nil {
 		return fmt.Errorf("check memory provider attempt session grant: %w", err)
 	}
@@ -595,13 +599,25 @@ func requireAttemptSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, 
 	return nil
 }
 
-func exactSessionGrantCurrentTx(ctx context.Context, tx *sql.Tx, postgres bool, sessionID, runID, grantID, lockOwner string) (bool, error) {
+func exactSessionGrantCurrentTx(ctx context.Context, tx *sql.Tx, postgres bool, sessionID, runID, grantID, lockOwner string, checkpoint ...string) (bool, error) {
 	query := `SELECT lease_expires_at FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND status='active'`
+	args := []any{sessionID, runID, grantID, lockOwner}
 	if postgres {
-		query = `SELECT lease_expires_at FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND status='active' FOR UPDATE`
+		query = `SELECT lease_expires_at FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND status='active'`
+	}
+	if len(checkpoint) != 0 {
+		if postgres {
+			query += ` AND COALESCE(runtime_state->'context_checkpoints'->-1->>'id','')=$5`
+		} else {
+			query += ` AND COALESCE(json_extract(runtime_state,'$.context_checkpoints[#-1].id'),'')=?`
+		}
+		args = append(args, checkpoint[0])
+	}
+	if postgres {
+		query += ` FOR UPDATE`
 	}
 	var expiresRaw any
-	if err := tx.QueryRowContext(ctx, query, sessionID, runID, grantID, lockOwner).Scan(&expiresRaw); err != nil {
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&expiresRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}

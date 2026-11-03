@@ -134,6 +134,7 @@ func acquireContinuedMemory(ctx context.Context, acquirer LiveSessionAcquirer, s
 			session.ID = lease.SessionID
 		}
 	}
+	session.acquiredCanonicalMessages = len(session.Messages)
 	if session.pendingAsync != nil && !transient {
 		session.Messages = append(session.Messages, *session.pendingAsync)
 	}
