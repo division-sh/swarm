@@ -21,7 +21,8 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		return nil, nil, nil, err
 	}
 	persistedRoutes := prepared.DeliveryRoutes
-	persisted = uniqueStrings(append(persisted, deliveryRouteAgentRecipientIDs(persistedRoutes)...))
+	agentRecipients := deliveryRouteAgentRecipientIDs(persistedRoutes)
+	persisted = uniqueStrings(append(persisted, agentRecipients...))
 	if prepared.Settlement.NoDelivery() {
 		if len(persisted) > 0 {
 			return nil, nil, nil, fmt.Errorf("replay event %s has no-delivery settlement with persisted recipients", evt.ID())
@@ -36,13 +37,13 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		if hasNodeDeliveryRoute(persistedRoutes) {
 			return nil, nil, nil, fmt.Errorf("direct replay event %s cannot carry node delivery routes", evt.ID())
 		}
-		return deliveryRouteAgentRecipientIDs(persistedRoutes), nil, persistedRoutes, nil
+		return agentRecipients, nil, persistedRoutes, nil
 	case runtimepipelineobligation.ScopeSubscribed:
 		internal, err := eb.replayNodeCarriersForCommittedEvent(ctx, evt, persistedRoutes)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		live := uniqueStrings(append(deliveryRouteAgentRecipientIDs(persistedRoutes), internal...))
+		live := uniqueStrings(append(agentRecipients, internal...))
 		return live, internal, persistedRoutes, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("replay recipients: unsupported scope %q", strings.TrimSpace(string(scope)))
@@ -79,22 +80,18 @@ func hasNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
 }
 
 func deliveryRouteNodeRecipientIDs(routes []events.DeliveryRoute) []string {
-	routes = events.NormalizeDeliveryRoutes(routes)
-	out := make([]string, 0, len(routes))
-	for _, route := range routes {
-		if !route.Recipient.IsNode() {
-			continue
-		}
-		out = append(out, route.Recipient.ID())
-	}
-	return uniqueStrings(out)
+	return deliveryRouteRecipientIDs(routes, events.DeliveryRecipient.IsNode)
 }
 
 func deliveryRouteAgentRecipientIDs(routes []events.DeliveryRoute) []string {
+	return deliveryRouteRecipientIDs(routes, events.DeliveryRecipient.IsAgent)
+}
+
+func deliveryRouteRecipientIDs(routes []events.DeliveryRoute, include func(events.DeliveryRecipient) bool) []string {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	out := make([]string, 0, len(routes))
 	for _, route := range routes {
-		if !route.Recipient.IsAgent() {
+		if !include(route.Recipient) {
 			continue
 		}
 		out = append(out, route.Recipient.ID())

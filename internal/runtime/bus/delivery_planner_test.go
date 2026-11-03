@@ -268,7 +268,7 @@ func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing
 		},
 	}
 
-	result, err := resolver.Resolve(context.Background(), eventtest.RunCreatingRootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	result, err := resolver.resolve(context.Background(), eventtest.RunCreatingRootIngress("", events.EventType("producer/scan.requested"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), ordinaryPublicationSource{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *te
 		time.Time{},
 	)
 
-	result, err := resolver.Resolve(context.Background(), evt)
+	result, err := resolver.resolve(context.Background(), evt, ordinaryPublicationSource{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestDeliveryRecipientPolicy_FiltersExplicitAgentScopeIntoManifest(t *testin
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-agent-scope-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}))
+	manifest, err := policy.evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-agent-scope-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Now().UTC()), agentDeliveryRecipientCandidates([]string{"entity-agent", "other-agent", "shared-agent"}), ordinaryPublicationSource{})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -379,12 +379,12 @@ func TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptor
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("internal-subscribers-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC()), []deliveryRecipientCandidate{
+	manifest, err := policy.evaluate(context.Background(), eventtest.ExistingRunRootIngress(eventtest.UUID("internal-subscribers-publication"), "task.completed", "operator", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC()), []deliveryRecipientCandidate{
 		{ID: "workflow-runtime", PersistAsDelivery: false},
 		{ID: "node:scan-orchestrator", PersistAsDelivery: false},
 		{ID: "agent-a", PersistAsDelivery: true},
 		{ID: "missing-agent", PersistAsDelivery: true},
-	})
+	}, ordinaryPublicationSource{})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -455,9 +455,9 @@ func TestDeliveryRecipientPolicy_BindsOnlyConstructedStaticDeclarations(t *testi
 			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("constructed-static-publication"), "task.completed", "operator", "", nil, 0, runID, envelope, time.Now().UTC())
 			ctx, reader := admittedAgentConstructionFixture(t, policy.semanticSource, runID)
 			policy.instances = reader
-			manifest, err := policy.Evaluate(ctx, evt, []deliveryRecipientCandidate{{
+			manifest, err := policy.evaluate(ctx, evt, []deliveryRecipientCandidate{{
 				ID: "reviewer", AgentIdentity: identity, PersistAsDelivery: true, AgentLifecycle: agentLifecycleAdmissionStaticDeclaration,
-			}})
+			}}, ordinaryPublicationSource{})
 			if err != nil || len(manifest.DeliveryRoutes) != test.want {
 				t.Fatalf("delivery routes=%#v want=%d err=%v", manifest.DeliveryRoutes, test.want, err)
 			}
@@ -536,7 +536,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *t
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.RunCreatingRootIngress(
+	manifest, err := policy.evaluate(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"task.completed",
 		"",
@@ -547,7 +547,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetInstanceIsGone(t *t
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-2", FlowInstance: "flow/missing"}),
 		time.Time{},
-	), agentDeliveryRecipientCandidates([]string{"agent-a"}))
+	), agentDeliveryRecipientCandidates([]string{"agent-a"}), ordinaryPublicationSource{})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 		},
 	}
 
-	manifest, err := policy.Evaluate(context.Background(), eventtest.RunCreatingRootIngress(
+	manifest, err := policy.evaluate(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"task.completed",
 		"",
@@ -577,7 +577,7 @@ func TestDeliveryRecipientPolicy_TargetedEventFailsWhenTargetDoesNotSubscribe(t 
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1", FlowInstance: "flow/target"}),
 		time.Time{},
-	), agentDeliveryRecipientCandidates([]string{"other-agent"}))
+	), agentDeliveryRecipientCandidates([]string{"other-agent"}), ordinaryPublicationSource{})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubsc
 		Route: events.RouteIdentity{FlowInstance: "component-scaffold/aaaaaaaa-1111-4111-8111-aaaaaaaa1111"},
 	})
 
-	manifest, err := policy.Evaluate(
+	manifest, err := policy.evaluate(
 		context.Background(),
 		eventtest.RunCreatingRootIngress(
 			"",
@@ -623,6 +623,7 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceWithoutSubscriberIsNotSubsc
 		),
 
 		nil,
+		ordinaryPublicationSource{},
 	)
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
@@ -644,7 +645,7 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTermina
 		},
 	}
 
-	manifest, err := policy.Evaluate(
+	manifest, err := policy.evaluate(
 		context.Background(),
 		eventtest.RunCreatingRootIngress(
 			"",
@@ -665,6 +666,7 @@ func TestDeliveryRecipientPolicy_TargetedFlowInstanceMissingIsUnreachableTermina
 		),
 
 		nil,
+		ordinaryPublicationSource{},
 	)
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)

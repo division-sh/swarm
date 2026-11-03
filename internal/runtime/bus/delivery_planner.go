@@ -56,10 +56,6 @@ type deliveryRouteResolver struct {
 	describeSubscribersForEvent         func(string, []Subscriber) []PublishDiagnosticRecipient
 }
 
-func (r deliveryRouteResolver) Resolve(ctx context.Context, evt events.Event) (deliveryRoutingResult, error) {
-	return r.resolve(ctx, evt, ordinaryPublicationSource{}, nil)
-}
-
 func (r deliveryRouteResolver) resolve(ctx context.Context, evt events.Event, source ordinaryPublicationSource, include func(Subscriber) bool) (deliveryRoutingResult, error) {
 	eventKeys := pubsubEventKeys(evt, source)
 	routedRecipients, err := r.resolveRoutedSubscribers(ctx, evt, eventKeys, source)
@@ -122,10 +118,6 @@ type deliveryRecipientPolicy struct {
 	semanticSource             semanticview.Source
 	requireTargetOwners        bool
 	runProposal                runtimepipeline.FlowInstanceRunProposal
-}
-
-func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate) (deliveryRecipientManifest, error) {
-	return p.evaluate(ctx, evt, recipients, ordinaryPublicationSource{})
 }
 
 func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate, localSource ordinaryPublicationSource) (deliveryRecipientManifest, error) {
@@ -535,7 +527,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 		return RoutePlan{}, err
 	}
 	ctx = withPublicationTargetOwners(ctx, projection)
-	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, agentDeliveryRecipientCandidates(requested))
+	manifest, err := p.recipientPolicy.evaluate(ctx, evt, agentDeliveryRecipientCandidates(requested), ordinaryPublicationSource{})
 	if err != nil {
 		return RoutePlan{}, err
 	}
