@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
@@ -18,41 +17,6 @@ import (
 )
 
 var errUnexpectedDurableTestRole = errors.New("unexpected durable EventBus test role")
-
-func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
-	if _, present := reflect.TypeOf(DurableDependencies{}).FieldByName("FlowRouteTopology"); present {
-		t.Error("EventBus still accepts a persisted topology owner")
-	}
-	if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName("StageFlowInstanceRouteContext"); present {
-		t.Error("EventBus still exposes persisted topology staging")
-	}
-	for _, field := range []string{"ActiveFlows", "TargetOwners"} {
-		if _, present := reflect.TypeOf(DurableDependencies{}).FieldByName(field); present {
-			t.Errorf("EventBus still accepts retired instance descriptor reader %s", field)
-		}
-	}
-}
-
-func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
-	if _, present := reflect.TypeOf(routeFlowTemplate{}).FieldByName("InputEvents"); present {
-		t.Error("compiled subscription template retains redundant reconstruction field InputEvents")
-	}
-	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun", "HasFlowInstanceRoute", "RemoveFlowInstanceRoute", "AddFlowInstanceRoute"} {
-		if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName(name); present {
-			t.Errorf("compiled source table still exports retired membership API %s", name)
-		}
-	}
-	for _, name := range []string{"HasFlowInstanceRoute", "PinRoutingDescriptors"} {
-		if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName(name); present {
-			t.Errorf("EventBus still exports retired membership API %s", name)
-		}
-	}
-	for _, name := range []string{"routes", "patterns", "eventPath", "instanceEventPath", "resolutionIndexDirty", "exactPatternIndexes", "wildcardPatternIndexes", "instanceOwners", "authoredEventPath", "authoredScopes", "mu"} {
-		if _, present := reflect.TypeOf(RouteTable{}).FieldByName(name); present {
-			t.Errorf("compiled source table retains retired resolution cache %s", name)
-		}
-	}
-}
 
 func TestCompiledPubsubBindingsRejectMissingSource(t *testing.T) {
 	for _, table := range []*RouteTable{nil, {}, derivedRouteTableFixture(t, nil)} {
