@@ -145,7 +145,7 @@ func oldEnvelopeReuseDecode(r Record, settlement events.RouteSettlement) (events
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, sourceFact.RouteIdentity, r.RoutingSourceAuthority, sourceFact.Life)
+	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, sourceFact.RouteIdentity.Normalized(), r.RoutingSourceAuthority, sourceFact.Life)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("event record routing source: %w", err)
 	}
