@@ -388,6 +388,12 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 			if handler.Guard != nil {
 				assume(handler.Guard.Check, true)
 			}
+		case StepAccumulate:
+			if handler.Accumulate != nil {
+				if field, ok := a.entity.Field(handler.Accumulate.Target); ok {
+					facts.Assign(handler.Accumulate.Target, field.Type)
+				}
+			}
 		case StepFilter:
 			if handler.Filter != nil {
 				assign(handler.Filter.StoreAs)
