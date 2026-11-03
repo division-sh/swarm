@@ -55,6 +55,7 @@ func toolTestConstructedActor(t testing.TB, exec *Executor, actor actors.AgentCo
 		t.Fatalf("producer fixture route %s conflicts with constructed %s", actor.FlowPath, instance.InstancePath)
 	}
 	exec.workflowInstances = emitWorkflowInstanceLoader{rows: map[string]pipeline.WorkflowInstance{instance.InstancePath: {
+		Life:         1,
 		WorkflowName: instance.TemplateID, InstanceID: instance.InstanceID, StorageRef: instance.InstancePath, EntityID: instance.EntityID,
 		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
 	}}}
