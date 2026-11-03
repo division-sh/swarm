@@ -254,5 +254,10 @@ func continuedRunFailureDetail(err error) string {
 			return "details unavailable"
 		}
 	}
+	for _, char := range message {
+		if char != ' ' && (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') {
+			return "details unavailable"
+		}
+	}
 	return message
 }
