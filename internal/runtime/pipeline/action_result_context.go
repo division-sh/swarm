@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -15,6 +16,7 @@ import (
 func workflowNodeProducerSource(ctx context.Context, source semanticview.Source, node runtimeidentity.ExecutableNode, flowID, entityID string, executionRoute events.RouteIdentity) (events.RoutingSource, error) {
 	route := executionRoute.Normalized()
 	life := events.DeliveryContextFromContext(ctx).Life
+	runID := correlation.RunIDFromContext(ctx)
 	if route.FlowInstance == "" || route.FlowID != strings.TrimSpace(flowID) || route.EntityID != strings.TrimSpace(entityID) {
 		return events.RoutingSource{}, fmt.Errorf("workflow node producer disagrees with its exact execution coordinate")
 	}
@@ -32,6 +34,10 @@ func workflowNodeProducerSource(ctx context.Context, source semanticview.Source,
 			}
 		}
 		route = application.Owner().Route()
+		if runID != "" && runID != application.Event().RunID() {
+			return events.RoutingSource{}, fmt.Errorf("node producer application crosses its execution run")
+		}
+		runID = application.Event().RunID()
 		captured := events.InstanceLife{RunID: application.Event().RunID(), FlowInstance: route.FlowInstance, Life: application.Owner().Life()}
 		if life != nil && *life != captured {
 			return events.RoutingSource{}, fmt.Errorf("node producer life disagrees with its delivery target application")
@@ -44,5 +50,5 @@ func workflowNodeProducerSource(ctx context.Context, source semanticview.Source,
 	if err != nil || life == nil {
 		return producer, err
 	}
-	return producer.WithInstanceLife(life.RunID, *life)
+	return producer.WithInstanceLife(runID, *life)
 }
