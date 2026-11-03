@@ -42,6 +42,36 @@ func TestProviderTurnRenderingJourneyBothStores(t *testing.T) {
 	}
 }
 
+func TestProviderRootStateToolsOfferedBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			denyProviderJourneyExternalNetwork(t)
+			h := newChannelOnboardingE2EHarness(t, backend, false)
+			h.opts.SourceRoot = writeTurnRenderingSource(t, "root_state")
+			h.opts.TestLLMRuntime = nil
+			provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-root-state-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				return turnRenderingReply(request, "root_state")
+			})
+			credentials, err := runtimecredentials.NewFileStore(h.credentialPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := credentials.Set(t.Context(), "OPENAI_COMPATIBLE_API_KEY", "synthetic-root-state-key"); err != nil {
+				t.Fatal(err)
+			}
+			configureProviderJourneyLLM(t, h.opts.ConfigPath, "openai_compatible", provider.URL, "synthetic-root-state")
+			h.start(t)
+			defer h.stop(t)
+			published := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+				"bundle_hash": servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot), "event_name": "evidence.started",
+				"payload": map[string]any{"conversation": "synthetic", "sequence": 1, "text": "synthetic turn 1"}, "idempotency_key": "root-state-tools",
+			})
+			inputID := waitRenderingInput(t, h, published.RunID, published.EventID)
+			waitTurnRenderingCompletion(t, h, published.RunID, inputID, &providerEvidenceObservation{})
+		})
+	}
+}
+
 func TestProviderTurnRenderingDeepSeekEvidence(t *testing.T) {
 	selected, reason := realModelSelection(os.Getenv, func() (string, bool) {
 		head := exec.Command("git", "rev-parse", "HEAD")
@@ -235,6 +265,21 @@ func waitTurnRenderingCompletion(t *testing.T, h *channelOnboardingE2EHarness, r
 
 func writeTurnRenderingSource(t *testing.T, cell string) string {
 	t.Helper()
+	if cell == "root_state" {
+		root := t.TempDir()
+		for path, body := range map[string]string{
+			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+			"schema.yaml":   "inputs: [evidence.started, evidence.requested, evidence.completed]\noutputs: [evidence.completed]\n",
+			"state.yaml":    "result: Report\n",
+			"types.yaml":    "Verdict: [\"accepted\", \"rejected\"]\nReport:\n  verdict: Verdict\n  score: integer\n  notes: [text]\n",
+			"events.yaml":   "evidence.started: {conversation: text, sequence: integer, text: text}\nevidence.requested: {conversation: text, sequence: integer, text: text}\nevidence.completed: {sequence: integer}\n",
+			"nodes.yaml":    "speaker:\n  evidence.started:\n    emit:\n      event: evidence.requested\n      fields: {conversation: payload.conversation, sequence: payload.sequence, text: payload.text}\nobserver:\n  evidence.completed:\n    guard: true\n",
+			"agents.yaml":   "witness:\n  model: regular\n  subscriptions: [evidence.requested]\n  emit_events: [evidence.completed]\n  writes: [result]\n  intent:\n    inline: Save and read the synthetic result, then emit the current sequence.\n",
+		} {
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), body)
+		}
+		return root
+	}
 	root := writeProviderEvidenceSource(t, "memory")
 	files := map[string]string{
 		"events.yaml":       "evidence.started: {conversation: string, sequence: integer, text: string}\nevidence.requested: {conversation: string, sequence: integer, text: string}\n",
@@ -378,9 +423,21 @@ func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, erro
 			} `json:"tool_calls"`
 			CallID string `json:"tool_call_id"`
 		} `json:"messages"`
+		Tools []struct {
+			Function struct{ Name string } `json:"function"`
+		} `json:"tools"`
 	}
 	if err := json.Unmarshal(request.Body, &body); err != nil {
 		return llmapi.Reply{}, err
+	}
+	if cell == "root_state" {
+		offered := map[string]bool{}
+		for _, tool := range body.Tools {
+			offered[tool.Function.Name] = true
+		}
+		if !offered["read_state"] || !offered["save_state_result"] {
+			return llmapi.Reply{}, fmt.Errorf("root provider request lacks generated state tools: %v", offered)
+		}
 	}
 	sequence := 0
 	speaker := ""
@@ -418,6 +475,21 @@ func turnRenderingReply(request llmapi.Request, cell string) (llmapi.Reply, erro
 	if (cell == "read" || cell == "long") && results == 0 {
 		name = "read_state"
 		args = map[string]any{}
+	}
+	if cell == "root_state" {
+		switch results {
+		case 0:
+			name = "save_state_result"
+			args = map[string]any{"value": map[string]any{"verdict": "accepted", "score": 7, "notes": []any{"synthetic root result"}}}
+		case 1:
+			name, args = "read_state", map[string]any{}
+		case 2:
+			var value map[string]any
+			last := body.Messages[len(body.Messages)-1]
+			if last.Role != "tool" || json.Unmarshal([]byte(last.Content), &value) != nil || !reflect.DeepEqual(value["result"], map[string]any{"verdict": "accepted", "score": float64(7), "notes": []any{"synthetic root result"}}) {
+				return llmapi.Reply{}, fmt.Errorf("root generated save/read did not preserve the typed result: %s", last.Content)
+			}
+		}
 	}
 	if cell == "results" && sequence == 1 {
 		if results == 0 {
