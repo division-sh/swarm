@@ -160,6 +160,9 @@ func (c *Conversation) RunManaged(ctx context.Context, draft agentframe.TurnDraf
 	causalEvent := draft.Event
 	c.causalEvent = &causalEvent
 	defer func() {
+		if retErr == nil && response != nil && draft.Kind == agentframe.TurnInitial && !response.completionConsumed {
+			retErr = c.settleUnemittedMemory(ctx)
+		}
 		retErr = errors.Join(retErr, c.releaseInvocationState(ctx))
 		if retErr == nil && response != nil {
 			c.pendingAsync = nil
