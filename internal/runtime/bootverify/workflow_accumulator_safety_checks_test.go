@@ -5,23 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
-
-func TestRunRejectsAccumulatorHandlerOnCompleteThroughSharedAdmission(t *testing.T) {
-	bundle := templatefanin.LoadBundle(t)
-	node := bundle.Nodes[templatefanin.ReceiverNodeID]
-	handler := node.EventHandlers[templatefanin.ReceiverEvent]
-	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{Condition: "accumulated.count >= 2"}}
-	writeFlowHandler(t, bundle, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, handler)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.HardInvalidities(), checkIDAccumulatorHandlerIsolation, "cannot be combined with handler.on_complete") {
-		t.Fatalf("missing shared accumulator isolation finding: %#v", report.HardInvalidities())
-	}
-}
 
 func TestRunAcceptsCanonicalStreamAccumulatorProducerPath(t *testing.T) {
 	bundle := templatefanin.LoadBundle(t)

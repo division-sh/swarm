@@ -148,7 +148,7 @@ func handlerEngineProjectNodeModule(t *testing.T) *previewWorkflowModule {
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  queued: {}\n",
 		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
-		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
+		"types.yaml":    "EmitSummary:\n  entity_id: text\n  stage: text\nEmitFlags:\n  ready: boolean\n",
 		"nodes.yaml":    "node-a:\n  {}\n",
 	})}
 	return module

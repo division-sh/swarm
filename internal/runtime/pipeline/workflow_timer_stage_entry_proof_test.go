@@ -80,10 +80,10 @@ func newStageTimerEntryVariantProof(t *testing.T, backend, delay, action string,
 		if action == "connected_renamed" {
 			event, rename = "exported", ", rename: enter.s2"
 		}
-		files["schema.yaml"] += "pins:\n  inputs: [enter.s2]\nconnect:\n  - {event: " + event + ", from: producer, to: ." + rename + "}\n"
+		files["schema.yaml"] += "inputs: [enter.s2]\nconnect:\n  - {event: " + event + ", from: producer, to: ." + rename + "}\n"
 		files["events.yaml"] = "enter.s1:\nnote:\nobserved:\n"
 		files["producer/manifest.yaml"] = "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"
-		files["producer/schema.yaml"] = "pins:\n  outputs: [" + event + "]\n"
+		files["producer/schema.yaml"] = "outputs: [" + event + "]\n"
 		files["producer/events.yaml"] = event + ":\n"
 	}
 	bundle := loadWorkflowTempBundle(t, files)

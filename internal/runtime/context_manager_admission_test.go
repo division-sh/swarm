@@ -328,7 +328,7 @@ func runtimeAdmissionTestCatalog(t *testing.T, revision, directory string) (*pro
 		"manifest.yaml":                []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":                  []byte("# fixture directory " + directory + "\nstages: []\n"),
 		"acme-flow/manifest.yaml":      []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"acme-flow/schema.yaml":        []byte("stages: []\npins: {inputs: [inbound.acme.raw]}\n"),
+		"acme-flow/schema.yaml":        []byte("stages: []\ninputs: [inbound.acme.raw]\n"),
 		"acme-flow/acme/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw], verify_secret: webhook_signing_secret}, cannot: [bypass journal]}\n"),
 		"acme-flow/acme/trigger.yaml": []byte("# captured revision " + revision + "\n" + `secret: {required: true}
 signature: {type: token_equality, header: X-Acme-Token}

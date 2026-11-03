@@ -68,7 +68,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	nodes := lifecycleStaticRead(t, root, "nodes.yaml")
 	switch variant {
 	case LifecycleStaticLoopLocal, LifecycleStaticLoopDangling, LifecycleStaticLoopNoEmit, LifecycleStaticLoopLocalNodeInvalid:
-		schema = strings.Split(schema, "  outputs:\n")[0]
+		schema = strings.Split(schema, "outputs:\n")[0]
 		removeClosedVariantFiles(t, root, "sink/manifest.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml")
 		if err := os.Remove(filepath.Join(root, "sink")); err != nil {
 			t.Fatal(err)
@@ -109,8 +109,8 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// counterexample, not an extra producer to satisfy a gate-only fixture.
 		nodes += "worker:\n  work.handled:\n    emit:\n      event: work.completed\n      fields: {result: \"handled\"}\n"
 		events += "work.handled:\n"
-		schema += "    - work.handled\n"
-		schema += "  outputs: [work.completed]\n"
+		schema += "  - work.handled\n"
+		schema += "outputs: [work.completed]\n"
 		if variant == LifecycleStaticMixedOutput {
 			schema += "connect:\n  - {event: work.completed, from: ., to: sink}\n"
 			writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
@@ -167,7 +167,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, declaration, strings.Replace(declaration, "fields: {", "fields: {second_revision_id: \"first\", ", 1)+second, 1)
 		schema = strings.Replace(schema, "  drafting: {}", "  drafting: {}\n  drafting_second: {}\n  review_second: {}", 1)
 		for _, event := range []string{"start", "admit", "repeat", "close"} {
-			schema = strings.Replace(schema, "  outputs:\n", "    - second."+event+"\n  outputs:\n", 1)
+			schema = strings.Replace(schema, "outputs:\n", "  - second."+event+"\noutputs:\n", 1)
 		}
 		events = strings.Replace(events, "loop.escaped:\n", "loop.escaped:\n  second_revision_id: text\n", 1)
 		events += "second.start:\n  seed: boolean\nsecond.admit:\n  second_revision_id: text\nsecond.repeat:\n  second_revision_id: text\nsecond.close:\n  second_revision_id: text\n"

@@ -203,10 +203,10 @@ func issue642TimerContinuationSource(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(schema), "  outputs:\n    - timer.check\n") != 1 {
+	if strings.Count(string(schema), "outputs:\n  - timer.check\n") != 1 {
 		t.Fatal("ordinary timer corpus lost its exact output declaration")
 	}
-	schema = []byte(strings.Replace(string(schema), "  outputs:\n    - timer.check\n", "  outputs:\n    - timer.check\n    - timer.armed\n", 1))
+	schema = []byte(strings.Replace(string(schema), "outputs:\n  - timer.check\n", "outputs:\n  - timer.check\n  - timer.armed\n", 1))
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), schema, 0o600); err != nil {
 		t.Fatal(err)
 	}

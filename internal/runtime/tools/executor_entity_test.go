@@ -1786,18 +1786,17 @@ func TestEntityTools_BracketListTypeRefsAcrossConsumers(t *testing.T) {
 		Role:          "validator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
 	}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "state", `types:
-  Feature:
-    name: text
-  BrandCandidate:
-    name: text
-  MvpSpec:
-    core_features: [Feature]
-    out_of_scope: [text]
-  Brand:
-    alternatives: [BrandCandidate]
-  ValidationKit:
-    risk_flags: [text]
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "validation", "state", `Feature:
+  name: text
+BrandCandidate:
+  name: text
+MvpSpec:
+  core_features: [Feature]
+  out_of_scope: [text]
+Brand:
+  alternatives: [BrandCandidate]
+ValidationKit:
+  risk_flags: [text]
 `, `
 mvp_spec: MvpSpec
 brand: Brand
@@ -2527,16 +2526,15 @@ func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Exe
 
 func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {
 	t.Helper()
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `types:
-  Metadata:
-    region: text
-  Brief:
-    summary: text
-  Spec:
-    headline: text
-    approved: boolean
-  ValidationKit:
-    checklist: [text]
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `Metadata:
+  region: text
+Brief:
+  summary: text
+Spec:
+  headline: text
+  approved: boolean
+ValidationKit:
+  checklist: [text]
 `, `
 status: text
 score: numeric
@@ -2572,14 +2570,13 @@ func newAnnotatedEntityToolExecutor(t *testing.T) (context.Context, *runtimetool
 		ID:            "tester",
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "search_entities"},
-	}, "validation", "state", `types:
-  Brief:
-    summary: text
-  Spec:
-    headline: text
-    approved: boolean
-  ValidationKit:
-    checklist: [text]
+	}, "validation", "state", `Brief:
+  summary: text
+Spec:
+  headline: text
+  approved: boolean
+ValidationKit:
+  checklist: [text]
 `, `
 business_brief: Brief
 mvp_spec: Spec
@@ -2603,16 +2600,15 @@ func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (
 	if strings.TrimSpace(actor.Type) == "" {
 		actor.Type = "internal"
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `types:
-  Metadata:
-    region: text
-  Brief:
-    summary: text
-  Spec:
-    headline: text
-    approved: boolean
-  ValidationKit:
-    checklist: [text]
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `Metadata:
+  region: text
+Brief:
+  summary: text
+Spec:
+  headline: text
+  approved: boolean
+ValidationKit:
+  checklist: [text]
 `, `
 status: text
 score: numeric
@@ -2822,13 +2818,12 @@ stages:
   ready: {}
   closed: {final: true}
 `,
-			TypesYAML: `types:
-  business_brief:
-    summary: text
-    confidence: integer
-  mvp_spec:
-    problem_statement: text
-    technical_approach: text
+			TypesYAML: `business_brief:
+  summary: text
+  confidence: integer
+mvp_spec:
+  problem_statement: text
+  technical_approach: text
 `,
 			EntitiesYAML: "fixture_key: text\nstatus: text\nbusiness_brief: business_brief\nmvp_spec: mvp_spec\n",
 			AgentsYAML:   roleScopedEntityToolAgentYAML(actor),

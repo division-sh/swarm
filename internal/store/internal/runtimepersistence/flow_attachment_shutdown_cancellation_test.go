@@ -100,7 +100,7 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	defer release()
 	f := newReceiverConfigActivationFixtureForStore(t, selected, true, map[string]string{
 		"schema.yaml":        "stages: []\n",
-		"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 		"review/state.yaml":  "request_id: text\n",
 		"review/events.yaml": "task.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil, ownStoreTestAgentManager, nil, func(options *manager.AgentManagerOptions) {

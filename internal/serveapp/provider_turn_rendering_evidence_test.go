@@ -238,7 +238,7 @@ func writeTurnRenderingSource(t *testing.T, cell string) string {
 	root := writeProviderEvidenceSource(t, "memory")
 	files := map[string]string{
 		"events.yaml":       "evidence.started: {conversation: string, sequence: integer, text: string}\nevidence.requested: {conversation: string, sequence: integer, text: string}\n",
-		"schema.yaml":       "pins:\n  inputs: [evidence.started, evidence.requested, evidence.completed]\nconnect:\n  - {event: evidence.requested, from: '.', to: worker, resolution: select-or-create}\n  - {event: evidence.completed, from: worker, to: '.'}\n",
+		"schema.yaml":       "inputs: [evidence.started, evidence.requested, evidence.completed]\nconnect:\n  - {event: evidence.requested, from: '.', to: worker, resolution: select-or-create}\n  - {event: evidence.completed, from: worker, to: '.'}\n",
 		"nodes.yaml":        "speaker:\n  evidence.started:\n    emit:\n      event: evidence.requested\n      fields: {conversation: payload.conversation, sequence: payload.sequence, text: payload.text}\nobserver:\n  evidence.completed:\n    guard: true\n",
 		"worker/state.yaml": "conversation: text\nnote: 'synthetic declared note'\n",
 	}

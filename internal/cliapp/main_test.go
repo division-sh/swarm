@@ -3029,7 +3029,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "duplicate activity after connector import",
-			schema: "stages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "stages: []\ninputs: [z.request, a.request]\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender:\n  z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n  a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
@@ -3039,7 +3039,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "duplicate activity on one YAML line",
-			schema: "stages: []\npins: {inputs: [z.request, a.request]}\n",
+			schema: "stages: []\ninputs: [z.request, a.request]\n",
 			files: map[string]string{
 				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
 				"nodes.yaml":  "sender: {z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}, a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}}\n",
@@ -3519,7 +3519,7 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 `
 
 	if opts.publicInput {
-		schema += "pins:\n  inputs: [item.arrived]\n"
+		schema += "inputs: [item.arrived]\n"
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), schema)
@@ -3527,12 +3527,14 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 item.arrived:
   expected_count: integer
 `)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "items: [Arrival]\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "Arrival:\n  expected_count: integer\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   item.arrived:
     accumulate:
-      into: items
-      from: payload
+      target: items
+      key: expected_count
     advances_to: done
 `)
 	return root

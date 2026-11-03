@@ -90,9 +90,8 @@ func newIssue2564PublicationFixture(t *testing.T, backend string, observer *issu
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml": `stages:
   active: {}
-pins:
-  inputs: [bump, recurse]
-  outputs: [child]
+inputs: [bump, recurse]
+outputs: [child]
 `,
 		"state.yaml": `count: 0
 parents: 0

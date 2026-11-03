@@ -40,7 +40,7 @@ func TestWorkflowHeaderSubmittedJSONBothDialects(t *testing.T) {
 					// not another JSON serialization or PostgreSQL's JSONB output.
 					config := []byte(`{ "name" : "exact argument" }`)
 					record := pipeline.WorkflowEngineStateRecord{Config: config}
-					args := make([]driver.Value, 21)
+					args := make([]driver.Value, 20)
 					for index := range args {
 						args[index] = sqlmock.AnyArg()
 					}

@@ -210,7 +210,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"]`) {
 				t.Fatalf("bundle load error = %v, want canonical rejection before boot verification", err)
 			}
 		})
@@ -376,7 +376,7 @@ func TestCompositionSourceRejectsRetiredFanInGrammarBeforeBoot(t *testing.T) {
 		repoRoot := repoRootForBootverifyTest(t)
 		root := canonicalrouting.CopyRetiredFanInPin(t)
 		_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
+		if err == nil || !strings.Contains(err.Error(), "portfolio/schema.yaml") || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"]`) {
 			t.Fatalf("retired canonical pin reached boot verification: %v", err)
 		}
 	})

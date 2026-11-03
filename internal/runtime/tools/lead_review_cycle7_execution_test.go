@@ -8,9 +8,8 @@ import (
 
 func TestLeadReview7StockOptionalToolExecution(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Role: "operator", Tools: []string{"create_entity", "query_entities", "query_metrics"}}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `types:
-  Metadata:
-    region: text?
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `Metadata:
+  region: text?
 `, `
 metadata: Metadata
 `,

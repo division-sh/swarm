@@ -121,12 +121,12 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.accepted\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"producer/nodes.yaml":    "producer-local:\n  deploy.done:\n    guard: _entity.id != \"\"\n",
 		"producer/agents.yaml":   "producer-agent:\n  intent: {inline: 'Observe deployment completion.'}\n  subscriptions: [deploy.done]\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.accepted]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.accepted]\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.accepted:\n    guard: _entity.id != \"\"\n",
 	}))
 	owners := mixedStaticOwners(t, source, "producer", "consumer")
@@ -239,13 +239,13 @@ func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            string(schema),
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [branch.ready]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [branch.ready]\n",
 		"producer/events.yaml":   "branch.ready:\n",
 		"producer/nodes.yaml":    "producer-local:\n  branch.ready:\n    guard: _entity.id != \"\"\n",
 	}
 	for _, id := range []string{"left", "right"} {
 		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.accepted]\n  outputs: [branch.done]\n"
+		files[id+"/schema.yaml"] = "stages: []\ninputs: [branch.accepted]\noutputs: [branch.done]\n"
 		files[id+"/events.yaml"] = "branch.done:\n"
 		files[id+"/nodes.yaml"] = fmt.Sprintf(`%s-receiver:
   branch.accepted:
@@ -255,7 +255,7 @@ func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
     guard: _entity.id != ""
 `, id, id)
 		files[id+"-sink/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-		files[id+"-sink/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.final]\n"
+		files[id+"-sink/schema.yaml"] = "stages: []\ninputs: [branch.final]\n"
 		files[id+"-sink/nodes.yaml"] = fmt.Sprintf(`%s-sink-node:
   branch.final:
     guard: _entity.id != ""

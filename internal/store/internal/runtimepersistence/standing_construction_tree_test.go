@@ -90,7 +90,7 @@ func TestStandingPreparationVerifiesCompleteRootTreeBothStores(t *testing.T) {
 					"service/detail/schema.yaml":   "stages: []\n",
 					"receiver/schema.yaml":         "stages: []\n",
 					"receiver/state.yaml":          "marker: \"unchanged\"\n",
-					"deferred/schema.yaml":         "instance: job_id\npins:\n  inputs:\n    - job.started\n",
+					"deferred/schema.yaml":         "instance: job_id\ninputs:\n  - job.started\n",
 					"deferred/state.yaml":          "job_id: text\n",
 					"deferred/events.yaml":         "job.started:\n  job_id: text\n",
 				}, nil)

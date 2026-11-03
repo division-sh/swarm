@@ -1,8 +1,8 @@
 node-a:
   work.ready:
     accumulate:
-      into: items
-      from: payload
+      target: items
+      key: item_id
   work.clear:
     data_accumulation:
       writes:

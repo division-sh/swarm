@@ -28,7 +28,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 		"coordinator/policy.yaml":   []byte("operator_account: '420079'\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
@@ -210,7 +210,7 @@ func TestProviderCompiledSchemaReadbackDoesNotGrantReceiverOwnership(t *testing.
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.text_message]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -294,7 +294,7 @@ func TestImportedProviderEventReadbacksAreMutationIsolated(t *testing.T) {
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.text_message]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -376,7 +376,7 @@ func TestProviderTriggerInputWithoutConnectionDoesNotAcquireCrossFlowPlan(t *tes
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.text_message]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -445,7 +445,7 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.text_message]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -572,7 +572,7 @@ func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *te
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.text_message]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {

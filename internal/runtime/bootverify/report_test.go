@@ -1159,7 +1159,7 @@ payload:
 
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
-	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema pins.outputs references platform-emitted event mailbox.card_decided; platform owns this event") {
+	if !reportContains(report.Errors(), "platform_namespace_violation", "root schema outputs references platform-emitted event mailbox.card_decided; platform owns this event") {
 		t.Fatalf("expected platform-emitted event output pin error, got %#v", report.Errors())
 	}
 }
@@ -4293,42 +4293,6 @@ func TestRun_SuppressesExpressionFieldReferenceFindingWhenComputeMakesFieldAvail
 	}
 	if reportContains(report.Warnings(), "expression_field_reference_validation", "state.composite_score") {
 		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_RejectsCreateEntityAccumulateWhenDynamicComputeProofWouldOtherwiseWarn(t *testing.T) {
-	bundle := loadWave1ExpressionFixtureBundle(t)
-	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
-	handler.Compute = &runtimecontracts.ComputeSpec{
-		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "state.composite_score",
-	}
-	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "dialect_compliance", "uses retired create_entity") {
-		t.Fatalf("expected typed constructor retirement, got %#v", report.Errors())
-	}
-}
-
-func TestRun_RejectsCreateEntityAccumulateWithoutFiniteCompletionSemantics(t *testing.T) {
-	bundle := loadWave1ExpressionFixtureBundle(t)
-	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
-	handler.CreateEntity = true
-	handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}
-	handler.Compute = &runtimecontracts.ComputeSpec{
-		Operation: runtimecontracts.ComputeOpCount,
-		StoreAs:   "state.composite_score",
-	}
-	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "dialect_compliance", "uses retired create_entity") {
-		t.Fatalf("expected typed constructor retirement, got %#v", report.Errors())
 	}
 }
 

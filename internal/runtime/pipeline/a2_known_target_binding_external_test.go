@@ -452,7 +452,7 @@ func a2KnownTargetBindingFiles() map[string]string {
 	return map[string]string{
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":          "stages:\n  active: {}\n",
-		"types.yaml":           "types:\n  JoinResult:\n    value: text\n",
+		"types.yaml":           "JoinResult:\n  value: text\n",
 		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"orders/schema.yaml": `instance: order_id
 stages:

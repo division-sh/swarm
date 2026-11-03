@@ -183,7 +183,7 @@ func VerifyDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMuta
 	})
 	node := pipelineNode(t, ".", "node-a")
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
-	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "id"}}
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Target: "items", Key: "item_id"}}
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: eventtest.UUID("missing-existing-target")}
 	evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); !errors.Is(err, runtimeengine.ErrUnconstructedWorkflowTarget) {

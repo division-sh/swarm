@@ -201,7 +201,7 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 		}
 	}
 	entities := mustMappingValue(t, expectations, "entities")
-	for _, key := range []string{"ref", "current_state", "fields", "gates", "count_interaction"} {
+	for _, key := range []string{"ref", "current_state", "fields", "count_interaction"} {
 		if !hasMappingKey(entities, key) {
 			t.Fatalf("deterministic scenario runner expectations.entities.%s missing", key)
 		}
@@ -213,7 +213,6 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 		{key: "ref", want: []string{"setup-alias", "entity.get", "MUST NOT be combined with `count`"}},
 		{key: "current_state", want: []string{"scenario literal model", "CEL", "entity.list", "entity.get", "current_state"}},
 		{key: "fields", want: []string{"EntityFull.fields", "scenario literal model", "CEL", "exactly"}},
-		{key: "gates", want: []string{"EntityFull.gates", "scenario literal model", "CEL", "booleans"}},
 		{key: "count_interaction", want: []string{"count-only", "MUST NOT be combined"}},
 	} {
 		text := scalarValue(mappingValue(entities, item.key))

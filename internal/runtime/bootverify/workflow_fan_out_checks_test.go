@@ -16,10 +16,25 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 	tests := []struct {
 		name      string
 		mutate    func(*runtimecontracts.FanOutSpec, *runtimecontracts.WorkflowContractBundle)
+		handler   func(*runtimecontracts.SystemNodeEventHandler)
 		wantError string
 	}{
 		{
 			name: "valid",
+		},
+		{
+			name: "handler fan-out beside rules",
+			handler: func(handler *runtimecontracts.SystemNodeEventHandler) {
+				handler.Rules = []runtimecontracts.HandlerRuleEntry{{}}
+			},
+			wantError: "handler.fan_out cannot be combined with handler.rules; put the fan-out on the rule that should fan out, or use no rules or on_complete",
+		},
+		{
+			name: "handler fan-out beside on-complete",
+			handler: func(handler *runtimecontracts.SystemNodeEventHandler) {
+				handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{}}
+			},
+			wantError: "handler.fan_out cannot be combined with handler.on_complete; put the fan-out on the rule that should fan out, or use no rules or on_complete",
 		},
 		{
 			name: "items source rejects untyped array schema type",
@@ -109,6 +124,11 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 				},
 			}
 			bundle := fanOutValidationBundle(spec)
+			if tc.handler != nil {
+				handler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
+				tc.handler(&handler)
+				bundle.Nodes["dispatcher"].EventHandlers["order.accepted"] = handler
+			}
 			if tc.mutate != nil {
 				handler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
 				tc.mutate(handler.FanOut, bundle)

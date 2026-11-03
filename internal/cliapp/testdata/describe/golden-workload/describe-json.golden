@@ -38,7 +38,6 @@
       }
     ],
     "required_agents": {
-      "source": "inferred",
       "agents": []
     },
     "primary_entity": {
@@ -123,8 +122,6 @@
         }
       ],
       "required_agents": {
-        "source": "inferred",
-        "source_file": "candidate/agents.yaml",
         "agents": [
           {
             "role": "candidate-worker",
@@ -134,7 +131,6 @@
             "emits": [
               "candidate.analyzed"
             ],
-            "source": "inferred",
             "source_file": "candidate/agents.yaml"
           }
         ]
@@ -239,8 +235,6 @@
         }
       ],
       "required_agents": {
-        "source": "inferred",
-        "source_file": "scout/agents.yaml",
         "agents": [
           {
             "role": "scout-worker",
@@ -250,7 +244,6 @@
             "emits": [
               "scout.completed"
             ],
-            "source": "inferred",
             "source_file": "scout/agents.yaml"
           }
         ]
@@ -390,34 +383,6 @@
         "source_location": "handler.emit"
       },
       {
-        "id": "endpoint-9c63d2afdcd42a62",
-        "direction": "producer",
-        "kind": "required_agent_role",
-        "flow_id": "scout",
-        "flow_path": "scout",
-        "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout/scout.completed"
-        },
-        "role": "scout-worker",
-        "source_location": "required_agents.emits"
-      },
-      {
-        "id": "endpoint-c5eac096dd5c1cf2",
-        "direction": "producer",
-        "kind": "required_agent_role",
-        "flow_id": "candidate",
-        "flow_path": "candidate",
-        "event": {
-          "authored": "candidate.analyzed",
-          "local": "candidate.analyzed",
-          "canonical": "candidate/candidate.analyzed"
-        },
-        "role": "candidate-worker",
-        "source_location": "required_agents.emits"
-      },
-      {
         "id": "endpoint-f162afb5a7201ef3",
         "direction": "producer",
         "kind": "node_handler",
@@ -502,20 +467,6 @@
         "source_location": "[\"search.requested\"]"
       },
       {
-        "id": "endpoint-6a4a4cd921729307",
-        "direction": "consumer",
-        "kind": "required_agent_role",
-        "flow_id": "candidate",
-        "flow_path": "candidate",
-        "event": {
-          "authored": "candidate.work.requested",
-          "local": "candidate.work.requested",
-          "canonical": "candidate/candidate.work.requested"
-        },
-        "role": "candidate-worker",
-        "source_location": "required_agents.subscribes_to"
-      },
-      {
         "id": "endpoint-7172756e1239b3af",
         "direction": "consumer",
         "kind": "node_handler",
@@ -597,20 +548,6 @@
         "source_location": "[\"candidate.analyzed\"]"
       },
       {
-        "id": "endpoint-b580b7b5015550ea",
-        "direction": "consumer",
-        "kind": "required_agent_role",
-        "flow_id": "scout",
-        "flow_path": "scout",
-        "event": {
-          "authored": "scout.work.requested",
-          "local": "scout.work.requested",
-          "canonical": "scout/scout.work.requested"
-        },
-        "role": "scout-worker",
-        "source_location": "required_agents.subscribes_to"
-      },
-      {
         "id": "endpoint-d9d41fae9df997a7",
         "direction": "consumer",
         "kind": "node_handler",
@@ -661,47 +598,7 @@
     ],
     "input_pins": [
       {
-        "id": "endpoint-0a73131ea710cfb5",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": "scout",
-        "flow_path": "scout",
-        "event": {
-          "authored": "scout.requested",
-          "local": "scout.requested",
-          "canonical": "scout/scout.requested"
-        },
-        "pin_name": "scout.requested",
-        "source_location": "pins.inputs.scout.requested"
-      },
-      {
-        "id": "endpoint-490501eaed89055e",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": ".",
-        "event": {
-          "authored": "candidate.completed",
-          "local": "candidate.completed",
-          "canonical": "candidate.completed"
-        },
-        "pin_name": "candidate.completed",
-        "source_location": "pins.inputs.candidate.completed"
-      },
-      {
-        "id": "endpoint-6b88d49d72ed2bd7",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": ".",
-        "event": {
-          "authored": "search.requested",
-          "local": "search.requested",
-          "canonical": "search.requested"
-        },
-        "pin_name": "search.requested",
-        "source_location": "pins.inputs.search.requested"
-      },
-      {
-        "id": "endpoint-6c6f83fd21817bda",
+        "id": "endpoint-09a7dbb327da1254",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "candidate",
@@ -712,10 +609,50 @@
           "canonical": "candidate/candidate.requested"
         },
         "pin_name": "candidate.requested",
-        "source_location": "pins.inputs.candidate.requested"
+        "source_location": "inputs.candidate.requested"
       },
       {
-        "id": "endpoint-e0cd033bea17ae76",
+        "id": "endpoint-748bc9fd0324d246",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": ".",
+        "event": {
+          "authored": "search.requested",
+          "local": "search.requested",
+          "canonical": "search.requested"
+        },
+        "pin_name": "search.requested",
+        "source_location": "inputs.search.requested"
+      },
+      {
+        "id": "endpoint-aa49a6c63e9c730a",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "scout",
+        "flow_path": "scout",
+        "event": {
+          "authored": "scout.requested",
+          "local": "scout.requested",
+          "canonical": "scout/scout.requested"
+        },
+        "pin_name": "scout.requested",
+        "source_location": "inputs.scout.requested"
+      },
+      {
+        "id": "endpoint-b186ebe054ac4baa",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": ".",
+        "event": {
+          "authored": "candidate.completed",
+          "local": "candidate.completed",
+          "canonical": "candidate.completed"
+        },
+        "pin_name": "candidate.completed",
+        "source_location": "inputs.candidate.completed"
+      },
+      {
+        "id": "endpoint-e01c9f18b6626b54",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": ".",
@@ -725,26 +662,12 @@
           "canonical": "scout.completed"
         },
         "pin_name": "scout.completed",
-        "source_location": "pins.inputs.scout.completed"
+        "source_location": "inputs.scout.completed"
       }
     ],
     "output_pins": [
       {
-        "id": "endpoint-1ca44a6565356fb8",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": "scout",
-        "flow_path": "scout",
-        "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout/scout.completed"
-        },
-        "pin_name": "scout.completed",
-        "source_location": "pins.outputs.scout.completed"
-      },
-      {
-        "id": "endpoint-611b8b97c45ffd31",
+        "id": "endpoint-0a663eabc13502b1",
         "direction": "output_pin",
         "kind": "flow_output_pin",
         "flow_id": "candidate",
@@ -755,10 +678,24 @@
           "canonical": "candidate/candidate.completed"
         },
         "pin_name": "candidate.completed",
-        "source_location": "pins.outputs.candidate.completed"
+        "source_location": "outputs.candidate.completed"
       },
       {
-        "id": "endpoint-92cf1402c5389e16",
+        "id": "endpoint-422d1c23436e01de",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": "scout",
+        "flow_path": "scout",
+        "event": {
+          "authored": "scout.completed",
+          "local": "scout.completed",
+          "canonical": "scout/scout.completed"
+        },
+        "pin_name": "scout.completed",
+        "source_location": "outputs.scout.completed"
+      },
+      {
+        "id": "endpoint-ce0acac7acb1bb65",
         "direction": "output_pin",
         "kind": "flow_output_pin",
         "flow_id": ".",
@@ -768,10 +705,10 @@
           "canonical": "candidate.requested"
         },
         "pin_name": "candidate.requested",
-        "source_location": "pins.outputs.candidate.requested"
+        "source_location": "outputs.candidate.requested"
       },
       {
-        "id": "endpoint-a33954ff255d79c0",
+        "id": "endpoint-df15e0234516c0f3",
         "direction": "output_pin",
         "kind": "flow_output_pin",
         "flow_id": ".",
@@ -781,13 +718,13 @@
           "canonical": "scout.requested"
         },
         "pin_name": "scout.requested",
-        "source_location": "pins.outputs.scout.requested"
+        "source_location": "outputs.scout.requested"
       }
     ],
     "root_input_sources": [],
     "boundary_exposures": [
       {
-        "id": "endpoint-1c64c0972b7316ab-\u003eendpoint-611b8b97c45ffd31",
+        "id": "endpoint-1c64c0972b7316ab-\u003eendpoint-0a663eabc13502b1",
         "event": {
           "authored": "candidate.completed",
           "local": "candidate.completed",
@@ -811,7 +748,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-611b8b97c45ffd31",
+          "id": "endpoint-0a663eabc13502b1",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "candidate",
@@ -822,11 +759,11 @@
             "canonical": "candidate/candidate.completed"
           },
           "pin_name": "candidate.completed",
-          "source_location": "pins.outputs.candidate.completed"
+          "source_location": "outputs.candidate.completed"
         }
       },
       {
-        "id": "endpoint-6458a925121ded9e-\u003eendpoint-a33954ff255d79c0",
+        "id": "endpoint-6458a925121ded9e-\u003eendpoint-df15e0234516c0f3",
         "event": {
           "authored": "scout.requested",
           "local": "scout.requested",
@@ -849,7 +786,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-a33954ff255d79c0",
+          "id": "endpoint-df15e0234516c0f3",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": ".",
@@ -859,47 +796,11 @@
             "canonical": "scout.requested"
           },
           "pin_name": "scout.requested",
-          "source_location": "pins.outputs.scout.requested"
+          "source_location": "outputs.scout.requested"
         }
       },
       {
-        "id": "endpoint-9c63d2afdcd42a62-\u003eendpoint-1ca44a6565356fb8",
-        "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout/scout.completed"
-        },
-        "producer": {
-          "id": "endpoint-9c63d2afdcd42a62",
-          "direction": "producer",
-          "kind": "required_agent_role",
-          "flow_id": "scout",
-          "flow_path": "scout",
-          "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout/scout.completed"
-          },
-          "role": "scout-worker",
-          "source_location": "required_agents.emits"
-        },
-        "output": {
-          "id": "endpoint-1ca44a6565356fb8",
-          "direction": "output_pin",
-          "kind": "flow_output_pin",
-          "flow_id": "scout",
-          "flow_path": "scout",
-          "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout/scout.completed"
-          },
-          "pin_name": "scout.completed",
-          "source_location": "pins.outputs.scout.completed"
-        }
-      },
-      {
-        "id": "endpoint-f162afb5a7201ef3-\u003eendpoint-92cf1402c5389e16",
+        "id": "endpoint-f162afb5a7201ef3-\u003eendpoint-ce0acac7acb1bb65",
         "event": {
           "authored": "candidate.requested",
           "local": "candidate.requested",
@@ -922,7 +823,7 @@
           "source_location": "handler.fan_out.emit"
         },
         "output": {
-          "id": "endpoint-92cf1402c5389e16",
+          "id": "endpoint-ce0acac7acb1bb65",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": ".",
@@ -932,11 +833,11 @@
             "canonical": "candidate.requested"
           },
           "pin_name": "candidate.requested",
-          "source_location": "pins.outputs.candidate.requested"
+          "source_location": "outputs.candidate.requested"
         }
       },
       {
-        "id": "endpoint-f8fce10fe0aa9fd4-\u003eendpoint-1ca44a6565356fb8",
+        "id": "endpoint-f8fce10fe0aa9fd4-\u003eendpoint-422d1c23436e01de",
         "event": {
           "authored": "scout.completed",
           "local": "scout.completed",
@@ -960,7 +861,7 @@
           "source_location": "emit_events"
         },
         "output": {
-          "id": "endpoint-1ca44a6565356fb8",
+          "id": "endpoint-422d1c23436e01de",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "scout",
@@ -971,11 +872,54 @@
             "canonical": "scout/scout.completed"
           },
           "pin_name": "scout.completed",
-          "source_location": "pins.outputs.scout.completed"
+          "source_location": "outputs.scout.completed"
         }
       }
     ],
     "edges": [
+      {
+        "id": "route-0eb2875c8767ddaf",
+        "scope": "typed_pubsub",
+        "event": {
+          "authored": "scout.completed",
+          "local": "scout.completed",
+          "canonical": "scout.completed"
+        },
+        "producer": {
+          "id": "endpoint-e01c9f18b6626b54",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": ".",
+          "event": {
+            "authored": "scout.completed",
+            "local": "scout.completed",
+            "canonical": "scout.completed"
+          },
+          "pin_name": "scout.completed",
+          "source_location": "inputs.scout.completed"
+        },
+        "consumer": {
+          "id": "endpoint-afc58cc8d298dd24",
+          "direction": "consumer",
+          "kind": "node_handler",
+          "flow_id": ".",
+          "event": {
+            "authored": "scout.completed",
+            "local": "scout.completed",
+            "canonical": "scout.completed"
+          },
+          "node_id": "scout-collector",
+          "handler_event": "scout.completed",
+          "source_file": "nodes.yaml",
+          "source_line": 1,
+          "source_location": "[\"scout.completed\"]"
+        },
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
+        },
+        "requires_runtime_resolution": false
+      },
       {
         "id": "route-116315885d44f511",
         "scope": "typed_pubsub",
@@ -1025,50 +969,50 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-3eceeed953984fec",
+        "id": "route-2431880fff575fc8",
         "scope": "inter_flow_connect",
         "event": {
-          "authored": "candidate.completed",
-          "local": "candidate.completed",
-          "canonical": "candidate/candidate.completed"
+          "authored": "scout.completed",
+          "local": "scout.completed",
+          "canonical": "scout/scout.completed"
         },
         "producer": {
-          "id": "endpoint-1c64c0972b7316ab",
+          "id": "endpoint-f8fce10fe0aa9fd4",
           "direction": "producer",
-          "kind": "node_handler",
-          "flow_id": "candidate",
-          "flow_path": "candidate",
+          "kind": "agent",
+          "flow_id": "scout",
+          "flow_path": "scout",
           "event": {
-            "authored": "candidate.completed",
-            "local": "candidate.completed",
-            "canonical": "candidate/candidate.completed"
+            "authored": "scout.completed",
+            "local": "scout.completed",
+            "canonical": "scout/scout.completed"
           },
-          "node_id": "candidate-completion",
-          "handler_event": "candidate.analyzed",
-          "site": "handler.emit",
-          "source_file": "candidate/nodes.yaml",
-          "source_location": "handler.emit"
+          "agent_id": "scout-worker",
+          "role": "golden_scout",
+          "source_file": "scout/agents.yaml",
+          "source_line": 1,
+          "source_location": "emit_events"
         },
         "consumer": {
-          "id": "endpoint-490501eaed89055e",
+          "id": "endpoint-e01c9f18b6626b54",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": ".",
           "event": {
-            "authored": "candidate.completed",
-            "local": "candidate.completed",
-            "canonical": "candidate.completed"
+            "authored": "scout.completed",
+            "local": "scout.completed",
+            "canonical": "scout.completed"
           },
-          "pin_name": "candidate.completed",
-          "source_location": "pins.inputs.candidate.completed"
+          "pin_name": "scout.completed",
+          "source_location": "inputs.scout.completed"
         },
         "boundary": {
           "owner_flow_path": ".",
           "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": "candidate.candidate.completed",
-          "to": ".candidate.completed",
-          "output_pin": "candidate.completed",
-          "input_pin": "candidate.completed"
+          "from": "scout.scout.completed",
+          "to": ".scout.completed",
+          "output_pin": "scout.completed",
+          "input_pin": "scout.completed"
         },
         "resolution": {
           "mode": "static",
@@ -1125,31 +1069,67 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-44f1682e77ff6849",
+        "id": "route-483d8f313dca7d34",
         "scope": "inter_flow_connect",
         "event": {
-          "authored": "scout.requested",
-          "local": "scout.requested",
-          "canonical": "scout.requested"
+          "authored": "candidate.completed",
+          "local": "candidate.completed",
+          "canonical": "candidate/candidate.completed"
         },
         "producer": {
-          "id": "endpoint-6458a925121ded9e",
+          "id": "endpoint-1c64c0972b7316ab",
           "direction": "producer",
           "kind": "node_handler",
-          "flow_id": ".",
+          "flow_id": "candidate",
+          "flow_path": "candidate",
           "event": {
-            "authored": "scout.requested",
-            "local": "scout.requested",
-            "canonical": "scout.requested"
+            "authored": "candidate.completed",
+            "local": "candidate.completed",
+            "canonical": "candidate/candidate.completed"
           },
-          "node_id": "search-intake",
-          "handler_event": "search.requested",
+          "node_id": "candidate-completion",
+          "handler_event": "candidate.analyzed",
           "site": "handler.emit",
-          "source_file": "nodes.yaml",
+          "source_file": "candidate/nodes.yaml",
           "source_location": "handler.emit"
         },
         "consumer": {
-          "id": "endpoint-0a73131ea710cfb5",
+          "id": "endpoint-b186ebe054ac4baa",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": ".",
+          "event": {
+            "authored": "candidate.completed",
+            "local": "candidate.completed",
+            "canonical": "candidate.completed"
+          },
+          "pin_name": "candidate.completed",
+          "source_location": "inputs.candidate.completed"
+        },
+        "boundary": {
+          "owner_flow_path": ".",
+          "authored_location": "schema.yaml:\u003cline\u003e",
+          "from": "candidate.candidate.completed",
+          "to": ".candidate.completed",
+          "output_pin": "candidate.completed",
+          "input_pin": "candidate.completed"
+        },
+        "resolution": {
+          "mode": "static",
+          "target_kind": "target"
+        },
+        "requires_runtime_resolution": true
+      },
+      {
+        "id": "route-5c7bec95f5b80309",
+        "scope": "typed_pubsub",
+        "event": {
+          "authored": "scout.requested",
+          "local": "scout.requested",
+          "canonical": "scout/scout.requested"
+        },
+        "producer": {
+          "id": "endpoint-aa49a6c63e9c730a",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "scout",
@@ -1160,146 +1140,24 @@
             "canonical": "scout/scout.requested"
           },
           "pin_name": "scout.requested",
-          "source_location": "pins.inputs.scout.requested"
-        },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": ".scout.requested",
-          "to": "scout.scout.requested",
-          "output_pin": "scout.requested",
-          "input_pin": "scout.requested"
-        },
-        "resolution": {
-          "mode": "static",
-          "target_kind": "target"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-646048a02d2a3351",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "candidate.completed",
-          "local": "candidate.completed",
-          "canonical": "candidate.completed"
-        },
-        "producer": {
-          "id": "endpoint-490501eaed89055e",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "candidate.completed",
-            "local": "candidate.completed",
-            "canonical": "candidate.completed"
-          },
-          "pin_name": "candidate.completed",
-          "source_location": "pins.inputs.candidate.completed"
+          "source_location": "inputs.scout.requested"
         },
         "consumer": {
-          "id": "endpoint-1e7136aae880394e",
+          "id": "endpoint-fe1735010102625c",
           "direction": "consumer",
           "kind": "node_handler",
-          "flow_id": ".",
+          "flow_id": "scout",
+          "flow_path": "scout",
           "event": {
-            "authored": "candidate.completed",
-            "local": "candidate.completed",
-            "canonical": "candidate.completed"
+            "authored": "scout.requested",
+            "local": "scout.requested",
+            "canonical": "scout/scout.requested"
           },
-          "node_id": "candidate-collector",
-          "handler_event": "candidate.completed",
-          "source_file": "nodes.yaml",
+          "node_id": "scout-intake",
+          "handler_event": "scout.requested",
+          "source_file": "scout/nodes.yaml",
           "source_line": 1,
-          "source_location": "[\"candidate.completed\"]"
-        },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-65435fa48e658520",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "candidate.analyzed",
-          "local": "candidate.analyzed",
-          "canonical": "candidate/candidate.analyzed"
-        },
-        "producer": {
-          "id": "endpoint-c5eac096dd5c1cf2",
-          "direction": "producer",
-          "kind": "required_agent_role",
-          "flow_id": "candidate",
-          "flow_path": "candidate",
-          "event": {
-            "authored": "candidate.analyzed",
-            "local": "candidate.analyzed",
-            "canonical": "candidate/candidate.analyzed"
-          },
-          "role": "candidate-worker",
-          "source_location": "required_agents.emits"
-        },
-        "consumer": {
-          "id": "endpoint-b20d33a4b80f84b6",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": "candidate",
-          "flow_path": "candidate",
-          "event": {
-            "authored": "candidate.analyzed",
-            "local": "candidate.analyzed",
-            "canonical": "candidate/candidate.analyzed"
-          },
-          "node_id": "candidate-completion",
-          "handler_event": "candidate.analyzed",
-          "source_file": "candidate/nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"candidate.analyzed\"]"
-        },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-687828f85d3ee0e2",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "search.requested",
-          "local": "search.requested",
-          "canonical": "search.requested"
-        },
-        "producer": {
-          "id": "endpoint-6b88d49d72ed2bd7",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "search.requested",
-            "local": "search.requested",
-            "canonical": "search.requested"
-          },
-          "pin_name": "search.requested",
-          "source_location": "pins.inputs.search.requested"
-        },
-        "consumer": {
-          "id": "endpoint-6909b10475f88d8c",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": ".",
-          "event": {
-            "authored": "search.requested",
-            "local": "search.requested",
-            "canonical": "search.requested"
-          },
-          "node_id": "search-intake",
-          "handler_event": "search.requested",
-          "source_file": "nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"search.requested\"]"
+          "source_location": "[\"scout.requested\"]"
         },
         "typed_pubsub": {
           "match": "exact",
@@ -1356,95 +1214,95 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-9832013a26bab2c2",
+        "id": "route-a942d6f68b749586",
         "scope": "inter_flow_connect",
         "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout/scout.completed"
+          "authored": "scout.requested",
+          "local": "scout.requested",
+          "canonical": "scout.requested"
         },
         "producer": {
-          "id": "endpoint-f8fce10fe0aa9fd4",
+          "id": "endpoint-6458a925121ded9e",
           "direction": "producer",
-          "kind": "agent",
+          "kind": "node_handler",
+          "flow_id": ".",
+          "event": {
+            "authored": "scout.requested",
+            "local": "scout.requested",
+            "canonical": "scout.requested"
+          },
+          "node_id": "search-intake",
+          "handler_event": "search.requested",
+          "site": "handler.emit",
+          "source_file": "nodes.yaml",
+          "source_location": "handler.emit"
+        },
+        "consumer": {
+          "id": "endpoint-aa49a6c63e9c730a",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
           "flow_id": "scout",
           "flow_path": "scout",
           "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout/scout.completed"
+            "authored": "scout.requested",
+            "local": "scout.requested",
+            "canonical": "scout/scout.requested"
           },
-          "agent_id": "scout-worker",
-          "role": "golden_scout",
-          "source_file": "scout/agents.yaml",
-          "source_line": 1,
-          "source_location": "emit_events"
-        },
-        "consumer": {
-          "id": "endpoint-e0cd033bea17ae76",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout.completed"
-          },
-          "pin_name": "scout.completed",
-          "source_location": "pins.inputs.scout.completed"
+          "pin_name": "scout.requested",
+          "source_location": "inputs.scout.requested"
         },
         "boundary": {
           "owner_flow_path": ".",
           "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": "scout.scout.completed",
-          "to": ".scout.completed",
-          "output_pin": "scout.completed",
-          "input_pin": "scout.completed"
+          "from": ".scout.requested",
+          "to": "scout.scout.requested",
+          "output_pin": "scout.requested",
+          "input_pin": "scout.requested"
         },
         "resolution": {
           "mode": "static",
           "target_kind": "target"
         },
-        "requires_runtime_resolution": true
+        "requires_runtime_resolution": false
       },
       {
-        "id": "route-a936010533d430d6",
+        "id": "route-b81e53a11d4e681c",
         "scope": "typed_pubsub",
         "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout/scout.completed"
+          "authored": "candidate.requested",
+          "local": "candidate.requested",
+          "canonical": "candidate/candidate.requested"
         },
         "producer": {
-          "id": "endpoint-9c63d2afdcd42a62",
-          "direction": "producer",
-          "kind": "required_agent_role",
-          "flow_id": "scout",
-          "flow_path": "scout",
+          "id": "endpoint-09a7dbb327da1254",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "candidate",
+          "flow_path": "candidate",
           "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout/scout.completed"
+            "authored": "candidate.requested",
+            "local": "candidate.requested",
+            "canonical": "candidate/candidate.requested"
           },
-          "role": "scout-worker",
-          "source_location": "required_agents.emits"
+          "pin_name": "candidate.requested",
+          "source_location": "inputs.candidate.requested"
         },
         "consumer": {
-          "id": "endpoint-7172756e1239b3af",
+          "id": "endpoint-d9d41fae9df997a7",
           "direction": "consumer",
           "kind": "node_handler",
-          "flow_id": "scout",
-          "flow_path": "scout",
+          "flow_id": "candidate",
+          "flow_path": "candidate",
           "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout/scout.completed"
+            "authored": "candidate.requested",
+            "local": "candidate.requested",
+            "canonical": "candidate/candidate.requested"
           },
-          "node_id": "scout-completion",
-          "handler_event": "scout.completed",
-          "source_file": "scout/nodes.yaml",
+          "node_id": "candidate-intake",
+          "handler_event": "candidate.requested",
+          "source_file": "candidate/nodes.yaml",
           "source_line": 1,
-          "source_location": "[\"scout.completed\"]"
+          "source_location": "[\"candidate.requested\"]"
         },
         "typed_pubsub": {
           "match": "exact",
@@ -1453,7 +1311,7 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-bc31a29c7f81ba6e",
+        "id": "route-d4e991dae48feaca",
         "scope": "inter_flow_connect",
         "event": {
           "authored": "candidate.requested",
@@ -1477,7 +1335,7 @@
           "source_location": "handler.fan_out.emit"
         },
         "consumer": {
-          "id": "endpoint-6c6f83fd21817bda",
+          "id": "endpoint-09a7dbb327da1254",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "candidate",
@@ -1488,7 +1346,7 @@
             "canonical": "candidate/candidate.requested"
           },
           "pin_name": "candidate.requested",
-          "source_location": "pins.inputs.candidate.requested"
+          "source_location": "inputs.candidate.requested"
         },
         "boundary": {
           "owner_flow_path": ".",
@@ -1560,135 +1418,41 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-e2d92dd1a09c1c76",
+        "id": "route-f4a3aaf2a8b18a91",
         "scope": "typed_pubsub",
         "event": {
-          "authored": "scout.requested",
-          "local": "scout.requested",
-          "canonical": "scout/scout.requested"
+          "authored": "candidate.completed",
+          "local": "candidate.completed",
+          "canonical": "candidate.completed"
         },
         "producer": {
-          "id": "endpoint-0a73131ea710cfb5",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "scout",
-          "flow_path": "scout",
-          "event": {
-            "authored": "scout.requested",
-            "local": "scout.requested",
-            "canonical": "scout/scout.requested"
-          },
-          "pin_name": "scout.requested",
-          "source_location": "pins.inputs.scout.requested"
-        },
-        "consumer": {
-          "id": "endpoint-fe1735010102625c",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": "scout",
-          "flow_path": "scout",
-          "event": {
-            "authored": "scout.requested",
-            "local": "scout.requested",
-            "canonical": "scout/scout.requested"
-          },
-          "node_id": "scout-intake",
-          "handler_event": "scout.requested",
-          "source_file": "scout/nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"scout.requested\"]"
-        },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-e55b868b5ab5106d",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout/scout.completed"
-        },
-        "producer": {
-          "id": "endpoint-9c63d2afdcd42a62",
-          "direction": "producer",
-          "kind": "required_agent_role",
-          "flow_id": "scout",
-          "flow_path": "scout",
-          "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout/scout.completed"
-          },
-          "role": "scout-worker",
-          "source_location": "required_agents.emits"
-        },
-        "consumer": {
-          "id": "endpoint-e0cd033bea17ae76",
+          "id": "endpoint-b186ebe054ac4baa",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": ".",
           "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout.completed"
+            "authored": "candidate.completed",
+            "local": "candidate.completed",
+            "canonical": "candidate.completed"
           },
-          "pin_name": "scout.completed",
-          "source_location": "pins.inputs.scout.completed"
-        },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": "scout.scout.completed",
-          "to": ".scout.completed",
-          "output_pin": "scout.completed",
-          "input_pin": "scout.completed"
-        },
-        "resolution": {
-          "mode": "static",
-          "target_kind": "target"
-        },
-        "requires_runtime_resolution": true
-      },
-      {
-        "id": "route-ebcf116fcd153a8a",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "scout.completed",
-          "local": "scout.completed",
-          "canonical": "scout.completed"
-        },
-        "producer": {
-          "id": "endpoint-e0cd033bea17ae76",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout.completed"
-          },
-          "pin_name": "scout.completed",
-          "source_location": "pins.inputs.scout.completed"
+          "pin_name": "candidate.completed",
+          "source_location": "inputs.candidate.completed"
         },
         "consumer": {
-          "id": "endpoint-afc58cc8d298dd24",
+          "id": "endpoint-1e7136aae880394e",
           "direction": "consumer",
           "kind": "node_handler",
           "flow_id": ".",
           "event": {
-            "authored": "scout.completed",
-            "local": "scout.completed",
-            "canonical": "scout.completed"
+            "authored": "candidate.completed",
+            "local": "candidate.completed",
+            "canonical": "candidate.completed"
           },
-          "node_id": "scout-collector",
-          "handler_event": "scout.completed",
+          "node_id": "candidate-collector",
+          "handler_event": "candidate.completed",
           "source_file": "nodes.yaml",
           "source_line": 1,
-          "source_location": "[\"scout.completed\"]"
+          "source_location": "[\"candidate.completed\"]"
         },
         "typed_pubsub": {
           "match": "exact",
@@ -1697,43 +1461,41 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-f822f716f9556cf3",
+        "id": "route-fe1a40b9be9389ad",
         "scope": "typed_pubsub",
         "event": {
-          "authored": "candidate.requested",
-          "local": "candidate.requested",
-          "canonical": "candidate/candidate.requested"
+          "authored": "search.requested",
+          "local": "search.requested",
+          "canonical": "search.requested"
         },
         "producer": {
-          "id": "endpoint-6c6f83fd21817bda",
+          "id": "endpoint-748bc9fd0324d246",
           "direction": "input_pin",
           "kind": "flow_input_pin",
-          "flow_id": "candidate",
-          "flow_path": "candidate",
+          "flow_id": ".",
           "event": {
-            "authored": "candidate.requested",
-            "local": "candidate.requested",
-            "canonical": "candidate/candidate.requested"
+            "authored": "search.requested",
+            "local": "search.requested",
+            "canonical": "search.requested"
           },
-          "pin_name": "candidate.requested",
-          "source_location": "pins.inputs.candidate.requested"
+          "pin_name": "search.requested",
+          "source_location": "inputs.search.requested"
         },
         "consumer": {
-          "id": "endpoint-d9d41fae9df997a7",
+          "id": "endpoint-6909b10475f88d8c",
           "direction": "consumer",
           "kind": "node_handler",
-          "flow_id": "candidate",
-          "flow_path": "candidate",
+          "flow_id": ".",
           "event": {
-            "authored": "candidate.requested",
-            "local": "candidate.requested",
-            "canonical": "candidate/candidate.requested"
+            "authored": "search.requested",
+            "local": "search.requested",
+            "canonical": "search.requested"
           },
-          "node_id": "candidate-intake",
-          "handler_event": "candidate.requested",
-          "source_file": "candidate/nodes.yaml",
+          "node_id": "search-intake",
+          "handler_event": "search.requested",
+          "source_file": "nodes.yaml",
           "source_line": 1,
-          "source_location": "[\"candidate.requested\"]"
+          "source_location": "[\"search.requested\"]"
         },
         "typed_pubsub": {
           "match": "exact",

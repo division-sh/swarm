@@ -431,7 +431,7 @@ inputs:
 		nodes += consumer
 	case LifecycleGateDangling:
 	case LifecycleGateOutputDisconnected:
-		schema += "  outputs: [work.completed]\n"
+		schema += "outputs: [work.completed]\n"
 	case LifecycleGateSharedEvent:
 		schema = strings.Replace(schema, "  approved: {}", "        reject:\n          advances_to: approved\n          emit:\n            event: work.completed\n            fields: {result: \"rejected\"}\n  approved: {}", 1)
 		nodes += consumer

@@ -583,7 +583,7 @@ func sourceMutationPublicationSource(t *testing.T, revision string) semanticview
 	t.Helper()
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "# captured revision " + revision + "\nstages: []\npins:\n  outputs: [test.source_mutation]\n",
+		"schema.yaml":   "# captured revision " + revision + "\nstages: []\noutputs: [test.source_mutation]\n",
 		"events.yaml":   "test.source_mutation:\ntest.work:\n",
 	}))
 }

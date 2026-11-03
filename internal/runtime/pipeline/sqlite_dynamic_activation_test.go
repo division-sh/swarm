@@ -674,10 +674,10 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages: []\n",
 
-		"types.yaml":           "types:\n  Component:\n    component_id: text\n",
+		"types.yaml":           "Component:\n  component_id: text\n",
 		"events.yaml":          "component_scaffold.batch_requested:\n  components: [Component]\ncomponent_scaffold.spawn_requested:\n  component_id: text\n  nested_items: [text]\ncomponent_scaffold.task_requested:\n  component_id: text\n  task: text\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"review/schema.yaml":   "stages:\n  pending: {}\npins:\n  inputs:\n    - component_scaffold.spawn_requested\n",
+		"review/schema.yaml":   "stages:\n  pending: {}\ninputs:\n  - component_scaffold.spawn_requested\n",
 
 		"nodes.yaml": `fanout-node:
   component_scaffold.batch_requested:

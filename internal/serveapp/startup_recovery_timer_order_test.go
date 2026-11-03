@@ -160,11 +160,10 @@ func TestComposedStartupWithholdsStandingTimerPublicationUntilRecoveryOnBothStor
   serving: {}
   retired:
     final: true
-pins:
-  inputs:
-    - inbound.telegram.text_message
-  outputs:
-    - inbound.telegram.text_message
+inputs:
+  - inbound.telegram.text_message
+outputs:
+  - inbound.telegram.text_message
 connect:
   - event: inbound.telegram.text_message
     from: .
@@ -180,7 +179,7 @@ connect:
 					}
 					if sourceCase == "partial_clock_receipt" {
 						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\nschedules:\n  first: {every: 1h, emit: poll.tick}\n  second: {every: 1h, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
+						writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\nschedules:\n  first: {every: 1h, emit: poll.tick}\n  second: {every: 1h, emit: poll.tick}\noutputs: [poll.tick]\n")
 					}
 				}
 				loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{

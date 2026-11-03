@@ -417,7 +417,7 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	root := canonicalrouting.CopySelectedStoreExecution(t)
-	if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("types:\n  OrderedPayload:\n    a: integer\n    b: integer\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("OrderedPayload:\n  a: integer\n  b: integer\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(`item.received:

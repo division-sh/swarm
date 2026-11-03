@@ -94,10 +94,10 @@ func TestDerivedStaticTargetRequiresCanonicalInstanceEvidence(t *testing.T) {
 		"parent/manifest.yaml":          "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"parent/receiver/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":                   "stages: []\n",
-		"parent/schema.yaml":            "instance: parent_id\npins:\n  inputs: [parent.created]\n",
+		"parent/schema.yaml":            "instance: parent_id\ninputs: [parent.created]\n",
 		"parent/events.yaml":            "parent.created:\n  parent_id: text\n",
 		"parent/state.yaml":             "parent_id: text\n",
-		"parent/receiver/schema.yaml":   "pins:\n  inputs: [work.started]\n",
+		"parent/receiver/schema.yaml":   "inputs: [work.started]\n",
 		"parent/receiver/events.yaml":   "work.started:\n",
 		"parent/receiver/nodes.yaml":    "receiver-node:\n  work.started: {}\n",
 	})

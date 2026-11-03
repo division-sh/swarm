@@ -33,7 +33,7 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 					"scout/detail/state.yaml":  "marker: \"original\"\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "scout/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "scout/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
 				if keyed {
-					documents["schema.yaml"] = "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n"
+					documents["schema.yaml"] = "instance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n"
 					documents["events.yaml"] = "task.started:\n  request_id: text\n"
 					documents["state.yaml"] = "request_id: text\n"
 				}
@@ -125,13 +125,13 @@ func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfig
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":                     "stages: []\n",
-		"review/schema.yaml":              "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml":              "instance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 		"review/state.yaml":               "request_id: text\n",
 		"review/events.yaml":              "task.started:\n",
 		"review/scout/schema.yaml":        "stages:\n  pending: {}\n",
 		"review/scout/detail/schema.yaml": "stages: []\n",
 		"review/scout/detail/state.yaml":  "marker: \"original\"\n",
-		"review/deferred/schema.yaml":     "instance: job_id\npins:\n  inputs:\n    - job.started\n",
+		"review/deferred/schema.yaml":     "instance: job_id\ninputs:\n  - job.started\n",
 		"review/deferred/events.yaml":     "job.started:\n",
 		"review/deferred/state.yaml":      "job_id: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/scout/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/scout/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/deferred/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)

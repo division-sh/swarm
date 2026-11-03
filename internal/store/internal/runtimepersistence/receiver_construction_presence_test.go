@@ -136,7 +136,7 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					var f receiverConfigActivationFixture
 					if shape == "root" {
 						f = newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-							"schema.yaml": "pins:\n  inputs:\n    - start.seeded\n",
+							"schema.yaml": "inputs:\n  - start.seeded\n",
 							"events.yaml": "start.seeded:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 						}, nil)
 					} else {

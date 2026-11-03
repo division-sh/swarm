@@ -406,10 +406,10 @@ func targetOwnerArcFixture(
 			"manifest.yaml":                      "version: 1.0.0\nplatform_version: '*'\n",
 			"schema.yaml":                        "stages: []\n",
 			test.sourcePath + "/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
-			test.sourcePath + "/schema.yaml":     "stages: []\npins:\n  outputs: [work.ready]\n",
+			test.sourcePath + "/schema.yaml":     "stages: []\noutputs: [work.ready]\n",
 			test.sourcePath + "/events.yaml":     "work.ready:\n",
 			test.receiverPath + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			test.receiverPath + "/schema.yaml":   "stages: []\npins:\n  inputs: [work.ready]\n",
+			test.receiverPath + "/schema.yaml":   "stages: []\ninputs: [work.ready]\n",
 			test.receiverPath + "/nodes.yaml":    "arc-receiver:\n  work.ready: {}\n",
 		}
 		for _, endpoint := range []string{test.sourcePath, test.receiverPath} {
@@ -605,14 +605,14 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - {event: work.ready, from: producer, to: fanout/existing}\n  - {event: work.ready, from: producer, to: fanout/constructed}\n  - {event: work.ready, from: producer, to: fanout/entityless}\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.ready]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [work.ready]\n",
 		"producer/events.yaml":   "work.ready:\n",
 		"fanout/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
 		"fanout/schema.yaml":     "stages: []\n",
 	}
 	for _, receiver := range []string{"existing", "constructed", "entityless", "poison"} {
 		files["fanout/"+receiver+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-		files["fanout/"+receiver+"/schema.yaml"] = "stages: []\npins:\n  inputs: [work.ready]\n"
+		files["fanout/"+receiver+"/schema.yaml"] = "stages: []\ninputs: [work.ready]\n"
 		handler := "{}\n"
 		if receiver == "existing" || receiver == "poison" {
 			handler = "\n    guard: _entity.id != \"\"\n"

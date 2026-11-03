@@ -23,6 +23,20 @@ func (c *checkerContext) fanOutValidation() []Finding {
 			continue
 		}
 		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+			var competing []string
+			if len(handler.Rules) > 0 {
+				competing = append(competing, "handler.rules")
+			}
+			if len(handler.OnComplete) > 0 {
+				competing = append(competing, "handler.on_complete")
+			}
+			if handler.FanOut != nil && len(competing) > 0 {
+				c.fanOutFindings = append(c.fanOutFindings, Finding{
+					CheckID: fanOutValidationCheckID, Severity: SeverityHardInvalidity,
+					Message:  fmt.Sprintf("flow %s node %s handler %s: handler.fan_out cannot be combined with %s; put the fan-out on the rule that should fan out, or use no rules or on_complete", defaultFlowLabel(node.FlowPath()), node.Key(), event, strings.Join(competing, " and ")),
+					Location: node.Key(),
+				})
+			}
 			for _, write := range handler.DataAccumulation.Writes {
 				if !fanOutWriteReferencesCount(write) {
 					continue

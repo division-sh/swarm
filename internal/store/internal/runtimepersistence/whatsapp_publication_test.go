@@ -55,7 +55,7 @@ ack: {mode: durable_before_dispatch}
 			candidate := runlifecycle.LiveRunScope{FlowPath: "."}
 			artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 				"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
-				"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.whatsapp.message]}\n"),
+				"schema.yaml":            []byte("stages: []\ninputs: [inbound.whatsapp.message]\n"),
 				"whatsapp/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [message], verify_secret: webhook_signing_secret}, cannot: [execute code]}\n"),
 				"whatsapp/trigger.yaml":  []byte(manifestText),
 			})

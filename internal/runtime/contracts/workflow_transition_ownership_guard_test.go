@@ -567,7 +567,8 @@ func allowedTransitionBoundaryUses() map[string]int {
 		// Static reference/ownership/reachability checks consume compiled owners.
 		"internal/runtime/bootverify.checkLoopValidation::call internal/runtime/semanticview.WorkflowStageTopology":                                       1,
 		"internal/runtime/bootverify.checkerContext.dataAccumulationSourceAlignment::call internal/runtime/semanticview.Source.DerivedHandlerTransitions": 1,
-		"internal/runtime/bootverify.checkerContext.gateSchemaValidation::call internal/runtime/semanticview.Source.DerivedHandlerTransitions":            1,
+		"internal/runtime/bootverify.wave1EntityWriterCoverageByFlow::call internal/runtime/semanticview.Source.DerivedHandlerTransitions":                1,
+		"internal/runtime/tools.roleScopedWritableFields::call internal/runtime/semanticview.Source.DerivedHandlerTransitions":                            1,
 		"internal/runtime/bootverify.checkerContext.stateMachineCoherence::call internal/runtime/semanticview.Source.DerivedHandlerTransitions":           1,
 		"internal/runtime/bootverify.checkerContext.transitionReferences::call internal/runtime/semanticview.WorkflowStageTopology":                       1,
 		"internal/runtime/bootverify.checkerContext.transitionReferences::carrier fields":                                                                 18,
@@ -636,8 +637,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::carrier fields":                                           16,
 		"internal/runtime/authoringview.buildStageGraphEdgesForFlow::edge inventory":                                           2,
 		// CLI/API scenario gate-name inventory is descriptive, not transition authority.
-		"internal/apiv1.declaredTestSetupGateNames::call internal/runtime/contracts.WorkflowContractBundle.DerivedHandlerTransitions":                1,
-		"internal/cliapp.scenarioRunner.declaredScenarioGateNames::call internal/runtime/contracts.WorkflowContractBundle.DerivedHandlerTransitions": 1,
 		// Exact flow metadata and selected-site construction, never pair-only admission.
 		"internal/runtime/pipeline.PipelineCoordinator.planWorkflowLifecycleEffect::call internal/runtime/pipeline.validateWorkflowInitialEntry":   1,
 		"internal/apiv1.validateTestSetupEntityAgainstBundle::call internal/runtime/contracts.WorkflowContractBundle.WorkflowStageTopology":        1,

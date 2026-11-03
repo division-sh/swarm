@@ -54,8 +54,8 @@ func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
 	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"),
-		"    - account.setup\n",
-		"    - account.create\n")
+		"  - account.setup\n",
+		"  - account.create\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"  - event: account.setup\n    from: producer\n    to: account\n    resolution: select-or-create\n  - event: account.ready\n    from: producer\n    to: account\n    resolution: select\n",
 		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n    resolution: select-or-create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n    resolution: select\n")
@@ -101,7 +101,7 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 		key, fieldType := "", "text"
 		if event == "account.ready" {
 			producerEvents = filepath.Join(root, "producer", "events.yaml")
-			key = "  key: account_id\n"
+			key = "  _key: account_id\n"
 			fieldType = "text"
 		}
 		applyClosedReplacement(t, producerEvents,

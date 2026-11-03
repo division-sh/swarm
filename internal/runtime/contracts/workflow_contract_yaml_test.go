@@ -2801,21 +2801,6 @@ on_complete:
 			contains: "not supported with on_complete",
 		},
 		{
-			name: "with_fan_out",
-			raw: `
-on_success:
-  emit: handler.succeeded
-rules:
-  - emit: rule.done
-fan_out:
-  items_from: payload.items
-  as: line_item
-  identity: line_item.id
-  emit: item.done
-`,
-			contains: "not supported with fan_out",
-		},
-		{
 			name: "with_rule_fan_out",
 			raw: `
 on_success:

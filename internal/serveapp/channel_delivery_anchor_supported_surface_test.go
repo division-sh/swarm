@@ -469,16 +469,15 @@ func nestChannelAnchorJourneyHolder(t *testing.T, sourceRoot string, withNotice 
 	if err := yaml.Unmarshal(schemaBody, &schema); err != nil {
 		t.Fatal(err)
 	}
-	pins := schema["pins"].(map[string]any)
 	for _, direction := range []string{"inputs", "outputs"} {
-		values := pins[direction].([]any)
+		values := schema[direction].([]any)
 		retained := make([]any, 0, len(values))
 		for _, value := range values {
 			if !publicEvents[value.(string)] {
 				retained = append(retained, value)
 			}
 		}
-		pins[direction] = retained
+		schema[direction] = retained
 	}
 	connections := schema["connect"].([]any)
 	if len(connections) != len(events) {
@@ -512,13 +511,13 @@ func nestChannelAnchorJourneyHolder(t *testing.T, sourceRoot string, withNotice 
 		t.Fatal(err)
 	}
 	var parent strings.Builder
-	parent.WriteString("stages: []\npins:\n  inputs:\n")
+	parent.WriteString("stages: []\ninputs:\n")
 	for _, event := range events {
-		fmt.Fprintf(&parent, "    - %s\n", event)
+		fmt.Fprintf(&parent, "  - %s\n", event)
 	}
-	parent.WriteString("  outputs:\n")
+	parent.WriteString("outputs:\n")
 	for _, event := range events {
-		fmt.Fprintf(&parent, "    - %s\n", event)
+		fmt.Fprintf(&parent, "  - %s\n", event)
 	}
 	parent.WriteString("connect:\n")
 	for _, event := range events {
@@ -658,7 +657,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 			}
 		}
 		if relative == "schema.yaml" {
-			pins := "pins:\n  inputs:\n    - work.requested\n    - effect.requested\n    - observer.requested\n"
+			pins := "inputs:\n  - work.requested\n  - effect.requested\n  - observer.requested\n"
 			outputs := "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n"
 			if withNotice {
 				pins += "    - notice.requested\n"
@@ -669,7 +668,7 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 			if strings.Count(string(body), old) != 1 {
 				return fmt.Errorf("channel anchor fixture changed its exact pins/connect declaration")
 			}
-			body = []byte(strings.Replace(string(body), old, "pins:\n  inputs:\n    - work.requested\n    - effect.requested\n", 1))
+			body = []byte(strings.Replace(string(body), old, "inputs:\n  - work.requested\n  - effect.requested\n", 1))
 		}
 		return os.WriteFile(target, body, 0o600)
 	}); err != nil {
@@ -685,18 +684,18 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 		t.Fatal(err)
 	}
 	var pins, connects strings.Builder
-	pins.WriteString("pins:\n  inputs:\n")
+	pins.WriteString("inputs:\n")
 	events := []string{"work.requested", "observer.requested", "effect.requested"}
 	if withNotice {
 		events = append(events, "notice.requested")
 	}
 	for _, event := range events {
-		fmt.Fprintf(&pins, "    - %s\n", event)
+		fmt.Fprintf(&pins, "  - %s\n", event)
 	}
-	pins.WriteString("  outputs:\n")
+	pins.WriteString("outputs:\n")
 	connects.WriteString("connect:\n")
 	for _, event := range events {
-		fmt.Fprintf(&pins, "    - %s\n", event)
+		fmt.Fprintf(&pins, "  - %s\n", event)
 		target := "reviews"
 		if event == "observer.requested" || event == "notice.requested" {
 			target = "observers"
@@ -707,10 +706,9 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 	if err := yaml.Unmarshal([]byte(pins.String()+connects.String()), &routes); err != nil {
 		t.Fatal(err)
 	}
-	rootPins := rootSchema["pins"].(map[string]any)
-	for key, values := range routes["pins"].(map[string]any) {
-		original, _ := rootPins[key].([]any)
-		rootPins[key] = append(original, values.([]any)...)
+	for _, key := range []string{"inputs", "outputs"} {
+		original, _ := rootSchema[key].([]any)
+		rootSchema[key] = append(original, routes[key].([]any)...)
 	}
 	originalConnections, _ := rootSchema["connect"].([]any)
 	rootSchema["connect"] = append(originalConnections, routes["connect"].([]any)...)

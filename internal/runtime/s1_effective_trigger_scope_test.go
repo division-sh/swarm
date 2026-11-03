@@ -213,7 +213,7 @@ func TestS1EffectiveProviderTriggerSchemasBindRawAndTemplatePinsWithoutIngress(t
 			members["team-bot/trigger.yaml"] = []byte(cell.body)
 			event := "inbound.team-bot." + cell.event
 			for _, flow := range []string{"", "child/"} {
-				members[flow+"schema.yaml"] = []byte(fmt.Sprintf("stages: []\npins:\n  inputs: [%s]\n  outputs: [%s]\n", event, event))
+				members[flow+"schema.yaml"] = []byte(fmt.Sprintf("stages: []\ninputs: [%s]\noutputs: [%s]\n", event, event))
 			}
 			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
@@ -300,7 +300,7 @@ func TestS1EffectiveProviderTriggerSchemaReadbackIsDefensive(t *testing.T) {
 func TestS1EffectiveProviderTriggerSchemasRefuseNoncanonicalFlowReaders(t *testing.T) {
 	members := s1EffectiveTriggerMembers()
 	const event = "inbound.team-bot.text_message"
-	members["schema.yaml"] = []byte("stages: []\npins:\n  inputs: [" + event + "]\n  outputs: [" + event + "]\n")
+	members["schema.yaml"] = []byte("stages: []\ninputs: [" + event + "]\n  outputs: [" + event + "]\n")
 	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
 	if err != nil {

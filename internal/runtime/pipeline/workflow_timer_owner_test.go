@@ -1052,7 +1052,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now())
 			eventOffset := time.Duration(0)
-			execute := func(eventType string, payload []byte, wantHandled bool) {
+			execute := func(eventType string, payload []byte, wantHandled bool) contractHandlerExecutionResult {
 				t.Helper()
 				eventOffset++
 				if len(payload) == 0 {
@@ -1072,6 +1072,7 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 				if result.Handled != wantHandled {
 					t.Fatalf("%s handled = %v, want %v", eventType, result.Handled, wantHandled)
 				}
+				return result
 			}
 			declarations := func(id string) []WorkflowTimerActivation {
 				t.Helper()
@@ -1111,7 +1112,10 @@ func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores
 			assertOneStatus("dedup.start", workflowTimerStatusCancelled)
 			execute("dedup.target", nil, true)
 			assertOneStatus("dedup.target", workflowTimerStatusActive)
-			execute("dedup.event", []byte(`{"item_id":"item-1"}`), false)
+			duplicate := execute("dedup.event", []byte(`{"item_id":"item-1"}`), true)
+			if duplicate.Committed || duplicate.Outcome == nil || duplicate.Outcome.Status != HandlerOutcomeDiscarded {
+				t.Fatalf("duplicate did not settle without handler work: %+v", duplicate)
+			}
 			assertOneStatus("dedup.start", workflowTimerStatusCancelled)
 			assertOneStatus("dedup.target", workflowTimerStatusActive)
 		})
@@ -2460,6 +2464,8 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return loadWorkflowTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  waiting: {}\n",
+		"state.yaml":    "items: [TimerItem]\n",
+		"types.yaml":    "TimerItem:\n  item_id: text\n",
 		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   timers:
@@ -2474,7 +2480,7 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
   guard.reject:
     guard: false
   dedup.event:
-    accumulate: {into: items, from: payload, key: payload.item_id}
+    accumulate: {target: items, key: item_id}
   dedup.reset: {}
   dedup.target: {}
 `,

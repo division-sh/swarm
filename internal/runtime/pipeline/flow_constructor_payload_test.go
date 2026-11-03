@@ -43,7 +43,7 @@ func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
 func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"schema.yaml":   "instance: item_id\ninputs:\n  - item.created\n",
 		"state.yaml":    "item_id: text\nprecise: double?\nmessage: text?\n",
 		"events.yaml":   "item.created:\n  precise: double\n  message: text\n",
 	})
@@ -122,7 +122,7 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-				"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":   "instance: item_id\ninputs:\n  - item.created\n",
 				"state.yaml":    "item_id: " + test.fieldType + "\n",
 				"events.yaml":   "item.created:\n  item_id: " + test.fieldType + "\n",
 			})
@@ -140,7 +140,7 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 	t.Run("canonical_operator_account", func(t *testing.T) {
 		members := map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			"schema.yaml":   "instance: operator_account\nstages:\n  active: {}\npins:\n  inputs: [account.created, inbound.whatsapp.message]\n",
+			"schema.yaml":   "instance: operator_account\nstages:\n  active: {}\ninputs: [account.created, inbound.whatsapp.message]\n",
 			"state.yaml":    "operator_account: text\n",
 			"events.yaml":   "account.created:\n  operator_account: text\n",
 		}
@@ -183,7 +183,7 @@ func TestFlowConstructorResolvedKeySatisfiesOnlyItsDeclaredSlot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-				"schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"schema.yaml":   "instance: item_id\ninputs:\n  - item.created\n",
 				"state.yaml":    "item_id: text\nmessage: text?\n",
 				"events.yaml":   eventSchema,
 			})

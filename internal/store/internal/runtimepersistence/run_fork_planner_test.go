@@ -130,7 +130,6 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 		VALUES
 			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
 			($1::uuid, $2::uuid, 'authored_field', 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
-			($1::uuid, $2::uuid, 'gate', 'ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
 			($1::uuid, $2::uuid, 'accumulator', 'score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4)
 	`, runID, entityID, firstEventID, at); err != nil {
 		t.Fatalf("seed first revision mutations: %v", err)

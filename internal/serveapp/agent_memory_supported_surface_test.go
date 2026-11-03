@@ -526,9 +526,8 @@ func addStandingMockInput(t *testing.T, root string) {
 	if err := yaml.Unmarshal(data, &schema); err != nil {
 		t.Fatal(err)
 	}
-	pins := schema["pins"].(map[string]any)
-	pins["inputs"] = append(pins["inputs"].([]any), "mock.message")
-	outputs := pins["outputs"].([]any)
+	schema["inputs"] = append(schema["inputs"].([]any), "mock.message")
+	outputs := schema["outputs"].([]any)
 	if len(outputs) != 1 || outputs[0] != "inbound.telegram.text_message" {
 		t.Fatal("mock fixture lost its exact child-constructor output")
 	}
@@ -567,7 +566,7 @@ mock.message_ready:
   conversation_scope: MockConversationScope
   provider_message_reference: integer
 `)
-	writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "enums:\n  MockConversationScope: {values: [direct, shared], default: direct}\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "MockConversationScope: [\"direct\", \"shared\"]\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `mock-input:
   mock.message:
     emit:

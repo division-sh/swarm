@@ -9,13 +9,12 @@ import (
 
 func TestEntityToolPredicatePresenceExecution(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Role: "operator", Tools: []string{"create_entity", "query_entities", "query_metrics"}}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `types:
-  Note:
-    note: text?
-  Metadata:
-    region: text?
-    notes: [Note]
-    by_name: map[text]Note
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "state", `Note:
+  note: text?
+Metadata:
+  region: text?
+  notes: [Note]
+  by_name: map[text]Note
 `, `
 status: text
 metadata: Metadata

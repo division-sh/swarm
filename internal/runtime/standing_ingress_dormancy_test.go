@@ -22,7 +22,7 @@ func TestDormantIngressReadbackCannotHotActivate(t *testing.T) {
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -119,7 +119,7 @@ func TestStandingIngressAdmissionDistinguishesAbsentFromInvalid(t *testing.T) {
 				"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 				"schema.yaml":               []byte("stages: []\n"),
 				"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-				"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+				"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 			}
 			for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 				if entry.ID() != "telegram" {
@@ -227,7 +227,7 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 				"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 				"schema.yaml":               []byte("stages: []\n"),
 				"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-				"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+				"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 			}
 			for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 				if entry.ID() != "telegram" {

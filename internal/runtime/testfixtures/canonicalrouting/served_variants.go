@@ -47,7 +47,7 @@ stages:
       - when: has(payload.item_id) && payload.item_id == 'review'
         advances_to: done
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.received\n", "    - item.received\n    - item.processed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.received\n", "  - item.received\n  - item.processed\n")
 	return root
 }
 
@@ -93,7 +93,7 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
   item_id: text?
 external.observed:
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - external.observed\n  outputs: [external.observed]\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.processed\n", "  - item.processed\n  - external.observed\noutputs: [external.observed]\n")
 	return root
 }
 
@@ -113,7 +113,7 @@ inputs:
   - fork.source_message
   - item.processed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - external.observed\n", "    - external.observed\n    - fork.source_message\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - external.observed\n", "  - external.observed\n  - fork.source_message\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed]\n", "outputs: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
 	removeClosedVariantFiles(t, root, "fork-source/state.yaml")
 	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  fork.source_message:\n    advances_to: active\n  item.processed:\n    advances_to: done\n")
@@ -124,10 +124,10 @@ inputs:
   model: regular
   memory: true
   subscriptions:
-    - fork.source_message
+  - fork.source_message
 `)
 	writeClosedVariantFile(t, root, "fork-source/prompts/fork-source-agent.md", "Preserve the source conversation used by the operator fork proof.\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - fork.source_message\n", "    - fork.source_message\n    - conversation.created\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - fork.source_message\n", "  - fork.source_message\n  - conversation.created\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed, fork.source_message, item.processed]", "outputs: [external.observed, fork.source_message, item.processed, conversation.created]")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: item.processed, from: ., to: fork-source}\n", "  - {event: item.processed, from: ., to: fork-source}\n  - {event: conversation.created, from: ., to: flow, resolution: create}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "fork.source_message:\n  note: text\n", "fork.source_message:\n  note: text\n"+ConversationForkCreatedEventDocument())
@@ -160,7 +160,7 @@ inputs:
   - item.agent_hold
   - item.processed
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - item.processed\n", "  - item.processed\n  - item.agent_hold\noutputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
 	removeClosedVariantFiles(t, root, "hold/state.yaml")
 	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  item.agent_hold:\n    advances_to: active\n  item.processed:\n    advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
@@ -170,7 +170,7 @@ inputs:
   model: regular
   memory: true
   subscriptions:
-    - item.agent_hold
+  - item.agent_hold
 `)
 	writeClosedVariantFile(t, root, "hold/prompts/load-agent.md", "Hold one lifecycle-authorized live session until destructive cleanup closes runtime admission.\n")
 	return root
@@ -192,7 +192,7 @@ func addServedItemProcessedAgent(t testing.TB, root, prompt string) {
   intent: prompts/load-agent.md
   model: regular
   subscriptions:
-    - item.processed
+  - item.processed
 `)
 	writeClosedVariantFile(t, root, "prompts/load-agent.md", prompt)
 }
@@ -244,14 +244,14 @@ lifecycle-orchestrator:
           target_field: note
     advances_to: ready
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `    - opco.spinup_requested
-  outputs:
-    - opco.create_requested
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `  - opco.spinup_requested
+outputs:
+  - opco.create_requested
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
-`, `    - opco.spinup_requested
-    - opco.product_review_requested
-  outputs: [opco.create_requested, opco.product_review_requested]
+`, `  - opco.spinup_requested
+  - opco.product_review_requested
+outputs: [opco.create_requested, opco.product_review_requested]
 connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
   - {event: opco.product_review_requested, from: ., to: operating, resolution: select}

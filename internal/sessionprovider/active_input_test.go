@@ -133,7 +133,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	manifest := sessionInputManifestFixture(t)
 	members := map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.whatsapp.raw, inbound.whatsapp.message, inbound.whatsapp.edit, inbound.whatsapp.revoke]}\n"),
+		"schema.yaml":   []byte("stages: []\ninputs: [inbound.whatsapp.raw, inbound.whatsapp.message, inbound.whatsapp.edit, inbound.whatsapp.revoke]\n"),
 		"policy.yaml":   []byte("operator_account: '+100000000002'\n"),
 	}
 	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, manifest.SourceBytes(), []string{"raw", "edit", "message", "revoke"}) {

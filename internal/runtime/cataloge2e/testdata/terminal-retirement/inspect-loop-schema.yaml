@@ -9,8 +9,7 @@ loops:
     revision_field: revision_id
     max_attempts: 3
     escape: {advances_to: complete}
-pins:
-  inputs:
-    - worker.ready
-  outputs:
-    - worker.observed
+inputs:
+  - worker.ready
+outputs:
+  - worker.observed

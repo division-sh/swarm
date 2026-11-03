@@ -29,7 +29,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 			files["observer/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 			files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer, resolution: select}\n"
 			files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
-			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "    - provider.replied\n", "    - provider.replied\n    - provider.notified\n", 1)
+			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "  - provider.replied\n", "  - provider.replied\n  - provider.notified\n", 1)
 			files["provider/events.yaml"] += "ordinary.requested:\n  order_id: text\n  member_id: text\n  result: JoinResult\nprovider.notified:\n  order_id: text\n  member_id: text\n  result: JoinResult\n"
 			files["provider/nodes.yaml"] += `  ordinary.requested:
     emit:
@@ -40,8 +40,8 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
         result: payload.result
 `
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "# fixture: requester", "# fixture: observer", 1)
-			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
-			files["observer/schema.yaml"] += "    - provider.notified\n"
+			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "outputs:\n  - provider.requested\n", "", 1)
+			files["observer/schema.yaml"] += "  - provider.notified\n"
 			files["observer/state.yaml"] = files["requester/state.yaml"] + "ordinary_result: JoinResult\n"
 			start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
 			end := strings.Index(files["requester/nodes.yaml"], "dispatcher:\n")

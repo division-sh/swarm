@@ -31,7 +31,7 @@ func TestResourceCodecCompiledMapImportReceiptAndPinnedPublicAgentReadbackBothSt
 			"support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 			"schema.yaml":           "stages: []\n",
 			"support/schema.yaml":   "stages: []\n",
-			"support/types.yaml":    "types:\n  CodecProfile:\n    note: integer?\n",
+			"support/types.yaml":    "CodecProfile:\n  note: integer?\n",
 			"support/events.yaml":   "records.loaded:\n  records: map[text]CodecProfile\n",
 			"support/agents.yaml":   "reader:\n  id: codec-map-reader\n  role: reader\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
 		} {

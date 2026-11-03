@@ -364,7 +364,7 @@ func TestFanOutInstancePlanningReobservesAbsentKeyAndNewMemberBothStores(t *test
 			t.Run(backend+"/"+createdKey, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 					"schema.yaml":        "stages: []\n",
-					"worker/schema.yaml": "instance: item_id\npins:\n  inputs: [item.created]\n",
+					"worker/schema.yaml": "instance: item_id\ninputs: [item.created]\n",
 					"worker/state.yaml":  "item_id: text\n",
 					"worker/events.yaml": "item.created:\n  item_id: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}, nil)

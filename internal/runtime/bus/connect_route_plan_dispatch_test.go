@@ -192,7 +192,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 				"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 				"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: missing\n",
 				"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-				"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+				"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 				"producer/events.yaml":   "deploy.done:\n",
 			}
 			if tc.mode == runtimecontracts.FlowModeTemplate {
@@ -222,7 +222,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 	}))
 	if runtimepinrouting.CompileConnectGraph(diagnosticSource).IssueMatchesEvent(diagnosticOnlyIssue, diagnosticEvent) {
@@ -627,11 +627,11 @@ func mixedPubsubConnectStaticSource(t *testing.T) semanticview.Source {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"producer/nodes.yaml":    "local-observer:\n  deploy.done:\n    guard: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: _entity.id != \"\"\n",
 	}))
 }
@@ -642,11 +642,11 @@ func mixedPubsubConnectNoMatchSource(t *testing.T) semanticview.Source {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done, local.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done, local.done]\n",
 		"producer/events.yaml":   "deploy.done:\nlocal.done:\n",
 		"producer/nodes.yaml":    "local-observer:\n  local.done:\n    guard: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: _entity.id != \"\"\n",
 	}))
 }
@@ -657,7 +657,7 @@ func mixedPubsubConnectFailureSource(t *testing.T) semanticview.Source {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: missing\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"producer/nodes.yaml":    "local-observer:\n  deploy.done:\n    guard: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
@@ -784,7 +784,7 @@ func connectReceiverPinCollisionSource(t *testing.T, producerMode string, rootRe
 	files := map[string]string{
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.ready]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [work.ready]\n",
 		"producer/events.yaml":   "work.ready:\n",
 	}
 	if producerMode == runtimecontracts.FlowModeTemplate {
@@ -794,10 +794,11 @@ func connectReceiverPinCollisionSource(t *testing.T, producerMode string, rootRe
 	receiverPrefix := "consumer"
 	if rootReceiver {
 		receiverPrefix = ""
-		rootSchema["pins"] = map[string]any{"inputs": []string{"work.accepted", "work.audited"}}
+		rootSchema["inputs"] = []string{"work.accepted", "work.audited"}
+		delete(rootSchema, "outputs")
 	} else {
 		files["consumer/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-		files["consumer/schema.yaml"] = "stages: []\npins:\n  inputs: [work.accepted, work.audited]\n"
+		files["consumer/schema.yaml"] = "stages: []\ninputs: [work.accepted, work.audited]\n"
 	}
 	schema, err := yaml.Marshal(rootSchema)
 	if err != nil {
@@ -852,7 +853,7 @@ func connectReceiverPinLegalSource(t *testing.T, shape string) semanticview.Sour
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            string(rootSchema),
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.ready]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [work.ready]\n",
 		"producer/events.yaml":   "work.ready:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   string(consumerSchema),
@@ -1054,10 +1055,10 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 		"consumer/agents.yaml":   "consumer-agent:\n  intent: {inline: 'Handle completed deployments.'}\n  subscriptions: [deploy.completed]\n",
 	}))
 	store := newConnectRoutePlanStaticStore()
@@ -1806,12 +1807,12 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: work.done\n    from: producer\n    to: consumer-a\n  - event: work.done\n    from: producer\n    to: consumer-b\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [work.done]\n",
 		"producer/events.yaml":   "work.done:\n",
 	}
 	for _, id := range []string{"consumer-a", "consumer-b"} {
 		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
-		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [work.done]\n"
+		files[id+"/schema.yaml"] = "stages: []\ninputs: [work.done]\n"
 		files[id+"/nodes.yaml"] = id + "-node:\n  work.done: {}\n"
 	}
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
@@ -1862,10 +1863,10 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.*:\n    guard: _entity.id != \"\"\n",
 	}))
 	store := newConnectRoutePlanStaticStore()
@@ -3884,11 +3885,11 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"producer/nodes.yaml":    "producer-node:\n  deploy.done: {}\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 	}))
 	store := newConnectRoutePlanStaticStore()
 	store.setTargetOwnerRoutes(
@@ -3958,10 +3959,10 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: missing.input\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 		"consumer/events.yaml":   "deploy.completed:\n",
 	}))
 	materializerCalled := false
@@ -4575,10 +4576,10 @@ func connectRoutePlanStaticSource(t *testing.T) semanticview.Source {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [deploy.completed]\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  deploy.completed:\n    guard: _entity.id != \"\"\n",
 	}))
 }

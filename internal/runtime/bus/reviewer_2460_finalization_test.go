@@ -71,7 +71,7 @@ func review2460DispatchSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.emitted]\n  outputs: [custom.emitted]\n",
+		"schema.yaml":   "stages: []\ninputs: [custom.emitted]\noutputs: [custom.emitted]\n",
 		"events.yaml":   "custom.emitted:\n",
 	}))
 }

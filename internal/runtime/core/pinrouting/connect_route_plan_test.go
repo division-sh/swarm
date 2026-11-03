@@ -906,7 +906,7 @@ func TestBundleAdmissionRejectsRetiredJoinRoutingPolicies(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-			if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), "schema.yaml:") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
+			if err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), "schema.yaml:") || !strings.Contains(err.Error(), `["inputs"]`) {
 				t.Fatalf("load error = %v, want exact source-located refusal of retired %q", err, tc.field)
 			}
 		})
@@ -1396,7 +1396,7 @@ func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeRouteLowering(t *t
 		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["pins"]["inputs"]`) {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "must be a scalar text") || !strings.Contains(err.Error(), `["inputs"]`) {
 				t.Fatalf("bundle load error = %v, want canonical rejection before CompileConnectGraph", err)
 			}
 		})

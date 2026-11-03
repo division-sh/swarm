@@ -828,7 +828,7 @@ func seedLifecycleReadinessOwner(
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":             "stages: []\n",
 		flowID + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		flowID + "/schema.yaml":   "instance: fixture_key\nstages:\n  pending: {}\npins:\n  inputs: [lifecycle.constructed]\n",
+		flowID + "/schema.yaml":   "instance: fixture_key\nstages:\n  pending: {}\ninputs: [lifecycle.constructed]\n",
 		flowID + "/events.yaml":   "lifecycle.constructed:\n  fixture_key: text\n",
 		flowID + "/state.yaml":    "fixture_key: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	})

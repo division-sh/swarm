@@ -57,7 +57,7 @@ func (g *outputPreparationGroup) RecordPrepared(_ context.Context, claim pipelin
 func TestFanOutPreparationSharesOutputCompilationNotSettlement(t *testing.T) {
 	bundle := loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "pins:\n  outputs: [root.ready, root.unconsumed]\n",
+		"schema.yaml":   "outputs: [root.ready, root.unconsumed]\n",
 		"events.yaml":   "root.ready:\nroot.unconsumed:\n",
 	})
 	source := &publicationCensusSource{Source: semanticview.Wrap(bundle)}

@@ -82,7 +82,7 @@ func copyInboundTransport(t testing.TB, flows []string, observe bool) string {
 			t.Fatalf("unclassified inbound transport flow %q", flow)
 		}
 		write(flow+"/manifest.yaml", manifest)
-		write(flow+"/schema.yaml", "stages: []\npins:\n  inputs: ["+strings.Join(events, ", ")+"]\n")
+		write(flow+"/schema.yaml", "stages: []\ninputs: ["+strings.Join(events, ", ")+"]\n")
 		for _, entry := range inventory.Entries() {
 			if _, present := entry.Provider().Body(packmodel.BodyTrigger); !present {
 				continue

@@ -65,7 +65,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 	a := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	bundleB, rootedB, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"schema.yaml":   []byte("stages: []\npins: {inputs: [beta.requested]}\n"),
+		"schema.yaml":   []byte("stages: []\ninputs: [beta.requested]\n"),
 		"events.yaml":   []byte("beta.requested:\n"),
 	})
 	providersB, err := packadmission.AdmitProviderSource(rootedB, bundleB.Platform)

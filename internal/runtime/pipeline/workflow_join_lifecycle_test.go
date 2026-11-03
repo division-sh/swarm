@@ -927,7 +927,7 @@ stages:
   attention: {final: true}
 `,
 		"orders/state.yaml": "instance_key: text\nexpected: [text]\n",
-		"orders/types.yaml": "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
+		"orders/types.yaml": "ItemResult:\n  ok: boolean\nLineItem:\n  id: text\n",
 		"orders/events.yaml": `item.completed:
   member_id: text
   result: ItemResult
