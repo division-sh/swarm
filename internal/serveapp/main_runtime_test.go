@@ -4472,18 +4472,6 @@ func requireNoServedDeliveryStatusDuring(t *testing.T, db *sql.DB, backend, even
 	}
 }
 
-func requireNoServedReceiptOutcomeDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(duration)
-	for time.Now().Before(deadline) {
-		if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
-			t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d during blocked interval, want 0",
-				backend, eventID, subscriberType, subscriberID, outcome, got)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
 func requireServedRuntimeIngressState(t *testing.T, db *sql.DB, backend, wantStatus, wantTransitionEventName string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
