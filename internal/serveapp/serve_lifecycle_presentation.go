@@ -260,7 +260,10 @@ func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) 
 	p.boot(3, "db_connection", "ok", detail)
 }
 
-func (p *serveLifecyclePresenter) recordStandby(line string) {
+func (p *serveLifecyclePresenter) recordStandby(line string, err error) {
+	if err != nil || !strings.HasPrefix(line, "waiting:") {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	fmt.Fprintln(p.out, line)

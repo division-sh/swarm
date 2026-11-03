@@ -1023,16 +1023,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	}
 	processWorkOwner := worklifetime.NewProcess()
 	standbyReadout := func(ctx context.Context) (string, error) {
-		bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		inspection, err := cliapp.InspectSelectedStoreStartup(bounded, storeSelection, cfg)
-		if err != nil {
-			return "", err
-		}
-		if inspection.Possession == nil || inspection.Possession.Available {
-			return "booting", nil
-		}
-		return "waiting: store held; " + cliapp.LastAdmittedServeLine(inspection), nil
+		return readStandbyStoreStatus(ctx, storeSelection, cfg)
 	}
 	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
 		cancelServe()
@@ -1057,9 +1048,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	if opts.TestAPIListenerBound != nil {
 		opts.TestAPIListenerBound(apiListener.Addr())
 	}
-	if line, err := standbyReadout(ctx); err == nil && strings.HasPrefix(line, "waiting:") {
-		presenter.recordStandby(line)
-	}
+	presenter.recordStandby(standbyReadout(ctx))
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
