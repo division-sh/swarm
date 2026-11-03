@@ -73,11 +73,12 @@ func pinnedTestOwner(t *testing.T, backend string, compiled runtimedata.Compiled
 		blob = "BYTEA"
 	}
 	for _, statement := range []string{
-		`CREATE TABLE runs (run_id TEXT, bundle_hash TEXT, origin_kind TEXT, status TEXT)`,
 		`CREATE TABLE resource_declarations (flow_path TEXT, event_name TEXT)`,
 		`CREATE TABLE resource_bundle_declarations (bundle_hash TEXT, flow_path TEXT, event_name TEXT, schema_digest TEXT, canonical_schema_bytes ` + blob + `, business_key_field TEXT)`,
 		`CREATE TABLE resource_heads (flow_path TEXT, event_name TEXT, version_id TEXT)`,
 		`CREATE TABLE resource_version_pins (run_id TEXT, flow_path TEXT, event_name TEXT, schema_digest TEXT, version_id TEXT)`,
+		`CREATE VIEW runs AS SELECT DISTINCT run_id, 'test-bundle' AS bundle_hash,
+			'deployment' AS origin_kind, 'paused' AS status FROM resource_version_pins`,
 		`CREATE TABLE resource_versions (version_id TEXT, flow_path TEXT, event_name TEXT, sequence_alias INTEGER, schema_digest TEXT, canonical_schema_bytes ` + blob + `, manifest_json ` + blob + `, row_count INTEGER, business_key_field TEXT, content_digest TEXT, row_codec TEXT, canonical_jsonl ` + blob + `, pruned_at TIMESTAMP)`,
 		`CREATE TABLE resource_version_provenance (version_id TEXT)`,
 	} {
@@ -94,7 +95,6 @@ func pinnedTestOwner(t *testing.T, backend string, compiled runtimedata.Compiled
 		query string
 		args  []any
 	}{
-		{`INSERT INTO runs VALUES ($1,$2,$3,$4)`, []any{pinnedTestRun, pinnedTestBundle, "deployment", "paused"}},
 		{`INSERT INTO resource_declarations VALUES ($1,$2)`, []any{ref.FlowPath, ref.EventName}},
 		{`INSERT INTO resource_bundle_declarations VALUES ($1,$2,$3,$4,$5,$6)`, []any{pinnedTestBundle, ref.FlowPath, ref.EventName, compiled.Manifest.SchemaDigest, compiled.CanonicalSchema, ""}},
 		{`INSERT INTO resource_version_pins VALUES ($1,$2,$3,$4,$5)`, []any{pinnedTestRun, ref.FlowPath, ref.EventName, compiled.Manifest.SchemaDigest, compiled.VersionID}},
