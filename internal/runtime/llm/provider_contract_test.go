@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -47,6 +48,21 @@ func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
 		}
 		if tokens, err := contextCompactionRequestTokens([]byte(`{"system":"1234","messages":[{"role":"user","content":"1234"}]}`)); err != nil || tokens != 10 {
 			t.Fatalf("rendered request estimate = %d, %v", tokens, err)
+		}
+		const trigger = 133440
+		toolHeavy := openAICompatibleRequest{Messages: []openAICompatibleMessage{{
+			Role: "assistant", ToolCalls: []openAICompatibleToolCall{{
+				Type: "function", Function: openAICompatibleToolCallFunction{
+					Name: "retain_fact", Arguments: strings.Repeat("x", 4*trigger),
+				},
+			}},
+		}}}
+		raw, err := json.Marshal(toolHeavy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tokens, err := contextCompactionRequestTokens(raw); err != nil || tokens < trigger {
+			t.Fatalf("retained tool arguments did not reach pressure trigger: tokens=%d trigger=%d err=%v", tokens, trigger, err)
 		}
 		if contextCompactionTextTokens("\U0001f600\U0001f600\U0001f600") != 2 {
 			t.Fatal("pressure estimate lost UTF-16 surrogate width")
