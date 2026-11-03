@@ -93,6 +93,10 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			if mode == "already_emitted" && (before.CreationEventEmittedAt.IsZero() || len(bus.published) != 1) {
 				t.Fatal("control did not commit the creation occurrence")
 			}
+			creationIDs := make([]string, len(bus.published))
+			for index, event := range bus.published {
+				creationIDs[index] = event.ID()
+			}
 			records, err := agents.LoadAgents(ctx)
 			if err != nil || len(records) != 1 {
 				t.Fatalf("initial agents: %v %v", records, err)
@@ -304,7 +308,22 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				shutdownErr = am.ShutdownWithOptions(ShutdownOptions{Grace: 5 * time.Second})
 			}
 			switch {
-			case mode == "cleanup_failure" || mode == "before_verification_read_failure" || strings.HasSuffix(mode, "read_failure") || strings.HasSuffix(mode, "cleanup_failure"):
+			case mode == "during_verification" || mode == "already_emitted" || mode == "before_verification_read":
+				if attempt.err != nil || shutdownErr != nil {
+					t.Fatalf("accepted readiness did not finish within shutdown grace: attempt=%v shutdown=%v", attempt.err, shutdownErr)
+				}
+				if err := attempt.acceptedReceipt.Validate(); err != nil || attempt.acceptedReceipt.RunID() != req.TriggerEvent.RunID() || attempt.acceptedReceipt.InstancePath() != req.Instance.InstancePath {
+					t.Fatalf("accepted readiness lost its exact native receipt: %v", err)
+				}
+			case mode == "cleanup_failure":
+				if attempt.err != nil || !errors.Is(shutdownErr, fault) {
+					t.Fatalf("retirement failure lost its owner: attempt=%v shutdown=%v", attempt.err, shutdownErr)
+				}
+				key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
+				if isReadinessShutdownCompletion(shutdownErr, key, attempt) {
+					t.Fatal("independent retirement failure became a clean shutdown completion")
+				}
+			case mode == "before_verification_read_failure" || strings.HasSuffix(mode, "read_failure") || strings.HasSuffix(mode, "cleanup_failure"):
 				terminal := !reuse || strings.HasSuffix(mode, "cleanup_failure")
 				if !errors.Is(attempt.err, fault) || terminal && !errors.Is(shutdownErr, fault) || isReadinessShutdownRefusal(attempt.err) {
 					t.Fatalf("independent failure lost: attempt=%v shutdown=%v", attempt.err, shutdownErr)
@@ -317,7 +336,7 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 				if attempt.err == nil || shutdownErr == nil || isReadinessShutdownRefusal(attempt.err) {
 					t.Fatalf("live corruption was treated as shutdown: attempt=%v shutdown=%v", attempt.err, shutdownErr)
 				}
-			case mode == "before_verification_read" || strings.HasPrefix(mode, "attempt_") || mode == "timer_projection" || mode == "timer_projection_mixed" || mode == "progress_cancellation":
+			case strings.HasPrefix(mode, "attempt_") || mode == "timer_projection" || mode == "timer_projection_mixed" || mode == "progress_cancellation":
 				key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
 				graceExpired := verificationCtx != nil
 				if graceExpired && !errors.Is(shutdownErr, context.DeadlineExceeded) || !graceExpired && shutdownErr != nil || !isReadinessShutdownCompletion(attempt.err, key, attempt) {
@@ -337,6 +356,14 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 			after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 			if err != nil || !found || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
 				t.Fatalf("shutdown changed creation evidence: found=%t err=%v before=%+v after=%+v", found, err, before, after)
+			}
+			if len(bus.published) != len(creationIDs) {
+				t.Fatalf("shutdown duplicated creation occurrences: before=%v after=%d", creationIDs, len(bus.published))
+			}
+			for index, event := range bus.published {
+				if event.ID() != creationIDs[index] {
+					t.Fatalf("shutdown replaced creation occurrence %d: before=%s after=%s", index, creationIDs[index], event.ID())
+				}
 			}
 			if mode == "cleanup_failure" || mode == "before_verification_read_failure" || mode == "live_fenced" || strings.HasSuffix(mode, "read_failure") || strings.HasSuffix(mode, "cleanup_failure") {
 				return
