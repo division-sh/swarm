@@ -74,7 +74,10 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 						t.Fatalf("restart/readback changed immutable emit feedback: before=%s after=%s", prior, encoded)
 					}
 					feedbackByEvent[id] = encoded
-					var routing events.RouteIdentity
+					var routing struct {
+						events.RouteIdentity
+						Life int64 `json:"life"`
+					}
 					if err := json.Unmarshal(rawSource, &routing); err != nil {
 						t.Fatal(err)
 					}
@@ -90,7 +93,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 					if mode == "template" && flow == "source" {
 						wantKind = events.RoutingSourceConcreteTemplateInstance
 					}
-					if _, err := events.RestoreRoutingSource(kind, routing, authority); err != nil {
+					if _, err := events.RestoreRoutingSource(kind, routing.RouteIdentity, authority, routing.Life); err != nil {
 						t.Fatal(err)
 					}
 					if producerType != "agent" || kind != wantKind.StorageCode() || authority != "" {

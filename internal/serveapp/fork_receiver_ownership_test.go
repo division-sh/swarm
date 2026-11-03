@@ -56,12 +56,15 @@ func readForkReceiverProducerEvidence(t *testing.T, rt servedControlProofRuntime
 	if err := rt.DB.QueryRow(`SELECT routing_source_kind,COALESCE(routing_source_authority,''),CAST(source_route AS TEXT),event_name,execution_mode FROM events WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&kind, &authority, &routeJSON, &evidence.Name, &evidence.Mode); err != nil {
 		t.Fatal(err)
 	}
-	var route events.RouteIdentity
+	var route struct {
+		events.RouteIdentity
+		Life int64 `json:"life"`
+	}
 	if err := json.Unmarshal([]byte(routeJSON), &route); err != nil {
 		t.Fatal(err)
 	}
 	var err error
-	evidence.Source, err = events.RestoreRoutingSource(kind, route, authority)
+	evidence.Source, err = events.RestoreRoutingSource(kind, route.RouteIdentity, authority, route.Life)
 	if err != nil {
 		t.Fatal(err)
 	}

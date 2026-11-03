@@ -179,13 +179,13 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 			if route.AgentIdentity.Route.Presence == agentidentity.RouteRoot {
 				path = route.AgentIdentity.RunID
 			}
-			if !route.Recipient.IsAgent() || life.RunID != event.RunID() || life.RunID != route.AgentIdentity.RunID || life.FlowInstance != path || life.Validate() != nil {
+			if !route.Recipient.IsAgent() || life.RunID != view.RunID() || life.RunID != route.AgentIdentity.RunID || life.FlowInstance != path || life.Validate() != nil {
 				return DeliveryEvent{}, fmt.Errorf("targetless delivery life disagrees with its exact actor")
 			}
 		}
 		view.setEnvelopeClaim(EnvelopeForBroadcast(view.NormalizedEnvelope()))
 	} else if !target.Empty() {
-		life := InstanceLife{RunID: event.RunID(), FlowInstance: target.FlowInstance, Life: route.Target.Life()}
+		life := InstanceLife{RunID: view.RunID(), FlowInstance: target.FlowInstance, Life: route.Target.Life()}
 		if err := life.Validate(); err != nil {
 			return DeliveryEvent{}, err
 		}

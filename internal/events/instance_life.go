@@ -23,3 +23,17 @@ func (l InstanceLife) Validate() error {
 	}
 	return nil
 }
+
+func (s RoutingSource) WithInstanceLife(runID string, life InstanceLife) (RoutingSource, error) {
+	if err := life.Validate(); err != nil {
+		return RoutingSource{}, err
+	}
+	path := s.Route().FlowInstance
+	if s.Kind() == RoutingSourceRoot {
+		path = s.Route().EntityID
+	}
+	if life.RunID != runID || life.FlowInstance != path {
+		return RoutingSource{}, fmt.Errorf("routing source life crosses its exact execution coordinate")
+	}
+	return s.WithLife(life.Life)
+}

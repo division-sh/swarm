@@ -170,7 +170,7 @@ func TestRestoreRoutingSourceRejectsCrossVariantClaims(t *testing.T) {
 		{name: "flow owned control with authority", kind: RoutingSourceFlowOwnedControl, route: exactFlowRoute, authority: RoutingSourceAuthorityProviderAdmissionPlan.StorageCode()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := RestoreRoutingSource(tc.kind.StorageCode(), tc.route, tc.authority); err == nil {
+			if _, err := RestoreRoutingSource(tc.kind.StorageCode(), tc.route, tc.authority, 1); err == nil {
 				t.Fatal("RestoreRoutingSource accepted cross-variant routing facts")
 			}
 		})
@@ -219,6 +219,37 @@ func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
 		}
 		if _, err := NewDeliveryEvent(event, DeliveryRoute{Context: DeliveryContext{RunID: runID}}); err == nil {
 			t.Fatal("a delivery borrowed a run for a non-platform publication")
+		}
+		target := MustExistingEntityTarget(RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID})
+		target, err = target.WithLife(3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projected, err := NewDeliveryEvent(platform, DeliveryRoute{Target: target, Context: DeliveryContext{RunID: runID}})
+		want := InstanceLife{RunID: runID, FlowInstance: runID, Life: 3}
+		if err != nil || projected.Event().DeliveryContext().Life == nil || *projected.Event().DeliveryContext().Life != want || projected.JournalEvent().RunID() != "" || !projected.JournalEvent().DeliveryContext().Empty() {
+			t.Fatalf("platform delivery lost run-local life or changed its journal: %+v %v", projected, err)
+		}
+		producer, err := NewStaticFlowRoutingSource(target.Route())
+		if err != nil {
+			t.Fatal(err)
+		}
+		captured, err := producer.WithInstanceLife(runID, want)
+		if err != nil || captured.Life() != want.Life || captured.Route() != producer.Route() || producer.Life() != 1 {
+			t.Fatalf("source did not capture exact delivery life: %+v %v", captured, err)
+		}
+		foreign := want
+		foreign.FlowInstance = "sibling"
+		if _, err := producer.WithInstanceLife(runID, foreign); err == nil {
+			t.Fatal("source accepted a sibling's life")
+		}
+		foreign = want
+		foreign.RunID = "306f59ef-0909-4909-a596-fdf212eb20b2"
+		if _, err := producer.WithInstanceLife(runID, foreign); err == nil {
+			t.Fatal("source accepted a foreign run's life")
+		}
+		if _, err := NewDeliveryEvent(platform, DeliveryRoute{Target: target, Context: DeliveryContext{RunID: runID, Life: &foreign}}); err == nil {
+			t.Fatal("delivery accepted life across its selected run")
 		}
 	}
 }
