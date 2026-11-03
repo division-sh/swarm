@@ -206,11 +206,6 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 	}
 	am.dynamicFlowReadinessMu.Lock()
 	active.receipt, active.pending, active.retirementKind = admitted.Attempt, nil, 0
-	// Carry this executor's acknowledged admission, not a later observed receipt.
-	if executor := readinessAttemptFromContext(ctx); executor != nil && am.dynamicFlowReadinessAttempts[key] == executor &&
-		am.dynamicFlowActiveAttempts[key] == active && executor.attemptOrdinal == revision && executor.planHash == hash {
-		executor.attemptOrdinal = admitted.Attempt.Ordinal()
-	}
 	am.dynamicFlowReadinessMu.Unlock()
 	return active, true, commitErr
 }
