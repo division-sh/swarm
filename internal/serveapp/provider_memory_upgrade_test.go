@@ -35,7 +35,7 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				unsetStoreSelectorEnv(t)
 				stubServeRuntimeWorkspaceLifecycle(t)
 				root := canonicalrouting.CopyRootIngressServedSessionCleanup(t)
-				setUpgradeMemoryAgent(t, root, "old")
+				setUpgradeMemoryAgent(t, root, "old", profile != "claude_cli")
 				configPath := writeServeRuntimeTestConfig(t)
 				storeConfig := ""
 				probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -118,16 +118,22 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 				})
 				probe.Expect(seed.EventID).NodeDelivered(identitytest.RootNode(t, "item-handler").Key()).Within(servedEventPublishLifecycleProbeWaitTimeout)
 				lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 1, probe)
+				if provider != nil {
+					requireMemoryReplyEvents(t, endpoint, seed.RunID, 1)
+				}
 				session := requireProviderMemoryTurns(t, endpoint, seed.RunID, 1)
 				if code := process.stop(); code != 0 {
 					t.Fatalf("stop before upgrade: exit=%d", code)
 				}
 				process = nil
-				setUpgradeMemoryAgent(t, root, "new")
+				setUpgradeMemoryAgent(t, root, "new", profile != "claude_cli")
 				process = startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
 				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 				lastEventID = publishUpgradeMemoryTurn(t, endpoint, seed.RunID, seed.EventID, 2, probe)
+				if provider != nil {
+					requireMemoryReplyEvents(t, endpoint, seed.RunID, 2)
+				}
 				if current := requireProviderMemoryTurns(t, endpoint, seed.RunID, 2); current != session {
 					t.Fatalf("upgrade replaced memory session: before=%s after=%s", session, current)
 				}
@@ -145,7 +151,7 @@ func TestProviderMemorySurvivesAdmittedBundleUpgradeBothStores(t *testing.T) {
 	}
 }
 
-func setUpgradeMemoryAgent(t *testing.T, root, revision string) {
+func setUpgradeMemoryAgent(t *testing.T, root, revision string, acceptedReply bool) {
 	t.Helper()
 	path := filepath.Join(root, "hold", "agents.yaml")
 	raw, err := os.ReadFile(path)
@@ -157,6 +163,11 @@ func setUpgradeMemoryAgent(t *testing.T, root, revision string) {
 		t.Fatal(err)
 	}
 	agents["load-agent"].(map[string]any)["model"] = "memory-" + revision
+	if acceptedReply {
+		agents["load-agent"].(map[string]any)["emit_events"] = []string{"memory.replied"}
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "hold", "events.yaml"), "memory.replied:\n  text: text\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "hold", "nodes.yaml"), "owner:\n  item.agent_hold:\n    advances_to: active\n  item.processed:\n    advances_to: done\n  memory.replied:\n    advances_to: active\n")
+	}
 	raw, err = yaml.Marshal(agents)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +175,11 @@ func setUpgradeMemoryAgent(t *testing.T, root, revision string) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "hold", "prompts", "load-agent.md"), []byte("Memory upgrade prompt "+revision+".\n"), 0o600); err != nil {
+	prompt := "Memory upgrade prompt " + revision + ".\n"
+	if acceptedReply {
+		prompt += "Call emit_memory_replied with the required text field.\n"
+	}
+	if err := os.WriteFile(filepath.Join(root, "hold", "prompts", "load-agent.md"), []byte(prompt), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -209,7 +224,9 @@ func upgradeMemoryReply(request llmapi.Request) (llmapi.Reply, error) {
 	if request.Number == 2 && (!strings.Contains(string(request.Body), "upgrade input 1") || !strings.Contains(string(request.Body), "upgrade answer 1")) {
 		return llmapi.Reply{}, fmt.Errorf("upgraded turn lost its retained user/assistant history")
 	}
-	return llmapi.Reply{ID: fmt.Sprintf("memory-%d", request.Number), TextID: fmt.Sprintf("answer-%d", request.Number), Model: body.Model, Text: fmt.Sprintf("upgrade answer %d", request.Number), InputTokens: 10, OutputTokens: 3, TotalTokens: 13}, nil
+	arguments, _ := json.Marshal(map[string]string{"text": fmt.Sprintf("upgrade answer %d", request.Number)})
+	return llmapi.Reply{ID: fmt.Sprintf("memory-%d", request.Number), TextID: fmt.Sprintf("answer-%d", request.Number), Model: body.Model, Text: fmt.Sprintf("upgrade answer %d", request.Number), InputTokens: 10, OutputTokens: 3, TotalTokens: 13,
+		Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("upgrade-reply-%d", request.Number), OutputID: fmt.Sprintf("upgrade-output-%d", request.Number), Name: "emit_memory_replied", Arguments: arguments}}}, nil
 }
 
 func configureUpgradeMemoryCLI(t *testing.T, opts *cliapp.ServeOptions, text *string) {
