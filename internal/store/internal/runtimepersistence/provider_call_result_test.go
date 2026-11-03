@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -13,41 +14,7 @@ import (
 
 func proveProviderCallResultJournal(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
-	const adapter = "anthropic_api"
-	authority := fixture.authority
-	authority.BudgetScopes = nil
-	ctx := withManagedCompletionTestSurface(t, fixture.contextFor(authority), authority, adapter)
-	old, _ := managedcapabilities.FromContext(ctx)
-	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	contract, err := runtimellm.ProviderContractForProfile(profile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rawContract, _ := json.Marshal(contract)
-	surface, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: old.ActorIdentity,
-		RuntimeMode: old.RuntimeMode, Provider: old.Provider, Transport: old.Transport,
-		ProviderContract: runtimeeffects.Fingerprint(rawContract), Authority: old.Authority, CreatedAt: old.CreatedAt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx = managedcapabilities.WithContext(ctx, surface)
-	event := managedCompletionTestEvent(authority)
-	frame := managedCompletionTestFrameWithSurface(t, authority, event,
-		managedCompletionTestFrame(t, authority, adapter).Session.SourceArtifact.Hash, surface)
-	call := runtimeeffects.ProviderCall{SessionID: authority.Target.SessionID, Memory: authority.Target.Memory,
-		Messages: []byte(`[{"Role":"user","Content":"continue"}]`), ProviderContract: rawContract,
-		Request: runtimeeffects.ProviderCallRequest{Method: "POST", Destination: "https://api.anthropic.com/v1/messages",
-			Headers: map[string]string{"content-type": "application/json", "anthropic-version": "2023-06-01"}, Body: []byte(`{"model":"test"}`)}}
-	handle, err := runtimeeffects.BeginManagedProviderCall(ctx, adapter, frame, call)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := handle.MarkLaunched(ctx); err != nil {
-		t.Fatal(err)
-	}
+	handle, ctx := beginReadOnlyProviderCallForTest(t, fixture)
 	query := `SELECT CAST(authority_evidence AS TEXT) FROM runtime_external_effect_attempts WHERE attempt_id=$1`
 	var original string
 	if err := fixture.db.QueryRow(query, handle.Attempt().AttemptID).Scan(&original); err != nil {
@@ -102,4 +69,44 @@ func proveProviderCallResultJournal(t *testing.T, fixture completionSettlementFi
 	if err := handle.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "exact-result"}); err != nil {
 		t.Fatalf("exact launched result with its immutable journal refused: %v", err)
 	}
+}
+
+func beginReadOnlyProviderCallForTest(t *testing.T, fixture completionSettlementFixture) (*runtimeeffects.Handle, context.Context) {
+	t.Helper()
+	const adapter = "anthropic_api"
+	authority := fixture.authority
+	authority.BudgetScopes = nil
+	ctx := withManagedCompletionTestSurface(t, fixture.contextFor(authority), authority, adapter)
+	old, _ := managedcapabilities.FromContext(ctx)
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, err := runtimellm.ProviderContractForProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawContract, _ := json.Marshal(contract)
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: old.ActorIdentity,
+		RuntimeMode: old.RuntimeMode, Provider: old.Provider, Transport: old.Transport,
+		ProviderContract: runtimeeffects.Fingerprint(rawContract), Authority: old.Authority, CreatedAt: old.CreatedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	event := managedCompletionTestEvent(authority)
+	frame := managedCompletionTestFrameWithSurface(t, authority, event,
+		managedCompletionTestFrame(t, authority, adapter).Session.SourceArtifact.Hash, surface)
+	call := runtimeeffects.ProviderCall{SessionID: authority.Target.SessionID, Memory: authority.Target.Memory,
+		Messages: []byte(`[{"Role":"user","Content":"continue"}]`), ProviderContract: rawContract,
+		Request: runtimeeffects.ProviderCallRequest{Method: "POST", Destination: "https://api.anthropic.com/v1/messages",
+			Headers: map[string]string{"content-type": "application/json", "anthropic-version": "2023-06-01"}, Body: []byte(`{"model":"test"}`)}}
+	handle, err := runtimeeffects.BeginManagedProviderCall(ctx, adapter, frame, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.MarkLaunched(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return handle, ctx
 }

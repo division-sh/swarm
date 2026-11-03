@@ -1571,6 +1571,31 @@ func (a *Adapter) readProviderOriginRecoveryDisposition(ctx context.Context, tx 
 	return providerOriginRecoveryAlreadyTerminal, nil
 }
 
+func failureSettlementStatus(disposition FailureDisposition, retryCount, maxRetries int) Status {
+	if disposition == FailureRetry && retryCount < maxRetries {
+		return StatusFailed
+	}
+	if disposition == FailureRetry || disposition == FailureDeadLetter {
+		return StatusDeadLetter
+	}
+	return StatusDelivered
+}
+
+func (a *Adapter) inspectProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim, disposition FailureDisposition) (Status, bool, error) {
+	origin, err := a.readProviderOriginRecoveryDisposition(ctx, tx, claim, false)
+	if err != nil || origin == providerOriginRecoveryAlreadyTerminal {
+		return "", false, err
+	}
+	if disposition != FailureRetry && disposition != FailureDeadLetter {
+		return "", false, fmt.Errorf("provider recovery failure disposition %q is invalid", disposition)
+	}
+	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
+	if err != nil {
+		return "", false, err
+	}
+	return failureSettlementStatus(disposition, record.RetryCount, record.MaxRetries), true, nil
+}
+
 func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
 	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
 	if err != nil {
@@ -1693,7 +1718,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	retryCount := record.RetryCount
 	var nextEligible *time.Time
 	if settlement.Disposition == FailureRetry {
-		if record.RetryCount < record.MaxRetries {
+		if failureSettlementStatus(settlement.Disposition, record.RetryCount, record.MaxRetries) == StatusFailed {
 			status = StatusFailed
 			transition = "failed"
 			outcome = "retry_scheduled"
