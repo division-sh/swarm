@@ -172,6 +172,24 @@ func restartSelectedDeadlineChild(t *testing.T, ctx context.Context, source *roo
 				t.Error("deadline activation has no native pipeline receipt snapshot")
 				return
 			}
+			rows, err := storetest.DecodeSelectedForkSnapshotRows(receiptsBeforeActivation)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			encoded := receiptsBeforeActivation.Rows
+			receiptsBeforeActivation.Rows = nil
+			for index, row := range rows {
+				kind, kindErr := row["subscriber_type"].Text()
+				subscriber, subscriberErr := row["subscriber_id"].Text()
+				if kindErr != nil || subscriberErr != nil {
+					t.Errorf("decode exact pipeline receipt identity: %v %v", kindErr, subscriberErr)
+					return
+				}
+				if kind == "platform" && subscriber == "pipeline" {
+					receiptsBeforeActivation.Rows = append(receiptsBeforeActivation.Rows, encoded[index])
+				}
+			}
 			receiptsObserved = true
 		},
 	}
