@@ -3473,21 +3473,35 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithRootInput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
-	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
-		publicInput: true,
-	})
+	for _, before := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read_before_accumulate=%t", before), func(t *testing.T) {
+			root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
+				publicInput: true,
+			})
+			read := "    rules:\n      - when: state.items.size() >= 1\n        advances_to: done\n"
+			if before {
+				read = "    guard: state.items.size() >= 1\n    advances_to: done\n"
+			}
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "accumulator:\n  item.arrived:\n    accumulate: {target: items, key: expected_count}\n"+read)
 
-	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
-	}
-	if out := stdout.String(); !strings.Contains(out, "verify ok: source=") {
-		t.Fatalf("verify stdout missing success marker:\n%s", out)
-	}
-	errText := stderr.String()
-	if strings.Contains(errText, "accumulator_input_producer_path") {
-		t.Fatalf("verify stderr reported no-producer error despite public root input:\n%s", errText)
+			var stdout, stderr bytes.Buffer
+			code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
+			if before {
+				if code == 0 || !strings.Contains(stderr.String(), "not definitely assigned") {
+					t.Fatalf("pre-accumulate read must refuse: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+			}
+			if out := stdout.String(); !strings.Contains(out, "verify ok: source=") {
+				t.Fatalf("verify stdout missing success marker:\n%s", out)
+			}
+			if errText := stderr.String(); strings.Contains(errText, "accumulator_input_producer_path") {
+				t.Fatalf("verify stderr reported no-producer error despite public root input:\n%s", errText)
+			}
+		})
 	}
 }
 
