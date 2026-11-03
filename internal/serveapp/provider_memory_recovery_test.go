@@ -227,7 +227,7 @@ func TestConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
 func requireMemoryReplyEvents(t *testing.T, endpoint, runID string, want int) {
 	t.Helper()
 	var page operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "memory.replied"}, "limit": 100}, &page)
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "hold/memory.replied"}, "limit": 100}, &page)
 	if len(page.Events) != want {
 		t.Fatalf("accepted memory replies=%d, want %d", len(page.Events), want)
 	}
