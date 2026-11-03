@@ -15,15 +15,18 @@ type liveHeadDeclaration struct {
 // BindLiveRunHeadsTx selects current declaration heads for a served run in the
 // same transaction that creates or resumes it. Import locks the same head rows.
 func BindLiveRunHeadsTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, postgres bool, now time.Time) error {
-	var originKind string
+	var originKind, storedBundle, status string
 	var createdWithData bool
-	if err := tx.QueryRowContext(ctx, `SELECT r.origin_kind,EXISTS (
+	if err := tx.QueryRowContext(ctx, `SELECT r.origin_kind,r.bundle_hash,r.status,EXISTS (
 		SELECT 1 FROM resource_run_creation_operations c WHERE c.run_id=r.run_id
-	) FROM runs r WHERE r.run_id=$1`, runID).Scan(&originKind, &createdWithData); err != nil {
+	) FROM runs r WHERE r.run_id=$1`, runID).Scan(&originKind, &storedBundle, &status, &createdWithData); err != nil {
 		return fmt.Errorf("read live run data binding origin: %w", err)
 	}
 	if originKind != "deployment" || createdWithData {
 		return nil
+	}
+	if storedBundle != bundleHash || status != "live" {
+		return fmt.Errorf("live run data binding requires its exact active source")
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT flow_path,event_name FROM resource_bundle_declarations
 		WHERE bundle_hash=$1 ORDER BY flow_path,event_name`, bundleHash)
