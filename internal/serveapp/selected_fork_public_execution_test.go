@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -331,6 +333,9 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				completionCount = 2
 			}
 			if options.continueLoadFailure {
+				if detail := continuedRunFailureDetail(errors.New("token=private-value")); detail != "details unavailable" {
+					t.Fatalf("continued run disclosed a credential-shaped failure: %q", detail)
+				}
 				var loads atomic.Int32
 				supervisor.operationMu.Lock()
 				supervisor.resetBuildExecution = func(serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error) {
@@ -354,6 +359,8 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					RuntimeReadiness *struct {
 						Ready   bool                                    `json:"ready"`
 						Reason  string                                  `json:"reason"`
+						Stage   string                                  `json:"stage"`
+						Detail  string                                  `json:"detail"`
 						Failure *struct{ Detail struct{ Code string } } `json:"failure"`
 					} `json:"runtime_readiness"`
 				}
@@ -375,17 +382,19 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					case <-tick.C:
 					}
 				}
-				if read.RuntimeReadiness.Ready || read.RuntimeReadiness.Failure == nil || read.RuntimeReadiness.Failure.Detail.Code != "unclassified_runtime_error" || loads.Load() != 1 {
+				if read.RuntimeReadiness.Ready || read.RuntimeReadiness.Failure == nil || read.RuntimeReadiness.Failure.Detail.Code != "unclassified_runtime_error" || read.RuntimeReadiness.Stage != "load_target" || read.RuntimeReadiness.Detail != "target startup unavailable" || loads.Load() != 1 {
 					t.Fatalf("failed target has wrong readback or duplicate load: read=%+v loads=%d", read, loads.Load())
 				}
 				var diagnosis struct {
 					BlockingLayer    string `json:"blocking_layer"`
 					RuntimeReadiness *struct {
 						Reason string `json:"reason"`
+						Stage  string `json:"stage"`
+						Detail string `json:"detail"`
 					} `json:"runtime_readiness"`
 				}
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": seed.RunID}, &diagnosis)
-				if diagnosis.BlockingLayer != "runtime_context" || diagnosis.RuntimeReadiness == nil || diagnosis.RuntimeReadiness.Reason != "runtime_failed" {
+				if diagnosis.BlockingLayer != "runtime_context" || diagnosis.RuntimeReadiness == nil || diagnosis.RuntimeReadiness.Reason != "runtime_failed" || diagnosis.RuntimeReadiness.Stage != "load_target" || diagnosis.RuntimeReadiness.Detail != "target startup unavailable" {
 					t.Fatalf("failed target diagnosis omitted its runtime cause: %+v", diagnosis)
 				}
 				return
@@ -421,6 +430,25 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": seed.RunID}, &read)
 					if read.Run.Status != "live" || read.RuntimeReadiness == nil || read.RuntimeReadiness.Ready || read.RuntimeReadiness.Reason != "runtime_starting" {
 						t.Fatalf("accepted continue did not expose pending target: %+v", read)
+					}
+					caller, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+					defer cancel()
+					body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "expired-continue", "method": "run.continue", "params": map[string]any{"run_id": seed.RunID, "idempotency_key": "expired-continued-target"}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					request, err := http.NewRequestWithContext(caller, http.MethodPost, rt.Endpoint, strings.NewReader(string(body)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
+					response, err := http.DefaultClient.Do(request)
+					if response != nil {
+						response.Body.Close()
+					}
+					if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(caller.Err(), context.DeadlineExceeded) {
+						t.Fatalf("post-commit caller did not expire while load held lifecycle serialization: response=%v err=%v", response, err)
 					}
 					released.Do(func() { close(release) })
 				}
@@ -547,12 +575,22 @@ func requireForkSourceSelfReleaseConservation(t *testing.T, owner runtimebus.Eve
 func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *processLifecycleSupervisor, owner runtimebus.EventStore, sourceRunID string, sourceCoordinate agenttopology.SourceCoordinate, childRunID, childHash string, onContinue func(runcontrol.TransitionResult)) {
 	t.Helper()
 	sourceHash := sourceCoordinate.BundleHash
+	type runControlReply struct {
+		OK       bool
+		Recovery *struct {
+			Status runcontrol.RecoveryDisposition
+		}
+	}
+	var acceptedContinue *runControlReply
+	continueKey := uuid.NewString()
 	status := func(runID, want string) {
 		var result struct {
 			Run              struct{ Status string } `json:"run"`
 			RuntimeReadiness *struct {
 				Ready  bool   `json:"ready"`
 				Reason string `json:"reason"`
+				Stage  string `json:"stage"`
+				Detail string `json:"detail"`
 			} `json:"runtime_readiness"`
 		}
 		requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &result)
@@ -566,7 +604,7 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 			defer tick.Stop()
 			for !result.RuntimeReadiness.Ready {
 				if result.RuntimeReadiness.Reason == "runtime_failed" {
-					t.Fatalf("continued run %s failed target startup", runID)
+					t.Fatalf("continued run %s failed target startup: stage=%s detail=%s", runID, result.RuntimeReadiness.Stage, result.RuntimeReadiness.Detail)
 				}
 				select {
 				case <-deadline.C:
@@ -578,17 +616,17 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 		}
 	}
 	control := func(method, runID string) {
-		var result struct {
-			OK       bool
-			Recovery *struct {
-				Status runcontrol.RecoveryDisposition
-			}
+		var result runControlReply
+		key := uuid.NewString()
+		if method == "run.continue" && runID == sourceRunID && onContinue != nil {
+			key = continueKey
 		}
-		requireServedJSONRPCResult(t, endpoint, method, map[string]any{"run_id": runID, "idempotency_key": uuid.NewString()}, &result)
+		requireServedJSONRPCResult(t, endpoint, method, map[string]any{"run_id": runID, "idempotency_key": key}, &result)
 		if !result.OK {
 			t.Fatalf("%s did not acknowledge %s", method, runID)
 		}
 		if method == "run.continue" && runID == sourceRunID && onContinue != nil {
+			acceptedContinue = &result
 			if result.Recovery == nil {
 				t.Fatal("continued run omitted its recovery disposition")
 			}
@@ -658,6 +696,13 @@ func requireForkLivePublicControls(t *testing.T, endpoint string, supervisor *pr
 	control("run.continue", childRunID)
 	status(sourceRunID, "paused")
 	status(childRunID, "live")
+	if acceptedContinue != nil {
+		var replayed runControlReply
+		requireServedJSONRPCResult(t, endpoint, "run.continue", map[string]any{"run_id": sourceRunID, "idempotency_key": continueKey}, &replayed)
+		if !reflect.DeepEqual(*acceptedContinue, replayed) {
+			t.Fatalf("expired caller changed committed continue replay: first=%+v replay=%+v", *acceptedContinue, replayed)
+		}
+	}
 	stop := map[string]any{"run_id": sourceRunID, "idempotency_key": "W4-unloaded-source-stop"}
 	var stopped, replayed map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.stop", stop, &stopped)

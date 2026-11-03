@@ -22960,6 +22960,10 @@
       "RunRuntimeReadiness": {
         "additionalProperties": false,
         "properties": {
+          "detail": {
+            "description": "Bounded public failure detail; structured values and credential-shaped text are withheld.",
+            "type": "string"
+          },
           "failure": {
             "$ref": "#/components/schemas/FailureEnvelope"
           },
@@ -22967,6 +22971,10 @@
             "type": "boolean"
           },
           "reason": {
+            "type": "string"
+          },
+          "stage": {
+            "description": "Bounded process-owned startup stage on failure.",
             "type": "string"
           }
         },
