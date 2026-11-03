@@ -688,21 +688,17 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
 		flows[evt.RoutingSource().Route().FlowID] = struct{}{}
 	}
-	coordinates, err := r.targetLookupCoordinates(evt)
-	if err != nil {
-		return selectedTargetOwnerLookupScope{}, false, err
-	}
-	scope, err := r.lookupTargetScope(ctx, evt.RunID(), flows, coordinates)
-	return scope, err == nil, err
-}
-
-func (r connectRoutePlanResolver) targetLookupCoordinates(evt events.Event) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	routes := []events.RouteIdentity{evt.RoutingSource().Route(), evt.SourceRoute(), evt.TargetRoute()}
 	routes = append(routes, evt.TargetRoutes()...)
 	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
 		routes = append(routes, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.lifecycle.source), FlowInstance: evt.RunID()})
 	}
-	return r.exactLookupCoordinates(evt.RunID(), routes)
+	coordinates, err := r.exactLookupCoordinates(evt.RunID(), routes)
+	if err != nil {
+		return selectedTargetOwnerLookupScope{}, false, err
+	}
+	scope, err := r.lookupTargetScope(ctx, evt.RunID(), flows, coordinates)
+	return scope, err == nil, err
 }
 
 func (r connectRoutePlanResolver) exactLookupCoordinates(runID string, routes []events.RouteIdentity) ([]runtimeflowidentity.RunScopedFlowInstance, error) {

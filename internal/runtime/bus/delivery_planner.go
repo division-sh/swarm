@@ -14,7 +14,6 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -438,13 +437,13 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 		routePlan.AddDeliveryIntents(connectPlan.DeliveryIntents...)
 	}
 	routePlan.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
-	routePlan.ExtraDetail = cloneAnyMap(connectPlan.ExtraDetail)
+	routePlan.ExtraDetail = connectPlan.ExtraDetail
 	routePlan.ReplyContextConsumed = connectPlan.ReplyContextConsumed
-	routePlan.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), connectPlan.ActivationPlans...)
-	routePlan.ReplyCreations = append([]runtimereplycontext.Record(nil), connectPlan.ReplyCreations...)
-	routePlan.ReplyContinuations = append([]runtimepinrouting.ReplyRequestContinuation(nil), connectPlan.ReplyContinuations...)
-	routePlan.ReplyReturns = append([]runtimepinrouting.ReplyReturnContinuation(nil), connectPlan.ReplyReturns...)
-	routePlan.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), connectPlan.ReplyClaims...)
+	routePlan.ActivationPlans = connectPlan.ActivationPlans
+	routePlan.ReplyCreations = connectPlan.ReplyCreations
+	routePlan.ReplyContinuations = connectPlan.ReplyContinuations
+	routePlan.ReplyReturns = connectPlan.ReplyReturns
+	routePlan.ReplyClaims = connectPlan.ReplyClaims
 	routePlan.unavailableReceiverError = connectPlan.unavailableReceiverError
 	return routePlan.Normalized()
 }

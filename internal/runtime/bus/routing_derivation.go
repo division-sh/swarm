@@ -2,7 +2,6 @@ package bus
 
 import (
 	"fmt"
-	"maps"
 	"sort"
 	"strings"
 
@@ -135,7 +134,7 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		}
 		rt.templates[runtimeflowidentity.ScopeKey(source, scope.ID)] = routeFlowTemplate{
 			FlowID:      scope.ID,
-			LocalEvents: maps.Clone(localEvents),
+			LocalEvents: localEvents,
 			Subscribers: subscribers,
 		}
 		definitions, staticPlans, err := compileRouteConnectDefinitions(graph, scope, subscribers)

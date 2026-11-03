@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -88,6 +89,10 @@ func TestTemplateMaterializationDoesNotRepeatDeclarationAdmission(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	localEvents := make(map[string]map[string]struct{}, len(table.templates))
+	for scope, template := range table.templates {
+		localEvents[scope] = maps.Clone(template.LocalEvents)
+	}
 	checked := 0
 	for _, template := range table.templates {
 		for _, subscriber := range template.Subscribers {
@@ -122,6 +127,11 @@ func TestTemplateMaterializationDoesNotRepeatDeclarationAdmission(t *testing.T) 
 		}
 		inputLookups = append(inputLookups, source.inputLookups.Load())
 		nodeLookups = append(nodeLookups, source.nodeLookups.Load())
+		for scope, template := range table.templates {
+			if !maps.Equal(template.LocalEvents, localEvents[scope]) {
+				t.Fatalf("receiver binding mutated compiled local events for %s: got %v, want %v", scope, template.LocalEvents, localEvents[scope])
+			}
+		}
 	}
 	if inputLookups[1] != inputLookups[0] || inputLookups[2] != inputLookups[0] ||
 		nodeLookups[1] != nodeLookups[0] || nodeLookups[2] != nodeLookups[0] {
