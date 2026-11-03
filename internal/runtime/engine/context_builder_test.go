@@ -18,7 +18,7 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 			WorkflowName:    "wf",
 			WorkflowVersion: "v1",
 			CurrentState:    "researching",
-			StateCarrier:    NewStateCarrier(map[string]any{"k": "v"}, map[string]bool{"review": true}, nil),
+			StateCarrier:    NewStateCarrier(map[string]any{"k": "v"}, nil),
 		},
 		Payload: map[string]any{"p": "x"},
 	}
@@ -39,9 +39,6 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 	}
 	if _, ok := base.Entity.Raw()["current_state"]; ok {
 		t.Fatalf("platform current_state leaked into entity context: %#v", base.Entity.Raw())
-	}
-	if got := base.Gates.Bool("review"); !got {
-		t.Fatalf("gates bucket missing review: %#v", base.Gates.Raw())
 	}
 	input.Payload["p"] = "changed"
 	input.State.StateCarrier.Fields["k"] = "changed"
@@ -87,7 +84,7 @@ func TestBuildBaseContext_PrefersExactExecutionFlowOverPersistedWorkflowName(t *
 		FlowID: "child",
 		State: StateSnapshot{
 			WorkflowName: "root",
-			StateCarrier: NewStateCarrier(nil, nil, nil),
+			StateCarrier: NewStateCarrier(nil, nil),
 		},
 	})
 	if err != nil {
@@ -149,33 +146,19 @@ func TestExecutionStateBucketHelpers(t *testing.T) {
 func TestStateSnapshotBucketHelpers(t *testing.T) {
 	var snapshot StateSnapshot
 	snapshot.SetField("status", "ready")
-	snapshot.SetGate("review", true)
 
 	if got := snapshot.FieldsBucket().String("status"); got != "ready" {
 		t.Fatalf("metadata string = %q", got)
-	}
-	if !snapshot.StateCarrier.Gates["review"] {
-		t.Fatalf("snapshot gates missing: %#v", snapshot.StateCarrier.Gates)
-	}
-	if !snapshot.GatesBucket().Bool("review") {
-		t.Fatalf("typed gates missing: %#v", snapshot.GatesBucket().Raw())
 	}
 }
 
 func TestStateMutationAndResultBucketHelpers(t *testing.T) {
 	var mutation StateMutation
 	mutation.SetField("status", "ready")
-	mutation.SetGateValue("review", false)
 	mutation.SetStateBuckets(map[string]map[string]any{"node-1": {"count": 2}})
 
 	if got := mutation.FieldsBucket().String("status"); got != "ready" {
 		t.Fatalf("mutation metadata string = %q", got)
-	}
-	if mutation.StateCarrier.Gates["review"] {
-		t.Fatalf("mutation gates wrong: %#v", mutation.StateCarrier.Gates)
-	}
-	if mutation.GatesBucket().Bool("review") {
-		t.Fatalf("mutation gates wrong: %#v", mutation.GatesBucket().Raw())
 	}
 	if bucket, ok := mutation.StateBucketsBucket().Map("node-1"); !ok || bucket.Int("count") != 2 {
 		t.Fatalf("state buckets wrong: %#v, %v", bucket.Raw(), ok)
@@ -207,7 +190,7 @@ func TestBuildBaseContext_PropagatesPresentEntityValidationFailure(t *testing.T)
 		State: StateSnapshot{
 			EntityID:     "entity-1",
 			CurrentState: "researching",
-			StateCarrier: NewStateCarrier(map[string]any{"status": "unknown"}, map[string]bool{}, nil),
+			StateCarrier: NewStateCarrier(map[string]any{"status": "unknown"}, nil),
 		},
 		Payload: map[string]any{},
 	}

@@ -360,7 +360,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				t.Fatal("E1 return changed E2 state")
 			}
 			current := load()
-			state, err := runtimeengine.StateCarrierFromPersisted(current.Fields, current.Bookkeeping, current.Gates, current.StateBuckets)
+			state, err := runtimeengine.StateCarrierFromPersisted(current.Fields, current.Bookkeeping, current.StateBuckets)
 			if err != nil {
 				t.Fatal(err)
 			}

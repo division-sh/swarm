@@ -82,7 +82,6 @@ type entityFull struct {
 	Entity      entitySummary                  `json:"entity"`
 	Fields      map[string]any                 `json:"fields"`
 	Bookkeeping map[string]any                 `json:"bookkeeping"`
-	Gates       map[string]bool                `json:"gates"`
 	Accumulated map[string]any                 `json:"accumulated"`
 	Loops       []loopruntime.PublicActivation `json:"loops"`
 }
@@ -114,7 +113,7 @@ func (e *entitySummary) UnmarshalJSON(raw []byte) error {
 
 func (e *entityFull) UnmarshalJSON(raw []byte) error {
 	type decoded entityFull
-	return decodeRequiredEntityProperties(raw, (*decoded)(e), "entity", "fields", "bookkeeping", "gates", "accumulated", "loops")
+	return decodeRequiredEntityProperties(raw, (*decoded)(e), "entity", "fields", "bookkeeping", "accumulated", "loops")
 }
 
 func (e *entityAggregateResult) UnmarshalJSON(raw []byte) error {
@@ -450,16 +449,13 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 		return fmt.Errorf("malformed %s: fields is required", prefix)
 	}
 	if result.Entity.StageDefined == nil {
-		if result.Bookkeeping != nil || result.Gates != nil || result.Accumulated != nil || result.Loops != nil {
+		if result.Bookkeeping != nil || result.Accumulated != nil || result.Loops != nil {
 			return fmt.Errorf("malformed %s: data-only entity cannot carry lifecycle maps or loops", prefix)
 		}
 		return nil
 	}
 	if result.Bookkeeping == nil {
 		return fmt.Errorf("malformed %s: bookkeeping is required", prefix)
-	}
-	if result.Gates == nil {
-		return fmt.Errorf("malformed %s: gates is required", prefix)
 	}
 	if result.Accumulated == nil {
 		return fmt.Errorf("malformed %s: accumulated is required", prefix)
@@ -634,7 +630,6 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Entity " + entity.EntityID, Rows: header})
 
 	writeEntityFieldSection(out, "Fields", result.Fields, nil, true)
-	writeEntityGatesSection(out, result.Gates)
 	writeEntityAccumulatedSection(out, result.Accumulated, opts.verbose)
 	writeEntityBookkeepingSection(out, result.Bookkeeping, opts.verbose)
 	if opts.verbose {
@@ -723,26 +718,6 @@ func entityFieldValue(value any) string {
 		}
 	}
 	return cliRenderOneLineValue(entityCompactJSON(value))
-}
-
-// writeEntityGatesSection renders EVERY declared gate with its value in
-// default and --verbose; a false gate is not absence, it is the diagnostic an
-// operator needs. "Gates  none" renders only when the gate map is empty.
-func writeEntityGatesSection(out io.Writer, gates map[string]bool) {
-	if len(gates) == 0 {
-		writeCLITitle(out, "Gates  none")
-		return
-	}
-	keys := make([]string, 0, len(gates))
-	for key := range gates {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	rows := make([]cliLabeledDetailRow, 0, len(keys))
-	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: cliSanitizeOneLineValue(key), Value: fmt.Sprintf("%t", gates[key])})
-	}
-	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Gates", Rows: rows})
 }
 
 // writeEntityAccumulatedSection states accumulated presence in default output

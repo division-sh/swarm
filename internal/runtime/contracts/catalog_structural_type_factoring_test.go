@@ -182,12 +182,9 @@ func catalogFactoringRefusal(t *testing.T, err error, problem string) {
 }
 
 func catalogFactoringClone(t *testing.T) {
-	minRange, maxRange, minLength, maxLength := 1.0, 9.0, 2, 8
 	original := ResolvedCatalogType{Kind: CatalogTypeObject, Name: "Snapshot", Fields: []ResolvedCatalogField{
-		{Name: "bounds", TypeRef: "text", Type: ResolvedCatalogType{Kind: CatalogTypeText}, IsOptional: true,
-			Refinements: SchemaRefinements{Pattern: "^value", EqualTo: "peer", Length: SchemaLengthRefinement{Min: &minLength, Max: &maxLength}}},
-		{Name: "score", TypeRef: "numeric", Type: ResolvedCatalogType{Kind: CatalogTypeNumber},
-			Refinements: SchemaRefinements{EqualTo: "other", Range: SchemaRangeRefinement{Min: &minRange, Max: &maxRange}}},
+		{Name: "bounds", TypeRef: "text", Type: ResolvedCatalogType{Kind: CatalogTypeText}, IsOptional: true},
+		{Name: "score", TypeRef: "numeric", Type: ResolvedCatalogType{Kind: CatalogTypeNumber}},
 		{Name: "items", TypeRef: "[map[uuid]Leaf]", Type: ResolvedCatalogType{Kind: CatalogTypeList, Element: &ResolvedCatalogType{
 			Kind: CatalogTypeMap, Key: &ResolvedCatalogType{Kind: CatalogTypeText, Format: "uuid"}, Value: &ResolvedCatalogType{Kind: CatalogTypeObject, Name: "Leaf", Fields: []ResolvedCatalogField{
 				{Name: "body", Type: ResolvedCatalogType{Kind: CatalogTypeDynamic, primitive: "json"}},
@@ -202,15 +199,10 @@ func catalogFactoringClone(t *testing.T) {
 	}
 	copy := original.Clone()
 	if copy.Name != "Snapshot" || copy.Fields[0].Name != "bounds" || copy.Fields[0].TypeRef != "text" || !copy.Fields[0].IsOptional ||
-		copy.Fields[0].Refinements.Pattern != "^value" || copy.Fields[0].Refinements.EqualTo != "peer" ||
 		copy.Fields[2].Type.Element.Key.Format != "uuid" || copy.Fields[2].Type.Element.Value.Fields[0].Type.primitive != "json" {
 		t.Fatalf("clone erased metadata/order: %#v", copy)
 	}
 	copy.Fields[0].Name = "changed"
-	*copy.Fields[1].Refinements.Range.Min = 100
-	*copy.Fields[1].Refinements.Range.Max = 200
-	*copy.Fields[0].Refinements.Length.Min = 100
-	*copy.Fields[0].Refinements.Length.Max = 200
 	copy.Fields[2].Type.Element.Key.Format = "changed"
 	copy.Fields[2].Type.Element.Value.Fields[0].Type.primitive = "changed"
 	after, err := json.Marshal(original)
@@ -225,7 +217,7 @@ func catalogFactoringClone(t *testing.T) {
 	// The immutable compiled owner, unlike a caller-owned Field lookup, must
 	// return a fresh view after a returned structural value was mutated.
 	compiled, err := CompileImportedEventSchema(".", "snapshot.ready", EventCatalogEntry{Payload: EventPayloadSpec{
-		Properties: map[string]EventFieldSpec{"label": {Type: "text", Refinements: SchemaRefinements{Length: SchemaLengthRefinement{Min: &minLength}}}},
+		Properties: map[string]EventFieldSpec{"label": {Type: "text"}},
 		Required:   []string{"label"},
 	}}, CompiledEventSchemaSource{})
 	if err != nil {
@@ -236,9 +228,9 @@ func catalogFactoringClone(t *testing.T) {
 	if !ok {
 		t.Fatal("compiled structure missing")
 	}
-	*view.Fields[0].Refinements.Length.Min = 100
+	view.Fields[0].Name = "changed"
 	fresh, ok := compiled.StructuralType()
-	if !ok || *fresh.Fields[0].Refinements.Length.Min != 2 || string(compiled.CanonicalAcceptanceSchema()) != string(acceptance) {
+	if !ok || fresh.Fields[0].Name != "label" || string(compiled.CanonicalAcceptanceSchema()) != string(acceptance) {
 		t.Fatal("returned view changed retained compiled evidence")
 	}
 }
@@ -334,20 +326,15 @@ func catalogFactoringSyntax(t *testing.T) {
 }
 
 func catalogFactoringField(t *testing.T) {
-	minimum := 2
-	owner := ResolvedCatalogType{Kind: CatalogTypeObject, Fields: []ResolvedCatalogField{{Name: "value", TypeRef: "Label", Type: ResolvedCatalogType{Kind: CatalogTypeText}, IsOptional: true, Refinements: SchemaRefinements{Length: SchemaLengthRefinement{Min: &minimum}}}}}
+	owner := ResolvedCatalogType{Kind: CatalogTypeObject, Fields: []ResolvedCatalogField{{Name: "value", TypeRef: "Label", Type: ResolvedCatalogType{Kind: CatalogTypeText}, IsOptional: true}}}
 	field, found := owner.Field(" value ")
-	if !found || field.Name != "value" || field.TypeRef != "Label" || !field.IsOptional || *field.Refinements.Length.Min != 2 {
+	if !found || field.Name != "value" || field.TypeRef != "Label" || !field.IsOptional {
 		t.Fatalf("field metadata = %#v/%v", field, found)
 	}
 	for _, name := range []string{"", "missing", "Value"} {
 		if field, found := owner.Field(name); found || !reflect.DeepEqual(field, ResolvedCatalogField{}) {
 			t.Fatalf("nonexistent field %q resolved: %#v/%v", name, field, found)
 		}
-	}
-	*field.Refinements.Length.Min = 3
-	if *owner.Fields[0].Refinements.Length.Min != 3 {
-		t.Fatal("Field unexpectedly acquired deep-copy semantics for caller-owned data")
 	}
 }
 
@@ -551,11 +538,6 @@ func catalogFactoringComparableDomain(t *testing.T) {
 		right := (CatalogTypeReference{Type: pair[1], Catalog: catalog}).ComparableDomain()
 		if left == right {
 			t.Fatalf("distinct domains %v collapsed to %q", pair, left)
-		}
-		if errs := validateSchemaRefinementFields("factoring", catalog, map[string]schemaRefinementField{
-			"left": {Name: "left", TypeRef: pair[0], Refinements: SchemaRefinements{EqualTo: "right"}}, "right": {Name: "right", TypeRef: pair[1]},
-		}); len(errs) == 0 {
-			t.Fatalf("actual equality consumer accepted different domains %v", pair)
 		}
 	}
 	if got := (CatalogTypeReference{Type: "Missing", Catalog: catalog}).ComparableDomain(); got != "" {

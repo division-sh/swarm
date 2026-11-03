@@ -80,7 +80,7 @@ func VerifyNativePipelineCompiledTimerTransitionEvidenceOnBothStoresForTest(t *t
 					if err != nil {
 						t.Fatal(err)
 					}
-					carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{})
+					carrier := runtimeengine.NewStateCarrier(map[string]any{}, map[string]map[string]any{})
 					if err := loopruntime.Store(carrier.StateBuckets, activation); err != nil {
 						t.Fatal(err)
 					}

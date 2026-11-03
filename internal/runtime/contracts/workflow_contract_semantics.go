@@ -177,8 +177,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 				Terminate:        handler.Terminate,
-				SetsGate:         handler.SetsGate,
-				ClearGates:       handler.ClearGates,
 				DataAccumulation: handler.DataAccumulation,
 				Emit:             cloneEmitSpec(handler.Emit),
 				OnSuccess:        HandlerOnSuccessSpec{Emit: cloneEmitSpec(handler.OnSuccess.Emit)},
@@ -359,11 +357,10 @@ func entityContractsToLegacyEntitySchema(entities EntityContractsDocument) Entit
 		}
 		for fieldName, field := range contract.Fields {
 			group.Fields = append(group.Fields, EntitySchemaField{
-				Name:        strings.TrimSpace(fieldName),
-				Type:        strings.TrimSpace(field.Type),
-				Initial:     field.Initial,
-				Indexed:     field.Indexed,
-				Description: field.Description,
+				Name:    strings.TrimSpace(fieldName),
+				Type:    strings.TrimSpace(field.Type),
+				Initial: field.Initial,
+				Indexed: field.Indexed,
 			})
 		}
 		sort.Slice(group.Fields, func(i, j int) bool {

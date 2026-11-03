@@ -96,7 +96,7 @@ func TestExecutor_HandlerActivityCompletionSelectionKeepsCatalogOwnership(t *tes
 					result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 						EntityID: "entity-1", Node: node, HandlerEventKey: "source.requested", Handler: handler,
 						Event: eventtest.RunCreatingRootIngress("evt-completion", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
-						State: testStateSnapshot("pending", nil, nil, nil),
+						State: testStateSnapshot("pending", nil, nil),
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -141,7 +141,7 @@ func TestExecutor_JoinOutcomeDoesNotInventActivityOwnership(t *testing.T) {
 				frame := executionFrame{ctx: context.Background(), req: ExecutionRequest{
 					EntityID: "entity-1", Node: node, ExecutionFlowID: identity.NormalizeFlowID(flow), HandlerEventKey: "source.requested", Handler: handler,
 					Event: eventtest.RunCreatingRootIngress("evt-join", "source.requested", "", "task-1", json.RawMessage(`{}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
-				}, state: ExecutionState{State: testStateSnapshot("pending", nil, nil, nil)}, rule: row, ruleSource: rowSource, ruleIndex: 0}
+				}, state: ExecutionState{State: testStateSnapshot("pending", nil, nil)}, rule: row, ruleSource: rowSource, ruleIndex: 0}
 				exec := &Executor{deps: RuntimeDependencies{Source: source}}
 				if err := exec.applyRule(&frame, row); err != nil {
 					t.Fatal(err)
@@ -197,7 +197,7 @@ func TestExecutor_SelectionPresentationKeepsFullAdmittedText(t *testing.T) {
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", Node: node, HandlerEventKey: "source.requested", Handler: handler,
 				Event: eventtest.RunCreatingRootIngress("evt-full-predicate", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 0, "run-1", "", events.EventEnvelope{}, time.Time{}),
-				State: testStateSnapshot("pending", nil, nil, nil),
+				State: testStateSnapshot("pending", nil, nil),
 			})
 			if err != nil {
 				t.Fatal(err)

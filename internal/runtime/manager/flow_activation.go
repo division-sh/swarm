@@ -352,10 +352,6 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		// not supply constructor eligibility or create a business occurrence.
 		plan.Instance.Fields = fields
 		plan.Instance.CurrentState = *seed.CurrentState
-		plan.Instance.Gates = make(map[string]bool, len(seed.Gates))
-		for gate, value := range seed.Gates {
-			plan.Instance.Gates[gate] = value
-		}
 	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 	flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(autoEmitRunID, instance.Route())

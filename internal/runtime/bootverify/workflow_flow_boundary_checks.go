@@ -303,9 +303,7 @@ func bootverifyHandlerUsesCanonicalEntity(source semanticview.Source, node runti
 }
 
 func bootverifyHandlerMutatesEntityLifecycle(handler runtimecontracts.SystemNodeEventHandler) bool {
-	if strings.TrimSpace(handler.AdvancesTo) != "" ||
-		gateNameLocal(handler.SetsGate) != "" ||
-		len(handler.ClearGates) > 0 {
+	if strings.TrimSpace(handler.AdvancesTo) != "" {
 		return true
 	}
 	for _, rule := range handler.Rules {

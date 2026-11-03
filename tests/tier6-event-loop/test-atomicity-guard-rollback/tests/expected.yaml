@@ -5,8 +5,6 @@ trigger:
   entity_fields_before:
     status: not_ready
     counter: 0
-  gates_before:
-    g_processed: false
 
 expected:
 
@@ -15,8 +13,6 @@ expected:
   entity_fields:
     status: not_ready
     counter: 0
-  gates:
-    g_processed: false
   emitted_events: []
 
 conformance:

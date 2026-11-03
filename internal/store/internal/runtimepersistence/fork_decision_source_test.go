@@ -113,7 +113,7 @@ func Test2376ForkDecisionExecutionSourceBothStores(t *testing.T) {
 				if err := gateruntime.Store(buckets, activation); err != nil {
 					t.Fatal(err)
 				}
-				_, bindings, err := forkGateActivationState(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(), childRun, "launch/review", entity, targetHash)
+				_, bindings, err := forkGateActivationState(runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets(), childRun, "launch/review", entity, targetHash)
 				if err != nil {
 					t.Fatal(err)
 				}

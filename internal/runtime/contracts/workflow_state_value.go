@@ -99,7 +99,9 @@ func projectIndexedStateField(value yamlsource.Value, types TypeCatalogDocument)
 			}
 			indexed = true
 		default:
-			return EntityFieldDecl{}, NewUndefinedFieldDiagnostic("state field", field.Name, map[string]struct{}{"type": {}, "indexed": {}}, field)
+			diagnostic := NewUndefinedFieldDiagnostic("state field", field.Name, map[string]struct{}{"type": {}, "indexed": {}}, field)
+			diagnostic.Remediation = "Declare the field as its type or {type: T, indexed: true}. Put descriptions in YAML comments."
+			return EntityFieldDecl{}, diagnostic
 		}
 	}
 	if !indexed || typeValue.Presence() == yamlsource.PresenceMissing {

@@ -139,7 +139,7 @@ func projectSetup(value semanticvalue.Value) (Setup, error) {
 }
 
 func projectSetupEntity(value semanticvalue.Value, label string) (SetupEntity, error) {
-	fields, err := mapping(value, label, "as", "type", "flow", "current_state", "fields", "gates")
+	fields, err := mapping(value, label, "as", "type", "flow", "current_state", "fields")
 	if err != nil {
 		return SetupEntity{}, err
 	}
@@ -168,13 +168,6 @@ func projectSetupEntity(value semanticvalue.Value, label string) (SetupEntity, e
 	if v, ok := fields["fields"]; ok {
 		out.Fields, err = objectOrExpression(v, label+".fields")
 		out.FieldsSet = true
-		if err != nil {
-			return out, err
-		}
-	}
-	if v, ok := fields["gates"]; ok {
-		out.Gates, err = objectOrExpression(v, label+".gates")
-		out.GatesSet = true
 		if err != nil {
 			return out, err
 		}
@@ -436,7 +429,7 @@ func projectEntityExpectations(value semanticvalue.Value) ([]EntityExpect, error
 }
 
 func projectEntityExpect(value semanticvalue.Value, label string) (EntityExpect, error) {
-	fields, err := mapping(value, label, "ref", "flow", "count", "current_state", "fields", "gates")
+	fields, err := mapping(value, label, "ref", "flow", "count", "current_state", "fields")
 	if err != nil {
 		return EntityExpect{}, err
 	}
@@ -474,21 +467,14 @@ func projectEntityExpect(value semanticvalue.Value, label string) (EntityExpect,
 			return out, err
 		}
 	}
-	if v, ok := fields["gates"]; ok {
-		out.Gates, err = objectOrExpression(v, label+".gates")
-		out.GatesSet = true
-		if err != nil {
-			return out, err
-		}
-	}
 	if out.Count != nil && out.Ref != "" {
 		return out, fmt.Errorf("%s.count cannot be combined with ref", label)
 	}
 	if out.Count != nil && out.HasDetailAssertion() {
-		return out, fmt.Errorf("%s.count cannot be combined with current_state, fields, or gates", label)
+		return out, fmt.Errorf("%s.count cannot be combined with current_state or fields", label)
 	}
 	if out.Count == nil && !out.HasDetailAssertion() {
-		return out, fmt.Errorf("%s requires count, current_state, fields, or gates", label)
+		return out, fmt.Errorf("%s requires count, current_state or fields", label)
 	}
 	return out, nil
 }

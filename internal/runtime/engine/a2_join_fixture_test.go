@@ -41,7 +41,7 @@ func a2JoinFixtureRoute(entry timeridentity.StageEntryRef) flowidentity.Route {
 
 func a2JoinFixtureSnapshot(t *testing.T, activation joinruntime.Activation, fields map[string]any, buckets map[string]map[string]any) StateSnapshot {
 	t.Helper()
-	state := testStateSnapshot(activation.JoinRef().Stage(), fields, nil, buckets)
+	state := testStateSnapshot(activation.JoinRef().Stage(), fields, buckets)
 	state.StateCarrier.Bookkeeping = map[string]any{}
 	if err := workflowlifecycle.StoreStageEntry(state.StateCarrier.Bookkeeping, activation.JoinRef().StageEntry()); err != nil {
 		t.Fatal(err)

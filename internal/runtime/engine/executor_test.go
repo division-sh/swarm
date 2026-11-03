@@ -391,7 +391,7 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 			events.EventEnvelope{},
 			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		),
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -715,7 +715,7 @@ func (r lockOrderStateRepo) LoadState(context.Context, StateAddress) (StateSnaps
 	if r.order != nil {
 		*r.order = append(*r.order, "load")
 	}
-	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
+	return testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}), true, nil
 }
 func (lockOrderStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	return nil
@@ -881,10 +881,10 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 	}
 }
 
-func testStateSnapshot(currentState string, metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) StateSnapshot {
+func testStateSnapshot(currentState string, metadata map[string]any, buckets map[string]map[string]any) StateSnapshot {
 	return StateSnapshot{
 		CurrentState: currentState,
-		StateCarrier: NewStateCarrier(metadata, gates, buckets),
+		StateCarrier: NewStateCarrier(metadata, buckets),
 	}
 }
 
@@ -1240,7 +1240,7 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 			time.Now().UTC(),
 		),
 
-		State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{})},
+		State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, map[string]map[string]any{})},
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1279,7 +1279,8 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	shaper := &recordingPayloadShaper{}
 	state := testStateSnapshot("discovered", map[string]any{
 		"composite_score": 0, "dimensions_requested": []any{"build_complexity"},
-	}, nil, nil)
+	}, nil)
+
 	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 			"composite_score": {Type: "integer"}, "dimensions_requested": {Type: "[text]"},
@@ -1395,7 +1396,7 @@ func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.
 			0, "", "", events.EventEnvelope{}, time.Time{},
 		),
 		Handler: qualified,
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Execute error = %v, want %v", err, wantErr)
@@ -1448,7 +1449,7 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 					0, "", "", events.EventEnvelope{}, time.Time{},
 				),
 				Handler: qualified,
-				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 			})
 			if !errors.Is(err, ErrNotImplemented) {
 				t.Fatalf("Execute error = %v, want %v", err, ErrNotImplemented)
@@ -1480,7 +1481,7 @@ func TestExecutor_AccumulatorUsesMatchedHandlerEventKeyForScopedConcreteEvents(t
 		},
 	}
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
-	firstState := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
+	firstState := testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{})
 	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     lifecycleNode,
@@ -1508,7 +1509,7 @@ func TestExecutor_AccumulatorUsesMatchedHandlerEventKeyForScopedConcreteEvents(t
 	if firstAccumulator.Err() != nil || len(firstAccumulator.Items) != 1 {
 		t.Fatalf("first stream accumulator = %#v, want one item", firstAccumulator)
 	}
-	secondState := testStateSnapshot("pending", first.StateMutation.StateCarrier.Fields, nil, first.StateMutation.StateCarrier.StateBuckets)
+	secondState := testStateSnapshot("pending", first.StateMutation.StateCarrier.Fields, first.StateMutation.StateCarrier.StateBuckets)
 	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     lifecycleNode,
@@ -1857,7 +1858,7 @@ func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent stri
 }
 
 func TestExecutor_ComputeReadsDeclaredAccumulatorListForMatchedHandler(t *testing.T) {
-	state := testStateSnapshot("pending", map[string]any{"items": []any{map[string]any{"component_id": "a"}}}, nil, map[string]map[string]any{})
+	state := testStateSnapshot("pending", map[string]any{"items": []any{map[string]any{"component_id": "a"}}}, map[string]map[string]any{})
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
 	source := scopedComponentAccumulatorSource(t)
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -1952,7 +1953,7 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 			events.EventEnvelope{},
 			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		),
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -2037,7 +2038,7 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 			events.EventEnvelope{},
 			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		),
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -2430,7 +2431,7 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 			events.EventEnvelope{},
 			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		),
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -2542,7 +2543,7 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 			events.EventEnvelope{},
 			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		),
-		State: testStateSnapshot("pending", map[string]any{"expected_count": int(1)}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{"expected_count": int(1)}, map[string]map[string]any{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{
@@ -2587,7 +2588,7 @@ func (r *orderedStateRepo) LoadState(context.Context, StateAddress) (StateSnapsh
 	if r.snapshot != nil {
 		return *r.snapshot, true, nil
 	}
-	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
+	return testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}), true, nil
 }
 
 func (r *orderedStateRepo) SaveState(_ context.Context, _ StateAddress, mutation StateMutation) error {
@@ -2680,7 +2681,7 @@ func TestExecutorDoesNotSerializeIndependentEntitiesBehindCommit(t *testing.T) {
 			EntityID: entityID, Node: testFlowExecutableNode(t, "flow-1", "node-1"),
 			Route:   runtimeflowidentity.RouteForInstancePath("flow-1"),
 			Event:   eventtest.RunCreatingRootIngress(eventID, "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
-			Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "task.recorded"}}, State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "task.recorded"}}, State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 		}
 	}
 	firstRequest := request("entity-1", "evt-1")
@@ -2744,7 +2745,7 @@ func TestExecutorKeepsEntityLockThroughCommitButNotDispatch(t *testing.T) {
 				Route:   runtimeflowidentity.RouteForInstancePath("flow-1"),
 				Event:   eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 				Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "task.recorded"}},
-				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 			}
 			dispatcher.executor = exec
 			dispatcher.reentry = request
@@ -2864,7 +2865,7 @@ func TestExecutor_KeyFreeHTTPActivityFixedPolicy(t *testing.T) {
 					HandlerEventKey: "source.requested",
 					Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
 					Handler:         handler,
-					State:           testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+					State:           testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 				})
 				if err != nil || !reflect.DeepEqual(order, []string{"lock", "tx", "save", "activity_intents"}) || len(writer.intents) != 1 || len(result.ActivityIntents) != 1 {
 					t.Fatalf("key-free activity lost its existing persistence boundary: order=%v written=%+v result=%+v err=%v", order, writer.intents, result, err)
@@ -2913,7 +2914,7 @@ func TestExecutor_ActivityIntentPersistsBeforeFollowUpTransfer(t *testing.T) {
 				},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -2957,7 +2958,7 @@ func TestExecutor_RuleActivityIntentKeepsExplicitNamesAndSelectedRef(t *testing.
 				ID: "pinned_request", Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
 			},
 		}}},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3000,7 +3001,7 @@ func TestExecutor_UnnamedRuleActivityRefusesBeforeEffects(t *testing.T) {
 					ID: id, Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
 				},
 			}}},
-			State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 		})
 		if err == nil || !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "rules[0].activity.id is required") {
 			t.Fatalf("unnamed selected activity error = %v", err)
@@ -3042,7 +3043,7 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 				},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "intent store failed") {
 		t.Fatalf("Execute error = %v, want intent store failure", err)
@@ -3075,10 +3076,9 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
-			ClearGates: []string{"gate_a"},
 			Emit:       runtimecontracts.EmitSpec{Event: "task.recorded"},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3094,9 +3094,6 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	}
 	if result.ChainDepth != 1 || len(result.EmitIntents) != 1 {
 		t.Fatalf("emit chain depth wrong: depth=%d intents=%d", result.ChainDepth, len(result.EmitIntents))
-	}
-	if !reflect.DeepEqual(repo.mutation.ClearGates, []string{"gate_a"}) {
-		t.Fatalf("clear gates mutation = %#v", repo.mutation.ClearGates)
 	}
 	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{
 		"record_state_change",
@@ -3127,7 +3124,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 		CurrentState: "pending",
 		StateCarrier: NewStateCarrier(map[string]any{
 			"dedup_key": "dup-1",
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	}
 	node := testRootExecutableNode(t, "node-1")
 	repo.snapshot = &initial
@@ -3208,7 +3205,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 				StoreAs: "state.grouped",
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3243,7 +3240,7 @@ func TestExecutorOrdinaryEventPayloadPreservesIntegerForCELArithmetic(t *testing
 			Filter:  "item.integer + 1 == 76 && double(item.decimal) + 1.0 == 76.0 && double(item.exponent) + 1.0 == 76.0",
 			StoreAs: "state.matches",
 		}},
-		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("ready", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("ordinary event integer arithmetic: %v", err)
@@ -3274,7 +3271,7 @@ func TestExecutorOrdinaryEventPayloadRejectsUnsafeIntegerBeforeMutation(t *testi
 			"evt-unsafe", "scores.ready", "", "", json.RawMessage(`{"score":9007199254740992}`),
 			0, "", "", events.EventEnvelope{}, time.Time{},
 		),
-		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("ready", map[string]any{}, map[string]map[string]any{}),
 	})
 	var projection *workflowexpr.CELProjectionError
 	if !errors.As(err, &projection) || projection.Path != "$.score" || !strings.Contains(projection.Remediation, "declare the field as string") {
@@ -3420,7 +3417,7 @@ func numericProjectionExecutionFrame(t *testing.T, handler runtimecontracts.Syst
 	frame, err := exec.newExecutionFrame(context.Background(), ExecutionRequest{
 		Node: testRootExecutableNode(t, "node-1"), ExecutionFlowID: identity.NormalizeFlowID("."),
 		Event:   eventtest.RunCreatingRootIngress("", "items.ready", "", "", raw, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: handler, State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+		Handler: handler, State: testStateSnapshot("ready", map[string]any{}, map[string]map[string]any{}),
 	})
 	return &frame, err
 }
@@ -3460,7 +3457,7 @@ func TestExecutor_QueryEntityTableUsesAdmittedSourceExactlyOnce(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 			Entities: "state", Filter: `item.status != "done"`, GroupBy: "status", Count: true,
 		}},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3486,7 +3483,7 @@ func TestExecutor_QueryRejectsDualSourceBeforeReading(t *testing.T) {
 		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 		Event:   eventtest.RunCreatingRootIngress("evt-query-dual", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Entities: "state"}},
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "exactly one collection source") {
 		t.Fatalf("Execute error = %v", err)
@@ -3509,7 +3506,7 @@ func TestExecutor_RejectsFutureCollectionDependencyBeforeExecution(t *testing.T)
 			Query:  &runtimecontracts.QuerySpec{Source: "computed.filter"},
 			Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "true"},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "same or a later execution phase") {
 		t.Fatalf("Execute error = %v, want future dependency rejection", err)
@@ -3563,7 +3560,7 @@ func TestExecutor_RejectsOverlappingCollectionOutputsBeforeReading(t *testing.T)
 				EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("."), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 				Event:   eventtest.RunCreatingRootIngress("evt-query-collision", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: tc.handler,
-				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 			})
 			if err == nil || !strings.Contains(err.Error(), "duplicate or overlapping ownership") {
 				t.Fatalf("Execute error = %v, want output ownership rejection", err)
@@ -3585,7 +3582,7 @@ func TestExecutor_RejectsRootOnlyCollectionSourceWithoutPanic(t *testing.T) {
 		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 		Event:   eventtest.RunCreatingRootIngress("evt-query-root", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "payload"}},
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "must select a field below payload") {
 		t.Fatalf("Execute error = %v, want root-only rejection", err)
@@ -3602,7 +3599,7 @@ func TestExecutor_QuerySelectionPreservesOptionalOmission(t *testing.T) {
 		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 		Event:   eventtest.RunCreatingRootIngress("evt-query-select", "work.received", "", "", json.RawMessage(`{"items":[{"id":"a","status":"queued"},{"id":"b","status":"done","note":"kept"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Select: []string{"id", "note"}}},
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3628,7 +3625,7 @@ func TestExecutor_QuerySelectionRejectsMissingRequiredField(t *testing.T) {
 		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 		Event:   eventtest.RunCreatingRootIngress("evt-query-select-missing", "work.received", "", "", json.RawMessage(`{"items":[{"status":"queued"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Select: []string{"id"}}},
-		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing required field id") {
 		t.Fatalf("Execute error = %v", err)
@@ -3678,7 +3675,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 				StoreAs: "state.query_rows",
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{"score": 4}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{"score": 4}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3714,7 +3711,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 				StoreAs:   "state.filtered",
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{"score": 4}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{"score": 4}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "undeclared reference") {
 		t.Fatalf("Execute error = %v, want undeclared reference", err)
@@ -3725,7 +3722,8 @@ func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 	repo := &orderedStateRepo{order: &[]string{}}
 	stored := testStateSnapshot("pending", map[string]any{
 		"items": []any{map[string]any{"score": 7}, map[string]any{"score": 3}},
-	}, nil, nil)
+	}, nil)
+
 	repo.snapshot = &stored
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(entityCollectionExpressionSource(), ".", "pending", "pending"),
@@ -3748,7 +3746,7 @@ func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 		}},
 		State: testStateSnapshot("pending", map[string]any{
 			"items": []any{map[string]any{"score": 7}, map[string]any{"score": 3}},
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3784,7 +3782,7 @@ func TestExecutorChainedCollectionConditionUsesCompiledItemType(t *testing.T) {
 				ItemsFrom: "computed.queried", Condition: "item.score > 5", StoreAs: "computed.filtered",
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3835,7 +3833,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 				{AdvancesTo: "rejected"},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3876,7 +3874,7 @@ rules:
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "scan.requested", "", "", json.RawMessage(`{"mode":"deep"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:  handler,
-		State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:    testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3911,7 +3909,7 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 				Condition: "payload.score > 5",
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -3921,47 +3919,6 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	}
 	if result.NextState != "default" {
 		t.Fatalf("NextState = %q, want handler-level default", result.NextState)
-	}
-}
-
-func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, stubEvaluator{bools: map[string]bool{
-		"payload.score > 5": true,
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
-			Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: "payload.score > 5",
-			}},
-		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rules[0]: when payload.score > 5" {
-		t.Fatalf("display = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
-	}
-	if result.SetsGate != "approved" {
-		t.Fatalf("SetsGate = %q, want handler-level gate with matched rule", result.SetsGate)
-	}
-	if result.StateMutation.SetGate != "approved" {
-		t.Fatalf("StateMutation.SetGate = %q, want approved", result.StateMutation.SetGate)
-	}
-	if got := result.StateMutation.Gates["approved"]; !got {
-		t.Fatalf("StateMutation.Gates[approved] = %v, want true", got)
 	}
 }
 
@@ -3989,7 +3946,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatalf("expected ambiguous handler-level emit config to be rejected, got %+v", result)
@@ -4023,7 +3980,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 				AdvancesTo: "approved",
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatalf("expected ambiguous handler-level emit config to be rejected, got %+v", result)
@@ -4131,7 +4088,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 						},
 					},
 				},
-				State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 			})
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
@@ -4206,7 +4163,7 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 		State: testStateSnapshot("pending", map[string]any{
 			"account_id": "acct-1",
 			"bucket":     "vip",
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -4285,7 +4242,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 				},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -4371,7 +4328,7 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":3}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:    handler,
-		State:      testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State:      testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -4419,7 +4376,7 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 				Emit:      runtimecontracts.EmitSpec{Event: "shared.event"},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "duplicate declarative emit event") {
 		t.Fatalf("Execute error = %v, want duplicate declarative emit event", err)
@@ -4462,7 +4419,7 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 }
 
 func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *testing.T) {
-	stored := testStateSnapshot("pending", map[string]any{}, nil, nil)
+	stored := testStateSnapshot("pending", map[string]any{}, nil)
 	stateRepo := &recordingStateRepo{snapshot: &stored}
 	publications := &recordingPublicationCommitter{}
 	shaper := &eventErrPayloadShaper{failEvent: "flow-1/handler.succeeded"}
@@ -4491,7 +4448,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "payload shape failed") {
 		t.Fatalf("Execute error = %v, want payload shape failed", err)
@@ -4508,7 +4465,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 }
 
 func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
-	state := testStateSnapshot("pending", map[string]any{}, nil, nil)
+	state := testStateSnapshot("pending", map[string]any{}, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
 			"final_source": {Type: "text"}, "rule_only": {Type: "text"},
@@ -4558,7 +4515,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 }
 
 func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
-	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil, nil)
+	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
 			"branch_target": {Type: "text"}, "rule_selected": {Type: "boolean"},
@@ -4612,7 +4569,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 }
 
 func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
-	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil, nil)
+	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
 			"branch_target": {Type: "text"},
@@ -4683,7 +4640,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 			AdvancesTo: "done",
 			Emit:       runtimecontracts.EmitSpec{Event: "task.followup"},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -4731,7 +4688,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 			},
 			AdvancesTo: "processing",
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -4834,7 +4791,7 @@ join:
 		ExecutionFlowID: identity.NormalizeFlowID("."),
 		EntityID:        "entity-1", Node: node, HandlerEventKey: "batch.requested", Event: trigger,
 		Handler: qualified, JoinDeclaration: declaration,
-		State: testStateSnapshot("active", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("active", map[string]any{}, map[string]map[string]any{}),
 	}
 	triggerResult, err := exec.ExecuteSemanticFixture(context.Background(), request)
 	if err != nil {
@@ -4985,7 +4942,7 @@ join:
 			eventtest.UUID("stale-fan-out-completion"), events.EventType(handle.EventType()), "platform", handle.TaskID(), raw, 0,
 			semanticExecutionFixtureRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(2*time.Second),
 		),
-		State: testStateSnapshot("active", map[string]any{"sentinel": "unchanged"}, nil, buckets),
+		State: testStateSnapshot("active", map[string]any{"sentinel": "unchanged"}, buckets),
 	})
 	if err != nil {
 		t.Fatalf("execute stale completion: %v", err)
@@ -5047,7 +5004,7 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		ExecutionFlowID: identity.NormalizeFlowID("."),
 		EntityID:        "entity-1", Node: node, Event: trigger, Handler: qualified,
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -5123,7 +5080,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 	liveFields := map[string]any{"threshold": int64(75)}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", Node: node, Event: trigger, Handler: qualified,
-		State: testStateSnapshot("pending", liveFields, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", liveFields, map[string]map[string]any{}),
 	})
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("create numeric fan-out intent: result=%#v err=%v", result, err)
@@ -5224,7 +5181,7 @@ func TestExecutor_FanOutEntitySourceBindsAfterSameHandlerMutation(t *testing.T) 
 				}},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{"items": []any{"old"}}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{"items": []any{"old"}}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5274,7 +5231,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 				},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatal("expected fan_out bound exceeded error")
@@ -5353,7 +5310,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 	wantItemOrder := []string{"item-b", "item-a", "item-b"}
 	fixedEmitNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
 	state := func() StateSnapshot {
-		return testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{})
+		return testStateSnapshot("ready", map[string]any{}, map[string]map[string]any{})
 	}
 
 	for _, tc := range cases {
@@ -5455,7 +5412,7 @@ func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
 				EntityID: "entity-1", Node: testFlowExecutableNode(t, "flow-1", "node-1"),
 				Event:   eventtest.RunCreatingRootIngress("evt-1", "batch.ready", "", "", json.RawMessage(`{"items":[{"id":"item-a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &tc.spec},
-				State:   testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+				State:   testStateSnapshot("ready", map[string]any{}, map[string]map[string]any{}),
 			})
 			if err == nil || !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Execute result=%#v error=%v, want ErrInvalidConfig containing %q", result, err, tc.want)
@@ -5559,7 +5516,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 				},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5615,7 +5572,8 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 		t.Run(eventType, func(t *testing.T) {
 			state := testStateSnapshot("researching", map[string]any{
 				"flow_path": targetFlowInstance,
-			}, nil, map[string]map[string]any{})
+			}, map[string]map[string]any{})
+
 			state.EntityID = identity.NormalizeEntityID(targetEntityID)
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:       targetEntityID,
@@ -5718,7 +5676,7 @@ func TestExecutor_EmitIntentUsesAdmittedProducerSourceBeforeStateMetadata(t *tes
 		},
 		State: testStateSnapshot("researching", map[string]any{
 			"flow_path": "validation/validation",
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5770,7 +5728,7 @@ func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalize
 		},
 		State: testStateSnapshot("pending", map[string]any{
 			"flow_path": "/",
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5856,7 +5814,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 					"parent_flow_id":       parentRoute.FlowID,
 					"parent_flow_instance": parentRoute.FlowInstance,
 					"parent_entity_id":     parentRoute.EntityID,
-				}, nil, map[string]map[string]any{}),
+				}, map[string]map[string]any{}),
 			})
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
@@ -5920,7 +5878,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 			"parent_flow_id":       "operating",
 			"parent_flow_instance": "operating/opco-1",
 			"parent_entity_id":     "opco-entity",
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5957,7 +5915,8 @@ func TestExecutor_ChildPinOutputRejectsCompleteParentWithoutConsumer(t *testing.
 		"parent_flow_id":       parentRoute.FlowID,
 		"parent_flow_instance": parentRoute.FlowInstance,
 		"parent_entity_id":     parentRoute.EntityID,
-	}, nil, map[string]map[string]any{})
+	}, map[string]map[string]any{})
+
 	state.EntityID = identity.NormalizeEntityID("child-ent")
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
@@ -6017,7 +5976,8 @@ func TestExecutor_LoweredConnectEmissionRemainsTargetlessBeforeEventBus(t *testi
 	state := testStateSnapshot("running", map[string]any{
 		"flow_path": "child/inst-1", "parent_flow_id": structuralParent.FlowID,
 		"parent_flow_instance": structuralParent.FlowInstance, "parent_entity_id": structuralParent.EntityID,
-	}, nil, map[string]map[string]any{})
+	}, map[string]map[string]any{})
+
 	state.EntityID = identity.NormalizeEntityID("child-source")
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "child", "child-node")), Target: events.MustExistingEntityTarget(currentOwner),
@@ -6058,7 +6018,7 @@ func TestExecutor_NestedStaticOutputRejectsCompleteCurrentDeliveryWithoutConsume
 	if err != nil {
 		t.Fatalf("producer source: %v", err)
 	}
-	state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
+	state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, map[string]map[string]any{})
 	state.EntityID = identity.NormalizeEntityID(currentOwner.EntityID)
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "root/child", "child-node")), Target: events.MustExistingEntityTarget(currentOwner),
@@ -6101,7 +6061,7 @@ func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t 
 			if err != nil {
 				t.Fatalf("producer source: %v", err)
 			}
-			state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
+			state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, map[string]map[string]any{})
 			state.EntityID = identity.NormalizeEntityID("state-owner")
 			result, err := exec.ExecuteSemanticFixture(tc.ctx, ExecutionRequest{
 				EntityID: "state-owner", Node: testFlowExecutableNode(t, "root/child", "child-node"), ProducerSource: producerSource,
@@ -6126,7 +6086,8 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 	}
 	state := testStateSnapshot("running", map[string]any{
 		"flow_path": "child/inst-1", "parent_flow_id": "root", "parent_entity_id": "parent-ent",
-	}, nil, map[string]map[string]any{})
+	}, map[string]map[string]any{})
+
 	state.EntityID = identity.NormalizeEntityID("child-ent")
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "child-ent", Node: testFlowExecutableNode(t, "child", "child-node"),
@@ -6257,7 +6218,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 				"summary":      "stale",
 				"report_count": 2,
 			},
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6350,7 +6311,7 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 				"obsolete": map[string]any{"status": "old", "active_jobs": []any{}},
 			},
 			"tags": []any{"new", "silver"},
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6436,7 +6397,7 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 		},
 		State: testStateSnapshot("active", map[string]any{
 			"verticals": map[string]any{},
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6489,7 +6450,7 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 		},
 		State: testStateSnapshot("pending", map[string]any{
 			"verticals": map[string]any{},
-		}, nil, map[string]map[string]any{}),
+		}, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatal("expected missing map key failure")
@@ -6537,7 +6498,7 @@ func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) 
 				},
 				State: testStateSnapshot("pending", map[string]any{
 					"verticals": map[string]any{},
-				}, nil, map[string]map[string]any{}),
+				}, map[string]map[string]any{}),
 			})
 			if err == nil {
 				t.Fatal("expected contained operation index rejection")
@@ -6569,7 +6530,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 				StoreAs:   "state.analysis.missing",
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatal("expected invalid config error")
@@ -6590,7 +6551,8 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	bundle.RootTypes.Types["Analysis"] = analysisType
 	stored := testStateSnapshot("pending", map[string]any{
 		"analysis": map[string]any{"summary": "stale", "report_count": 2},
-	}, nil, nil)
+	}, nil)
+
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
 		StateRepo:     sparseSnapshotRepo{snapshot: stored},
@@ -6649,7 +6611,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 				},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err == nil {
 		t.Fatal("expected emit.fields CEL failure to return an error")
@@ -6679,7 +6641,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 			},
 			AdvancesTo: "scanning",
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6734,7 +6696,7 @@ func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.
 			},
 			AdvancesTo: "scanning",
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6772,7 +6734,7 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 				Emit:      runtimecontracts.EmitSpec{Event: "routed.item"},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6809,7 +6771,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 			},
 			AdvancesTo: "done",
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6852,7 +6814,7 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 			},
 			AdvancesTo: "done",
 		},
-		State: testStateSnapshot("pending", map[string]any{"category": "entity"}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{"category": "entity"}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6874,76 +6836,6 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 	}
 	if _, ok := grouped["policy"]; ok {
 		t.Fatalf("grouped metadata unexpectedly used policy scope: %#v", grouped)
-	}
-}
-
-func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			ClearGates: []string{"*"},
-		},
-		State: StateSnapshot{
-			StateCarrier: NewStateCarrier(map[string]any{"note": "keep"}, map[string]bool{"gate_a": true, "gate_b": true}, nil),
-		},
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := result.ClearGates; !reflect.DeepEqual(got, []string{"gate_a", "gate_b"}) {
-		t.Fatalf("ClearGates = %#v", got)
-	}
-	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
-		t.Fatalf("typed gates not cleared: %#v", result.StateMutation.Gates)
-	}
-	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
-		t.Fatalf("typed gate state not cleared: %#v", result.StateMutation.Gates)
-	}
-	if result.StateMutation.Fields["note"] != "keep" {
-		t.Fatalf("non-gate metadata changed: %#v", result.StateMutation.Fields)
-	}
-}
-
-func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
-		"_entity.gates.review == false": func(base BaseContext) (bool, error) {
-			return base.Gates.Raw()["review"] == false, nil
-		},
-	}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			ClearGates: []string{"review"},
-			Guard:      &runtimecontracts.GuardSpec{Check: "_entity.gates.review == false"},
-		},
-		State: StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"review": true}, nil)},
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if result.Status != OutcomeCompleted {
-		t.Fatalf("Status = %q", result.Status)
 	}
 }
 
@@ -6976,7 +6868,7 @@ func TestExecutor_RuleEmitRunsOnlyForSelectedRule(t *testing.T) {
 				},
 			},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)

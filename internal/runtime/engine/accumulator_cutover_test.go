@@ -63,7 +63,7 @@ func a2AccumulatorExecutor(t *testing.T) (*Executor, *persistentStateRepo) {
 			}, Required: []string{"id", "marker"}}},
 		},
 	})
-	repo := &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "active", StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}}
+	repo := &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "active", StateCarrier: NewStateCarrier(map[string]any{}, nil)}}
 	executor, err := NewExecutor(RuntimeDependencies{
 		Source: sourceWithFixtureStages(source, ".", "active", "active"), StateRepo: repo,
 		MutationOwner: stubMutationOwner{state: repo}, Locker: stubLocker{},
@@ -175,7 +175,7 @@ func TestA2M15AccumulatorFilterReduceCountAndComputeUseBusinessItems(t *testing.
 			Reduce: &runtimecontracts.ReduceSpec{ItemsFrom: "state.items", ItemsPath: path, Operation: "count", StoreAs: "computed.reduced"},
 			Count:  &runtimecontracts.CountSpec{ItemsFrom: "state.items", ItemsPath: path, StoreAs: "computed.counted"},
 		}},
-		state:          ExecutionState{State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"items": acc.Items}, nil, nil)}, Computed: map[string]any{}},
+		state:          ExecutionState{State: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"items": acc.Items}, nil)}, Computed: map[string]any{}},
 		collectionPlan: runtimecontracts.WorkflowHandlerCollectionPlan{Filter: &resolution, Reduce: &resolution, Count: &resolution},
 	}
 	executor := &Executor{}

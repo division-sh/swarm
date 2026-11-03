@@ -205,7 +205,7 @@ func TestEmitFieldsPayload_EvaluatesYAMLLoadedR2Values(t *testing.T) {
 }
 
 func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
-	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil)}
 	payload := map[string]any{
 		"score":  4,
 		"nested": map[string]any{"value": "ok"},
@@ -243,7 +243,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 }
 
 func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) {
-	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{
 			"mode": "corpus",
@@ -283,7 +283,7 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 
 func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testing.T) {
 	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "revision_count", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}}}}
-	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{
 			"revision_count": 0,
@@ -313,7 +313,7 @@ func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
 			"summary":      "stale",
 			"report_count": 2,
 		},
-	}, nil, nil)}
+	}, nil)}
 	base := BaseContext{
 		Payload: values.Wrap(map[string]any{
 			"summary": "ready",
@@ -343,7 +343,7 @@ func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
 }
 
 func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T) {
-	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
+	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{}),
 	}

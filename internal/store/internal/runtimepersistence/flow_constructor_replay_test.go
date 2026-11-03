@@ -120,7 +120,6 @@ func TestFlowConstructorReplayAndRefusalBothStores(t *testing.T) {
 					state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 					state.CurrentState = "done"
 					state.Fields = json.RawMessage(`{"account_id":"preserved","handled":true}`)
-					state.Gates = json.RawMessage(`{"approved":true}`)
 					state.Bookkeeping = json.RawMessage(`{"completed":1}`)
 					state.Accumulator = json.RawMessage(`{"totals":{"accepted":4}}`)
 					state.EnteredStageAt, state.UpdatedAt = state.CreatedAt.Add(time.Minute), state.CreatedAt.Add(time.Minute)
@@ -168,7 +167,7 @@ func TestFlowConstructorReplayAndRefusalBothStores(t *testing.T) {
 					observed, found, err := index.LookupFlowInstance(f.ctx, request)
 					if variant == "progress" {
 						stored, projectionErr := observed.WorkflowInstance()
-						if err != nil || !found || projectionErr != nil || stored.CurrentState != "done" || stored.Revision != 2 || stored.Fields["handled"] != true || !stored.Gates["approved"] {
+						if err != nil || !found || projectionErr != nil || stored.CurrentState != "done" || stored.Revision != 2 || stored.Fields["handled"] != true {
 							t.Fatalf("native index lost legitimate progress: %+v found=%t err=%v projection=%v", stored, found, err, projectionErr)
 						}
 					} else {
@@ -193,7 +192,7 @@ func TestFlowConstructorReplayAndRefusalBothStores(t *testing.T) {
 						}
 					}
 					stored, found, err := f.workflows.Load(f.ctx, record.Identity)
-					if err != nil || !found || stored.CurrentState != "done" || stored.Revision != 2 || stored.Fields["handled"] != true || !stored.Gates["approved"] {
+					if err != nil || !found || stored.CurrentState != "done" || stored.Revision != 2 || stored.Fields["handled"] != true {
 						t.Fatalf("creation replay rewrote workflow progress: %+v found=%t err=%v", stored, found, err)
 					}
 					return

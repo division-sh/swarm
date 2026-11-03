@@ -27,7 +27,7 @@ func admitEventCatalogEntryForTest(t testing.TB, source string) (EventCatalogEnt
 
 func TestEventCatalogAdmissionOwnsRequiredByDefaultOptionalityAndBusinessKey(t *testing.T) {
 	entry, err := admitEventCatalogEntryForTest(t, `
-key: item_id
+_key: item_id
 item_id: uuid
 note: text?
 `)
@@ -104,8 +104,8 @@ func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 		{name: "duplicate direct", source: "id: text\nid: uuid", wantErr: "duplicate effective field \"id\""},
 		{name: "duplicate through merge", source: "<<: &base\n  id: text\nid: uuid", wantErr: "duplicate effective field \"id\""},
 		{name: "double optional marker", source: "id: text??", wantErr: "exactly one trailing ?"},
-		{name: "optional business key", source: "key: id\nid: uuid?", wantErr: "must be required"},
-		{name: "missing business key field", source: "key: id\nname: text", wantErr: "is not a declared payload field"},
+		{name: "optional business key", source: "_key: id\nid: uuid?", wantErr: "must be required"},
+		{name: "missing business key field", source: "_key: id\nname: text", wantErr: "is not a declared payload field"},
 		{name: "null declaration", source: "null", wantErr: "an event with no fields is declared bare"},
 		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `event field name "swarm"`},
 		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `event field name "swarm"`},
@@ -287,7 +287,7 @@ func TestEventCatalogBusinessKeyRejectsDynamicSemanticsAtBundleAdmission(t *test
 	root := currentWorkflowContractsDirForTest(t)
 	writeFixtureFile(t, root+"/events.yaml", `
 item.created:
-  key: payload
+  _key: payload
   payload: json
 evidence.recorded:
 `)

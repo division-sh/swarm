@@ -612,28 +612,7 @@ func normalizedEventFieldSpec(schema runtimecontracts.ToolInputSchema) runtimeco
 	return runtimecontracts.EventFieldSpec{
 		Type:        typeName,
 		ExactSchema: &exact,
-		Refinements: runtimecontracts.SchemaRefinements{
-			Pattern: schema.Pattern(),
-			Length:  runtimecontracts.SchemaLengthRefinement{Min: normalizedInt(schema.MinLength), Max: normalizedInt(schema.MaxLength)},
-			Range:   runtimecontracts.SchemaRangeRefinement{Min: normalizedFloat(schema.Minimum), Max: normalizedFloat(schema.Maximum)},
-		},
 	}
-}
-
-func normalizedInt(accessor func() (int, bool)) *int {
-	value, ok := accessor()
-	if !ok {
-		return nil
-	}
-	return &value
-}
-
-func normalizedFloat(accessor func() (float64, bool)) *float64 {
-	value, ok := accessor()
-	if !ok {
-		return nil
-	}
-	return &value
 }
 
 func RawEventCatalogEntry() runtimecontracts.EventCatalogEntry {

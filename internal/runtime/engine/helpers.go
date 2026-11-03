@@ -52,9 +52,6 @@ func resolveParsedRef(base BaseContext, state ExecutionState, ref paths.Path) (a
 		if ref.Root == paths.RootComputed {
 			return state.ComputedBucket().Lookup(ref)
 		}
-		if ref.Root == paths.RootGates {
-			return base.Gates.Lookup(ref)
-		}
 		return base.Lookup(ref)
 	}
 	return nil, false

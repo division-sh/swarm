@@ -16,10 +16,6 @@ func SetWorkflowProjectionFieldsArrayForTest(ctx context.Context, selected any, 
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, key, true, pipelinepersistence.SetWorkflowProjectionFieldsArrayForTest)
 }
 
-func SetWorkflowProjectionNumericGateForTest(ctx context.Context, selected any, run, key string) (int64, error) {
-	return applyWorkflowProjectionShapeFault(ctx, selected, run, key, false, pipelinepersistence.SetWorkflowProjectionNumericGateForTest)
-}
-
 func SetWorkflowProjectionAccumulatorArrayForTest(ctx context.Context, selected any, run, key string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, key, false, pipelinepersistence.SetWorkflowProjectionAccumulatorArrayForTest)
 }

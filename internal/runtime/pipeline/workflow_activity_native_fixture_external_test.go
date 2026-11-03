@@ -246,7 +246,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			for _, bucket := range []struct {
 				raw []byte
 				dst *map[string]any
-			}{{evidence.Fields, &out.Current.Fields}, {evidence.Bookkeeping, &out.Current.Bookkeeping}, {evidence.Gates, &out.Current.Gates}, {evidence.Accumulator, &out.Current.Accumulator}} {
+			}{{evidence.Fields, &out.Current.Fields}, {evidence.Bookkeeping, &out.Current.Bookkeeping}, {evidence.Accumulator, &out.Current.Accumulator}} {
 				if bucket.raw != nil {
 					if err := canonicaljson.DecodePreservingNumberLexemes(bucket.raw, bucket.dst); err != nil {
 						return pipeline.WorkflowMutationProjectionForTest{}, err

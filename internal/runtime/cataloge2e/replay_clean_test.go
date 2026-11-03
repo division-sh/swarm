@@ -801,8 +801,8 @@ func assertCatalogPartitionEntrypoints(t *testing.T, filename, prefix, executor 
 func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 	t.Helper()
 	inventory := catalogInventory(t)
-	if len(inventory.Fixtures) != 156 {
-		t.Fatalf("catalog fixtures = %d, want 156", len(inventory.Fixtures))
+	if len(inventory.Fixtures) != 154 {
+		t.Fatalf("catalog fixtures = %d, want 154", len(inventory.Fixtures))
 	}
 
 	runtimeCount := 0
@@ -826,11 +826,11 @@ func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 			fixtures = append(fixtures, fixture)
 		}
 	}
-	if runtimeCount != 99 {
-		t.Fatalf("runtime fixtures = %d, want 99", runtimeCount)
+	if runtimeCount != 97 {
+		t.Fatalf("runtime fixtures = %d, want 97", runtimeCount)
 	}
-	if len(fixtures) != 94 || len(excluded) != 5 {
-		t.Fatalf("replay-clean census = %d applicable + %d excluded, want 94 + 5", len(fixtures), len(excluded))
+	if len(fixtures) != 92 || len(excluded) != 5 {
+		t.Fatalf("replay-clean census = %d applicable + %d excluded, want 92 + 5", len(fixtures), len(excluded))
 	}
 	for path, disposition := range catalogReplayCleanExclusions {
 		if !excluded[path] {

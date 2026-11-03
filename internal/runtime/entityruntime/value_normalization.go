@@ -44,9 +44,6 @@ func NormalizeState(contract Contract, provided map[string]any) (map[string]any,
 	if err != nil {
 		return nil, err
 	}
-	if err := validateEntityFieldEqualities("state", contract.Entity.Fields, out); err != nil {
-		return nil, err
-	}
 	return out, nil
 }
 
@@ -140,7 +137,7 @@ func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return validateValueRefinements(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), field.Refinements, normalized)
+	return normalized, nil
 }
 
 func normalizeValueForType(contract Contract, fieldName, typeRef string, value any) (any, error) {

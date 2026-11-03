@@ -92,11 +92,10 @@ func resolveCatalogNamedType(typeRef string, named NamedTypeDecl, catalog TypeCa
 			return ResolvedCatalogType{}, fmt.Errorf("named type %s field %s: %w", typeRef, fieldName, err)
 		}
 		fields = append(fields, ResolvedCatalogField{
-			Name:        fieldName,
-			TypeRef:     strings.TrimSpace(field.Type),
-			Type:        resolved,
-			IsOptional:  field.IsOptional,
-			Refinements: field.Refinements.Clone(),
+			Name:       fieldName,
+			TypeRef:    strings.TrimSpace(field.Type),
+			Type:       resolved,
+			IsOptional: field.IsOptional,
 		})
 	}
 	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: typeRef, Fields: fields}, nil

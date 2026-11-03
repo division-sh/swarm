@@ -41,11 +41,11 @@ func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing
 				t.Fatalf("R1: found=%v err=%v", found, err)
 			}
 			stale := runtimeengine.StateMutation{StateCarrier: runtimeengine.NewStateCarrierWithOwners(
-				r1.Fields, r1.Bookkeeping, r1.Control, r1.Gates, r1.StateBuckets)}
+				r1.Fields, r1.Bookkeeping, r1.Control, r1.StateBuckets)}
 			stale.SetField("count", 1)
 			owner := pipelineEngineMutationOwner{store: store, state: repo}
 			fresh := runtimeengine.StateMutation{StateCarrier: runtimeengine.NewStateCarrierWithOwners(
-				r1.Fields, r1.Bookkeeping, r1.Control, r1.Gates, r1.StateBuckets)}
+				r1.Fields, r1.Bookkeeping, r1.Control, r1.StateBuckets)}
 			fresh.SetField("marker", 1)
 			if committed, err := owner.CommitEngineMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: r1, State: fresh}); err != nil || !committed.Committed {
 				t.Fatalf("competing commit: acknowledged=%v err=%v", committed.Committed, err)

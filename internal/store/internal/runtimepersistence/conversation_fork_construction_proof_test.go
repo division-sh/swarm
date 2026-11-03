@@ -191,7 +191,7 @@ func TestConversationForkHistoricalClockDoesNotLeakToOrdinaryConstructionBothSto
 			mutation.ExpectedState, mutation.ExpectedRevision = "after", 2
 			mutation.CurrentState = "after"
 			mutation.Fields = []byte(`{"name":"ordinary-after"}`)
-			mutation.Bookkeeping, mutation.Gates, mutation.Accumulator = []byte(`{}`), []byte(`{}`), []byte(`{}`)
+			mutation.Bookkeeping, mutation.Accumulator = []byte(`{}`), []byte(`{}`)
 			mutation.UpdatedAt = born.Add(time.Hour)
 			before = time.Now().UTC().Truncate(time.Microsecond)
 			if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: mutation}); err != nil {

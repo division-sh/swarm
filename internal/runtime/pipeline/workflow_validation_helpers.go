@@ -100,11 +100,10 @@ func workflowEntitySchemaFieldDefinitions(raw any) map[string]runtimecontracts.E
 			name := strings.TrimSpace(asString(field["name"]))
 			if name != "" {
 				out[name] = runtimecontracts.EntitySchemaField{
-					Name:        name,
-					Type:        strings.TrimSpace(asString(field["type"])),
-					Initial:     cloneWorkflowSchemaValue(field["initial"]),
-					Nullable:    asBool(field["nullable"]),
-					Description: strings.TrimSpace(asString(field["description"])),
+					Name:     name,
+					Type:     strings.TrimSpace(asString(field["type"])),
+					Initial:  cloneWorkflowSchemaValue(field["initial"]),
+					Nullable: asBool(field["nullable"]),
 				}
 			}
 		}

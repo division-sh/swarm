@@ -49,7 +49,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				record.UpdatedAt = time.Now().UTC()
 				record.EnteredStageAt = record.UpdatedAt
 				record.Fields = json.RawMessage(forkTestJSON(t, fields))
-				record.Bookkeeping, record.Gates, record.Accumulator = json.RawMessage(forkTestJSON(t, atomic)), json.RawMessage(forkTestJSON(t, atomic)), json.RawMessage(forkTestJSON(t, atomic))
+				record.Bookkeeping, record.Accumulator = json.RawMessage(forkTestJSON(t, atomic)), json.RawMessage(forkTestJSON(t, atomic))
 				if _, err := owner.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 					t.Fatalf("ordinary domain writer step %d: %v", step, err)
 				}
@@ -79,7 +79,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			// A later ordinary clear must not leak backward into either fixed cut.
 			record.CurrentState, record.UpdatedAt = "cleared", time.Now().UTC()
 			record.EnteredStageAt = record.UpdatedAt
-			record.Fields, record.Bookkeeping, record.Gates, record.Accumulator = []byte(`{}`), []byte(`{}`), []byte(`{}`), []byte(`{}`)
+			record.Fields, record.Bookkeeping, record.Accumulator = []byte(`{}`), []byte(`{}`), []byte(`{}`)
 			if _, err := owner.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +106,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				t.Fatalf("fixed-revision reconstruction: %+v %v", plan.Entities, err)
 			}
 			entity := plan.Entities[0]
-			assertForkDomainSnapshot(t, entity.EntityID, entity.CurrentState, entity.Fields, entity.Bookkeeping, entity.Gates, entity.Accumulator, entityID, wantFields, wantAtomic)
+			assertForkDomainSnapshot(t, entity.EntityID, entity.CurrentState, entity.Fields, entity.Bookkeeping, entity.Accumulator, entityID, wantFields, wantAtomic)
 			if forkTestJSON(t, before) != forkTestJSON(t, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 				t.Fatal("planning mutated source history")
 			}
@@ -115,7 +115,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				t.Fatalf("conversation snapshot: %#v", prepared.Snapshot.EntitySnapshot)
 			}
 			chat := prepared.Snapshot.EntitySnapshot[0]
-			assertForkDomainSnapshot(t, chat.EntityID, chat.CurrentState, chat.Fields, chat.Bookkeeping, chat.Gates, chat.Accumulator, entityID, wantFields, wantAtomic)
+			assertForkDomainSnapshot(t, chat.EntityID, chat.CurrentState, chat.Fields, chat.Bookkeeping, chat.Accumulator, entityID, wantFields, wantAtomic)
 			after := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 			for _, table := range []string{"entity_state", "entity_mutations"} {
 				if forkTestJSON(t, before[table]) != forkTestJSON(t, after[table]) {
@@ -126,12 +126,12 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 	}
 }
 
-func assertForkDomainSnapshot(t *testing.T, entityID string, stage *string, fields, bookkeeping, gates, accumulator map[string]any, wantID string, wantFields, wantAtomic map[string]any) {
+func assertForkDomainSnapshot(t *testing.T, entityID string, stage *string, fields, bookkeeping, accumulator map[string]any, wantID string, wantFields, wantAtomic map[string]any) {
 	t.Helper()
 	if entityID != wantID || stage == nil || *stage != "ready" || forkTestJSON(t, fields) != forkTestJSON(t, wantFields) {
 		t.Fatalf("snapshot scalar/fields: %s %v %#v", entityID, stage, fields)
 	}
-	for _, values := range []map[string]any{bookkeeping, gates, accumulator} {
+	for _, values := range []map[string]any{bookkeeping, accumulator} {
 		if forkTestJSON(t, values) != forkTestJSON(t, wantAtomic) {
 			t.Fatalf("opaque domain disagrees with writer: got=%#v want=%#v", values, wantAtomic)
 		}

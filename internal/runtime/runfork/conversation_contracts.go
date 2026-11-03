@@ -187,7 +187,6 @@ type ConversationForkEntitySnapshot struct {
 	EnteredStateAt *time.Time     `json:"entered_state_at,omitempty"`
 	Fields         map[string]any `json:"fields,omitempty"`
 	Bookkeeping    map[string]any `json:"bookkeeping,omitempty"`
-	Gates          map[string]any `json:"gates,omitempty"`
 	Accumulator    map[string]any `json:"accumulator,omitempty"`
 }
 

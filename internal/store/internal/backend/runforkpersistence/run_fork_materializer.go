@@ -685,7 +685,7 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("fieldless entity %s has authored-data clocks", entityID))
 		}
 		if entity.MaterializationMetadata.Source == runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState &&
-			(entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil) {
+			(entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Bookkeeping != nil || entity.Accumulator != nil) {
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("imported entity %s has lifecycle evidence", entityID))
 		}
 		out[entityID] = meta
@@ -815,7 +815,7 @@ func projectRunForkHistoricalFields(sourceRunID, forkRunID, entityID, targetBund
 	projected.Mutation.Fields = entity.Fields
 	switch entity.MaterializationMetadata.Source {
 	case runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState:
-		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
+		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
 			return projected, fmt.Errorf("imported entity %s cannot carry lifecycle evidence", entityID)
 		}
 	case runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance:
@@ -833,7 +833,7 @@ func projectRunForkHistoricalFields(sourceRunID, forkRunID, entityID, targetBund
 		if err := cancelRunForkRemovedArrivalState(accumulator, meta.RemovedArrivalRefs); err != nil {
 			return projected, err
 		}
-		projected.Mutation.CurrentState, projected.Mutation.Gates = entity.CurrentState, entity.Gates
+		projected.Mutation.CurrentState = entity.CurrentState
 		projected.Mutation.Bookkeeping, projected.Mutation.Accumulator = bookkeeping, accumulator
 		projected.Correspondence, projected.GateBindings = correspondence, bindings
 	default:

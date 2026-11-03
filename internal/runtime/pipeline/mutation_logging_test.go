@@ -45,14 +45,12 @@ func VerifyNativeWorkflowInstanceStoreTracksFieldsGatesAndAccumulatorInMutationL
 			owner := testRunScopedWorkflowInstanceFromContext(ctx, run)
 			if err := pc.workflowStore.mutate(ctx, owner, func(instance *WorkflowInstance) {
 				instance.Fields = map[string]any{"status": "open", "business_status": "pending"}
-				instance.Gates = map[string]bool{"g_ready": true}
 				instance.StateBuckets = map[string]any{"evidence": map[string]any{"score": 1}}
 			}); err != nil {
 				t.Fatalf("initial native tracked-state write: %v", err)
 			}
 			if err := pc.workflowStore.mutate(ctx, owner, func(instance *WorkflowInstance) {
 				instance.Fields = map[string]any{"status": "closed", "business_status": "approved"}
-				instance.Gates = map[string]bool{"g_done": true}
 				instance.StateBuckets = map[string]any{"evidence": map[string]any{"score": 2}, "notes": map[string]any{"count": 1}}
 			}); err != nil {
 				t.Fatalf("update native tracked state: %v", err)
@@ -64,7 +62,7 @@ func VerifyNativeWorkflowInstanceStoreTracksFieldsGatesAndAccumulatorInMutationL
 			if _, err := executeNativeClaimedPipelineHandlerForTest(t, pc, withWorkflowNodeDeliveryRoute(ctx, route), node, handler, workflowTriggerContext{Event: inbound, State: mustCurrentWorkflowState(t, pc, ctx, owner.Route, run), HandlerEventKey: "flow.transitioned"}); err != nil {
 				t.Fatalf("native compiled stage transition: %v", err)
 			}
-			assertNativeTrackedMutationProjectionForTest(t, fixture, ctx, run, "lifecycle_state:", "authored_field:status", "authored_field:business_status", "gate:g_ready", "gate:g_done", "accumulator:evidence", "accumulator:notes")
+			assertNativeTrackedMutationProjectionForTest(t, fixture, ctx, run, "lifecycle_state:", "authored_field:status", "authored_field:business_status", "accumulator:evidence", "accumulator:notes")
 		})
 	}
 }
@@ -107,7 +105,7 @@ func nativeMutationLoggingFixtureForTest(t *testing.T, backend string, open pipe
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":   "stages:\n  queued: {}\n  done: {}\n",
 		"state.yaml":    "status: text\nbusiness_status: text\nverticals: map[text]Vertical\ntags: [text]\n",
-		"types.yaml":    "types:\n  Job:\n    id: text\n    title: text\n  Vertical:\n    status: text\n    active_jobs: [Job]\n",
+		"types.yaml":    "Job:\n  id: text\n  title: text\nVertical:\n  status: text\n  active_jobs: [Job]\n",
 		"events.yaml":   "flow.transitioned:\n",
 		"nodes.yaml":    "lifecycle-owner:\n  flow.transitioned: {advances_to: done}\n",
 	})
@@ -116,19 +114,6 @@ func nativeMutationLoggingFixtureForTest(t *testing.T, backend string, open pipe
 		t.Fatal(err)
 	}
 	return fixture, pc, ctx
-}
-
-func VerifyNativeApplyWorkflowGateMutation_LogsMutationRowForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture, pc, ctx, _ := nativeLifecycleComponentForTest(t, backend, lifecycleStateFixtureForTest(t, ".", "queued", "done", "flow.transitioned"), "queued", open)
-			run := runtimeRunID(ctx)
-			if err := pc.applyWorkflowGateForTest(ctx, testWorkflowInstanceRoute(run), "workflow.ready", "g_ready", false); err != nil {
-				t.Fatalf("native gate mutation: %v", err)
-			}
-			assertNativeTrackedMutationProjectionForTest(t, fixture, ctx, run, "gate:g_ready")
-		})
-	}
 }
 
 func VerifyNativeAccumulatorAppend_LogsMutationRowForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
@@ -234,7 +219,7 @@ func VerifyNativeMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTab
 }
 
 func VerifyNativeMutationLoggedGateAndAccumulatorWritesFailClosedWithoutJournalForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	for _, operation := range []string{"gate mutation", "accumulator append"} {
+	for _, operation := range []string{"accumulator append"} {
 		for _, backend := range []string{"sqlite", "postgres"} {
 			t.Run(operation+"/"+backend, func(t *testing.T) {
 				fixture, pc, ctx, _ := nativeLifecycleComponentForTest(t, backend, lifecycleStateFixtureForTest(t, ".", "queued", "done", "flow.transitioned"), "queued", open)
@@ -252,20 +237,13 @@ func VerifyNativeMutationLoggedGateAndAccumulatorWritesFailClosedWithoutJournalF
 						t.Error(err)
 					}
 				})
-				if operation == "gate mutation" {
-					err = pc.applyWorkflowGateForTest(ctx, owner.Route, "workflow.ready", "g_ready", false)
-				} else {
-					err = commitAccumulatorAppendForTest(ctx, pc, owner.Route, run, ".", "research", map[string]any{"summary": "done"})
-				}
+				err = commitAccumulatorAppendForTest(ctx, pc, owner.Route, run, ".", "research", map[string]any{"summary": "done"})
 				if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 					t.Fatalf("native %s err=%v, want entity_mutations failure", operation, err)
 				}
 				after, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, owner)
 				if err != nil || !found || mustCanonicalJSON(t, after) != mustCanonicalJSON(t, before) {
 					t.Fatalf("rejected %s changed exact native state: before=%+v after=%+v found=%t err=%v", operation, before, after, found, err)
-				}
-				if after.Gates["g_ready"] {
-					t.Fatal("rejected mutation set g_ready")
 				}
 				if _, present := after.StateBuckets["journal"]; present {
 					t.Fatal("rejected append left the journal bucket")

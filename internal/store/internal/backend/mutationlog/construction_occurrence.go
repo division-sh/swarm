@@ -121,7 +121,7 @@ func fixedForkConstructionWitness(plan pipeline.FlowInstanceActivationPlan, even
 	mode, parent := "template", (flowidentity.ParentRoute{FlowID: ".", FlowInstance: plan.Readiness.RunID, EntityID: plan.Readiness.RunID})
 	if component {
 		mode, parent = "static", flowidentity.ParentRoute{}
-		if !plan.OccurredAt.Equal(time.Unix(1700000210, 0).UTC()) || len(plan.Instance.Bookkeeping) != 0 || len(plan.Instance.Gates) != 0 || len(plan.Instance.StateBuckets) != 0 {
+		if !plan.OccurredAt.Equal(time.Unix(1700000210, 0).UTC()) || len(plan.Instance.Bookkeeping) != 0 || len(plan.Instance.StateBuckets) != 0 {
 			return false
 		}
 	}
@@ -182,9 +182,9 @@ func fixedForkWitnessBuckets(plan pipeline.FlowInstanceActivationPlan, component
 	}
 	if plan.Identity.TemplateID == "flow-a" && plan.Instance.CurrentState == "queued" {
 		return len(plan.Instance.Bookkeeping) == 2 && plan.Instance.Bookkeeping["activation"] == "standing" &&
-			reflect.DeepEqual(plan.Instance.Gates, map[string]bool{"review": true}) && reflect.DeepEqual(plan.Instance.StateBuckets, map[string]any{"total": int64(7)})
+			reflect.DeepEqual(plan.Instance.StateBuckets, map[string]any{"total": int64(7)})
 	}
-	return len(plan.Instance.Bookkeeping) == 1 && len(plan.Instance.Gates) == 0 && len(plan.Instance.StateBuckets) == 0
+	return len(plan.Instance.Bookkeeping) == 1 && len(plan.Instance.StateBuckets) == 0
 }
 
 func (o *ConstructionOccurrence) addConstructionBirth(plan pipeline.FlowInstanceActivationPlan) error {
@@ -208,7 +208,7 @@ func (o *ConstructionOccurrence) addConstructionBirth(plan pipeline.FlowInstance
 	for _, bucket := range []struct {
 		raw json.RawMessage
 		dst *map[string]any
-	}{{state.Fields, &projection.Fields}, {state.Bookkeeping, &projection.Bookkeeping}, {state.Gates, &projection.Gates}, {state.Accumulator, &projection.Accumulator}} {
+	}{{state.Fields, &projection.Fields}, {state.Bookkeeping, &projection.Bookkeeping}, {state.Accumulator, &projection.Accumulator}} {
 		if err := canonicaljson.DecodePreservingNumberLexemes(bucket.raw, bucket.dst); err != nil {
 			return err
 		}

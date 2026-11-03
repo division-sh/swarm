@@ -19,7 +19,7 @@ func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 	if err := gateruntime.Store(buckets, source); err != nil {
 		t.Fatal(err)
 	}
-	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
+	raw := runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets()
 	targetHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 	forkedRaw, bindings, err := forkGateActivationState(raw, "fork-run", "launch/review", "entity-1", targetHash)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 	if len(bindings) != 1 || bindings[0].Source.ActivationID != source.ActivationID {
 		t.Fatalf("bindings = %#v", bindings)
 	}
-	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, forkedRaw)
+	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, forkedRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

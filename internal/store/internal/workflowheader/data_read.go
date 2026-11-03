@@ -20,7 +20,7 @@ const DataReadColumns = `CAST(es.run_id AS TEXT), CAST(es.entity_id AS TEXT),
 	CAST(fi.entity_id AS TEXT), fi.instance_path, fi.entity_type, fi.flow_template,
 	fi.mode, fi.status, fi.config, fi.current_state, fi.stage_defined, fi.revision,
 	fi.entered_state_at, fi.created_at, fi.updated_at, fi.terminated_at,
-	fi.gates, fi.bookkeeping, fi.accumulator, fi.parent_instance, fi.instance_key,
+	fi.bookkeeping, fi.accumulator, fi.parent_instance, fi.instance_key,
 	(SELECT COUNT(*) FROM flow_instances owner
 	 WHERE owner.run_id = es.run_id AND (owner.entity_id = es.entity_id OR owner.instance_path = es.flow_instance))`
 
@@ -42,16 +42,16 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	var revision sql.NullInt64
 	var owners int
 	var dataCreated, dataUpdated, entered, created, updated, terminated any
-	var fields, config, gates, bookkeeping, accumulator []byte
+	var fields, config, bookkeeping, accumulator []byte
 	dest := []any{&runID, &state.EntityID, &state.FlowInstance, &state.EntityType, &slug, &name,
 		&fields, &dataCreated, &dataUpdated, &headerID, &path, &entityType, &template,
 		&mode, &status, &config, &stage, &stageDefined, &revision, &entered, &created, &updated,
-		&terminated, &gates, &bookkeeping, &accumulator, &parentInstance, &instanceKey, &owners}
+		&terminated, &bookkeeping, &accumulator, &parentInstance, &instanceKey, &owners}
 	if err := row.Scan(append(dest, tail...)...); err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}
 	state.Fields = fields
-	header.Config, header.Gates, header.Bookkeeping, header.Accumulator = config, gates, bookkeeping, accumulator
+	header.Config, header.Bookkeeping, header.Accumulator = config, bookkeeping, accumulator
 	if owners > 1 || (owners == 1) != headerID.Valid {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("entity has conflicting constructed header owners")
 	}
@@ -89,7 +89,7 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 		for _, object := range []struct {
 			name string
 			raw  any
-		}{{"gates", header.Gates}, {"bookkeeping", header.Bookkeeping}, {"accumulator", header.Accumulator}} {
+		}{{"bookkeeping", header.Bookkeeping}, {"accumulator", header.Accumulator}} {
 			if err := requireJSONObject(object.name, object.raw); err != nil {
 				return operatorread.OperatorEntityFull{}, err
 			}
@@ -120,7 +120,7 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	if header.StageDefined {
 		out.Entity.CurrentState, out.Entity.EnteredStateAt = &header.CurrentState, &header.EnteredStageAt
 	}
-	out.Gates, out.Bookkeeping = instance.Gates, instance.Bookkeeping
+	out.Bookkeeping = instance.Bookkeeping
 	loops, err := loopruntime.PublicActivations(instance.StateBuckets)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, err

@@ -206,7 +206,7 @@ func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runI
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Gates, entity.Accumulated)
+	carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Accumulated)
 	if err != nil {
 		t.Fatal(err)
 	}

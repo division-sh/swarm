@@ -152,7 +152,6 @@ type OperatorEntityFull struct {
 	Entity      OperatorEntitySummary          `json:"entity"`
 	Fields      map[string]any                 `json:"fields"`
 	Bookkeeping map[string]any                 `json:"bookkeeping"`
-	Gates       map[string]bool                `json:"gates"`
 	Accumulated map[string]any                 `json:"accumulated"`
 	Loops       []loopruntime.PublicActivation `json:"loops"`
 }

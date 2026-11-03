@@ -22,7 +22,7 @@ func assertQ10NativeInternalHistory(t *testing.T, ctx context.Context, selected 
 	for _, bucket := range []struct {
 		raw []byte
 		dst *map[string]any
-	}{{evidence.Fields, &current.Fields}, {evidence.Bookkeeping, &current.Bookkeeping}, {evidence.Gates, &current.Gates}, {evidence.Accumulator, &current.Accumulator}} {
+	}{{evidence.Fields, &current.Fields}, {evidence.Bookkeeping, &current.Bookkeeping}, {evidence.Accumulator, &current.Accumulator}} {
 		if bucket.raw != nil {
 			if err := canonicaljson.DecodePreservingNumberLexemes(bucket.raw, bucket.dst); err != nil {
 				t.Fatal(err)

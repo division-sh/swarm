@@ -304,8 +304,8 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		runtimeProjectionNestedValue(t, entity.Fields, "bookkeeping", "activation") != "manual" {
 		t.Fatalf("conversation fork authored collision fields = %#v", entity.Fields)
 	}
-	if entity.Bookkeeping["activation"] != "standing" || entity.Gates["review"] != true || entity.Accumulator["total"] != float64(7) {
-		t.Fatalf("conversation fork typed semantic domains = bookkeeping:%#v gates:%#v accumulator:%#v", entity.Bookkeeping, entity.Gates, entity.Accumulator)
+	if entity.Bookkeeping["activation"] != "standing" || entity.Accumulator["total"] != float64(7) {
+		t.Fatalf("conversation fork typed semantic domains = bookkeeping:%#v accumulator:%#v", entity.Bookkeeping, entity.Accumulator)
 	}
 	if _, ok := entity.Fields["removed"]; ok {
 		t.Fatalf("deleted authored field survived fork reconstruction: %#v", entity.Fields)
@@ -315,9 +315,6 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	}
 	if _, ok := entity.Bookkeeping["removed"]; ok {
 		t.Fatalf("deleted bookkeeping fact survived fork reconstruction: %#v", entity.Bookkeeping)
-	}
-	if _, ok := entity.Gates["removed"]; ok {
-		t.Fatalf("deleted gate survived fork reconstruction: %#v", entity.Gates)
 	}
 	readCall := requireConversationForkToolCall(t, result.Turn.ToolCalls, "fork_snapshot_read_entities")
 	readArgs := conversationForkToolCallMap(t, readCall.Arguments)

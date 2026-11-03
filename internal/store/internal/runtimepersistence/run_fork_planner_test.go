@@ -165,9 +165,6 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	if got.Fields["title"] != "before-title" {
 		t.Fatalf("field title = %#v, want before-title", got.Fields["title"])
 	}
-	if got.Gates["ready"] != true {
-		t.Fatalf("gate ready = %#v, want true", got.Gates["ready"])
-	}
 	if got.Accumulator["score"] != int64(7) {
 		t.Fatalf("accumulator score = %#v (%T), want int64(7)", got.Accumulator["score"], got.Accumulator["score"])
 	}

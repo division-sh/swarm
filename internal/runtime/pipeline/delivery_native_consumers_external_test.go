@@ -386,10 +386,6 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 	pipeline.VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
-	pipeline.VerifyNativeApplyWorkflowGateMutation_LogsMutationRowForTest(t, pipelineDeliveryNativeFixture)
-}
-
 func TestAccumulatorAppend_LogsMutationRow(t *testing.T) {
 	pipeline.VerifyNativeAccumulatorAppend_LogsMutationRowForTest(t, pipelineDeliveryNativeFixture)
 }

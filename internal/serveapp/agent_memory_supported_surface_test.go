@@ -559,13 +559,13 @@ func addStandingMockInput(t *testing.T, root string) {
   conversation_reference: text
   provider_message_reference: integer
 mock.message_ready:
-  key: conversation_reference
-  operator_account: {type: text, pattern: '^[0-9]+$', length: {min: 1}}
-  text: {type: text, length: {min: 1, max: 4096}}
-  external_account: {type: text, pattern: '^[0-9]+$', length: {min: 1, max: 17}}
-  conversation_reference: {type: text, pattern: '^-?[0-9]+$', length: {min: 1, max: 17}}
+  _key: conversation_reference
+  operator_account: text
+  text: text
+  external_account: text
+  conversation_reference: text
   conversation_scope: MockConversationScope
-  provider_message_reference: {type: integer, range: {min: 1, max: 2147483647}}
+  provider_message_reference: integer
 `)
 	writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "enums:\n  MockConversationScope: {values: [direct, shared], default: direct}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), `mock-input:

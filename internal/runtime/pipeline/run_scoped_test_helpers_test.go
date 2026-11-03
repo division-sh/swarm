@@ -44,7 +44,6 @@ func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInst
 	if instance.Bookkeeping == nil {
 		instance.Bookkeeping = map[string]any{}
 	}
-	instance.Gates = cloneWorkflowGates(instance.Gates)
 	storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
 	if storageRef != "" {
 		instance.InstanceID = runtimeflowidentity.LogicalInstanceID(storageRef)

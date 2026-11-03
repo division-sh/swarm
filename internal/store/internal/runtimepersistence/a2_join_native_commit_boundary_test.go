@@ -234,7 +234,7 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 		if err := joinruntime.Store(buckets, arm); err != nil {
 			t.Fatal(err)
 		}
-		raw, err := canonicaljson.MarshalPreservingNumberKinds(engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+		raw, err := canonicaljson.MarshalPreservingNumberKinds(engine.NewStateCarrier(nil, buckets).PersistedStateBuckets())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,7 +377,7 @@ func assertA2NativeJoinState(t *testing.T, evidence a2NativeJoinEvidence, fixtur
 	if err != nil || !found || entry != *fixture.command.Lifecycle.StageEntry || evidence.Instance.EntityID != fixture.command.State.EntityID || evidence.Instance.CurrentState != "awaiting" {
 		t.Fatalf("wrong exact stage-entry/entity owner: entry=%#v instance=%#v err=%v", entry, evidence.Instance, err)
 	}
-	carrier, err := engine.StateCarrierFromPersisted(evidence.Instance.Fields, evidence.Instance.Bookkeeping, evidence.Instance.Gates, evidence.Instance.StateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(evidence.Instance.Fields, evidence.Instance.Bookkeeping, evidence.Instance.StateBuckets)
 	if err != nil {
 		t.Fatalf("decode persisted join carrier: %v", err)
 	}

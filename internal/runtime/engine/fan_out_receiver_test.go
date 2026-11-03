@@ -44,7 +44,7 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 			result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{
 				EntityID: "entity-1", Node: node, Route: flowidentity.StoredRoute("flow-1", "flow-1", "flow-1"), Event: event,
 				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", As: "fan_item", Identity: "fan_item", Emit: runtimecontracts.EmitSpec{Event: "item.process"}}},
-				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				State:   testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 			})
 			if err != nil || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 || len(result.EmitIntents) != 0 {
 				t.Fatalf("real handler did not capture deferred work: %+v %v", result, err)

@@ -88,7 +88,7 @@ func TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores(t *tes
 					if err != nil || !found {
 						t.Fatalf("load constructed gate: found=%t err=%v", found, err)
 					}
-					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -34,7 +34,6 @@ type StateCarrier struct {
 	Fields       map[string]any
 	Bookkeeping  map[string]any
 	Control      StateControl
-	Gates        map[string]bool
 	StateBuckets map[string]map[string]any
 }
 
@@ -50,23 +49,22 @@ type StateControl struct {
 	ParentEntityID     string
 }
 
-func NewStateCarrier(fields map[string]any, gates map[string]bool, stateBuckets map[string]map[string]any) StateCarrier {
+func NewStateCarrier(fields map[string]any, stateBuckets map[string]map[string]any) StateCarrier {
 	return StateCarrier{
 		Fields:       cloneStringAnyMap(fields),
 		Bookkeeping:  map[string]any{},
-		Gates:        mapsClone(gates),
 		StateBuckets: cloneStateBucketSet(stateBuckets),
 	}
 }
 
-func NewStateCarrierWithOwners(fields, bookkeeping map[string]any, control StateControl, gates map[string]bool, stateBuckets map[string]map[string]any) StateCarrier {
-	carrier := NewStateCarrier(fields, gates, stateBuckets)
+func NewStateCarrierWithOwners(fields, bookkeeping map[string]any, control StateControl, stateBuckets map[string]map[string]any) StateCarrier {
+	carrier := NewStateCarrier(fields, stateBuckets)
 	carrier.Bookkeeping = cloneStringAnyMap(bookkeeping)
 	carrier.Control = control
 	return carrier
 }
 
-func StateCarrierFromPersisted(fields, bookkeeping map[string]any, gates map[string]bool, stateBuckets map[string]any) (StateCarrier, error) {
+func StateCarrierFromPersisted(fields, bookkeeping map[string]any, stateBuckets map[string]any) (StateCarrier, error) {
 	buckets, err := stateBucketSetFromRaw(stateBuckets)
 	if err != nil {
 		return StateCarrier{}, err
@@ -74,17 +72,12 @@ func StateCarrierFromPersisted(fields, bookkeeping map[string]any, gates map[str
 	return StateCarrier{
 		Fields:       cloneStringAnyMap(fields),
 		Bookkeeping:  cloneStringAnyMap(bookkeeping),
-		Gates:        mapsClone(gates),
 		StateBuckets: buckets,
 	}, nil
 }
 
 func (c StateCarrier) FieldsBucket() values.Bucket {
 	return values.Wrap(c.Fields)
-}
-
-func (c StateCarrier) GatesBucket() values.Bucket {
-	return values.Wrap(boolMapToAnyMap(c.Gates))
 }
 
 func (c StateCarrier) StateBucketsBucket() values.Bucket {
@@ -110,17 +103,6 @@ func (c StateCarrier) PersistedBookkeeping() map[string]any {
 
 func (c StateCarrier) PersistedStateBuckets() map[string]any {
 	return stateBucketSetAsRaw(c.StateBuckets)
-}
-
-func (c *StateCarrier) SetGate(name string, value bool) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return
-	}
-	if c.Gates == nil {
-		c.Gates = map[string]bool{}
-	}
-	c.Gates[name] = value
 }
 
 func (c *StateCarrier) SetField(key string, value any) {
@@ -184,20 +166,12 @@ func (s StateSnapshot) FieldsBucket() values.Bucket {
 	return s.StateCarrier.FieldsBucket()
 }
 
-func (s StateSnapshot) GatesBucket() values.Bucket {
-	return s.StateCarrier.GatesBucket()
-}
-
 func (s StateSnapshot) EntityContext() map[string]any {
 	return s.StateCarrier.EntityContext(s.EntityID, s.CurrentState, s.WorkflowName, s.WorkflowVersion)
 }
 
 func (s StateSnapshot) PlatformEntityContext(flowInstance string) map[string]any {
 	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance)
-}
-
-func (s *StateSnapshot) SetGate(name string, value bool) {
-	s.StateCarrier.SetGate(name, value)
 }
 
 func (s *StateSnapshot) SetField(key string, value any) {
@@ -406,17 +380,11 @@ type StateMutation struct {
 	TriggerEventType string
 	TriggeredAt      time.Time
 	StateCarrier
-	ClearGates       []string
-	SetGate          string
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 }
 
 func (m StateMutation) FieldsBucket() values.Bucket {
 	return m.StateCarrier.FieldsBucket()
-}
-
-func (m StateMutation) GatesBucket() values.Bucket {
-	return m.StateCarrier.GatesBucket()
 }
 
 func (m StateMutation) StateBucketsBucket() values.Bucket {
@@ -429,10 +397,6 @@ func (m *StateMutation) SetField(key string, value any) {
 
 func (m *StateMutation) SetBookkeeping(key string, value any) {
 	m.StateCarrier.SetBookkeeping(key, value)
-}
-
-func (m *StateMutation) SetGateValue(name string, value bool) {
-	m.StateCarrier.SetGate(name, value)
 }
 
 func (m *StateMutation) SetStateBuckets(raw map[string]map[string]any) {
@@ -452,8 +416,6 @@ type ExecutionResult struct {
 	NextState               string
 	GuardsEvaluated         []string
 	ActionsExecuted         []string
-	ClearGates              []string
-	SetsGate                string
 	HandlerRuleSelection    handlerselection.Observation
 	FanOutCount             int
 	FanOutIntent            *fanoutobligation.IntentRequest

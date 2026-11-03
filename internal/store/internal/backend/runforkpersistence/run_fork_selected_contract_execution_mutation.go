@@ -492,7 +492,7 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	for _, projection := range []struct {
 		value map[string]any
 		raw   *json.RawMessage
-	}{{history.Fields, &record.Fields}, {history.Fields, &record.InitialFields}, {history.Gates, &record.Gates}, {bookkeeping, &record.Bookkeeping}, {accumulator, &record.Accumulator}} {
+	}{{history.Fields, &record.Fields}, {history.Fields, &record.InitialFields}, {bookkeeping, &record.Bookkeeping}, {accumulator, &record.Accumulator}} {
 		value := projection.value
 		if value == nil {
 			value = map[string]any{}

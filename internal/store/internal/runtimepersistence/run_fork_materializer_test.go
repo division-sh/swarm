@@ -259,22 +259,21 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if !forkEnteredStateAt.Equal(at) {
 		t.Fatalf("fork entered_state_at = %s, want state-entry timestamp %s", forkEnteredStateAt, at)
 	}
-	var forkFieldsJSON, forkBookkeepingJSON, forkGatesJSON, forkAccumulatorJSON []byte
+	var forkFieldsJSON, forkBookkeepingJSON, forkAccumulatorJSON []byte
 	if err := db.QueryRowContext(ctx, `
-			SELECT e.fields, f.bookkeeping, f.gates, f.accumulator
+			SELECT e.fields, f.bookkeeping, f.accumulator
 			FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
 			WHERE e.run_id = $1::uuid AND e.entity_id = $2::uuid
-		`, result.ForkRunID, entityID).Scan(&forkFieldsJSON, &forkBookkeepingJSON, &forkGatesJSON, &forkAccumulatorJSON); err != nil {
+		`, result.ForkRunID, entityID).Scan(&forkFieldsJSON, &forkBookkeepingJSON, &forkAccumulatorJSON); err != nil {
 		t.Fatalf("load fork semantic domains: %v", err)
 	}
-	var forkFields, forkBookkeeping, forkGates, forkAccumulator map[string]any
+	var forkFields, forkBookkeeping, forkAccumulator map[string]any
 	for label, item := range map[string]struct {
 		raw    []byte
 		target *map[string]any
 	}{
 		"fields":      {forkFieldsJSON, &forkFields},
 		"bookkeeping": {forkBookkeepingJSON, &forkBookkeeping},
-		"gates":       {forkGatesJSON, &forkGates},
 		"accumulator": {forkAccumulatorJSON, &forkAccumulator},
 	} {
 		if err := json.Unmarshal(item.raw, item.target); err != nil {
@@ -287,8 +286,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		runtimeProjectionNestedValue(t, forkFields, "bookkeeping", "activation") != "manual" {
 		t.Fatalf("fork authored collision fields = %#v", forkFields)
 	}
-	if forkBookkeeping["activation"] != "standing" || forkGates["review"] != true || forkAccumulator["total"] != float64(7) {
-		t.Fatalf("fork typed semantic domains = bookkeeping:%#v gates:%#v accumulator:%#v", forkBookkeeping, forkGates, forkAccumulator)
+	if forkBookkeeping["activation"] != "standing" || forkAccumulator["total"] != float64(7) {
+		t.Fatalf("fork typed semantic domains = bookkeeping:%#v accumulator:%#v", forkBookkeeping, forkAccumulator)
 	}
 	var forkFlow, forkType, forkSlug, forkName string
 	if err := db.QueryRowContext(ctx, `
@@ -332,7 +331,6 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		{"authored_field", "accumulator"},
 		{"authored_field", "bookkeeping"},
 		{"bookkeeping", "activation"},
-		{"gate", "review"},
 		{"accumulator", "total"},
 	} {
 		var count int

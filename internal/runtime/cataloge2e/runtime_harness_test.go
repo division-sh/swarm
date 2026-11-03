@@ -106,7 +106,6 @@ type catalogExpectedDocument struct {
 		Entity                        map[string]any       `yaml:"entity"`
 		EntityStateBefore             string               `yaml:"entity_state_before"`
 		EntityFieldsBefore            map[string]any       `yaml:"entity_fields_before"`
-		GatesBefore                   map[string]bool      `yaml:"gates_before"`
 		AssertPersistedBeforeDelivery bool                 `yaml:"assert_persisted_before_delivery"`
 	} `yaml:"trigger"`
 	Expected struct {
@@ -117,7 +116,6 @@ type catalogExpectedDocument struct {
 		FlowBState          string                           `yaml:"flow_b_state"`
 		FlowEntities        map[string]catalogEntityExpected `yaml:"flow_entities"`
 		EntityFields        map[string]any                   `yaml:"entity_fields"`
-		Gates               map[string]bool                  `yaml:"gates"`
 		EmittedEvents       []string                         `yaml:"emitted_events"`
 		CausalEvents        []string                         `yaml:"causal_events"`
 		AgentReceived       map[string][]string              `yaml:"agent_received"`
@@ -130,14 +128,13 @@ type catalogExpectedDocument struct {
 }
 
 type catalogEntityExpected struct {
-	HandlerOutcome string          `yaml:"handler_outcome"`
-	Exists         *bool           `yaml:"exists"`
-	EntityState    string          `yaml:"entity_state"`
-	EntityFields   map[string]any  `yaml:"entity_fields"`
-	Gates          map[string]bool `yaml:"gates"`
-	EmittedEvents  []string        `yaml:"emitted_events"`
-	CausalEvents   []string        `yaml:"causal_events"`
-	DeadLetter     bool            `yaml:"dead_letter"`
+	HandlerOutcome string         `yaml:"handler_outcome"`
+	Exists         *bool          `yaml:"exists"`
+	EntityState    string         `yaml:"entity_state"`
+	EntityFields   map[string]any `yaml:"entity_fields"`
+	EmittedEvents  []string       `yaml:"emitted_events"`
+	CausalEvents   []string       `yaml:"causal_events"`
+	DeadLetter     bool           `yaml:"dead_letter"`
 }
 
 func (d catalogExpectedDocument) triggerSequence() []catalogTriggerStep {
@@ -1356,7 +1353,7 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 			state.WorkflowName = instance.WorkflowName
 			state.WorkflowVersion = instance.WorkflowVersion
 			state.EnteredStateAt = instance.EnteredStageAt
-			state.StateCarrier, err = runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+			state.StateCarrier, err = runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.StateBuckets)
 			if err != nil {
 				return runtimepipeline.HandlerPreview{}, false
 			}
@@ -1462,7 +1459,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if h == nil || h.workflow == nil {
 		return
 	}
-	if len(expected.Trigger.EntityFieldsBefore) == 0 && len(expected.Trigger.Entity) == 0 && len(expected.Trigger.GatesBefore) == 0 && strings.TrimSpace(expected.Trigger.EntityStateBefore) == "" {
+	if len(expected.Trigger.EntityFieldsBefore) == 0 && len(expected.Trigger.Entity) == 0 && strings.TrimSpace(expected.Trigger.EntityStateBefore) == "" {
 		return
 	}
 	entityID := ""
@@ -1533,18 +1530,6 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 		}
 		instance.Fields[key] = value
 	}
-	if len(expected.Trigger.GatesBefore) > 0 {
-		if instance.Gates == nil {
-			instance.Gates = map[string]bool{}
-		}
-		for key, value := range expected.Trigger.GatesBefore {
-			key = h.catalogGateKey(h.bundle.WorkflowName(), key)
-			if key == "" {
-				continue
-			}
-			instance.Gates[key] = value
-		}
-	}
 	if ok {
 		h.t.Fatalf("entity field fixture %s was already materialized before exact fixture projection", entityID)
 	}
@@ -1583,21 +1568,6 @@ func (h *runtimeHarness) requireRootEntityType() string {
 		h.t.Fatalf("catalog stateful fixture %s requires one canonical root entity contract", h.bundle.WorkflowName())
 	}
 	return strings.TrimSpace(contract.EntityType)
-}
-
-func (h *runtimeHarness) catalogGateKey(flowID, key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" || strings.Contains(key, "/") || h == nil || h.bundle == nil {
-		return key
-	}
-	scope := strings.Trim(strings.TrimSpace(semanticview.Wrap(h.bundle).FlowPath(strings.TrimSpace(flowID))), "/")
-	if scope == "" {
-		scope = strings.Trim(strings.TrimSpace(flowID), "/")
-	}
-	if scope == "" {
-		return key
-	}
-	return scope + "/" + key
 }
 
 func triggerPayloadEntityID(payload map[string]any) string {

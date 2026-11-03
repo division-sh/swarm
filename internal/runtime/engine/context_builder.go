@@ -44,7 +44,6 @@ func baseContextWithAdmittedFields(input ContextBuilderInput, materializedFields
 	base.PlatformEntity = values.Wrap(materializedState.PlatformEntityContext(contextFlowInstance(input.State, input.Event, input.FlowID)))
 	base.FlowID = firstNonEmpty(strings.TrimSpace(input.FlowID), strings.TrimSpace(input.State.WorkflowName))
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Fields))
-	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Event = values.Wrap(input.Event.ContextMap(input.State.CurrentState))
 	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))
 	if input.Source != nil {

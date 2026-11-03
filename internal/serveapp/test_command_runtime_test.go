@@ -1421,12 +1421,12 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "enums:\n  PublicConversationScope: {values: [direct, shared], default: direct}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `message.received:
-  key: conversation_reference
-  conversation_reference: {type: text, pattern: '^-?[0-9]+$', length: {min: 1, max: 32}}
+  _key: conversation_reference
+  conversation_reference: text
   conversation_scope: PublicConversationScope
-  external_account: {type: text, pattern: '^[0-9]+$', length: {min: 1, max: 17}}
-  provider_message_reference: {type: integer, range: {min: 1, max: 2147483647}}
-  text: {type: text, length: {min: 1, max: 4096}}
+  external_account: text
+  provider_message_reference: integer
+  text: text
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-responder:

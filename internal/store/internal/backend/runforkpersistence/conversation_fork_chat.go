@@ -804,7 +804,6 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 			EnteredStateAt: enteredStateAt,
 			Fields:         projection.Fields,
 			Bookkeeping:    projection.Bookkeeping,
-			Gates:          projection.Gates,
 			Accumulator:    projection.Accumulator,
 		})
 	}

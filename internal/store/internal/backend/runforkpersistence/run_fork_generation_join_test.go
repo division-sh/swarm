@@ -77,7 +77,7 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
+			raw := runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets()
 			before := projectionJSON(t, raw)
 			entity := a2ForkEntity(t, entry, raw)
 			projection, err := runfork.ProjectEntityOwnership("source", "child", "source", "source")
@@ -97,7 +97,7 @@ func TestForkGenerationHistoricalJoinProjection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, child)
+			carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, child)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,7 +150,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	nodeBucketKey := forkGenerationRootNode("review-node").Key()
 	buckets[nodeBucketKey] = map[string]any{}
 	buckets[nodeBucketKey]["handler_accumulators"] = map[string]any{accumulatorRef.Key(): map[string]any{"count": 1}}
-	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
+	raw := runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets()
 	entity := a2ForkEntity(t, entry, raw)
 	projection, err := runfork.ProjectEntityOwnership("source-run", "fork-run", "source-run", "source-run")
 	if err != nil {
@@ -160,7 +160,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, forkedRaw)
+	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, forkedRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -241,10 +241,7 @@ review_scores: map[text]integer
 		"operating/types.yaml":  "Brief:\n  summary: text\nFeature:\n  name: text\n",
 		"operating/events.yaml": "opco.product_review_requested:\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
-  gate_state:
-    gates: [review_ready]
   opco.product_review_requested:
-    sets_gate: review_ready
     advances_to: ready
 `,
 		"secondary/schema.yaml": "# fixture: secondary\nstages:\n  open: {}\n  closed: {final: true}\n",
@@ -272,7 +269,7 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 outputs:
   - deploy.done
 `,
-		"producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
+		"producer/events.yaml": "deploy.done:\n  _key: vertical_id\n  vertical_id: string\n",
 		"consumer/schema.yaml": `# fixture: consumer
 instance: vertical_id
 inputs:
@@ -306,7 +303,7 @@ opco.spinup_requested:
   instance_id: string
   product_id: string
 opco.create_requested:
-  key: instance_id
+  _key: instance_id
   instance_id: string
   product_id: string
 `,

@@ -118,9 +118,6 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	if _, ok := entity.Bookkeeping["removed"]; ok {
 		t.Fatalf("SQLite deleted bookkeeping fact survived reconstruction: %#v", entity.Bookkeeping)
 	}
-	if _, ok := entity.Gates["removed"]; ok {
-		t.Fatalf("SQLite deleted gate survived reconstruction: %#v", entity.Gates)
-	}
 
 	const chatCount = 4
 	turnIndexes := make(chan int, chatCount)

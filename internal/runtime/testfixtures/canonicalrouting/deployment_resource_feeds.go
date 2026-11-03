@@ -34,7 +34,7 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	root := CopyRootOutputSingletonConnect(t)
 	eventsYAML := "root.ready:\n  account_id: text\n  document: json?\n"
 	if keyed {
-		eventsYAML = "root.ready:\n  key: account_id\n  account_id: text\n  document: json?\n"
+		eventsYAML = "root.ready:\n  _key: account_id\n  account_id: text\n  document: json?\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", eventsYAML+DeploymentFixtureCloseDeclaration)
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-output-singleton-connect\nstages: {active: {}, done: {final: true}}\ninputs: [root.ready, fixture.close.requested]\noutputs:\n  - root.ready\n  - fixture.close.requested\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n")

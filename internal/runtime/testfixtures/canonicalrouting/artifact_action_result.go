@@ -71,10 +71,8 @@ repo_scaffold.repo_commit_failed:
             request_id: payload.request_id
             request_copy: payload.request_id
             result_kind: "failed"
-  repo_scaffold.repo_commit_succeeded:
-    sets_gate: result_callback_observed
-  repo_scaffold.repo_commit_failed:
-    sets_gate: result_callback_observed
+  repo_scaffold.repo_commit_succeeded: {}
+  repo_scaffold.repo_commit_failed: {}
 `,
 	}
 }

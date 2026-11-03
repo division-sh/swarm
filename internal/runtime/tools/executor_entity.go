@@ -21,7 +21,6 @@ var entityStateTopLevelFields = map[string]struct{}{
 	"name":                 {},
 	"stage_defined":        {},
 	"current_state":        {},
-	"gates":                {},
 	"fields":               {},
 	"accumulator":          {},
 	"revision":             {},

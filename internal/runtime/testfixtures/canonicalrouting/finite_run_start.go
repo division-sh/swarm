@@ -27,7 +27,7 @@ func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"registry/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: {done: {final: true}}\ninputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n",
-		"events.yaml":            "item.registered:\n  key: item_id\n  item_id: text\n",
+		"events.yaml":            "item.registered:\n  _key: item_id\n  item_id: text\n",
 		"registry/schema.yaml":   "instance: item_id\nstages: {pending: {}, done: {final: true}}\ninputs: [item.registered]\n",
 		"registry/state.yaml":    "item_id: text\n",
 		"registry/nodes.yaml":    "register:\n  item.registered: {advances_to: done}\n",
@@ -51,7 +51,7 @@ func CopyRootInputFeed(t testing.TB, kind DeploymentFeedRoot) string {
 		files["schema.yaml"] = "stages: {done: {final: true}}\noutputs: [item.registered]\nconnect:\n  - {event: item.registered, from: ., to: registry, resolution: create}\n"
 	case DeploymentFeedPrivateRoot:
 		files["schema.yaml"] = "stages: {done: {final: true}}\n"
-		files["registry/events.yaml"] = "item.registered:\n  key: item_id\n  item_id: text\n"
+		files["registry/events.yaml"] = "item.registered:\n  _key: item_id\n  item_id: text\n"
 	default:
 		t.Fatalf("unknown deployment feed root %d", kind)
 	}
@@ -84,7 +84,7 @@ func CopyDeploymentRunStart(t testing.TB) string {
 		"discovery/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":             "# fixture: deployment\nstages: {done: {final: true}}\ninputs: [scan.requested, score.observed]\noutputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n",
-		"events.yaml":             "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\nportfolio.opened:\n  topic: text\n",
+		"events.yaml":             "scan.requested:\n  topic: text\nscore.observed:\n  _key: label\n  label: text\nportfolio.opened:\n  topic: text\n",
 		"discovery/schema.yaml":   "instance: topic\nstages: {ready: {}, done: {final: true}}\ninputs: [scan.requested]\n",
 		"discovery/state.yaml":    "topic: text\n",
 		"discovery/nodes.yaml":    "scanner:\n  scan.requested:\n    advances_to: done\n",
@@ -107,7 +107,7 @@ func CopyPublicCompletionFeedOnly(t testing.TB) string {
 	root := CopyDeploymentRunStart(t)
 	// portfolio.opened belongs to the component's unpinned-resource rejection
 	// control; the served completion journey carries only active declarations.
-	writeClosedVariantFile(t, root, "events.yaml", "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", "scan.requested:\n  topic: text\nscore.observed:\n  _key: label\n  label: text\n")
 	return root
 }
 

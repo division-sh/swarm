@@ -175,24 +175,6 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			wantField: "entities[0].fields.review_scores",
 		},
 		{
-			name:            "undeclared gate",
-			constructedRoot: true,
-			edit: func(entity map[string]any) {
-				entity["gates"] = map[string]any{"missing_gate": true}
-			},
-			wantField:  "entities[0].gates.missing_gate",
-			wantReason: "is not declared for the selected flow",
-		},
-		{
-			name:            "non boolean gate",
-			constructedRoot: true,
-			edit: func(entity map[string]any) {
-				entity["gates"] = map[string]any{"review_ready": "yes"}
-			},
-			wantField:  "entities[0].gates.review_ready",
-			wantReason: "must be boolean",
-		},
-		{
 			name: "flow entity mismatch",
 			edit: func(entity map[string]any) {
 				entity["flow_instance"] = "secondary"
@@ -221,30 +203,6 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 				entity["current_state"] = ""
 			},
 			wantField:  "entities[0].current_state",
-			wantReason: "data-only imports cannot carry lifecycle inputs",
-		},
-		{
-			name: "import declared gate",
-			edit: func(entity map[string]any) {
-				entity["gates"] = map[string]any{"review_ready": true}
-			},
-			wantField:  "entities[0].gates",
-			wantReason: "data-only imports cannot carry lifecycle inputs",
-		},
-		{
-			name: "import null gates",
-			edit: func(entity map[string]any) {
-				entity["gates"] = nil
-			},
-			wantField:  "entities[0].gates",
-			wantReason: "data-only imports cannot carry lifecycle inputs",
-		},
-		{
-			name: "import empty gates",
-			edit: func(entity map[string]any) {
-				entity["gates"] = map[string]any{}
-			},
-			wantField:  "entities[0].gates",
 			wantReason: "data-only imports cannot carry lifecycle inputs",
 		},
 	}
@@ -436,7 +394,7 @@ func assertTestSetupImportedEntity(t *testing.T, selected interface {
 	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != "operating" || entity.EntityType != "state" || len(full.Fields) != 1 || full.Fields["note"] != note {
 		t.Fatalf("imported setup identity/fields = %+v", full)
 	}
-	if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil || entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil || full.Gates != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil {
+	if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil || entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil {
 		t.Fatalf("imported setup entity acquired lifecycle: %+v", full)
 	}
 	if entity.CreatedAt.IsZero() || entity.UpdatedAt.IsZero() || !entity.CreatedAt.Equal(entity.UpdatedAt) {

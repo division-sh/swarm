@@ -25,7 +25,7 @@ func TestActivityLoopLineageRetainsHistoryWithoutReadmission(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "working"}, AdvancesTo: "executing",
 	}
-	parent := loopTestRequest(t, testStateSnapshot("working", nil, nil, nil), handler, uuidForLoopCarrier("lineage", 1), map[string]any{"revision_id": g.RevisionID}).Event
+	parent := loopTestRequest(t, testStateSnapshot("working", nil, nil), handler, uuidForLoopCarrier("lineage", 1), map[string]any{"revision_id": g.RevisionID}).Event
 	intent := ActivityIntent{ExecutionFlowID: identity.NormalizeFlowID("validation"), Generation: g, LoopStage: "executing"}
 	selection := handlerselection.NotApplicable()
 	check := func(t *testing.T, candidate ActivityIntent, state []loopruntime.Activation, want bool) {

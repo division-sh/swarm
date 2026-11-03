@@ -29,10 +29,6 @@ func SetWorkflowProjectionFieldsArray(ctx context.Context, selected any, run, ke
 	return private.SetWorkflowProjectionFieldsArrayForTest(ctx, selected, run, key)
 }
 
-func SetWorkflowProjectionNumericGate(ctx context.Context, selected any, run, key string) (int64, error) {
-	return private.SetWorkflowProjectionNumericGateForTest(ctx, selected, run, key)
-}
-
 func SetWorkflowProjectionAccumulatorArray(ctx context.Context, selected any, run, key string) (int64, error) {
 	return private.SetWorkflowProjectionAccumulatorArrayForTest(ctx, selected, run, key)
 }

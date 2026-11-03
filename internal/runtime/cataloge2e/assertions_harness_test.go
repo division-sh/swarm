@@ -57,7 +57,6 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertFlowState(t, h, entityID, "flow-b", expected.Expected.FlowBState)
 		assertCausalFlowEntities(t, h, entityID, expected.Expected.FlowEntities)
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
-		assertGates(t, h, entityID, expected.Expected.Gates)
 		reader, err := h.catalogOperatorEventLister()
 		if err != nil {
 			t.Fatal(err)
@@ -134,15 +133,6 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 				}
 			}
 		}
-		if len(expected.Gates) > 0 {
-			gates := catalogBoolGates(got.Gates)
-			for key, wantValue := range expected.Gates {
-				key = h.catalogGateKey(flowID, key)
-				if gotValue := gates[strings.TrimSpace(key)]; gotValue != wantValue {
-					t.Fatalf("causal flow instance %s gate %s = %v, want %v", flowID, key, gotValue, wantValue)
-				}
-			}
-		}
 	}
 }
 
@@ -165,7 +155,6 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 			assertEntityState(t, reader, h.workflow, entityID, want.EntityState)
 		}
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
-		assertGates(t, h, entityID, want.Gates)
 		reader, err := h.catalogOperatorEventLister()
 		if err != nil {
 			t.Fatal(err)
@@ -183,43 +172,6 @@ func (h *runtimeHarness) resolveExpectedEntityID(entityID string) string {
 		return h.firstPublishedEntityID()
 	default:
 		return entityID
-	}
-}
-
-func assertGates(t testing.TB, h *runtimeHarness, entityID string, want map[string]bool) {
-	t.Helper()
-	if len(want) == 0 {
-		return
-	}
-	if h == nil || h.workflow == nil {
-		t.Fatal("workflow instance store is required for gates assertions")
-	}
-	instance, ok, err := catalogWorkflowInstanceForEntity(h.workflow, entityID)
-	if err != nil {
-		t.Fatalf("load workflow instance %s for gates: %v", entityID, err)
-	}
-	if !ok {
-		t.Fatalf("workflow instance %s not found for gates assertion", entityID)
-	}
-	for key, wantValue := range want {
-		flowID := ""
-		if h.bundle != nil {
-			flowID = h.bundle.WorkflowName()
-		}
-		key = h.catalogGateKey(flowID, key)
-		if key == "" {
-			continue
-		}
-		gotValue, ok := instance.Gates[key]
-		if !ok {
-			if !wantValue {
-				continue
-			}
-			t.Fatalf("gate %q missing; have keys=%v", key, boolMapKeys(instance.Gates))
-		}
-		if gotValue != wantValue {
-			t.Fatalf("gate %q = %v, want %v", key, gotValue, wantValue)
-		}
 	}
 }
 
@@ -711,26 +663,6 @@ func normalizeCatalogObservedEventName(eventName, flowPrefix string, source sema
 		}
 	}
 	return eventName
-}
-
-func catalogBoolGates(gates map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(gates))
-	for key, value := range gates {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = value
-	}
-	return out
-}
-
-func boolMapKeys(in map[string]bool) []string {
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	return keys
 }
 
 func catalogRootEventExists(source semanticview.Source, eventName string) bool {

@@ -123,7 +123,7 @@ func (f WorkflowJoinAdmissionFence) MatchesCurrent(stage string, bookkeeping, st
 	if entry != f.Entry {
 		return false, nil
 	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, bookkeeping, nil, stateBuckets)
+	carrier, err := engine.StateCarrierFromPersisted(nil, bookkeeping, stateBuckets)
 	if err != nil {
 		return false, err
 	}

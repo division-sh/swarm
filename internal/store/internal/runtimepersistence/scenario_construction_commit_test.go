@@ -39,7 +39,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				seed := pipeline.ScenarioSetupEntityRequest{
 					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
-					CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{"marker": "imported"}, Gates: map[string]bool{},
+					CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{"marker": "imported"},
 				}
 				source := semanticview.Wrap(f.bundle)
 				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
@@ -57,7 +57,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				}, Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
 				owner := selected.(runtimebus.ScenarioSetupCommitOwner)
 				unchanged := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
-				for _, mismatch := range []string{"fields", "stage", "gates", "run"} {
+				for _, mismatch := range []string{"fields", "stage", "run"} {
 					hostile := command
 					hostile.Setup.Entities = append([]pipeline.ScenarioSetupEntityRequest(nil), command.Setup.Entities...)
 					switch mismatch {
@@ -65,8 +65,6 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 						hostile.Setup.Entities[0].Fields = map[string]any{"marker": "different"}
 					case "stage":
 						hostile.Setup.Entities[0].CurrentState = mutationlog.PresentLifecycleState("foreign")
-					case "gates":
-						hostile.Setup.Entities[0].Gates = map[string]bool{"foreign": true}
 					case "run":
 						hostile.Setup.RunID = uuid.NewString()
 					}

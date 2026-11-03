@@ -170,33 +170,7 @@ func TestStageGateVerificationRejectsOptionalDecisionFieldUsedByEmit(t *testing.
 	t.Fatalf("stage gate findings = %#v, want optional decision reference blocker", report.Errors())
 }
 
-func TestStageGateVerificationValidatesAssembledLiteralPayloadRelations(t *testing.T) {
-	plan := runtimecontracts.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "launch_review", Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {
-			AdvancesTo: "complete",
-			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
-				"component": runtimecontracts.LiteralExpression("api"),
-				"owner":     runtimecontracts.LiteralExpression("worker"),
-			}},
-		},
-	}}
-	fields := map[string]runtimecontracts.EventFieldSpec{
-		"component": {Type: "text"},
-		"owner":     {Type: "text", Refinements: runtimecontracts.SchemaRefinements{EqualTo: "component"}},
-	}
-	report := Run(context.Background(), semanticview.Wrap(stageGateValidationBundle(plan, fields, []string{"component", "owner"})), Options{})
-	for _, finding := range report.Errors() {
-		if finding.CheckID == stageGateValidationCheckID && strings.Contains(finding.Message, "assembled literal payload") && strings.Contains(finding.Message, "must equal") {
-			return
-		}
-	}
-	t.Fatalf("stage gate findings = %#v, want assembled relational-payload blocker", report.Errors())
-}
-
 func TestStageGateLiteralEmitConsumesExactResolvedEventFieldSchema(t *testing.T) {
-	minLength := 3
-	minScore := 0.0
-	maxScore := 1.0
 	tests := []struct {
 		name       string
 		field      runtimecontracts.EventFieldSpec
@@ -214,18 +188,6 @@ func TestStageGateLiteralEmitConsumesExactResolvedEventFieldSchema(t *testing.T)
 		{
 			name: "enum", field: runtimecontracts.EventFieldSpec{Type: "ReviewMode"}, valid: "fast", invalid: "slow", wantDetail: "enum",
 			rootTypes: runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"ReviewMode": {Values: []string{"fast", "deep"}}}},
-		},
-		{
-			name: "pattern", field: runtimecontracts.EventFieldSpec{Type: "text", Refinements: runtimecontracts.SchemaRefinements{Pattern: "^[a-z]+$"}},
-			valid: "ready", invalid: "NOT-READY", wantDetail: "pattern",
-		},
-		{
-			name: "length", field: runtimecontracts.EventFieldSpec{Type: "text", Refinements: runtimecontracts.SchemaRefinements{Length: runtimecontracts.SchemaLengthRefinement{Min: &minLength}}},
-			valid: "ready", invalid: "no", wantDetail: "length",
-		},
-		{
-			name: "range", field: runtimecontracts.EventFieldSpec{Type: "numeric", Refinements: runtimecontracts.SchemaRefinements{Range: runtimecontracts.SchemaRangeRefinement{Min: &minScore, Max: &maxScore}}},
-			valid: 0.5, invalid: 2.0, wantDetail: "<=",
 		},
 	}
 

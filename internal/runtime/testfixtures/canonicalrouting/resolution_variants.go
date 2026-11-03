@@ -153,7 +153,7 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	case SelectResolutionUndeclaredSource:
 		applyClosedReplacement(t, edgeSchema, selectedEdge, selectedEdge+"    key_from: payload.missing_account_id\n")
 	case SelectResolutionSourceTypeMismatch:
-		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  _key: account_id\n  account_id: text\n", "account.ready:\n  _key: account_id\n  account_id: integer\n")
 	case SelectResolutionStaticReceiver:
 		applyClosedReplacement(t, accountSchema, "instance: account_id\n", "")
 	case SelectResolutionExtraAggregation:
@@ -161,9 +161,9 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	case SelectResolutionEntityTypeMismatch:
 		applyClosedReplacement(t, filepath.Join(root, "account", "state.yaml"), "account_id: text\n", "account_id: integer\n")
 	case SelectResolutionSourceTypeMismatchWithoutCarryType:
-		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  _key: account_id\n  account_id: text\n", "account.ready:\n  _key: account_id\n  account_id: integer\n")
 	case SelectResolutionNumberSourceToIntegerReceiver:
-		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: number\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "account.ready:\n  _key: account_id\n  account_id: text\n", "account.ready:\n  _key: account_id\n  account_id: number\n")
 		applyClosedReplacement(t, filepath.Join(root, "account", "state.yaml"), "account_id: text\n", "account_id: integer\n")
 	default:
 		t.Fatalf("unsupported select resolution invalidity %d", opts.Invalidity)
@@ -210,7 +210,7 @@ func CopyTemplateSelectResolutionRenamedSource(t testing.TB, opts TemplateSelect
 		"  - event: account.ready\n    from: producer\n    to: account\n    resolution: "+mode+"\n",
 		"  - event: account.ready\n    from: producer\n    to: account\n    resolution: "+mode+"\n    key_from: payload.external_account_id\n")
 	applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
-		"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text\n  external_account_id: text\n")
+		"account.ready:\n  _key: account_id\n  account_id: text\n", "account.ready:\n  _key: account_id\n  account_id: text\n  external_account_id: text\n")
 	return root
 }
 
@@ -253,7 +253,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		applyClosedReplacement(t, validatorSchema, "    key_from: generated.uuid\n", "    key_from: payload.candidate\n")
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
 			"validation.requested:\n  candidate: text\n",
-			"validation.requested:\n  key: candidate\n  candidate: text\n")
+			"validation.requested:\n  _key: candidate\n  candidate: text\n")
 	default:
 		t.Fatalf("unsupported create mint %d", opts.Mint)
 	}
@@ -268,7 +268,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"), "        candidate: payload.candidate\n", "        candidate: payload.candidate\n        validation_case_id: payload.candidate\n")
 	case CreateResolutionSourceTypeMismatchWithoutCarryType:
 		if opts.Mint == CreateMintPayload {
-			applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: integer\n")
+			applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  _key: candidate\n  candidate: text\n", "validation.requested:\n  _key: candidate\n  candidate: integer\n")
 		} else {
 			applyClosedReplacement(t, filepath.Join(root, "validator", "state.yaml"), "validation_case_id: uuid\n", "validation_case_id: integer\n")
 		}
@@ -276,7 +276,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		if opts.Mint != CreateMintPayload {
 			t.Fatal("number-to-integer create fixture requires payload minting")
 		}
-		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: number\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  _key: candidate\n  candidate: text\n", "validation.requested:\n  _key: candidate\n  candidate: number\n")
 		applyClosedReplacement(t, filepath.Join(root, "validator", "state.yaml"), "validation_case_id: uuid\n", "validation_case_id: integer\n")
 	default:
 		t.Fatalf("unsupported create resolution invalidity %d", opts.Invalidity)

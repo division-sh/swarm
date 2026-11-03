@@ -44,7 +44,6 @@ type Step string
 const (
 	StepLoop       Step = "loop"
 	StepQuery      Step = "query"
-	StepClearGates Step = "clear_gates"
 	StepGuard      Step = "guard"
 	StepJoin       Step = "join"
 	StepAccumulate Step = "accumulate"
@@ -57,7 +56,6 @@ const (
 	StepOnComplete Step = "on_complete"
 	StepRules      Step = "rules"
 	StepAdvancesTo Step = "advances_to"
-	StepSetsGate   Step = "sets_gate"
 	StepDataWrites Step = "data_writes"
 	StepTransform  Step = "transform"
 	StepEmits      Step = "emits"
@@ -81,7 +79,6 @@ var OrderedSteps = []Step{
 	StepOnComplete,
 	StepRules,
 	StepAdvancesTo,
-	StepSetsGate,
 	StepTransform,
 	StepEmits,
 	StepActivity,
@@ -640,7 +637,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		return executionFrame{}, err
 	}
 	req.State = state
-	state.StateCarrier = NewStateCarrierWithOwners(state.Fields, state.Bookkeeping, state.Control, state.Gates, state.StateBuckets)
+	state.StateCarrier = NewStateCarrierWithOwners(state.Fields, state.Bookkeeping, state.Control, state.StateBuckets)
 	currentState := strings.TrimSpace(state.CurrentState)
 	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
 	if err != nil {
@@ -721,8 +718,6 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepLoop(frame)
 	case StepQuery:
 		return false, e.stepQuery(frame)
-	case StepClearGates:
-		return false, e.stepClearGates(frame)
 	case StepGuard:
 		return e.stepGuard(frame)
 	case StepJoin:
@@ -748,8 +743,6 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 	case StepAdvancesTo:
 		frame.resolveNonRuleObservation()
 		return false, e.stepAdvancesTo(frame)
-	case StepSetsGate:
-		return false, e.stepSetsGate(frame)
 	case StepDataWrites:
 		return false, e.stepDataWrites(frame)
 	case StepTransform:
@@ -1098,21 +1091,6 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	if err := e.writeStepValue(frame, plan.StoreAs, value); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (e *Executor) stepClearGates(frame *executionFrame) error {
-	if len(frame.req.Handler.ClearGates) == 0 {
-		return nil
-	}
-	frame.result.ClearGates = normalizeStrings(e.resolveClearGates(frame))
-	frame.result.StateMutation.ClearGates = append([]string{}, frame.result.ClearGates...)
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	for _, gate := range frame.result.ClearGates {
-		frame.state.State.SetGate(gate, false)
-		frame.result.StateMutation.SetGateValue(gate, false)
-	}
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	return nil
 }
 
@@ -1979,7 +1957,6 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 			Entity: entity, PlatformEntity: cloneStringAnyMap(ctx.PlatformEntity.Raw()), Computed: cloneStringAnyMap(ctx.Computed.Raw()),
 			Accumulated: cloneStringAnyMap(ctx.Accumulated.Raw()), Join: cloneStringAnyMap(ctx.Join.Raw()), Loop: cloneStringAnyMap(ctx.Loop.Raw()),
 			StateFields: stateFields, StateBookkeeping: cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping),
-			StateGates: mapsClone(frame.state.State.StateCarrier.Gates),
 		},
 	}
 	if err := request.Validate(); err != nil {
@@ -2106,32 +2083,6 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 		identity.ActionCancelStateTimers.String(),
 		identity.ActionStartStateTimers.String(),
 	)
-	return nil
-}
-
-func (e *Executor) stepSetsGate(frame *executionFrame) error {
-	if frame.req.Handler.SetsGate == nil {
-		if frame.rule == nil || strings.TrimSpace(frame.rule.AdvancesTo) == "" {
-			return nil
-		}
-	}
-	spec := frame.req.Handler.SetsGate
-	if frame.rule != nil && strings.TrimSpace(frame.rule.AdvancesTo) == "" {
-		// rule-level gates are not modeled yet
-	}
-	if spec == nil {
-		return nil
-	}
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return nil
-	}
-	frame.result.SetsGate = name
-	frame.result.StateMutation.SetGate = name
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	frame.state.State.SetGate(name, true)
-	frame.result.StateMutation.SetGateValue(name, true)
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	return nil
 }
 
@@ -2585,7 +2536,6 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 		frame.state.State.StateCarrier.Fields,
 		frame.state.State.StateCarrier.Bookkeeping,
 		frame.state.State.StateCarrier.Control,
-		frame.state.State.StateCarrier.Gates,
 		frame.state.State.StateCarrier.StateBuckets,
 	)
 	effects := make([]runtimeworkflowlifecycle.Effect, 0, 1)
@@ -2715,7 +2665,6 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithJoin(ctx, frame.state.Join)
 	ctx = WithLoop(ctx, frame.state.Loop)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Fields))
-	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.ExecutionFlowID.String())))
 	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.ExecutionFlowID.String())
@@ -2911,7 +2860,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			return fmt.Errorf("data_accumulation target is required")
 		}
 		switch parsed := paths.Parse(target); parsed.Root {
-		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
+		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
 			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
 		}
 		if !write.Value.IsZero() {
@@ -3247,33 +3196,12 @@ func (e *Executor) queueEmitIntentForSpec(frame *executionFrame, spec runtimecon
 	return true, nil
 }
 
-func (e *Executor) resolveClearGates(frame *executionFrame) []string {
-	if !slices.Contains(frame.req.Handler.ClearGates, "*") {
-		return frame.req.Handler.ClearGates
-	}
-	if len(frame.state.State.StateCarrier.Gates) == 0 {
-		return nil
-	}
-	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))))
-}
-
 func (e *Executor) applyGuardFailure(frame *executionFrame, _ *runtimecontracts.GuardSpec) error {
 	frame.req.Handler.AdvancesTo = ""
-	frame.req.Handler.SetsGate = nil
 	frame.req.Handler.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.topLevelDataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.req.Handler.Emit = runtimecontracts.EmitSpec{}
 	frame.result.Status = OutcomeRejected
 	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "reject")
 	return nil
-}
-func mapsKeys(values map[string]any) []any {
-	if len(values) == 0 {
-		return nil
-	}
-	keys := make([]any, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	return keys
 }

@@ -722,52 +722,6 @@ lookup:
 	}
 }
 
-func TestSystemNodeContract_GateStateSupportsShorthandMap(t *testing.T) {
-	var node SystemNodeContract
-	if err := loadYAMLBytes([]byte(`
-gate_state:
-  g_product_spec: PM completed product spec
-  g_tech_spec: CTO completed tech spec
-`), &node); err != nil {
-		t.Fatalf("load system node: %v", err)
-	}
-	if got := len(node.GateState.Gates); got != 2 {
-		t.Fatalf("expected 2 gates, got %d", got)
-	}
-	if got := node.GateState.Gates[0].Name; got != "g_product_spec" {
-		t.Fatalf("expected first gate g_product_spec, got %q", got)
-	}
-	if got := node.GateState.Gates[0].Description; got != "PM completed product spec" {
-		t.Fatalf("expected first gate description, got %q", got)
-	}
-}
-
-func TestSystemNodeContract_GateStateSupportsStructuredForm(t *testing.T) {
-	var node SystemNodeContract
-	if err := loadYAMLBytes([]byte(`
-gate_state:
-  description: Tracks 4 validation gates per vertical
-  gates:
-    - g1_research
-    - g2_spec
-  storage: validation_pipelines.gate_state JSONB
-`), &node); err != nil {
-		t.Fatalf("load system node: %v", err)
-	}
-	if got := strings.TrimSpace(node.GateState.Description); got != "Tracks 4 validation gates per vertical" {
-		t.Fatalf("expected gate_state description, got %q", got)
-	}
-	if got := len(node.GateState.Gates); got != 2 {
-		t.Fatalf("expected 2 gates, got %d", got)
-	}
-	if got := node.GateState.Gates[1].Name; got != "g2_spec" {
-		t.Fatalf("expected second gate g2_spec, got %q", got)
-	}
-	if got := strings.TrimSpace(node.GateState.Storage); got != "validation_pipelines.gate_state JSONB" {
-		t.Fatalf("expected gate_state storage, got %q", got)
-	}
-}
-
 func TestEventCatalogEntry_RejectsRetiredSwarmMetadata(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.CanonicalExternalEventMetadata)
 	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "swarm") {

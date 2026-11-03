@@ -28,22 +28,22 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 		return nil, fmt.Errorf("unknown conversation fixture kind")
 	}
 	bornAt, advancedAt := fixture.Turn1At.Add(-30*time.Second), fixture.Turn1At.Add(10*time.Second)
-	path, fields, gates, bookkeeping, accumulator := "flow/forkchat", `{"name":"After"}`, `{}`, `{}`, `{}`
+	path, fields, bookkeeping, accumulator := "flow/forkchat", `{"name":"After"}`, `{}`, `{}`
 	if kind != conversationForkServedSource {
 		fields = `{"name":"After","current_state":"business-draft","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}`
 	}
 	if kind == conversationForkNativeChat {
-		gates, bookkeeping, accumulator = `{"review":true}`, `{"activation":"standing"}`, `{"total":7}`
+		bookkeeping, accumulator = `{"activation":"standing"}`, `{"total":7}`
 	}
 	if kind == conversationForkDataOnlyChat {
 		path = "flow/forkchat/import"
 	}
 	statements := []conversationForkFixtureStatement{}
 	if kind != conversationForkDataOnlyChat {
-		query := `UPDATE flow_instances SET current_state='after', gates=?, bookkeeping=?, accumulator=?, revision=2, entered_state_at=?, updated_at=? WHERE run_id=? AND instance_path='flow/forkchat' AND entity_id=?`
-		args := []any{gates, bookkeeping, accumulator, advancedAt, advancedAt, fixture.RunID, fixture.EntityID}
+		query := `UPDATE flow_instances SET current_state='after', bookkeeping=?, accumulator=?, revision=2, entered_state_at=?, updated_at=? WHERE run_id=? AND instance_path='flow/forkchat' AND entity_id=?`
+		args := []any{bookkeeping, accumulator, advancedAt, advancedAt, fixture.RunID, fixture.EntityID}
 		if postgres {
-			query = `UPDATE flow_instances SET current_state='after', gates=$1::jsonb, bookkeeping=$2::jsonb, accumulator=$3::jsonb, revision=2, entered_state_at=$4, updated_at=$5 WHERE run_id=$6::uuid AND instance_path='flow/forkchat' AND entity_id=$7::uuid`
+			query = `UPDATE flow_instances SET current_state='after', bookkeeping=$1::jsonb, accumulator=$2::jsonb, revision=2, entered_state_at=$3, updated_at=$4 WHERE run_id=$5::uuid AND instance_path='flow/forkchat' AND entity_id=$6::uuid`
 		}
 		statements = append(statements, conversationForkFixtureStatement{query, args})
 	}
@@ -90,14 +90,11 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 		if kind == conversationForkNativeChat {
 			mutations = append(mutations,
 				mutation{mutationlog.DomainBookkeeping, "activation", nil, `"standing"`, keptAt},
-				mutation{mutationlog.DomainGate, "review", nil, `true`, keptAt},
 				mutation{mutationlog.DomainAccumulator, "total", nil, `7`, keptAt},
 				mutation{mutationlog.DomainAccumulator, "removed", nil, `9`, removedAt},
 				mutation{mutationlog.DomainAccumulator, "removed", `9`, nil, keptAt},
 				mutation{mutationlog.DomainBookkeeping, "removed", nil, `"temporary"`, removedAt},
-				mutation{mutationlog.DomainBookkeeping, "removed", `"temporary"`, nil, keptAt},
-				mutation{mutationlog.DomainGate, "removed", nil, `true`, removedAt},
-				mutation{mutationlog.DomainGate, "removed", `true`, nil, keptAt})
+				mutation{mutationlog.DomainBookkeeping, "removed", `"temporary"`, nil, keptAt})
 		}
 	}
 	if kind != conversationForkDataOnlyChat {

@@ -1,7 +1,4 @@
 test-node:
-  gate_state:
-    approval_gate: gate set when task is accepted
   task.submitted:
     guard: false
     advances_to: done
-    sets_gate: approval_gate

@@ -158,9 +158,6 @@ func normalizeRecordFieldValue(contract Contract, fieldName, typeRef string, val
 	if err := validateRecordMemberNames(fieldName, resolved, object); err != nil {
 		return nil, err
 	}
-	if err := validateStructuralFieldEqualities(fieldName, resolved.Fields, out); err != nil {
-		return nil, err
-	}
 	return out, nil
 }
 
@@ -169,10 +166,6 @@ func normalizeRecordMembers(contract Contract, fieldName string, fields []runtim
 	for _, field := range fields {
 		if raw, ok := object[field.Name]; ok {
 			normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, field.Name), field.TypeRef, raw)
-			if err != nil {
-				return nil, err
-			}
-			normalized, err = validateValueRefinements(contract, joinFieldName(fieldName, field.Name), field.TypeRef, field.Refinements, normalized)
 			if err != nil {
 				return nil, err
 			}

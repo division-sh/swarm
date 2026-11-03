@@ -7,8 +7,6 @@ expected:
   flow_entities:
     child:
       entity_state: done
-      gates:
-        child/g_validated: true
   causal_events:
     - validate.requested
     - child/validate.start

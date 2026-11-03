@@ -154,15 +154,12 @@ func TestCatalogAdmissionConsumersPreserveDomains(t *testing.T) {
 func TestCatalogAdmissionComparableDomainsRequireResolvedEvidence(t *testing.T) {
 	types := admissionTestCatalog()
 	for _, ref := range []string{"[Missing]", "map[text]Missing", "Cycle", "[]Item"} {
-		if got := schemaRefinementKind(types, ref); got != "unknown" {
-			t.Errorf("invalid refinement reference %q classified as %q", ref, got)
-		}
-		if got := schemaRefinementComparableType(types, ref); got != "" {
+		if got := (CatalogTypeReference{Type: ref, Catalog: types}).ComparableDomain(); got != "" {
 			t.Errorf("invalid equality reference %q classified as %q", ref, got)
 		}
 	}
 	for _, pair := range [][2]string{{"text", "uuid"}, {"text", "Status"}, {"text", "timestamp"}, {"integer", "numeric"}, {"json", "object"}} {
-		if schemaRefinementComparableType(types, pair[0]) == schemaRefinementComparableType(types, pair[1]) {
+		if (CatalogTypeReference{Type: pair[0], Catalog: types}).ComparableDomain() == (CatalogTypeReference{Type: pair[1], Catalog: types}).ComparableDomain() {
 			t.Errorf("distinct domains %v collapsed", pair)
 		}
 	}
@@ -259,7 +256,7 @@ func TestCatalogAdmissionNativePlatformArrays(t *testing.T) {
 				t.Fatal(err)
 			}
 			field, optional, err := admitPlatformEventFieldValue(snapshot.Document("native.yaml").Root())
-			if err != nil || optional != tc.optional || field.Description != tc.description || !strings.HasPrefix(field.Type, "[") || strings.Contains(field.Type, "[]") {
+			if err != nil || optional != tc.optional || field.platformDescription != tc.description || !strings.HasPrefix(field.Type, "[") || strings.Contains(field.Type, "[]") {
 				t.Fatalf("native list lowering: field=%+v optional=%v err=%v", field, optional, err)
 			}
 			schema := platformEventFieldJSONSchema(field)

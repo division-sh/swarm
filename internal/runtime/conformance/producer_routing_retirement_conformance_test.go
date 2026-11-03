@@ -455,7 +455,7 @@ func producerRoutingPreviewSnapshot(t *testing.T, source semanticview.Source, fl
 	return runtimeengine.StateSnapshot{
 		EntityID: identity.NormalizeEntityID(entityID), WorkflowName: name, WorkflowVersion: source.WorkflowVersion(),
 		CurrentState: source.FlowInitialStage(name), EnteredStateAt: time.Now().UTC(),
-		StateCarrier: runtimeengine.NewStateCarrierWithOwners(fields, nil, control, nil, nil),
+		StateCarrier: runtimeengine.NewStateCarrierWithOwners(fields, nil, control, nil),
 	}
 }
 

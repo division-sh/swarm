@@ -5,16 +5,6 @@ import (
 	"testing"
 )
 
-func TestReconstructEntityStateProjection_FailsOnMalformedGateKey(t *testing.T) {
-	_, err := ReconstructEntityStateProjection([]ProjectionMutation{{
-		Domain:   DomainGate,
-		NewValue: true,
-	}})
-	if err == nil || !strings.Contains(err.Error(), "gate mutation path is required") {
-		t.Fatalf("ReconstructEntityStateProjection error = %v", err)
-	}
-}
-
 func TestReconstructEntityStateProjection_FailsOnMalformedAccumulatorKey(t *testing.T) {
 	_, err := ReconstructEntityStateProjection([]ProjectionMutation{{
 		Domain:   DomainAccumulator,
@@ -30,7 +20,6 @@ func TestReconstructEntityStateProjection_RoundTripsTrackedEntityState(t *testin
 		{Domain: DomainLifecycleState, NewValue: "done"},
 		{Domain: DomainAuthoredField, Path: "status", NewValue: "closed"},
 		{Domain: DomainBookkeeping, Path: "activation", NewValue: "platform"},
-		{Domain: DomainGate, Path: "g_done", NewValue: true},
 		{Domain: DomainAccumulator, Path: "evidence", NewValue: map[string]any{"score": float64(2)}},
 	})
 	if err != nil {
@@ -44,9 +33,6 @@ func TestReconstructEntityStateProjection_RoundTripsTrackedEntityState(t *testin
 	}
 	if got.Bookkeeping["activation"] != "platform" {
 		t.Fatalf("Bookkeeping = %#v", got.Bookkeeping)
-	}
-	if got.Gates["g_done"] != true {
-		t.Fatalf("Gates = %#v", got.Gates)
 	}
 	acc, _ := got.Accumulator["evidence"].(map[string]any)
 	if acc["score"] != float64(2) {
@@ -96,8 +82,8 @@ func TestReconstructEntityStateProjection_DomainNeverComesFromAuthoredPath(t *te
 	if got.CurrentState == nil || *got.CurrentState != "running" || got.Fields["current_state"] != "business-state" {
 		t.Fatalf("lifecycle/authored collision = %#v", got)
 	}
-	if _, ok := got.Gates["review"]; ok {
-		t.Fatalf("authored gates path changed platform gates: %#v", got.Gates)
+	if gates, _ := got.Fields["gates"].(map[string]any); gates["review"] != "business-gate" {
+		t.Fatalf("authored gates path lost business data: %#v", got.Fields)
 	}
 	if _, ok := got.Accumulator["total"]; ok {
 		t.Fatalf("authored accumulator path changed platform accumulator: %#v", got.Accumulator)

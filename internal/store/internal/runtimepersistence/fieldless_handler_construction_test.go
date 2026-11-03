@@ -213,12 +213,11 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, shape := range []struct {
 			name, entity, effects, wantMarker string
-			gate, emits                       bool
+			emits                             bool
 		}{
 			{name: "fieldless_stage"},
 			{name: "fielded_stage", entity: "state", wantMarker: "original"},
 			{name: "fielded_accumulation", entity: "state", effects: "    data_accumulation:\n      writes:\n        - {target_field: marker, value: 'changed'}\n", wantMarker: "changed"},
-			{name: "fieldless_gate", effects: "    sets_gate: {name: approved}\n", gate: true},
 			{name: "fieldless_emit", effects: "    emit: {event: work.recorded}\n", emits: true},
 		} {
 			for _, constructed := range []bool{false, true} {
@@ -352,9 +351,6 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 					}
 					if wantFields != 0 && instance.Fields["marker"] != shape.wantMarker {
 						t.Fatalf("handler field readback=%+v, want marker=%q", instance.Fields, shape.wantMarker)
-					}
-					if shape.gate && !instance.Gates["review/approved"] {
-						t.Fatalf("constructed handler lost gate: %+v", instance.Gates)
 					}
 					var emissions int
 					if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='review/work.recorded'`, event.RunID()).Scan(&emissions); err != nil {

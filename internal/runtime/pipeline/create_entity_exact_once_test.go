@@ -90,9 +90,6 @@ func VerifyNativeCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutationsForTe
 			assertMetadataNumber(t, instance.Fields, "amount", 250)
 			assertMetadataString(t, instance.Fields, "who", "alice")
 			assertMetadataNumber(t, instance.Fields, "counter", 1)
-			if !instance.Gates["validation/ready"] {
-				t.Fatalf("ready gate = false, want true (all=%v)", instance.Gates)
-			}
 
 			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
 			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "who", "entity_initial_value", "create_entity", 1)
@@ -162,7 +159,6 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 				{TargetField: "counter", Value: runtimecontracts.CELExpression("state.counter + 1")},
 			},
 		},
-		SetsGate:   &runtimecontracts.GateSpec{Name: "ready"},
 		AdvancesTo: "done",
 		Emit: runtimecontracts.EmitSpec{
 			Event: "thing.emitted",

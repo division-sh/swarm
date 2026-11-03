@@ -86,7 +86,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 			state := runtimeengine.StateSnapshot{
 				EntityID: entityID, CurrentState: "active", WorkflowName: "child", WorkflowVersion: source.WorkflowVersion(),
 				StateCarrier: runtimeengine.NewStateCarrierWithOwners(map[string]any{}, nil,
-					runtimeengine.StateControl{FlowPath: "child/executor", StorageRef: "child/executor", InstanceID: "executor", EntityType: "state"}, nil, nil),
+					runtimeengine.StateControl{FlowPath: "child/executor", StorageRef: "child/executor", InstanceID: "executor", EntityType: "state"}, nil),
 			}
 			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 				Source:            source,

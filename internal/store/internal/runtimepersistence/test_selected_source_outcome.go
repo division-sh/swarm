@@ -88,8 +88,8 @@ func SeedSelectedSourceEntityForTest(ctx context.Context, selected any, fixture 
 				return err
 			}
 			_, err := tx.ExecContext(ctx, `INSERT INTO entity_state
-				(run_id,entity_id,flow_instance,entity_type,name,current_state,gates,fields,accumulator,revision,entered_state_at,created_at,updated_at)
-				VALUES ($1,$2,'flow-a/1',$3,'Selected Execution Entity','pending','{}','{}','{}',1,$4,$4,$4)`, fixture.RunID, fixture.EntityID, fixture.EntityType, fixture.CreatedAt)
+				(run_id,entity_id,flow_instance,entity_type,name,current_state,fields,accumulator,revision,entered_state_at,created_at,updated_at)
+				VALUES ($1,$2,'flow-a/1',$3,'Selected Execution Entity','pending','{}','{}',1,$4,$4,$4)`, fixture.RunID, fixture.EntityID, fixture.EntityType, fixture.CreatedAt)
 			return err
 		})
 	})

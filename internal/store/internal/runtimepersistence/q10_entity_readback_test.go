@@ -41,7 +41,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			ctx := correlation.WithRunID(f.ctx, runID)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "state",
-				CurrentState: mutationlog.PresentLifecycleState("unknown"), Fields: map[string]any{"marker": "root", "current_state": "business"}, Gates: map[string]bool{}}
+				CurrentState: mutationlog.PresentLifecycleState("unknown"), Fields: map[string]any{"marker": "root", "current_state": "business"}}
 			source := semanticview.Wrap(f.bundle)
 			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, OccurredAt: at, ScenarioSeed: &seed,
@@ -122,11 +122,11 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 					t.Fatalf("agent read: %v %t %v", row, found, err)
 				}
 				if entity.EntityID == importID {
-					if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || full.Gates != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil || row["current_state"] != nil || row["gates"] != nil {
+					if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil || row["current_state"] != nil {
 						t.Fatalf("import acquired lifecycle: %+v %+v %v", entity, full, row)
 					}
 				} else {
-					if entity.StageDefined == nil || entity.Revision == nil || *entity.Revision <= 0 || entity.LifecycleCreatedAt == nil || entity.LifecycleUpdatedAt == nil || full.Gates == nil || full.Bookkeeping == nil || full.Accumulated == nil || full.Loops == nil {
+					if entity.StageDefined == nil || entity.Revision == nil || *entity.Revision <= 0 || entity.LifecycleCreatedAt == nil || entity.LifecycleUpdatedAt == nil || full.Bookkeeping == nil || full.Accumulated == nil || full.Loops == nil {
 						t.Fatalf("constructed lifecycle missing: %+v %+v", entity, full)
 					}
 					if entity.EntityID == runID {
@@ -196,7 +196,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire["entity"])
 				}
 			}
-			for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+			for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
 				if string(importWire[key]) != "null" {
 					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire[key])
 				}

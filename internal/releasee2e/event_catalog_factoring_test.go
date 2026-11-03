@@ -49,7 +49,7 @@ func TestEventCatalogFactoringRefinedPublicationBothStores(t *testing.T) {
 			base := filepath.Join(root, backend)
 			source := filepath.Join(base, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
-			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n  id: {type: text, pattern: '^[a-z]+$', length: {min: 2, max: 8}}\n  note: text?\n")
+			writeReleaseFile(t, filepath.Join(source, "events.yaml"), "task.requested:\n  id: text\n  note: text?\n")
 			store := goldenSQLiteStore(base)
 			if backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
@@ -83,7 +83,7 @@ func TestEventCatalogFactoringRefinedPublicationBothStores(t *testing.T) {
 			if err := process.rpc.call(ctx, "run.list", map[string]any{"bundle_hash": hash}, &before); err != nil {
 				t.Fatal(err)
 			}
-			for index, invalid := range []map[string]any{{"id": "XX"}, {"id": "x"}, {"id": "toooolong"}, {"note": "missing id"}} {
+			for index, invalid := range []map[string]any{{"id": false}, {"id": 7}, {"id": "valid", "note": 7}, {"note": "missing id"}} {
 				var result json.RawMessage
 				if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": "task.requested", "payload": invalid, "emitter": "releasee2e", "idempotency_key": "refused-" + strconv.Itoa(index)}, &result); err == nil || !strings.Contains(err.Error(), "PAYLOAD_VALIDATION_FAILED") {
 					t.Fatalf("invalid refined publication did not reach payload refusal: %v %s %v", invalid, result, err)

@@ -15,6 +15,3 @@ expect:
       fields:
         stage_one_result: pass
         stage_two_result: verified
-      gates:
-        g_stage_one: true
-        g_stage_two: true

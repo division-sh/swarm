@@ -17,9 +17,6 @@ func workflowProjectionShapeNativeFixture(t *testing.T, backend, runID string) p
 		FieldsArray: func(ctx context.Context, run, key string) (int64, error) {
 			return storetest.SetWorkflowProjectionFieldsArray(ctx, selected, run, key)
 		},
-		NumericGate: func(ctx context.Context, run, key string) (int64, error) {
-			return storetest.SetWorkflowProjectionNumericGate(ctx, selected, run, key)
-		},
 		AccumulatorArray: func(ctx context.Context, run, key string) (int64, error) {
 			return storetest.SetWorkflowProjectionAccumulatorArray(ctx, selected, run, key)
 		},

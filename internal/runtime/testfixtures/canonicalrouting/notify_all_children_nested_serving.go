@@ -40,7 +40,7 @@ connect:
     resolution: select-or-create
 `)
 	writeClosedVariantFile(t, root, "account/events.yaml", `account.task.requested:
-  key: task_key
+  _key: task_key
   account_id: text
   task: text
   task_key: text

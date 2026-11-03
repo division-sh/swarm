@@ -230,7 +230,7 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			entity := a2ForkEntity(t, newEntry, runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+			entity := a2ForkEntity(t, newEntry, runtimeengine.NewStateCarrier(nil, buckets).PersistedStateBuckets())
 			if hostile == "missing_bookkeeping" {
 				delete(entity.Bookkeeping, "stage_entry")
 			}
@@ -267,7 +267,7 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, accumulator)
+			carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, accumulator)
 			if err != nil {
 				t.Fatal(err)
 			}

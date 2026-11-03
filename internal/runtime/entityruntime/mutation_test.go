@@ -1,48 +1,15 @@
 package entityruntime
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-func TestEntityMutationFinalCandidateEquality(t *testing.T) {
-	c := Contract{Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{
-		"left":  {Type: "text", IsOptional: true, Refinements: rc.SchemaRefinements{EqualTo: "right"}},
-		"right": {Type: "text", IsOptional: true},
-	}}}
-	for _, tc := range []struct {
-		name  string
-		state map[string]any
-		ops   []Mutation
-		valid bool
-	}{
-		{"paired_set", nil, []Mutation{{Target: "left", Value: "x"}, {Target: "right", Value: "x"}}, true},
-		{"half_set", nil, []Mutation{{Target: "left", Value: "x"}}, false},
-		{"paired_clear", map[string]any{"left": "x", "right": "x"}, []Mutation{{Operation: MutationClear, Target: "left"}, {Operation: MutationClear, Target: "right"}}, true},
-		{"half_clear", map[string]any{"left": "x", "right": "x"}, []Mutation{{Operation: MutationClear, Target: "left"}}, false},
-		{"same_value", map[string]any{"left": "x", "right": "x"}, []Mutation{{Target: "left", Value: "x"}}, true},
-		{"different_value", map[string]any{"left": "x", "right": "x"}, []Mutation{{Target: "left", Value: "y"}}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			before := cloneMap(tc.state)
-			_, err := ApplyMutations(c, tc.state, tc.ops)
-			if (err == nil) != tc.valid {
-				t.Fatalf("mutation error=%v, want valid=%v", err, tc.valid)
-			}
-			if !reflect.DeepEqual(cloneMap(tc.state), before) {
-				t.Fatal("input state changed")
-			}
-		})
-	}
-}
-
 func TestEntityMutationPresenceAndOwnership(t *testing.T) {
 	c := Contract{Entity: rc.EntityContract{Fields: map[string]rc.EntityFieldDecl{
 		"required": {Type: "text"}, "optional": {Type: "text", IsOptional: true},
-		"fixed":   {Type: "text", IsOptional: true, Immutable: true},
 		"profile": {Type: "Profile", IsOptional: true},
 		"entity":  {Type: "Profile", IsOptional: true},
 		"_entity": {Type: "Profile", IsOptional: true},
@@ -59,8 +26,6 @@ func TestEntityMutationPresenceAndOwnership(t *testing.T) {
 	}{
 		{"bare_clear", nil, []Mutation{{Operation: MutationClear, Target: "required"}}, false},
 		{"absent_optional_clear", nil, []Mutation{{Operation: MutationClear, Target: "optional"}}, true},
-		{"immutable_clear", map[string]any{"fixed": "x"}, []Mutation{{Operation: MutationClear, Target: "fixed"}}, false},
-		{"immutable_same", map[string]any{"fixed": "x"}, []Mutation{{Target: "fixed", Value: "x"}}, true},
 		{"missing_parent", nil, []Mutation{{Target: "profile.note", Value: "x"}}, false},
 		{"retired_entity_root", map[string]any{"entity": map[string]any{"name": "x"}}, []Mutation{{Target: "entity.note", Value: "y"}}, false},
 		{"retired_platform_root", map[string]any{"_entity": map[string]any{"name": "x"}}, []Mutation{{Target: "_entity.note", Value: "y"}}, false},

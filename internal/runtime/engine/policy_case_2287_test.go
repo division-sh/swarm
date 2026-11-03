@@ -43,7 +43,7 @@ func TestExecutorCanonicalPolicyCaseShapes2287(t *testing.T) {
 				result, err := executor.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 					EntityID: "case-1", Node: identitytest.RootNode(t, "router"), HandlerEventKey: "requested",
 					Event:   eventtest.RunCreatingRootIngress("case-proof", "requested", "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Time{}),
-					Handler: handler, State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+					Handler: handler, State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
 				})
 				if err != nil || result.NextState != tc.stage {
 					t.Fatalf("real CEL selection stage=%q want %q, error=%v", result.NextState, tc.stage, err)

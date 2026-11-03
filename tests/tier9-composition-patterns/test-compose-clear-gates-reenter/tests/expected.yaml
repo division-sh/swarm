@@ -12,8 +12,6 @@ expected:
   handler_outcome: terminal_reject
   entity_state: approved
   emitted_events: [review.approved]
-  gates:
-    g_reviewed: true
 
 conformance:
   disposition: runtime

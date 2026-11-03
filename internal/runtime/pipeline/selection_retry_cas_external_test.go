@@ -54,7 +54,7 @@ func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Conte
 		for _, projection := range []struct {
 			value any
 			dest  *json.RawMessage
-		}{{before.Bookkeeping, &state.Bookkeeping}, {before.Gates, &state.Gates}, {before.StateBuckets, &state.Accumulator}} {
+		}{{before.Bookkeeping, &state.Bookkeeping}, {before.StateBuckets, &state.Accumulator}} {
 			*projection.dest, err = json.Marshal(projection.value)
 			if err != nil {
 				return pipeline.CommittedWorkflowEngineMutation{}, err

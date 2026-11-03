@@ -36,8 +36,6 @@ type SetupEntity struct {
 	StateSet     bool
 	Fields       any
 	FieldsSet    bool
-	Gates        any
-	GatesSet     bool
 }
 
 type Step struct {
@@ -75,8 +73,6 @@ type EntityExpect struct {
 	StateSet     bool
 	Fields       any
 	FieldsSet    bool
-	Gates        any
-	GatesSet     bool
 }
 type Invalid struct {
 	Base  map[string]any
@@ -100,7 +96,7 @@ func (d Document) Projection() (CLI, error)      { return projectDocument(d.valu
 func (e Expect) Empty() bool {
 	return len(e.Events.Include) == 0 && e.Events.Exact == nil && len(e.Events.Ordered) == 0 && e.NoDeadLetters == nil && len(e.Entities) == 0
 }
-func (e EntityExpect) HasDetailAssertion() bool { return e.StateSet || e.FieldsSet || e.GatesSet }
+func (e EntityExpect) HasDetailAssertion() bool { return e.StateSet || e.FieldsSet }
 
 func expression(value semanticvalue.Value) bool {
 	text, ok := value.String()

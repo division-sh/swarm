@@ -206,7 +206,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 			if kind != "data_only" {
 				summary["stage_defined"], summary["revision"] = false, float64(1)
 				summary["lifecycle_created_at"], summary["lifecycle_updated_at"] = "2026-10-10T01:00:00Z", "2026-10-10T01:00:00Z"
-				result["bookkeeping"], result["gates"], result["accumulated"], result["loops"] = map[string]any{}, map[string]any{}, map[string]any{}, []any{}
+				result["bookkeeping"], result["accumulated"], result["loops"] = map[string]any{}, map[string]any{}, []any{}
 			}
 			if kind == "constructed_unknown_stage" {
 				summary["stage_defined"], summary["current_state"], summary["entered_state_at"] = true, "unknown", "2026-10-10T01:00:00Z"
