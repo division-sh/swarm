@@ -187,6 +187,7 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 	if resumedPaused != 1 {
 		t.Fatal("resume did not observe the exact paused subscriber", pausedEvent.Deliveries)
 	}
+	requireServedJSONRPCResult(t, fixture.Endpoint, "run.pause", map[string]any{"run_id": runs["other"]}, &map[string]any{})
 	requireServedJSONRPCResult(t, fixture.Endpoint, "run.stop", map[string]any{"run_id": runs["other"]}, &map[string]any{})
 	if _, err := owner.CommitPublication(ctx, plan.PublicationCommand()); !errors.Is(err, runtimebus.ErrAPIEventLiveRunChanged) {
 		t.Fatal("stopped landing selection was not refused atomically", err)
