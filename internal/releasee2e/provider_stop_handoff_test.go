@@ -3,6 +3,7 @@ package releasee2e
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -222,9 +223,13 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					}
 					response, err := http.DefaultClient.Do(request)
 					if err == nil {
-						response.Body.Close()
+						body, readErr := io.ReadAll(response.Body)
+						closeErr := response.Body.Close()
 						if response.StatusCode != http.StatusServiceUnavailable {
 							t.Fatalf("standby ready before holder exit: HTTP %d", response.StatusCode)
+						}
+						if readErr != nil || closeErr != nil || !strings.Contains(string(body), "waiting: store held; last admitted serve ") {
+							t.Fatalf("standby lacks last-admitted readout: %q read=%v close=%v", body, readErr, closeErr)
 						}
 						break
 					}
