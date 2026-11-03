@@ -76,6 +76,7 @@ typed-process-local	callback-type	typed	internal/runtime/bus/bustest/publish.go	
 typed-process-local	interface-method	typed	internal/runtime/bus/bustest/routes.go	TestingT	method:Cleanup	func(func())
 typed-process-local	interface-method	typed	internal/runtime/bus/bustest/routes.go	TestingT	method:Fatalf	func(string, ...any)
 typed-process-local	interface-method	typed	internal/runtime/bus/bustest/routes.go	TestingT	method:Helper	func()
+typed-process-local	callback-type	typed	internal/runtime/bus/committed_replay_scope.go	deliveryRouteRecipientIDs	param:include	func(github.com/division-sh/swarm/internal/events.DeliveryRecipient) bool
 typed-process-local	context-value	typed	internal/runtime/bus/connect_instance_selection.go	(github.com/division-sh/swarm/internal/runtime/bus.connectInstanceSelector).Materialize	context:Value#1	func(key any) any|arg=github.com/division-sh/swarm/internal/runtime/bus.connectRoutePlanPreviewRoutesKey
 typed-process-local	context-value	typed	internal/runtime/bus/connect_instance_selection.go	connectPlanningPreview	context:Value#1	func(key any) any|arg=github.com/division-sh/swarm/internal/runtime/bus.connectPlanningPreviewKey
 typed-process-local	context-withvalue	typed	internal/runtime/bus/connect_instance_selection.go	withConnectPlanningPreview	context:WithValue#1	func(parent context.Context, key any, val any) context.Context|arg=context.Context|arg=github.com/division-sh/swarm/internal/runtime/bus.connectPlanningPreviewKey|arg=bool
