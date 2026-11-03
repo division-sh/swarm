@@ -4065,9 +4065,9 @@ handler_specification:
         computed:
           shape: '{target_field: entity_key, value: CEL_expression}'
           meaning: 'The unquoted expression is evaluated against handler context → entity.entity_key.'
-          context: 'The value expression is evaluated against: entity, payload, policy, fan_out. The fan_out
-            namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
-            accumulated is available after the current open-stream arrival has been admitted.'
+          context: 'The value expression is evaluated against state, payload and policy. A selected rule may read
+            fan_out.count in its own data_accumulation after that rule fans out. Handler-level writes run before
+            handler-level fan_out and cannot read its count; verify refuses them and points to the rule-level write.'
           example: "- target_field: revision_count\n  value: entity.revision_count + 1"
           note: 'Use the same value key for literals and computed values; YAML quote style selects text versus expressions.'
         contained_operation:
@@ -4148,11 +4148,28 @@ handler_specification:
       - literal writes do not reference source_event or handler context — the value is used as-is
       - computed writes do not reference source_event — they use the handler context directly
       - contained operations are validated against the current flow primary entity contract and remain local state updates, not routing declarations
-      example: "data_accumulation:\n  writes:\n  - geography                              # direct\n\
-        \  - source_field: vertical_name             # mapped\n    target_field: name\n  - target_field:\
-        \ revision_count                # literal\n    value: 0\n  - target_field: expected_count\
-        \              # computed\n    value: fan_out.count\n  source_event: scan.requested\
-        \               # optional"
+      - handler-level writes reading fan_out.count are refused; put the write in the rule that declares fan_out, after that rule's fan-out step
+      example: |
+        rules:
+          - when: true
+            fan_out:
+              items_from: payload.items
+              as: line_item
+              identity: line_item.id
+              emit:
+                event: item.requested
+                fields:
+                  item_id: line_item.id
+            data_accumulation:
+              source_event: scan.requested
+              writes:
+                - geography
+                - source_field: vertical_name
+                  target_field: name
+                - target_field: revision_count
+                  value: 0
+                - target_field: expected_count
+                  value: fan_out.count
     emit:
       field: emit
       type: 'scalar event name OR object: {event, from, fields}'
@@ -4473,8 +4490,8 @@ handler_specification:
           bound, source/write ordering, or emitted payload semantics.
       empty_collection: >
         An empty collection persists one immediately closed fan-out intent and publishes zero events. Handler
-        `advances_to` runs once after that constant-size intent commit, and `fan_out.count` is 0 for same-handler
-        data_accumulation.
+        `advances_to` runs once after that constant-size intent commit. A selected rule's data_accumulation can
+        write fan_out.count as 0 after that rule's fan-out; handler-level count writes are refused.
       collection_iteration: >
         One catalog-admitted CollectionProjection owns list-items versus map-TEXT-keys interpretation for compiler,
         engine, source persistence, deferred chunk reads, replay and supported fork. Runtime persists one constant-size
@@ -4516,8 +4533,8 @@ handler_specification:
         routes each emitted event to the intended flow instance by correlation
         key. No `batch_agent`, `map_agent`, inline runtime LLM invocation, or
         runtime-owned JSON result contract is part of this pattern.
-      side_effect: Writes immutable obligation cardinality to handler context as fan_out.count (available for
-        data_accumulation). `fan_out.index` is scoped to deferred per-item emit field evaluation and is not a durable
+      side_effect: Writes immutable obligation cardinality to context as fan_out.count, available to the selected
+        rule's own data_accumulation after its fan-out, never to handler-level writes. `fan_out.index` is scoped to deferred per-item emit field evaluation and is not a durable
         handler value.
       durable_issuance:
         canonical_owner: runtime.pipeline.FanOutObligationOwner backed by the selected SQLite or PostgreSQL store
@@ -5223,12 +5240,27 @@ handler_specification:
         resolves_to: 'Handler context produced while creating the durable fan_out obligation. fan_out.count is the
           immutable source cardinality owed by that obligation, not publications committed, deliveries settled,
           successes, or remaining work. fan_out.index is scoped to deferred fan_out.emit.fields evaluation only.'
-        available_in: 'data_accumulation.writes[].value with `fan_out.count` is the canonical way to write fan_out results to entity
-          state. This writes the obligation cardinality to an entity field for
-          downstream open-stream processing.'
-        not_available_in: 'guard — guards run before fan_out. on_complete.condition — use entity
-          fields written by data_accumulation instead.'
-        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    value: fan_out.count"
+        available_in: 'The selected rule that declares fan_out may write fan_out.count from its own
+          data_accumulation.writes[].value after that fan-out. This writes obligation cardinality to a declared
+          state field for downstream processing.'
+        not_available_in: 'Handler-level data writes run before handler-level fan_out and verify refuses count reads
+          there, teaching the rule-level write. Guards and on_complete conditions also run before fan_out; use
+          already-written state fields instead.'
+        usage_example: |
+          rules:
+            - when: true
+              fan_out:
+                items_from: payload.items
+                as: line_item
+                identity: line_item.id
+                emit:
+                  event: item.requested
+                  fields:
+                    item_id: line_item.id
+              data_accumulation:
+                writes:
+                  - target_field: expected_count
+                    value: fan_out.count
       computed:
         resolves_to: 'Turn-scoped derived handler values written by compute-owned operations. Public authors may read
           computed.* in rule conditions and expression-value surfaces after the value has been produced by the handler
@@ -9250,8 +9282,9 @@ engine:
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
       item: Exact element value for query.filter, filter.condition, and count.condition. Fan-out expressions use their configured item alias. Item and alias bindings inherit the compiled collection element type and never fall back to dyn.
-      fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
-        while evaluating fan_out.emit.fields for one item.
+      fan_out: The selected rule's own data writes may read fan_out.count after that rule's fan-out. Handler-level
+        count writes refuse at verify and must move into that rule. fan_out.index is available only while evaluating
+        fan_out.emit.fields for one item.
       join: Available only while evaluating selected on_complete/on_deadline outcomes. The typed arrival fields
         are expected, completed, missing, results, timed_out and close_reason; fan-out completion instead exposes
         total and its five disposition counts. join is read-only and never persisted as authored state.

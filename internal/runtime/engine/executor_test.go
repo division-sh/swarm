@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -6673,39 +6674,50 @@ func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.
 			}},
 		},
 	}
+	bundle.RootEntities["state"].Fields["dispatch_count"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
 	source = fanOutSourceWithBundleIdentity(t, bundle)
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(source, ".", "pending", "pending", "scanning"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testRootExecutableNode(t, "node-1"),
-		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-no-hidden-count"), "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			FanOut: &runtimecontracts.FanOutSpec{
-				ItemsFrom: "payload.items",
-				As:        "fan_item",
-				Identity:  "fan_item",
-				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
-			},
-			AdvancesTo: "scanning",
-		},
-		State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 0 {
-		t.Fatalf("empty fan-out intent = %#v, want cardinality 0", result.FanOutIntent)
-	}
-	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
-		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
+	for _, mode := range []executionmode.Mode{executionmode.Live, executionmode.Mock} {
+		t.Run(string(mode), func(t *testing.T) {
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:        sourceWithFixtureStages(source, ".", "pending", "pending", "scanning"),
+				StateRepo:     stubStateRepo{},
+				MutationOwner: stubMutationOwner{},
+				Locker:        stubLocker{},
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+				EntityID: "entity-1",
+				Node:     testRootExecutableNode(t, "node-1"),
+				Event:    eventtest.RunCreatingRootIngressWithMode(eventtest.UUID("fan-out-no-hidden-count-"+string(mode)), "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}, mode),
+				Handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
+					FanOut: &runtimecontracts.FanOutSpec{
+						ItemsFrom: "payload.items",
+						As:        "fan_item",
+						Identity:  "fan_item",
+						Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
+					},
+					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+						{TargetField: "dispatch_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					}},
+					AdvancesTo: "scanning",
+				}}},
+				State: testStateSnapshot("pending", map[string]any{}, map[string]map[string]any{}),
+			})
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 0 || result.FanOutIntent.Capsule.Lineage.ExecutionMode != mode {
+				t.Fatalf("empty fan-out intent = %#v, want cardinality 0 in %s mode", result.FanOutIntent, mode)
+			}
+			if got := result.StateMutation.Fields["dispatch_count"]; got != int64(0) {
+				t.Fatalf("rule-level count write = %#v, want 0 after fan-out", got)
+			}
+			if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
+				t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
+			}
+		})
 	}
 }
 
