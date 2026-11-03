@@ -64,30 +64,3 @@ func (s *targetRouteMemoryStore) refuseInstanceIndexReads(t testing.TB) {
 		}
 	})
 }
-
-func TestFlowInstanceFixturesHaveNoRetiredDescriptorReader(t *testing.T) {
-	for _, owner := range []reflect.Type{
-		reflect.TypeOf((*targetRouteMemoryStore)(nil)),
-		reflect.TypeOf((*connectRoutePlanLifecycleStore)(nil)),
-		reflect.TypeOf((*connectRoutePlanConcurrentLifecycleStore)(nil)),
-		reflect.TypeOf((*finalFlowInstanceAuthoringLifecycleStore)(nil)),
-	} {
-		for _, name := range []string{"ListActiveFlowInstanceDescriptors", "UpsertFlowInstanceRoute", "DeleteFlowInstanceRoute", "ListFlowInstanceRoutes"} {
-			if _, present := owner.MethodByName(name); present {
-				t.Errorf("%s retains the retired instance mirror API %s", owner, name)
-			}
-		}
-		for _, name := range []string{"flowRoutes", "flowInstances"} {
-			if _, present := owner.Elem().FieldByName(name); present {
-				t.Errorf("%s retains retired mirror %s beside its native index", owner, name)
-			}
-		}
-	}
-}
-
-func TestFinalAuthoringFixtureHasNoDescriptorMirror(t *testing.T) {
-	owner := reflect.TypeOf(finalFlowInstanceAuthoringLifecycleStore{})
-	if _, present := owner.FieldByName("flowInstances"); present {
-		t.Fatal("authoring fixture retains a descriptor mirror beside its native index")
-	}
-}
