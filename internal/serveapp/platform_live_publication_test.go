@@ -32,7 +32,7 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 			writeStandingCandidateFile(t, filepath.Join(root, flow, file), contents)
 		}
 	}
-	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins: {outputs: [observed]}\n")
+	writeStandingCandidateFile(t, filepath.Join(root, "schema.yaml"), "stages: []\noutputs: [observed]\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "observed:\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "nodes.yaml"), "boot-observer:\n  platform.boot:\n    emit: {event: observed}\n")
 	writeStandingCandidateFile(t, filepath.Join(root, "other", "agents.yaml"), "observer:\n  role: observer\n  intent: {inline: Observe the boot occurrence.}\n  model: regular\n  subscriptions: [platform.boot]\n  emit_events: []\n")
