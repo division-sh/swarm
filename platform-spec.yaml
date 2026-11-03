@@ -7619,9 +7619,9 @@ engine:
           retirement joins the same completion and returns its preserved terminal failure. Only the coordinator's
           typed retirement refusal and its actual owning cancellation are ordinary termination. Independent store,
           dispatch, invariant and lease-cleanup errors remain fatal even when joined with cancellation.
-          A new handoff refused by the exact occurrence fence of the coordinator's own shutdown is reported as its
-          typed retirement refusal; accepted carriers join and complete their handoff and acknowledgement before
-          that retirement publishes its terminal result.
+          A new handoff refused by the fence of the shutdown that retires the coordinator is reported as its typed
+          retirement refusal. An already accepted carrier completes its handoff and acknowledgement under its retained
+          selected occurrence before that occurrence retires; coordinator completion publication is not ordered against them.
           Startup returns synchronous failures; a running worker records and reports its terminal failure exactly once.
           No callback, string matching, retry or second lifecycle owner may reinterpret that result.
           Runtime shutdown fences and joins autonomous continuation dispatch before manager teardown invalidates
