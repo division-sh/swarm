@@ -97,18 +97,33 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 			t.Fatal(ctx.Err())
 		}
 	}
+	receiptBefore, err := storetest.ReadLatestPlatformPipelineReceiptStorage(ctx, selected.RuntimeDeps().DeliveryStore, observed.id)
+	if err != nil || !receiptBefore.Found || receiptBefore.Outcome != "dead_letter" {
+		t.Fatalf("completion failure lost its terminal receipt before activation acknowledgment: %+v err=%v", receiptBefore, err)
+	}
+	failureBefore, err := failures.UnmarshalEnvelope(receiptBefore.Failure)
+	if err != nil || !reflect.DeepEqual(failureBefore, *settled.Failure) {
+		t.Fatalf("completion receipt changed its exact failure envelope: failure=%s err=%v", receiptBefore.Failure, err)
+	}
 	select {
 	case ack := <-acknowledged:
-		refusal := "startup source observation context differs from runtime source"
 		if proof == publishedBarrierCompletionSQLFailure {
-			refusal = "live delivery handoff has 1 unparked or foreign continuations"
-			refusal += "\nlive handoff was not acknowledged; selected work remains recoverable"
-		}
-		if ack.err == nil || ack.err.Error() != refusal || ack.result.Activation.Activated {
+			if ack.err != nil || !ack.result.Activation.Activated {
+				t.Fatalf("terminal SQL-rollback receipt did not acknowledge activation: activated=%t err=%v", ack.result.Activation.Activated, ack.err)
+			}
+		} else if ack.err == nil || ack.err.Error() != "startup source observation context differs from runtime source" || ack.result.Activation.Activated {
 			t.Fatalf("failed completion lost its actual pre-ACK handoff refusal: activated=%t err=%v", ack.result.Activation.Activated, ack.err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+	receiptAfter, err := storetest.ReadLatestPlatformPipelineReceiptStorage(ctx, selected.RuntimeDeps().DeliveryStore, observed.id)
+	if err != nil || !reflect.DeepEqual(receiptBefore, receiptAfter) {
+		t.Fatalf("activation changed the terminal pipeline receipt: before=%+v after=%+v err=%v", receiptBefore, receiptAfter, err)
+	}
+	reasonAfter, err := storetest.ReadExactPipelineReceiptOutcomeReason(ctx, selected.RuntimeDeps().DeliveryStore, observed.id)
+	if err != nil || reasonAfter.Outcome != "dead_letter" || reasonAfter.Reason != settled.ReasonCode {
+		t.Fatalf("activation changed the terminal pipeline outcome or reason: %+v err=%v", reasonAfter, err)
 	}
 	barrier, err := storetest.ReadExactFanOutBarrier(ctx, selected.RuntimeDeps().DeliveryStore, key)
 	if err != nil || barrier.Status != fanoutbarrier.StatusOutcomeDeadLettered || barrier.Summary == nil || *barrier.Summary != (fanoutbarrier.Summary{Total: 1, Succeeded: 1}) ||
