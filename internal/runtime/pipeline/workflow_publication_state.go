@@ -103,7 +103,7 @@ func (p PreparedWorkflowPublicationState) JoinAdmissionInstance(target events.Ro
 		ParentInstance: record.ParentInstance, InstanceKey: record.InstanceKey,
 		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode,
 		Status: record.Status, TerminatedAt: record.TerminatedAt, StageDefined: record.StageDefined, Config: record.Config,
-		CurrentState: record.CurrentState, Revision: revision, EnteredStageAt: record.EnteredStageAt,
+		CurrentState: record.CurrentState, Life: record.Life, Revision: revision, EnteredStageAt: record.EnteredStageAt,
 		Fields: fields, Bookkeeping: record.Bookkeeping, Accumulator: record.Accumulator,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	})

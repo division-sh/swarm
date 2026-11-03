@@ -67,6 +67,7 @@ type entitySummary struct {
 	FlowInstance       string  `json:"flow_instance"`
 	EntityType         string  `json:"entity_type"`
 	StageDefined       *bool   `json:"stage_defined"`
+	Life               *int64  `json:"life"`
 	CurrentState       *string `json:"current_state"`
 	Slug               string  `json:"slug,omitempty"`
 	Name               string  `json:"name,omitempty"`
@@ -108,7 +109,7 @@ func (e *entitySummary) UnmarshalJSON(raw []byte) error {
 	type decoded entitySummary
 	return decodeRequiredEntityProperties(raw, (*decoded)(e),
 		"entity_id", "run_id", "flow_instance", "entity_type", "created_at", "updated_at",
-		"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at")
+		"stage_defined", "life", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at")
 }
 
 func (e *entityFull) UnmarshalJSON(raw []byte) error {

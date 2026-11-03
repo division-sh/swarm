@@ -96,6 +96,7 @@ type FlowInstanceActivationPlan struct {
 	Children            []FlowInstanceActivationPlan
 	ActivationVariables map[string]string
 	OccurredAt          time.Time
+	Restart             *FlowInstanceRestart
 }
 
 // CommittedFlowInstanceActivation is exact selected-store evidence that the
@@ -342,6 +343,9 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 }
 
 func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, error) {
+	if p.Instance.Life == 0 {
+		p.Instance.Life = 1
+	}
 	p.Instance.Fields = cloneMap(p.Instance.Fields)
 	p.Instance.Bookkeeping = cloneMap(p.Instance.Bookkeeping)
 	readiness, err := p.Readiness.Normalized()
@@ -373,6 +377,13 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	p, err = p.Normalized()
 	if err != nil {
 		return err
+	}
+	if p.Restart != nil {
+		if err := p.Restart.Validate(p.Instance); err != nil {
+			return err
+		}
+	} else if p.Instance.Life != 1 {
+		return fmt.Errorf("ordinary construction requires first life")
 	}
 	if !p.Identity.Route().Valid() || p.Instance.StorageRef == "" || p.Instance.InstanceID == "" {
 		return fmt.Errorf("flow instance activation plan requires exact instance identity")

@@ -133,6 +133,7 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		Name:                   strings.TrimSpace(sourceState.Name),
 		Source:                 source,
 		StageDefined:           sourceState.StageDefined,
+		Life:                   sourceState.Life,
 		FlowTemplate:           sourceState.FlowTemplate,
 		Mode:                   sourceState.Mode,
 		Status:                 sourceState.Status,
@@ -149,12 +150,15 @@ func validateRunForkMaterializedEntityLifecycle(source *runForkRevisionEntityMet
 	entityID := strings.TrimSpace(entity.EntityID)
 	switch source.ConstructionKind {
 	case "constructed":
-		if len(source.FlowConfig) == 0 || source.CreatedAt.IsZero() || source.UpdatedAt.IsZero() || source.EnteredStateAt.IsZero() || source.Status == "" ||
+		if source.Life <= 0 || len(source.FlowConfig) == 0 || source.CreatedAt.IsZero() || source.UpdatedAt.IsZero() || source.EnteredStateAt.IsZero() || source.Status == "" ||
 			source.CurrentState == "" || entity.CurrentState == nil || source.CurrentState != *entity.CurrentState || source.FlowTemplate == "" || (source.Mode != "static" && source.Mode != "template") ||
 			(source.Status == "terminated") != !source.TerminatedAt.IsZero() {
 			return fmt.Errorf("fork materialization cannot prove constructed header metadata for entity %s", entityID)
 		}
 	case "imported_state":
+		if source.Life != 0 {
+			return fmt.Errorf("imported entity %s cannot carry instance life", entityID)
+		}
 		if strings.TrimSpace(source.EntityType) == "" {
 			return fmt.Errorf("fork materialization imported state has no entity type for %s", entityID)
 		}
