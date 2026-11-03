@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -15,6 +16,22 @@ type readinessShutdownCancellation struct {
 	key      dynamicFlowRuntimeReadinessKey
 	ordinal  uint64
 	planHash string
+}
+
+type readinessProofReadError struct{ cause error }
+
+func (e *readinessProofReadError) Error() string { return e.cause.Error() }
+func (e *readinessProofReadError) Unwrap() error { return e.cause }
+
+func (am *AgentManager) cleanReadinessShutdownProofReadCancellation(ctx context.Context, err error) bool {
+	// A joined mutation or cleanup result is not a read-only proof failure.
+	for err != nil {
+		if read, ok := err.(*readinessProofReadError); ok {
+			return am.cleanReadinessShutdownReadCancellation(ctx, read.cause)
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }
 
 func (e *readinessShutdownCancellation) Error() string { return e.cause.Error() }
