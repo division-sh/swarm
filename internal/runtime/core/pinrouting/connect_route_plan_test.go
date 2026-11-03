@@ -897,11 +897,11 @@ func TestBundleAdmissionRejectsRetiredJoinRoutingPolicies(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			before := "    - account.ready\n"
+			before := "  - account.ready\n"
 			if strings.Count(string(raw), before) != 1 {
 				t.Fatal("exact account.ready input unavailable for retirement specimen")
 			}
-			after := "    - event: account.ready\n" + tc.resolution
+			after := "  - event: account.ready\n" + strings.ReplaceAll(tc.resolution, "      ", "    ")
 			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), before, after, 1)), 0o600); err != nil {
 				t.Fatal(err)
 			}

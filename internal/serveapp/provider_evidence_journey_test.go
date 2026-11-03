@@ -113,14 +113,14 @@ func writeProviderEvidenceSource(t *testing.T, cell string) string {
 	manifest := map[string]any{"version": "1.0.0", "platform_version": "*"}
 	write("manifest.yaml", manifest)
 	write("events.yaml", map[string]any{"evidence.requested": map[string]any{"conversation": "string", "sequence": "integer"}})
-	write("schema.yaml", map[string]any{"pins": map[string]any{"inputs": []string{"evidence.requested", "evidence.completed"}}, "connect": []map[string]any{
+	write("schema.yaml", map[string]any{"inputs": []string{"evidence.requested", "evidence.completed"}, "connect": []map[string]any{
 		{"event": "evidence.requested", "from": ".", "to": "worker", "resolution": "select-or-create"}, {"event": "evidence.completed", "from": "worker", "to": "."},
 	}})
 	write("nodes.yaml", map[string]any{"observer": map[string]any{
 		"evidence.completed": map[string]any{"guard": true},
 	}})
 	write("worker/manifest.yaml", manifest)
-	write("worker/schema.yaml", map[string]any{"instance": "conversation", "pins": map[string]any{"inputs": []string{"evidence.requested"}, "outputs": []string{"evidence.completed"}}})
+	write("worker/schema.yaml", map[string]any{"instance": "conversation", "inputs": []string{"evidence.requested"}, "outputs": []string{"evidence.completed"}})
 	write("worker/state.yaml", map[string]any{"conversation": "text"})
 	write("worker/events.yaml", map[string]any{"evidence.completed": map[string]any{"sequence": "integer"}})
 	agent := map[string]any{"role": "evidence", "model": "regular", "memory": true, "subscriptions": []string{"evidence.requested"}, "emit_events": []string{"evidence.completed"},

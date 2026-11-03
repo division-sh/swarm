@@ -87,7 +87,7 @@ func listRetirementPublicSource() map[string]string {
 
 func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 	for _, field := range []struct{ file, original, prefix, element string }{
-		{"types.yaml", "    tags: [text]", "    tags: ", "text"},
+		{"types.yaml", "  tags: [text]", "  tags: ", "text"},
 		{"state.yaml", "entries: [ProbeItem]", "entries: ", "ProbeItem"},
 		{"events.yaml", "  tags: [text]", "  tags: ", "text"},
 	} {

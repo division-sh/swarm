@@ -150,13 +150,13 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 		{"selected branch read", func(h *c.SystemNodeEventHandler) {
 			h.Rules = []c.HandlerRuleEntry{{Condition: "has(state.base_score)", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("state.base_score")}}}}}
 		}, false},
-		{"exhaustive branches both write", func(h *c.SystemNodeEventHandler) {
+		{"handler write cannot borrow later exhaustive branches", func(h *c.SystemNodeEventHandler) {
 			h.Rules = []c.HandlerRuleEntry{
 				{Condition: "payload.score > 0", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(7)}}}},
 				{DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(0)}}}},
 			}
 			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("state.base_score")}}
-		}, false},
+		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadWave1ExpressionFixtureBundle(t)

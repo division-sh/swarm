@@ -1,4 +1,4 @@
-overlap.start: {key: case_id, case_id: text}
-overlap.arm: {key: case_id, case_id: text}
-overlap.finish: {key: case_id, case_id: text}
+overlap.start: {_key: case_id, case_id: text}
+overlap.arm: {_key: case_id, case_id: text}
+overlap.finish: {_key: case_id, case_id: text}
 overlap.root_closed:

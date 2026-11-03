@@ -689,8 +689,7 @@
       ],
       "disposition": "B100_action_runtime_claim_retired_other_routing_assertions_preserved",
       "proofs": [
-        "TestRetiredActionHistoricalFixtureFailsClosed",
-        "TestProducerRoutingRetirementLedger"
+        "TestRetiredActionHistoricalFixtureFailsClosed"
       ]
     },
     {

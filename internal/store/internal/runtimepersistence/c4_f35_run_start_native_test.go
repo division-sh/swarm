@@ -1198,7 +1198,7 @@ func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (conte
 		"events.yaml": "records.ready:\n  body: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if withTimer {
-		files["schema.yaml"] += "    - timer.elapsed\nstages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\n"
+		files["schema.yaml"] += "  - timer.elapsed\nstages:\n  waiting:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\n"
 		files["events.yaml"] += "timer.elapsed:\n"
 	} else {
 		files["nested/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"

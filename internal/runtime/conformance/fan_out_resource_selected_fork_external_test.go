@@ -51,7 +51,7 @@ func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs 
 	if strings.Count(string(schema), outputPins) != 1 {
 		t.Fatalf("external fixture output pins changed: %s", schema)
 	}
-	schema = []byte(strings.Replace(string(schema), outputPins, outputPins+"    - task.assigned\n", 1))
+	schema = []byte(strings.Replace(string(schema), outputPins, outputPins+"  - task.assigned\n", 1))
 	if err := os.WriteFile(schemaPath, schema, 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -121,14 +121,14 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 			{semanticProofEntityEvent, "on_complete", "state.account_ids"},
 		} {
 			raw += fmt.Sprintf(`  %s:
+    data_accumulation:
+      writes:
+        - source_field: account_ids
+          target_field: account_ids
+        - source_field: threshold
+          target_field: threshold
     %s:
-      - data_accumulation:
-          writes:
-            - source_field: account_ids
-              target_field: account_ids
-            - source_field: threshold
-              target_field: threshold
-        fan_out:
+      - fan_out:
           items_from: %s
           as: account
           identity: account.account_id

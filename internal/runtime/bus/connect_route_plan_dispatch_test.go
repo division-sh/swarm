@@ -845,7 +845,7 @@ func connectReceiverPinLegalSource(t *testing.T, shape string) semanticview.Sour
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumerSchema, err := yaml.Marshal(map[string]any{"stages": []any{}, "pins": map[string]any{"inputs": inputs}})
+	consumerSchema, err := yaml.Marshal(map[string]any{"stages": []any{}, "inputs": inputs})
 	if err != nil {
 		t.Fatal(err)
 	}

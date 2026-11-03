@@ -740,7 +740,7 @@ func targetOwnerDescriptors(routes ...events.RouteIdentity) []runtimepipeline.De
 func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 	const eventType = "work.keyed"
 	newSource := func() semanticview.Source {
-		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, map[string]any{"accumulate": map[string]string{"into": "items", "from": "payload"}}, true)
+		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, map[string]any{"accumulate": map[string]string{"target": "items", "key": "member_id"}}, true)
 		return semanticview.Wrap(bundle)
 	}
 	matching := runtimepipeline.WorkflowInstance{
@@ -819,7 +819,7 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 		name    string
 		handler map[string]any
 	}{
-		{name: "existing-required", handler: map[string]any{"accumulate": map[string]string{"into": "items", "from": "payload"}}},
+		{name: "existing-required", handler: map[string]any{"accumulate": map[string]string{"target": "items", "key": "member_id"}}},
 		{name: "optional", handler: map[string]any{}},
 	}
 	for _, test := range tests {
@@ -1177,7 +1177,8 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		filepath.Join(flowID, "schema.yaml"):   schema,
 		filepath.Join(flowID, "events.yaml"):   string(events),
 		filepath.Join(flowID, "nodes.yaml"):    string(nodes),
-		filepath.Join(flowID, "state.yaml"):    "instance_key: text\nitems: [text]\nexpected: [text]\n",
+		filepath.Join(flowID, "state.yaml"):    "instance_key: text\nitems: [Item]\nexpected: [text]\n",
+		filepath.Join(flowID, "types.yaml"):    "Item:\n  member_id: text\n  result: text\n",
 	})
 }
 

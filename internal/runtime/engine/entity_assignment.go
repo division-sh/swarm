@@ -16,17 +16,16 @@ import (
 // EntityAssignmentPoint identifies an executed reader, including its selected
 // outcome and its position inside an ordered mutation list.
 type EntityAssignmentPoint struct {
-	Step              Step
-	RuleKind          c.HandlerAdvanceCarrierKind
-	RuleIndex         int
-	RuleRef           identity.DeclarationIdentity
-	Condition         bool
-	WriteIndex        int
-	HasWriteIndex     bool
-	FanOut            bool
-	FanOutAfterWrites bool
-	RuleCompute       bool
-	PolicyCompute     bool
+	Step          Step
+	RuleKind      c.HandlerAdvanceCarrierKind
+	RuleIndex     int
+	RuleRef       identity.DeclarationIdentity
+	Condition     bool
+	WriteIndex    int
+	HasWriteIndex bool
+	FanOut        bool
+	RuleCompute   bool
+	PolicyCompute bool
 }
 
 type entityAssignmentOutcome struct {
@@ -338,26 +337,10 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 	}
 	writes := func(spec c.WorkflowDataAccumulation, selected bool) bool {
 		for index, write := range spec.Writes {
-			if point != nil && point.Step == StepDataWrites && point.HasWriteIndex && (point.RuleKind != "") == selected && point.WriteIndex == index {
+			if point != nil && point.HasWriteIndex && (point.RuleKind != "") == selected && point.WriteIndex == index {
 				return false
 			}
 			facts.TransferWrite(a.entity, write)
-		}
-		return true
-	}
-	topWritten, ruleWritten := false, false
-	applyWrites := func(selected bool) bool {
-		if selected && outcome.rule != nil && !ruleWritten {
-			if !writes(outcome.rule.DataAccumulation, true) {
-				return false
-			}
-			ruleWritten = true
-		}
-		if !topWritten {
-			if !writes(handler.DataAccumulation, false) {
-				return false
-			}
-			topWritten = true
 		}
 		return true
 	}
@@ -380,12 +363,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		}
 		if _, found := a.source.FanOutPlanForSite(site); !found {
 			return true
-		}
-		if point != nil && point.Step == step && point.FanOut && !point.FanOutAfterWrites {
-			return false
-		}
-		if !applyWrites(selected) {
-			return false
 		}
 		return point == nil || point.Step != step || !point.FanOut
 	}
@@ -451,9 +428,6 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 			if outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == step {
 				assumeOutcome()
 				if step != StepJoin {
-					if !fanOut(step, true) {
-						return facts
-					}
 					if point != nil && point.Step == step && point.RuleCompute {
 						return facts
 					}
@@ -461,9 +435,17 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 				if step != StepJoin && outcome.rule.Compute != nil {
 					assign(outcome.rule.Compute.StoreAs)
 				}
+				if step != StepJoin {
+					if !fanOut(step, true) || !writes(outcome.rule.DataAccumulation, true) {
+						return facts
+					}
+				}
 			}
 		case StepDataWrites:
-			if !applyWrites(true) {
+			if !writes(handler.DataAccumulation, false) {
+				return facts
+			}
+			if outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == StepJoin && !writes(outcome.rule.DataAccumulation, true) {
 				return facts
 			}
 		}
