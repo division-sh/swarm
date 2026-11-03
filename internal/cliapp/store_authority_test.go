@@ -372,7 +372,7 @@ func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID
 
 func requireStoreReadout(t *testing.T, output, held string) {
 	t.Helper()
-	pattern := `^Project owner: selected-store lease is ` + held + `; last admitted serve ([0-9a-f-]{36}) \(generation 1\); interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome-unknown\n$`
+	pattern := `^Project owner: selected-store lease is ` + held + `; last admitted serve ([0-9a-f-]{36}) \(generation 1\); interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome unknown\n$`
 	match := regexp.MustCompile(pattern).FindStringSubmatch(output)
 	if len(match) != 2 {
 		t.Fatalf("store readout = %q", output)

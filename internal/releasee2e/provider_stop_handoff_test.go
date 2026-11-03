@@ -219,7 +219,7 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 					t.Fatalf("held read-only store status: %v\n%s", status.err, status.output)
 				}
 				lastAdmitted := strings.TrimSuffix(strings.TrimPrefix(status.output, heldPrefix), "\n")
-				if !strings.HasSuffix(lastAdmitted, "; interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome-unknown") {
+				if !strings.HasSuffix(lastAdmitted, "; interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome unknown") {
 					t.Fatalf("live unexpired work counted as interrupted: %s", lastAdmitted)
 				}
 				spec.APIPort = freeReleaseTCPPort(t)
