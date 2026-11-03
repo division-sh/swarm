@@ -408,7 +408,7 @@ func requireOfflinePairedWhatsAppServiceRoundTrip(t *testing.T, opts cliapp.Serv
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeStandingCandidateFile(t, filepath.Join(source, "schema.yaml"), strings.Replace(string(schema), "    - inbound.whatsapp.raw", "    - outbound.requested\n    - inbound.whatsapp.raw", 1))
+	writeStandingCandidateFile(t, filepath.Join(source, "schema.yaml"), strings.Replace(string(schema), "  - inbound.whatsapp.raw", "  - outbound.requested\n  - inbound.whatsapp.raw", 1))
 	nodes, err := os.ReadFile(filepath.Join(source, "nodes.yaml"))
 	if err != nil {
 		t.Fatal(err)

@@ -785,9 +785,8 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 func admitNovelDerivedExistingRunRoot(t *testing.T, root string) {
 	t.Helper()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages: {waiting: {}, done: {final: true}}
-pins:
-  inputs: [fulfillment.requested]
-  outputs: [fulfillment.requested]
+inputs: [fulfillment.requested]
+outputs: [fulfillment.requested]
 connect:
   - {event: fulfillment.requested, from: ., to: fulfillment}
 `)
@@ -1419,10 +1418,10 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 		}
 		writeWorkflowValidationFixtureFile(t, path, updated)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "PublicConversationScope: [\"direct\", \"shared\"]\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "PublicConversationScope: [\"direct\", \"shared\"]\nPublicConversationReference: [\"0\"]\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `message.received:
   _key: conversation_reference
-  conversation_reference: text
+  conversation_reference: PublicConversationReference
   conversation_scope: PublicConversationScope
   external_account: text
   provider_message_reference: integer
