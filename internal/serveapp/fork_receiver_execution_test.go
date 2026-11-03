@@ -321,6 +321,14 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 				}
 				resumeSettlement()
+				var terminalReceipt storetest.SemanticEventFixtureEvidence
+				if unavailable {
+					waitWorkspaceProofPipelineReceipt(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID, "dead_letter")
+					terminalReceipt = storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
+					if terminalReceipt.PipelineReceiptReason == "" || terminalReceipt.PipelineReceiptFailure == nil || runtimefailures.ValidateEnvelope(*terminalReceipt.PipelineReceiptFailure) != nil {
+						t.Fatalf("terminal pipeline receipt lost its visible failure before activation acknowledgment: %+v", terminalReceipt)
+					}
+				}
 				select {
 				case <-executed:
 				case <-ctx.Done():
@@ -346,7 +354,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					receipt := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
 					after, err := selected.RuntimeDeps().DeliveryStore.Snapshot(ctx, claim.DeliveryID())
 					if err != nil || after.Status != failedReceiver.Status || after.ReasonCode != failedReceiver.ReasonCode || !reflect.DeepEqual(after.Failure, failedReceiver.Failure) ||
-						receipt.PipelineReceiptCount != 1 || receipt.PipelineReceiptOutcome != "dead_letter" || receipt.PipelineReceiptReason != failedReceiver.ReasonCode || !reflect.DeepEqual(receipt.PipelineReceiptFailure, failedReceiver.Failure) {
+						receipt.PipelineReceiptCount != 1 || receipt.PipelineReceiptOutcome != "dead_letter" || receipt.PipelineReceiptReason != terminalReceipt.PipelineReceiptReason || !reflect.DeepEqual(receipt.PipelineReceiptFailure, terminalReceipt.PipelineReceiptFailure) {
 						t.Fatalf("activation rewrote terminal receiver failure as success: before=%+v after=%+v receipt=%+v error=%v", failedReceiver, after, receipt, err)
 					}
 				}
