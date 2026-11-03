@@ -10,10 +10,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -126,10 +127,16 @@ func completeRunControlTransition(ctx context.Context, opts RunControlHandlerOpt
 			if err != nil {
 				return apiidempotency.Completion{}, err
 			}
-			if selected.Runtime == nil || selected.Runtime.RunControl == nil {
-				return apiidempotency.Completion{}, fmt.Errorf("run control owner is required for the selected runtime")
+			if selected.Runtime == nil {
+				if action != "stop" {
+					return apiidempotency.Completion{}, fmt.Errorf("run control owner is required for the selected runtime")
+				}
+			} else {
+				if selected.Runtime.RunControl == nil {
+					return apiidempotency.Completion{}, fmt.Errorf("run control owner is required for the selected runtime")
+				}
+				controller = selected.Runtime.RunControl
 			}
-			controller = selected.Runtime.RunControl
 		}
 		switch action {
 		case "stop":
@@ -163,25 +170,21 @@ func completeRunControlTransition(ctx context.Context, opts RunControlHandlerOpt
 }
 
 func runControlRuntimeContext(ctx context.Context, contexts *swruntime.RuntimeContextManager, runID, action string) (context.Context, selectedRuntimeContext, error) {
-	ctx, selected, availability, err := runtimeBundleContextByRun(ctx, contexts, runID)
-	if err == nil || action != "stop" || availability.Status != string(runtimeruncontrol.StatusPaused) || !availability.Available() || contexts.LookupBundleHashStatus(availability.BundleHash).Loaded() {
-		return ctx, selected, err
+	if action == "stop" {
+		lookup, availability, err := contexts.LookupRunStatus(ctx, runID)
+		if errors.Is(err, runbundle.ErrRunNotFound) {
+			return ctx, selectedRuntimeContext{}, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
+		}
+		if err != nil {
+			return ctx, selectedRuntimeContext{}, err
+		}
+		if availability.Available() && availability.Status == string(runtimeruncontrol.StatusPaused) && !lookup.Loaded() {
+			target, err := startupownership.RunStopSourceContext(ctx, runID, availability.RootReference)
+			return target, selectedRuntimeContext{}, err
+		}
 	}
-	primary, loaded := contexts.Primary()
-	if !loaded {
-		return ctx, selected, err
-	}
-	ctx, selected, err = runtimeBundleContextByHash(ctx, contexts, primary.SourceArtifactFact.BundleHash(), runID)
-	if err != nil {
-		return ctx, selected, err
-	}
-	scope, err := authoractivity.BundleScopeForTarget(ctx, availability.BundleHash)
-	if err != nil {
-		return ctx, selected, err
-	}
-	// The stop transaction derives the target bundle scope from its locked run;
-	// keep the registered primary's original grant and source identity intact.
-	return authoractivity.WithScope(ctx, authoractivity.RuntimeScope(scope.RuntimeInstanceID)), selected, nil
+	ctx, selected, _, err := runtimeBundleContextByRun(ctx, contexts, runID)
+	return ctx, selected, err
 }
 
 func runControlRunIDParam(params map[string]any) (string, error) {

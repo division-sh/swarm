@@ -75,6 +75,39 @@ func AdmitRetainedRunSources(ctx context.Context, capability ProcessCapability, 
 	return admitted, nil
 }
 
+// RunStopSourceContext selects the target's startup-admitted input while
+// preserving the request's process custody. Native stop revalidates this root
+// against the target row under its initial exclusive run admission.
+func RunStopSourceContext(ctx context.Context, runID string, reference sourceartifact.RootAdmissionReference) (context.Context, error) {
+	if err := reference.Validate(); err != nil {
+		return nil, err
+	}
+	original, err := CaptureMutationAuthority(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if original.HasRuntimeGrant() {
+		return nil, errors.New("unloaded run stop requires its original process context before runtime acquisition")
+	}
+	if err := correlation.CheckRootAdmissionContext(ctx, reference); err != nil {
+		return nil, err
+	}
+	if fact, supplied := correlation.SourceArtifactFactFromContext(ctx); supplied && fact.BundleHash() != reference.BundleHash {
+		return nil, errors.New("run stop source contradicts the original context")
+	}
+	original.owner.mu.Lock()
+	admission, found := original.owner.retainedSources[reference]
+	original.owner.mu.Unlock()
+	if !found || admission.Reference() != reference {
+		return nil, fmt.Errorf("run %s source is absent from the startup admission census", runID)
+	}
+	fact, err := correlation.DecodeSourceArtifactFact(admission.BundleHash())
+	if err != nil {
+		return nil, err
+	}
+	return correlation.WithRunID(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, fact), admission), runID), nil
+}
+
 // RunSourceObservationContext lends no execution authority. It carries only a
 // startup-censused run's own admission for its exact native source observation.
 func RunSourceObservationContext(ctx context.Context, runID string, reference sourceartifact.RootAdmissionReference, plan agenttopology.SourceSetPlan) (context.Context, error) {
