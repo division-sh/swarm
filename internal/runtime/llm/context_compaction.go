@@ -47,7 +47,17 @@ func replayContextCompaction(session *Session, route, model string) (contextComp
 	if checkpoint.Route != route || checkpoint.Model != model {
 		return contextCompactionReplay{}, contextCompactionLimitation("native_checkpoint_requires_new_route_compaction")
 	}
-	var err error
+	system, err := canonicaljson.Hash(session.SystemPrompt)
+	if err != nil {
+		return contextCompactionReplay{}, err
+	}
+	tools, err := canonicaljson.Hash(session.Tools)
+	if err != nil {
+		return contextCompactionReplay{}, err
+	}
+	if checkpoint.SystemFingerprint != system || checkpoint.ToolsFingerprint != tools {
+		return contextCompactionReplay{}, contextCompactionLimitation("native_checkpoint_requires_current_prompt_compaction")
+	}
 	replay.Native, err = canonicaljson.Canonicalize(checkpoint.Native)
 	if err != nil {
 		return contextCompactionReplay{}, contextCompactionLimitation("invalid_native_replay")
