@@ -312,6 +312,14 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 						requireWorkspaceProofNoBusinessEmissions(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
 					}
 				}
+				var failedReceiver runtimedelivery.Snapshot
+				if unavailable {
+					var err error
+					failedReceiver, err = selected.RuntimeDeps().DeliveryStore.Snapshot(ctx, claim.DeliveryID())
+					if err != nil || failedReceiver.Status != runtimedelivery.StatusDeadLetter || failedReceiver.ReasonCode == "" || failedReceiver.Failure == nil || runtimefailures.ValidateEnvelope(*failedReceiver.Failure) != nil {
+						t.Fatalf("failed receiver lacks canonical terminal evidence before activation: %+v error=%v", failedReceiver, err)
+					}
+				}
 				resumeSettlement()
 				select {
 				case <-executed:
@@ -319,8 +327,8 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					t.Fatalf("fork did not join after its receiver barriers: %v", ctx.Err())
 				}
 				if unavailable {
-					if executionErr == nil || execution.Activation.Activated {
-						t.Fatalf("failed receiver acknowledged a live handoff: %+v error=%v", execution, executionErr)
+					if executionErr != nil || !execution.Activation.Activated {
+						t.Fatalf("terminal failed receiver did not acknowledge activation: %+v error=%v", execution, executionErr)
 					}
 				} else if executionErr != nil || !execution.Activation.Activated || execution.ExecutedEventCount != 1 || len(execution.ForkEvents) != 1 {
 					t.Fatalf("settled receiver lacks its real live acknowledgment: %+v error=%v", execution, executionErr)
@@ -334,6 +342,14 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					wantReceipt = "dead_letter"
 				}
 				waitWorkspaceProofPipelineReceipt(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID, wantReceipt)
+				if unavailable {
+					receipt := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
+					after, err := selected.RuntimeDeps().DeliveryStore.Snapshot(ctx, claim.DeliveryID())
+					if err != nil || after.Status != failedReceiver.Status || after.ReasonCode != failedReceiver.ReasonCode || !reflect.DeepEqual(after.Failure, failedReceiver.Failure) ||
+						receipt.PipelineReceiptCount != 1 || receipt.PipelineReceiptOutcome != "dead_letter" || receipt.PipelineReceiptReason != failedReceiver.ReasonCode || !reflect.DeepEqual(receipt.PipelineReceiptFailure, failedReceiver.Failure) {
+						t.Fatalf("activation rewrote terminal receiver failure as success: before=%+v after=%+v receipt=%+v error=%v", failedReceiver, after, receipt, err)
+					}
+				}
 				if newerClaim {
 					requireWorkspaceProofNoBusinessEmissions(t, selected.RuntimeDeps().EventStore, claim.RunID(), claimed.signal.EventID)
 					receiver.State = "done"
