@@ -161,6 +161,9 @@ func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
 		{name: "event_without_payload_bytes", table: "events", postgres: []string{`ALTER TABLE events DROP COLUMN payload_bytes`}, sqlite: []string{`ALTER TABLE events DROP COLUMN payload_bytes`}},
 		{name: "event_without_source_route", table: "events", postgres: []string{`DROP INDEX idx_events_source_route`, `ALTER TABLE events DROP COLUMN source_route`}, sqlite: []string{
 			`DROP INDEX idx_events_source_route`,
+			`DROP TRIGGER swarm_event_delivery_run_identity_insert`,
+			`DROP TRIGGER swarm_event_delivery_run_identity_update`,
+			`DROP TRIGGER swarm_event_run_delivery_identity_update`,
 			`CREATE TABLE events_without_source_route AS SELECT event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes, execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at, routing_source_kind, routing_source_authority, target_route, target_set, operator_reference_event_id, handler_node, idempotency_key FROM events`,
 			`DROP TABLE events`,
 			`ALTER TABLE events_without_source_route RENAME TO events`,
