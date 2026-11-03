@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -314,9 +315,8 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			caller := correlation.WithSourceArtifactFact(use.WorkContext(), use.Context.SourceArtifactFact)
 			caller = authoractivity.WithScope(caller, authoractivity.BundleScope(ordinary.Options.RuntimeInstanceID, bundleHash))
 			activated, err := runforkexecution.ExecuteSelectedContractRunFork(caller, executionRequest)
-			err = errors.Join(err, use.Done())
 			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != staged.ForkRunID ||
-				activated.Activation.ForkPoint != sourcePlan.ForkPoint || activated.ExecutedEventCount != 0 ||
+				activated.Activation.ForkPoint != sourcePlan.ForkPoint || activated.ExecutedEventCount != 1 || len(activated.ForkEvents) != 0 ||
 				activated.ForkLocalRuntimeContainer == nil || activated.ForkLocalRuntimeContainer.RuntimeExecutionID == "" ||
 				activated.ForkLocalRuntimeContainer.ForkEventID != "" || activated.ForkLocalRuntimeContainer.ForkPoint != sourcePlan.ForkPoint || len(activated.ForkLocalRuntimeContainer.SourceEventIDs) != 0 {
 				t.Fatalf("real owner failed pending exact-start timer activation: %+v err=%v", activated, err)
@@ -325,8 +325,25 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 			if err != nil || !found || activatedOperation.Validate() != nil || activatedOperation.Status != runfork.ForkOperationActivated ||
 				activatedOperation.Request.OperationID != materializedOperation.Request.OperationID || activatedOperation.ForkRunID != staged.ForkRunID ||
 				activatedOperation.Result == nil || activatedOperation.Result.ForkPoint != sourcePlan.ForkPoint ||
-				activatedOperation.Result.ForkEventID != "" || activatedOperation.Result.BundleHash != bundleHash || activatedOperation.Result.ExecutedEventCount != 0 {
-				t.Fatalf("native activation lost exact typed-start completion: operation=%+v found=%t err=%v validate_err=%v result=%+v expected_point=%+v expected_bundle=%q expected_child=%q expected_operation=%q expected_executed=0", activatedOperation, found, err, activatedOperation.Validate(), activatedOperation.Result, sourcePlan.ForkPoint, bundleHash, staged.ForkRunID, materializedOperation.Request.OperationID)
+				activatedOperation.Result.ForkEventID != "" || activatedOperation.Result.BundleHash != bundleHash || activatedOperation.Result.ExecutedEventCount != activated.ExecutedEventCount {
+				t.Fatalf("native activation lost exact typed-start completion: operation=%+v found=%t err=%v validate_err=%v result=%+v expected_point=%+v expected_bundle=%q expected_child=%q expected_operation=%q expected_executed=%d", activatedOperation, found, err, activatedOperation.Validate(), activatedOperation.Result, sourcePlan.ForkPoint, bundleHash, staged.ForkRunID, materializedOperation.Request.OperationID, activated.ExecutedEventCount)
+			}
+			feed, err := ReadFanOutPublishedOutcomeStorageForTest(ctx, selected, staged.ForkRunID)
+			if err != nil || len(feed) != 1 || feed[0].Ordinal != 0 || feed[0].Kind != "committed" || feed[0].EventID == "" {
+				t.Fatalf("selected start lost its single imported feed emission: %+v err=%v", feed, err)
+			}
+			var feedPayload map[string]any
+			if err := json.Unmarshal(feed[0].Payload, &feedPayload); err != nil || !reflect.DeepEqual(feedPayload, map[string]any{"body": "recorded"}) {
+				t.Fatalf("selected start changed its imported feed payload: %s err=%v", feed[0].Payload, err)
+			}
+			replayed, err := runforkexecution.ExecuteSelectedContractRunFork(caller, executionRequest)
+			err = errors.Join(err, use.Done())
+			if err != nil || !replayed.Activation.Activated || replayed.Materialization.ForkRunID != staged.ForkRunID || replayed.ExecutedEventCount != activated.ExecutedEventCount || replayed.Activation.ForkPoint != activated.Activation.ForkPoint || len(replayed.ForkEvents) != 0 {
+				t.Fatalf("selected start replay changed its immutable activation result: first=%+v replay=%+v err=%v", activated, replayed, err)
+			}
+			afterReplay, err := ReadFanOutPublishedOutcomeStorageForTest(ctx, selected, staged.ForkRunID)
+			if err != nil || !reflect.DeepEqual(afterReplay, feed) {
+				t.Fatalf("operation replay repeated its feed or frontier publication: before=%+v after=%+v err=%v", feed, afterReplay, err)
 			}
 			pending, err := ReadSelectedExecutionStorageForTest(ctx, selected, staged.ForkRunID)
 			if err != nil || pending.State != "closed" || pending.RunStatus != string(runlifecycle.StateLive) || pending.Occurrences != 1 {
