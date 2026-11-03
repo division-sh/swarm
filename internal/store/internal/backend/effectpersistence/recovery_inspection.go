@@ -57,40 +57,9 @@ func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, deli
 		return effects.StartupRecoveryCounts{}, err
 	}
 	for _, row := range filterCompletionRecoveryAttempts(attempts, externalEffectRecoveryAttemptSet(candidates)) {
-		state := effects.StateTerminalFailure
-		if recoveryPostlaunch(row.State) {
-			state = effects.StateOutcomeUncertain
-		}
-		attempt, _, err := completionRecoverySettlement(row, state, nil, now)
+		outcome, err := inspectProviderRecoveryOutcome(ctx, tx, postgres, delivery, row, now)
 		if err != nil {
 			return effects.StartupRecoveryCounts{}, err
-		}
-		resolution, err := resolveProviderDrainRecovery(ctx, tx, attempt, now, postgres, recoveryInspection)
-		if err != nil {
-			return effects.StartupRecoveryCounts{}, err
-		}
-		if resolution.Kind == completionSettlementDrained && state == effects.StateTerminalFailure {
-			return effects.StartupRecoveryCounts{}, fmt.Errorf("authorized provider attempt %s cannot own a predecessor drain", attempt.AttemptID)
-		}
-		disposition, err := providerRecoveryDisposition(ctx, tx, postgres, row, attempt, resolution.Expired, now, recoveryInspection)
-		if err != nil {
-			return effects.StartupRecoveryCounts{}, err
-		}
-		if attempt.Origin.Kind != effects.CompletionOriginDelivery {
-			continue
-		}
-		outcome, pending, err := delivery.InspectProviderOriginRecoveryTx(ctx, tx, attempt.Origin.Delivery, disposition)
-		if err != nil {
-			return effects.StartupRecoveryCounts{}, err
-		}
-		if resolution.Kind == completionSettlementDrained {
-			cancellation, err := readProviderOriginCancellation(ctx, tx, postgres, attempt, pending, recoveryInspection)
-			if err != nil {
-				return effects.StartupRecoveryCounts{}, err
-			}
-			if cancellation.disposition != providerOriginNotCanceled {
-				continue
-			}
 		}
 		switch outcome {
 		case deliverylifecycle.StatusFailed:
@@ -100,4 +69,43 @@ func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, deli
 		}
 	}
 	return result, nil
+}
+
+func inspectProviderRecoveryOutcome(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, row completionRecoveryAttempt, now time.Time) (deliverylifecycle.Status, error) {
+	state := effects.StateTerminalFailure
+	if recoveryPostlaunch(row.State) {
+		state = effects.StateOutcomeUncertain
+	}
+	attempt, _, err := completionRecoverySettlement(row, state, nil, now)
+	if err != nil {
+		return "", err
+	}
+	resolution, err := resolveProviderDrainRecovery(ctx, tx, attempt, now, postgres, recoveryInspection)
+	if err != nil {
+		return "", err
+	}
+	if resolution.Kind == completionSettlementDrained && state == effects.StateTerminalFailure {
+		return "", fmt.Errorf("authorized provider attempt %s cannot own a predecessor drain", attempt.AttemptID)
+	}
+	disposition, err := providerRecoveryDisposition(ctx, tx, postgres, row, attempt, resolution.Expired, now, recoveryInspection)
+	if err != nil {
+		return "", err
+	}
+	if attempt.Origin.Kind != effects.CompletionOriginDelivery {
+		return "", nil
+	}
+	outcome, pending, err := delivery.InspectProviderOriginRecoveryTx(ctx, tx, attempt.Origin.Delivery, disposition)
+	if err != nil {
+		return "", err
+	}
+	if resolution.Kind == completionSettlementDrained {
+		cancellation, err := readProviderOriginCancellation(ctx, tx, postgres, attempt, pending, recoveryInspection)
+		if err != nil {
+			return "", err
+		}
+		if cancellation.disposition != providerOriginNotCanceled {
+			return "", nil
+		}
+	}
+	return outcome, nil
 }
