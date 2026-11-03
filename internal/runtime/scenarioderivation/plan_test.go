@@ -61,7 +61,7 @@ func TestCompileInputSelectionFailsClosedAndAllInputsIsDeterministic(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plans) != 2 || plans[0].PinName != "work.requested" || plans[1].PinName != "work.alternate" {
+	if len(plans) != 2 || plans[0].PinName != "work.alternate" || plans[1].PinName != "work.requested" {
 		t.Fatalf("all-input plans = %#v", plans)
 	}
 }

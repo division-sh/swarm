@@ -137,7 +137,7 @@ func TestWorkflowIdentityLookalikeFaultPreservesConstructionBothStores(t *testin
 			}
 			expected := physical
 			expected[0] = map[string]any{"entity_id": "authored-lookalike", "flow_instance": "authored/lookalike"}
-			expected[4] = map[string]any{"entity_id": "bookkeeping-lookalike", "flow_instance": "bookkeeping/lookalike"}
+			expected[3] = map[string]any{"entity_id": "bookkeeping-lookalike", "flow_instance": "bookkeeping/lookalike"}
 			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, expected) {
 				t.Fatalf("identity lookalikes lost exact value maps or unrelated facts: actual=%+v expected=%+v", actual, expected)
 			}

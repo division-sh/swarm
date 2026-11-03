@@ -658,10 +658,10 @@ func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool)
 		}
 		if relative == "schema.yaml" {
 			pins := "inputs:\n  - work.requested\n  - effect.requested\n  - observer.requested\n"
-			outputs := "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n"
+			outputs := "outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n"
 			if withNotice {
-				pins += "    - notice.requested\n"
-				outputs = "  outputs: [observer.requested, notice.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n"
+				pins += "  - notice.requested\n"
+				outputs = "outputs: [observer.requested, notice.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n"
 			}
 			// Keep the executable gate's scalar styles intact while relocating its pins.
 			old := pins + outputs

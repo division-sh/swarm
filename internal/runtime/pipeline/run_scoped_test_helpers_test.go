@@ -117,6 +117,7 @@ func admitSyntheticEntityContractsForTest(
 	base *runtimecontracts.WorkflowContractBundle,
 	rootState bool,
 	flowIDs []string,
+	overlays ...map[string]string,
 ) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	if base == nil {
@@ -137,6 +138,11 @@ func admitSyntheticEntityContractsForTest(
 	}
 	if rootState {
 		files["state.yaml"] = "instance_key: text?\n"
+	}
+	for _, overlay := range overlays {
+		for path, body := range overlay {
+			files[path] = body
+		}
 	}
 
 	admitted := loadWorkflowTempBundle(t, files)

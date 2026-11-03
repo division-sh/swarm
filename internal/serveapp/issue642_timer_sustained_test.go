@@ -42,7 +42,7 @@ func issue642SustainedTimerSource(t *testing.T) string {
     emit: {event: timer.armed}
   timer.check:
     rules:
-      - when: state.tick_count == 1
+      - when: state.tick_count == 2
         advances_to: waiting
         emit: {event: timer.finished}
       - advances_to: waiting

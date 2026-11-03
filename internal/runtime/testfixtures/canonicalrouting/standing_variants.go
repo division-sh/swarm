@@ -15,12 +15,13 @@ func WithoutStandingIngressPins(t testing.TB, schema string) string {
 	}
 	root := document.Content[0]
 	found := false
-	for index := 0; index < len(root.Content); index += 2 {
-		if root.Content[index].Value == "pins" {
+	for index := 0; index < len(root.Content); {
+		if root.Content[index].Value == "inputs" || root.Content[index].Value == "outputs" {
 			root.Content = append(root.Content[:index], root.Content[index+2:]...)
 			found = true
-			break
+			continue
 		}
+		index += 2
 	}
 	if !found {
 		t.Fatal("standing ingress event pins not found")

@@ -300,7 +300,7 @@ func TestS1EffectiveProviderTriggerSchemaReadbackIsDefensive(t *testing.T) {
 func TestS1EffectiveProviderTriggerSchemasRefuseNoncanonicalFlowReaders(t *testing.T) {
 	members := s1EffectiveTriggerMembers()
 	const event = "inbound.team-bot.text_message"
-	members["schema.yaml"] = []byte("stages: []\ninputs: [" + event + "]\n  outputs: [" + event + "]\n")
+	members["schema.yaml"] = []byte("stages: []\ninputs: [" + event + "]\noutputs: [" + event + "]\n")
 	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
 	if err != nil {

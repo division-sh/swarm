@@ -34,7 +34,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			first := readForkLoopActivation(t, rt, started.RunID)
-			initial := readForkCollectedReviews(t, rt, started.RunID)
+			initial := readForkCollectedReviews(t, rt.Endpoint, started.RunID)
 			if !reflect.DeepEqual(initial, []any{map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}}) {
 				t.Fatalf("first ordinary admission: %#v", initial)
 			}
@@ -48,7 +48,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || current.RevisionID == first.RevisionID {
 				t.Fatalf("ordinary repeat: first=%+v current=%+v", first, current)
 			}
-			source := readForkCollectedReviews(t, rt, started.RunID)
+			source := readForkCollectedReviews(t, rt.Endpoint, started.RunID)
 			if !reflect.DeepEqual(source, []any{map[string]any{"revision_id": current.RevisionID, "token": "loop-notice-proof"}}) {
 				t.Fatalf("repeat did not start a new collected list: %#v", source)
 			}
@@ -81,24 +81,24 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child := readForkCollectedReviews(t, rt, fork.ForkRunID)
+			child := readForkCollectedReviews(t, rt.Endpoint, fork.ForkRunID)
 			if !reflect.DeepEqual(child, []any{map[string]any{"revision_id": want.RevisionID, "token": "loop-notice-proof"}}) {
 				t.Fatalf("fork did not collect the remapped current revision: %#v", child)
 			}
 			requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkCollectedReviews(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkCollectedReviews(t, rt.Endpoint, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
 				t.Fatal("repeated fork changed collected items or source history")
 			}
 		})
 	}
 }
 
-func readForkCollectedReviews(t *testing.T, rt servedControlProofRuntime, runID string) []any {
+func readForkCollectedReviews(t *testing.T, endpoint, runID string) []any {
 	t.Helper()
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": flowidentity.EntityID("review")}, &entity)
+	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": flowidentity.EntityID("review")}, &entity)
 	items, ok := entity.Fields["reviews"].([]any)
 	if !ok {
 		t.Fatalf("collected reviews are not an ordinary state list: %#v", entity.Fields)

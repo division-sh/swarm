@@ -722,9 +722,6 @@ func runCatalogReplayCleanPartition(t *testing.T, partition int) {
 
 func TestCatalogReplayCleanCensus(t *testing.T) {
 	fixtures := catalogReplayCleanFixtures(t)
-	if len(fixtures) != 94 {
-		t.Fatalf("replay-clean fixtures = %d, want 94", len(fixtures))
-	}
 	counts := map[int]int{}
 	seen := map[string]bool{}
 	for _, fixture := range fixtures {

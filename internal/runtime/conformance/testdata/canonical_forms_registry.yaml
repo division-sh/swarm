@@ -56,8 +56,8 @@ additive_document_families:
     denominator_rule: "additive to the historical 45-row/11-decoder/67-site/24-root receipt; no reset or closure claim for #2300/#2287/#2293, #2486 or #2487"
 
 inventory:
-  custom_unmarshal_total: 10
-  custom_unmarshal_reachable: 8
+  custom_unmarshal_total: 9
+  custom_unmarshal_reachable: 7
   custom_unmarshal_retired: 0
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
@@ -266,7 +266,7 @@ rows:
   - id: type.scalar_enum_named
     ruled: mechanical-ratified
     paths: "types.scalars.<name>, types.enums.<name>, types.types.<name>._description"
-    owners: [TypeCatalogDocument.UnmarshalYAML, ScalarTypeDecl.UnmarshalYAML, EnumTypeDecl.UnmarshalYAML, NamedTypeDecl.UnmarshalYAML]
+    owners: [TypeCatalogDocument.UnmarshalYAML, EnumTypeDecl.UnmarshalYAML, NamedTypeDecl.UnmarshalYAML]
     information:
       fact: [type names, scalar bases, enum members/default]
       annotation: [_description]
@@ -708,11 +708,13 @@ f2_priority_rows:
 
 decoder_coverage:
   workflow_contract_yaml_wave1.go:
-    type.scalar_enum_named: [TypeCatalogDocument, ScalarTypeDecl, EnumTypeDecl, NamedTypeDecl]
+    type.scalar_enum_named: [TypeCatalogDocument, EnumTypeDecl, NamedTypeDecl]
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
 
 decoder_deleted:
+  workflow_contract_yaml_wave1.go:
+    type.scalar_enum_named: [ScalarTypeDecl]
   enums.go:
     handler.collection_compute: [ComputeOperation]
   workflow_contract_yaml_schema.go:
@@ -746,7 +748,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 48
+  node_site_ceiling: 46
   off_owner_direct_decode_ceiling: 17
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -758,7 +760,7 @@ decode_bypasses:
     # #2533 deletes the trigger BODY wire decoder and all catalog/plan YAML roundtrips.
     # Its lexical admission consumes yamlsource and existing shared schema leaves.
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 2, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 9, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 7, direct_decode_roots: 0}
     internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
     internal/testplanning/execution.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
