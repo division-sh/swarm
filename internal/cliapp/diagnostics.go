@@ -944,7 +944,7 @@ func runDiagnosticHealthCommand(ctx context.Context, out, errOut io.Writer, opts
 	if err != nil {
 		var response *cliAPIHTTPError
 		if errors.As(err, &response) && response.statusCode == http.StatusServiceUnavailable && strings.HasPrefix(response.message, "waiting: store held;") {
-			fmt.Fprintln(errOut, strings.TrimSpace(response.message))
+			fmt.Fprintln(errOut, cliSanitizeOneLineValue(response.message))
 			return commandExitError{code: CLIExitRuntime}
 		}
 		return returnCLIAPIError(errOut, err, cliAPIErrorClassifier{})

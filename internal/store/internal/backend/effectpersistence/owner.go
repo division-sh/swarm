@@ -39,7 +39,7 @@ type providerDrainDeliveryOwner interface {
 	QueuedAgentFlowSnapshotsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimedelivery.Snapshot, error)
 	CancelQueuedAgentTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Snapshot) (runtimedelivery.Snapshot, error)
 	ProviderOriginPendingTx(context.Context, *sql.Tx, runtimedelivery.Claim) (bool, error)
-	InspectProviderOriginRecoveryTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimedelivery.FailureDisposition) (runtimedelivery.Status, bool, error)
+	InspectProviderOriginRecoveryTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimedelivery.FailureDisposition, bool) (runtimedelivery.Status, bool, error)
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
 	RenewProviderOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, time.Duration) error
 	SettleProviderOriginSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration) error
