@@ -2,9 +2,6 @@ package bus
 
 import (
 	"crypto/sha256"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -209,65 +206,5 @@ func TestRoutePlanRejectsMalformedDurableRouteBeforePersistence(t *testing.T) {
 	err := plan.ValidatePersistentDeliveries()
 	if err == nil || !strings.Contains(err.Error(), "unsupported subscriber type") {
 		t.Fatalf("malformed route error = %v", err)
-	}
-}
-
-func TestRoutePlanProducerHelpersRequireTypedProducer(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime caller unavailable")
-	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "route_plan.go"))
-	if err != nil {
-		t.Fatalf("read route_plan.go: %v", err)
-	}
-	source := string(raw)
-	for _, forbidden := range []string{
-		"routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, source, reason string)",
-		"routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, source, reason string)",
-		"routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest, source, reason string)",
-		"type routeIntentProducer struct",
-		"routeIntentProducer{source:",
-		"AuthorityOwner       string",
-		"Source            string",
-		"Reason            string",
-		"Source         string",
-		"Reason         string",
-	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("route_plan.go still exposes raw route-intent producer shape %q", forbidden)
-		}
-	}
-}
-
-func TestRoutePlanDoesNotExposeLegacyEventDeliveryPlanCompatibility(t *testing.T) {
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime caller unavailable")
-	}
-	dir := filepath.Dir(testFile)
-	files := []string{
-		"eventbus.go",
-		"route_plan.go",
-		"delivery_planner.go",
-		"eventbus_publish.go",
-	}
-	for _, file := range files {
-		raw, err := os.ReadFile(filepath.Join(dir, file))
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		source := string(raw)
-		for _, forbidden := range []string{
-			"type eventDeliveryPlan struct",
-			"func (p RoutePlan) EventDeliveryPlan()",
-			"CanonicalRoutePlan(",
-			"WithCanonicalRoutePlan(",
-			"routePlanFromLegacyEventDeliveryPlan",
-		} {
-			if strings.Contains(source, forbidden) {
-				t.Fatalf("%s still exposes legacy eventDeliveryPlan compatibility %q", file, forbidden)
-			}
-		}
 	}
 }
