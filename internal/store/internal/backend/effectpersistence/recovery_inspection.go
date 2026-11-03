@@ -94,7 +94,7 @@ func inspectProviderRecoveryOutcome(ctx context.Context, tx *sql.Tx, postgres bo
 	if attempt.Origin.Kind != effects.CompletionOriginDelivery {
 		return "", nil
 	}
-	outcome, pending, err := delivery.InspectProviderOriginRecoveryTx(ctx, tx, attempt.Origin.Delivery, disposition)
+	outcome, pending, err := delivery.InspectProviderOriginRecoveryTx(ctx, tx, attempt.Origin.Delivery, disposition, resolution.Kind == completionSettlementCurrent)
 	if err != nil {
 		return "", err
 	}

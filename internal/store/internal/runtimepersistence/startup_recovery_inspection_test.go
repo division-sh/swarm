@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/timeridentity"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
@@ -124,7 +126,7 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 func requireStartupRecoveryCLI(t *testing.T, fixture completionSettlementFixture, binary string) {
 	t.Helper()
 	backend, document := "sqlite", ""
-	env := os.Environ()
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "TMPDIR=" + os.Getenv("TMPDIR"), "NO_COLOR=1"}
 	if fixture.sqlite {
 		var sequence int
 		var name, path string
@@ -141,8 +143,8 @@ func requireStartupRecoveryCLI(t *testing.T, fixture completionSettlementFixture
 		if err := fixture.db.QueryRow(`SELECT current_database()`).Scan(&parameters.Database); err != nil {
 			t.Fatal(err)
 		}
-		document = fmt.Sprintf("store:\n  backend: postgres\ndatabase:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: SWARM_INSPECTION_TEST_PASSWORD\n  sslmode: %q\n", parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
-		env = append(env, "SWARM_INSPECTION_TEST_PASSWORD="+parameters.Password)
+		document = fmt.Sprintf("store:\n  backend: postgres\ndatabase:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: INSPECTION_TEST_PASSWORD\n  sslmode: %q\n", parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
+		env = append(env, "INSPECTION_TEST_PASSWORD="+parameters.Password)
 	}
 	config := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(config, []byte(document), 0o600); err != nil {
@@ -168,4 +170,27 @@ func requireStartupRecoveryCLI(t *testing.T, fixture completionSettlementFixture
 	if err := process.ProveCurrent(fixture.original); err != nil {
 		t.Fatalf("inspection released native possession: %v", err)
 	}
+}
+
+func TestStartupRecoveryInspectionRejectsCanceledCurrentOriginBothStores(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := effects.WithTurnTimeout(providerDrainContext(t, fixture, "current-cancellation"), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "current-cancellation")
+		clock, _ := handle.LogicalTurnClock()
+		intent, err := fixture.store.(effects.TurnLifetimeStore).RequestTurnTimeout(ctx, handle.Attempt(), clock.DeadlineAt)
+		if err != nil || !intent.Requested {
+			t.Fatalf("request timeout: %+v %v", intent, err)
+		}
+		now := time.Now().UTC()
+		setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Minute))
+		before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+		_, inspectionErr := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(context.Background(), now)
+		_, recoveryErr := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
+		for _, err := range []error{inspectionErr, recoveryErr} {
+			if err == nil || !strings.Contains(err.Error(), "authored cancellation requires canceled-origin settlement") {
+				t.Fatalf("current canceled origin did not retain recovery's refusal: %v", err)
+			}
+		}
+		historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	})
 }

@@ -1581,7 +1581,7 @@ func failureSettlementStatus(disposition FailureDisposition, retryCount, maxRetr
 	return StatusDelivered
 }
 
-func (a *Adapter) inspectProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim, disposition FailureDisposition) (Status, bool, error) {
+func (a *Adapter) inspectProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim, disposition FailureDisposition, ordinarySettlement bool) (Status, bool, error) {
 	origin, err := a.readProviderOriginRecoveryDisposition(ctx, tx, claim, false)
 	if err != nil || origin == providerOriginRecoveryAlreadyTerminal {
 		return "", false, err
@@ -1592,6 +1592,11 @@ func (a *Adapter) inspectProviderOriginRecovery(ctx context.Context, tx *sql.Tx,
 	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	if err != nil {
 		return "", false, err
+	}
+	if ordinarySettlement {
+		if err := a.readOrdinaryClaimSettlement(ctx, tx, claim, record, "", false); err != nil {
+			return "", false, err
+		}
 	}
 	return failureSettlementStatus(disposition, record.RetryCount, record.MaxRetries), true, nil
 }
@@ -1801,10 +1806,16 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 }
 
 func (a *Adapter) requireOrdinaryClaimSettlementTx(ctx context.Context, tx *sql.Tx, claim Claim, record deliveryRecord, cancellation CancellationReason) error {
+	return a.readOrdinaryClaimSettlement(ctx, tx, claim, record, cancellation, true)
+}
+
+func (a *Adapter) readOrdinaryClaimSettlement(ctx context.Context, tx *sql.Tx, claim Claim, record deliveryRecord, cancellation CancellationReason, lock bool) error {
 	if cancellation == "" && record.SubscriberClass == SubscriberAgent {
-		query := `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=$1::uuid FOR UPDATE`
+		query := `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=$1::uuid`
 		if a.dialect == DialectSQLite {
 			query = `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=?`
+		} else if lock {
+			query += ` FOR UPDATE`
 		}
 		var reason sql.NullString
 		if err := tx.QueryRowContext(ctx, query, claim.DeliveryID()).Scan(&reason); err != nil && !errors.Is(err, sql.ErrNoRows) {
