@@ -1132,6 +1132,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtR77PrivateBridgeCollectorTo && trusted.Collector == base &&
+		current == debtR83FixtureCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2293/6600659890: exact R83 fixture successors; baseline sites are unchanged.
+	}
 	if base == debtCatalogRuntimeRowsLandedCollectorTo && trusted.Collector == base &&
 		current == debtTestProcessCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
