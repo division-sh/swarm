@@ -128,7 +128,7 @@ func runMemoryConsumedProcess(t *testing.T, raw string) {
 	}
 }
 
-func TestConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
+func TestProviderConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
 	if raw := os.Getenv(memoryConsumedProcessEnv); raw != "" {
 		runMemoryConsumedProcess(t, raw)
 		return
@@ -183,7 +183,7 @@ func TestConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
 			}
 			request := memoryConsumedProcessRequest{Root: root, Source: source, ConfigPath: configPath, Backend: backend, CutURL: barrier.URL}
 			raw, _ := json.Marshal(request)
-			first := startServedCrashProcess(t, "TestConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
+			first := startServedCrashProcess(t, "TestProviderConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
 			endpoint := first.endpoint(t) + "/v1/rpc"
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, source),
 				"payload": map[string]any{"item_id": "consumed-memory"}, "idempotency_key": "consumed-memory-seed"})
@@ -199,7 +199,7 @@ func TestConsumedEmissionMemoryCrashRecoveryBothStores(t *testing.T) {
 			}
 			request.CutURL = ""
 			raw, _ = json.Marshal(request)
-			second := startServedCrashProcess(t, "TestConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
+			second := startServedCrashProcess(t, "TestProviderConsumedEmissionMemoryCrashRecoveryBothStores", []string{memoryConsumedProcessEnv + "=" + string(raw)})
 			endpoint = second.endpoint(t) + "/v1/rpc"
 			requireProviderMemoryDelivery(t, endpoint, []string{business.EventID})
 			if len(provider.Requests()) != 1 {
