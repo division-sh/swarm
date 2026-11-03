@@ -122,7 +122,7 @@ func LastAdmittedServeLine(inspection runtimestartupownership.AuthorityInspectio
 	}
 	line := fmt.Sprintf("last admitted serve %s (generation %d)", inspection.Authority.RuntimeInstanceID, inspection.Authority.AuthorityGeneration)
 	if counts := inspection.Interrupted; counts != nil {
-		line += fmt.Sprintf("; interrupted: %d provider turns to resume, %d provider turns to dead-letter, %d HTTP tool calls outcome-unknown", counts.ProviderTurnsToResume, counts.ProviderTurnsToDeadLetter, counts.HTTPToolCallsUnknown)
+		line += fmt.Sprintf("; interrupted: %d provider turns to resume, %d provider turns to dead-letter, %d HTTP tool calls outcome unknown", counts.ProviderTurnsToResume, counts.ProviderTurnsToDeadLetter, counts.HTTPToolCallsUnknown)
 	}
 	return line
 }

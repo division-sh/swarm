@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/timeridentity"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
@@ -163,7 +163,7 @@ func requireStartupRecoveryCLI(t *testing.T, fixture completionSettlementFixture
 	command := exec.CommandContext(ctx, binary, "store", "status", "--config", config, "--store", backend)
 	command.Dir, command.Env = pipeline.WorkflowRepoRoot(), env
 	output, err := command.CombinedOutput()
-	want := fmt.Sprintf("Project owner: selected-store lease is held; last admitted serve %s (generation %d); interrupted: 1 provider turns to resume, 2 provider turns to dead-letter, 1 HTTP tool calls outcome-unknown\n", stamp.RuntimeInstanceID, stamp.AuthorityGeneration)
+	want := fmt.Sprintf("Project owner: selected-store lease is held; last admitted serve %s (generation %d); interrupted: 1 provider turns to resume, 2 provider turns to dead-letter, 1 HTTP tool calls outcome unknown\n", stamp.RuntimeInstanceID, stamp.AuthorityGeneration)
 	if err != nil || string(output) != want {
 		t.Fatalf("public held-store count read: %v\ngot=%s\nwant=%s", err, output, want)
 	}
