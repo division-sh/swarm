@@ -54,9 +54,6 @@ func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
 		if len(plans) != 1 || plans[0].ItemsFrom != test.source || plans[0].Site.Kind != test.site {
 			t.Fatalf("compiled producer %s: %+v", test.event, plans)
 		}
-		if test.site == contracts.FanOutSiteOnComplete && !plans[0].SourceAfterWrites {
-			t.Fatal("entity proof must bind its same-handler writes")
-		}
 	}
 }
 
@@ -90,11 +87,11 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	modify("schema.yaml", func(raw string) string {
 		var inputs, outputs, connects strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&inputs, "    - %s\n", name)
-			fmt.Fprintf(&outputs, "    - %s\n", name)
+			fmt.Fprintf(&inputs, "  - %s\n", name)
+			fmt.Fprintf(&outputs, "  - %s\n", name)
 			fmt.Fprintf(&connects, "  - event: %s\n    from: .\n    to: portfolio\n", name)
 		}
-		raw = replace(raw, "  outputs:\n", inputs.String()+"  outputs:\n")
+		raw = replace(raw, "outputs:\n", inputs.String()+"outputs:\n")
 		raw = replace(raw, "connect:\n", outputs.String()+"connect:\n")
 		return raw + connects.String()
 	})
@@ -107,9 +104,9 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	modify("portfolio/schema.yaml", func(raw string) string {
 		var added strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&added, "    - %s\n", name)
+			fmt.Fprintf(&added, "  - %s\n", name)
 		}
-		return replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+		return replace(raw, "outputs:\n", added.String()+"outputs:\n")
 	})
 	modify("portfolio/events.yaml", func(raw string) string {
 		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")

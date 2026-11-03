@@ -472,12 +472,12 @@ func TestRuntimePayloadAdmitter_RejectsUndeclaredCallerPayloadFieldWhenAdditiona
 	}
 }
 
-func TestRuntimePayloadAdmitter_RejectsScalarAliasUUIDViolation(t *testing.T) {
+func TestRuntimePayloadAdmitter_RejectsUUIDViolation(t *testing.T) {
 	t.Parallel()
 
 	source := semanticview.Wrap(loadRootPayloadBundle(t,
-		"task.completed:\n  trace_id: TraceID\n",
-		"scalars:\n  TraceID: uuid\n",
+		"task.completed:\n  trace_id: uuid\n",
+		"",
 	))
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle.SourceArtifact == nil {
@@ -489,6 +489,6 @@ func TestRuntimePayloadAdmitter_RejectsScalarAliasUUIDViolation(t *testing.T) {
 	}
 	admitter := NewRuntimePayloadAdmitter(nil, source, fact)
 	if _, err := admitRuntimePayload(admitter, "task.completed", []byte(`{"trace_id":"not-a-uuid"}`)); err == nil {
-		t.Fatal("expected scalar-alias uuid violation to be rejected")
+		t.Fatal("expected uuid violation to be rejected")
 	}
 }

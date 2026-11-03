@@ -20,9 +20,9 @@ const canonicalNotifyAllChildrenAgents = `account-worker:
   intent: prompts/account-worker.md
   model: regular
   subscriptions:
-    - account.notify.requested
+  - account.notify.requested
   emit_events:
-    - account.notification.completed
+  - account.notification.completed
   mock:
     kind: python
     module: mocks/account-worker.py
@@ -81,7 +81,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 `, "")
 	}
 	if opts.OmitOutputPin {
-		applyClosedReplacement(t, ownerSchema, "    - account.notify.requested\n", "")
+		applyClosedReplacement(t, ownerSchema, "  - account.notify.requested\n", "")
 	}
 	if opts.MissingEmitField {
 		applyClosedReplacement(t, ownerNodes, "          command: payload.command\n", "")
@@ -120,10 +120,10 @@ account.created:
 auto_emit_on_create:
   event: account.created
 `)
-		applyClosedReplacement(t, accountSchema, `    - account.notify.requested
-`, `    - account.notify.requested
-  outputs:
-    - account.created
+		applyClosedReplacement(t, accountSchema, `  - account.notify.requested
+`, `  - account.notify.requested
+outputs:
+  - account.created
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
@@ -167,9 +167,9 @@ portfolio.notify.completed:
   semantic_rejected: integer
   canceled: integer
 `)
-		applyClosedReplacement(t, ownerSchema, `    - account.notify.requested
-`, `    - account.notify.requested
-    - portfolio.notify.completed
+		applyClosedReplacement(t, ownerSchema, `  - account.notify.requested
+`, `  - account.notify.requested
+  - portfolio.notify.completed
 `)
 		applyClosedReplacement(t, ownerNodes, "            canceled: join.dispositions.canceled\n", "            canceled: join.dispositions.canceled\n  portfolio.notify.completed: {}\n")
 	}
@@ -288,7 +288,7 @@ last_command: text
         - source_field: eligible
           target_field: eligible
 `, "")
-			applyClosedReplacement(t, accountSchema, "    - account.registered\n", "")
+			applyClosedReplacement(t, accountSchema, "  - account.registered\n", "")
 		}
 		if opts.NumericReporterSink {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
@@ -299,8 +299,8 @@ last_command: text
     from: portfolio
     to: .
 `)
-			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\n", "    - portfolio.notify.requested\n    - account.registered\n")
-			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.registered\nconnect:\n")
+			applyClosedReplacement(t, connectFile, "  - portfolio.notify.requested\n", "  - portfolio.notify.requested\n  - account.registered\n")
+			applyClosedReplacement(t, connectFile, "  - portfolio.notify.requested\nconnect:\n", "  - portfolio.notify.requested\n  - account.registered\nconnect:\n")
 			writeClosedVariantFile(t, root, "nodes.yaml", `numeric-registration-reporter:
   account.registered: {}
 `)
@@ -317,7 +317,7 @@ portfolio-coordinator:
 `)
 		}
 		if opts.RegistrationUUIDField {
-			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
+			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "  external_id: text?\n", "  external_id: text\n")
 			applyClosedReplacement(t, ownerNodes, `          gem_score: account.gem_score
           eligible: state.threshold >= 70
 `, `          gem_score: account.gem_score
@@ -348,14 +348,14 @@ portfolio-coordinator:
   intent: {inline: "Read account registration events."}
   model: regular
   subscriptions:
-    - account.registered
+  - account.registered
 retired:
   id: account-retired
   role: retired
   intent: {inline: "Handle account notification requests."}
   model: regular
   subscriptions:
-    - account.notify.requested
+  - account.notify.requested
 `)
 	case 2:
 		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "2.0.0"`)
@@ -365,15 +365,15 @@ retired:
   intent: {inline: "Read account registration and notification events."}
   model: regular
   subscriptions:
-    - account.registered
-    - account.notify.requested
+  - account.registered
+  - account.notify.requested
 writer:
   id: account-writer
   role: writer
   intent: {inline: "Write account notification results."}
   model: regular
   subscriptions:
-    - account.notify.requested
+  - account.notify.requested
 `)
 	case 3:
 		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "3.0.0"`)
@@ -383,22 +383,22 @@ writer:
   intent: {inline: "Read account registration and notification events."}
   model: regular
   subscriptions:
-    - account.registered
-    - account.notify.requested
+  - account.registered
+  - account.notify.requested
 writer:
   id: account-writer
   role: writer
   intent: {inline: "Write account notification results."}
   model: regular
   subscriptions:
-    - account.notify.requested
+  - account.notify.requested
 retired:
   id: account-retired
   role: returned
   intent: {inline: "Handle account notification requests."}
   model: regular
   subscriptions:
-    - account.notify.requested
+  - account.notify.requested
 `)
 	default:
 		t.Fatalf("unsupported agent topology revision %d", opts.AgentTopologyRevision)
@@ -410,12 +410,12 @@ retired:
 		// The root only forwards work. The portfolio stays active across rows
 		// until an explicit close, rather than completing on its first input.
 		applyClosedReplacement(t, connectFile, "# fixture: notify-all-children\n", "# fixture: notify-all-children\nstages: {done: {final: true}}\n")
-		applyClosedReplacement(t, connectFile, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
-		applyClosedReplacement(t, connectFile, "  outputs:\n", "  outputs:\n    - fixture.close.requested\n")
+		applyClosedReplacement(t, connectFile, "inputs:\n", "inputs:\n  - fixture.close.requested\n")
+		applyClosedReplacement(t, connectFile, "outputs:\n", "outputs:\n  - fixture.close.requested\n")
 		applyClosedReplacement(t, connectFile, "connect:\n", "connect:\n  - {event: fixture.close.requested, from: ., to: portfolio}\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "portfolio.opened:\n", "fixture.close.requested:\nportfolio.opened:\n")
 		applyClosedReplacement(t, ownerSchema, "# fixture: portfolio\n", "# fixture: portfolio\nstages: {active: {}, done: {final: true}}\n")
-		applyClosedReplacement(t, ownerSchema, "  inputs:\n", "  inputs:\n    - fixture.close.requested\n")
+		applyClosedReplacement(t, ownerSchema, "inputs:\n", "inputs:\n  - fixture.close.requested\n")
 		applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", "portfolio-coordinator:\n  fixture.close.requested: {advances_to: done}\n")
 	}
 	return root

@@ -21,7 +21,7 @@ func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *tes
 				source := loadWorkflowTempSource(t, map[string]string{
 					"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 					"schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
-					"types.yaml":    "types:\n  Finding:\n    summary: text\n",
+					"types.yaml":    "Finding:\n  summary: text\n",
 					"state.yaml":    "findings: [Finding]\nstatus: \"pending\"\n",
 					"events.yaml":   "finding.received:\n  summary: text\n  status: text\nfinding.recorded:\n  status: text\n",
 					"nodes.yaml": `writer:

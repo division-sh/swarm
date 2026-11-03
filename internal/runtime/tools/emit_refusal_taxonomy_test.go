@@ -85,14 +85,14 @@ func emitRefusalSource(t *testing.T, reply bool, finalReceiver ...bool) semantic
 	root := canonicalrouting.CopyStaticAgentOutputConnect(t)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "producer/agents.yaml"), "producer-agent:\n  role: producer\n  model: regular\n  intent: {inline: Report deployment completion.}\n  emit_events: [deploy.done]\n")
 	if len(finalReceiver) != 0 && finalReceiver[0] {
-		writeToolFlowDataFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "stages: {active: {}, done: {final: true}}\npins:\n  inputs: [deploy.completed]\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(root, "consumer/schema.yaml"), "stages: {active: {}, done: {final: true}}\ninputs: [deploy.completed]\n")
 	}
 	if reply {
 		for name, body := range map[string]string{
 			"schema.yaml":          "connect:\n  - {event: deploy.requested, from: consumer, to: producer}\n  - {event: deploy.done, from: producer, to: consumer, rename: deploy.completed, replies_to: deploy.requested}\n",
-			"producer/schema.yaml": "pins:\n  inputs: [deploy.requested]\n  outputs: [deploy.done]\n",
+			"producer/schema.yaml": "inputs: [deploy.requested]\noutputs: [deploy.done]\n",
 			"producer/nodes.yaml":  "request-observer:\n  deploy.requested: {}\n",
-			"consumer/schema.yaml": "pins:\n  inputs: [deploy.completed]\n  outputs: [deploy.requested]\n",
+			"consumer/schema.yaml": "inputs: [deploy.completed]\noutputs: [deploy.requested]\n",
 			"consumer/events.yaml": "deploy.requested:\n",
 		} {
 			writeToolFlowDataFixtureFile(t, filepath.Join(root, name), body)

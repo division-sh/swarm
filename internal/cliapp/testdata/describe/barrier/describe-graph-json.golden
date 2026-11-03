@@ -33,7 +33,6 @@
       }
     ],
     "required_agents": {
-      "source": "inferred",
       "agents": []
     }
   },
@@ -64,7 +63,6 @@
         }
       ],
       "required_agents": {
-        "source": "inferred",
         "agents": []
       },
       "input_pins": [
@@ -123,7 +121,6 @@
         }
       ],
       "required_agents": {
-        "source": "inferred",
         "agents": []
       },
       "primary_entity": {
@@ -207,7 +204,6 @@
         }
       ],
       "required_agents": {
-        "source": "inferred",
         "agents": []
       },
       "primary_entity": {
@@ -299,7 +295,6 @@
         "nodes": "portfolio/period/nodes.yaml"
       },
       "required_agents": {
-        "source": "inferred",
         "agents": []
       },
       "primary_entity": {
@@ -634,34 +629,7 @@
     ],
     "input_pins": [
       {
-        "id": "endpoint-48ce0af899fbcc5a",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": ".",
-        "event": {
-          "authored": "operating.report.triggered",
-          "local": "operating.report.triggered",
-          "canonical": "operating.report.triggered"
-        },
-        "pin_name": "operating.report.triggered",
-        "source_location": "pins.inputs.operating.report.triggered"
-      },
-      {
-        "id": "endpoint-49c9d89e71ba2ddc",
-        "direction": "input_pin",
-        "kind": "flow_input_pin",
-        "flow_id": "portfolio",
-        "flow_path": "portfolio",
-        "event": {
-          "authored": "portfolio.setup",
-          "local": "portfolio.setup",
-          "canonical": "portfolio/portfolio.setup"
-        },
-        "pin_name": "portfolio.setup",
-        "source_location": "pins.inputs.portfolio.setup"
-      },
-      {
-        "id": "endpoint-81fb062bc8bdd498",
+        "id": "endpoint-15b914c8df2af702",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "portfolio/period",
@@ -672,23 +640,23 @@
           "canonical": "portfolio/period/period.setup"
         },
         "pin_name": "period.setup",
-        "source_location": "pins.inputs.period.setup"
+        "source_location": "inputs.period.setup"
       },
       {
-        "id": "endpoint-8b0a1dcffc3d861c",
+        "id": "endpoint-1f89f85c38b24194",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": ".",
         "event": {
-          "authored": "portfolio.setup",
-          "local": "portfolio.setup",
-          "canonical": "portfolio.setup"
+          "authored": "operating.report.triggered",
+          "local": "operating.report.triggered",
+          "canonical": "operating.report.triggered"
         },
-        "pin_name": "portfolio.setup",
-        "source_location": "pins.inputs.portfolio.setup"
+        "pin_name": "operating.report.triggered",
+        "source_location": "inputs.operating.report.triggered"
       },
       {
-        "id": "endpoint-d61eedbcefea1407",
+        "id": "endpoint-2c492888ce7a434e",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "portfolio/period",
@@ -699,24 +667,23 @@
           "canonical": "portfolio/period/period.reported"
         },
         "pin_name": "period.reported",
-        "source_location": "pins.inputs.period.reported"
+        "source_location": "inputs.period.reported"
       },
       {
-        "id": "endpoint-d9417a848a828ab0",
+        "id": "endpoint-4768f97b92bc347c",
         "direction": "input_pin",
         "kind": "flow_input_pin",
-        "flow_id": "portfolio",
-        "flow_path": "portfolio",
+        "flow_id": ".",
         "event": {
-          "authored": "operating.reported",
-          "local": "operating.reported",
-          "canonical": "portfolio/operating.reported"
+          "authored": "portfolio.setup",
+          "local": "portfolio.setup",
+          "canonical": "portfolio.setup"
         },
-        "pin_name": "operating.reported",
-        "source_location": "pins.inputs.operating.reported"
+        "pin_name": "portfolio.setup",
+        "source_location": "inputs.portfolio.setup"
       },
       {
-        "id": "endpoint-e187f74eae601bb1",
+        "id": "endpoint-625e723ff171189b",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "ingress",
@@ -727,10 +694,24 @@
           "canonical": "ingress/operating.report.triggered"
         },
         "pin_name": "operating.report.triggered",
-        "source_location": "pins.inputs.operating.report.triggered"
+        "source_location": "inputs.operating.report.triggered"
       },
       {
-        "id": "endpoint-efdaaafa1026205b",
+        "id": "endpoint-c768f73e9a16c4c3",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "portfolio",
+        "flow_path": "portfolio",
+        "event": {
+          "authored": "operating.reported",
+          "local": "operating.reported",
+          "canonical": "portfolio/operating.reported"
+        },
+        "pin_name": "operating.reported",
+        "source_location": "inputs.operating.reported"
+      },
+      {
+        "id": "endpoint-c87d6d63d6e815e8",
         "direction": "input_pin",
         "kind": "flow_input_pin",
         "flow_id": "operating",
@@ -741,80 +722,26 @@
           "canonical": "operating/operating.report.requested"
         },
         "pin_name": "operating.report.requested",
-        "source_location": "pins.inputs.operating.report.requested"
+        "source_location": "inputs.operating.report.requested"
+      },
+      {
+        "id": "endpoint-d580725fad9b4c26",
+        "direction": "input_pin",
+        "kind": "flow_input_pin",
+        "flow_id": "portfolio",
+        "flow_path": "portfolio",
+        "event": {
+          "authored": "portfolio.setup",
+          "local": "portfolio.setup",
+          "canonical": "portfolio/portfolio.setup"
+        },
+        "pin_name": "portfolio.setup",
+        "source_location": "inputs.portfolio.setup"
       }
     ],
     "output_pins": [
       {
-        "id": "endpoint-52044ea432efaf74",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": "operating",
-        "flow_path": "operating",
-        "event": {
-          "authored": "operating.reported",
-          "local": "operating.reported",
-          "canonical": "operating/operating.reported"
-        },
-        "pin_name": "operating.reported",
-        "source_location": "pins.outputs.operating.reported"
-      },
-      {
-        "id": "endpoint-5e5d70a287a15efa",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": "portfolio",
-        "flow_path": "portfolio",
-        "event": {
-          "authored": "period.reported",
-          "local": "period.reported",
-          "canonical": "portfolio/period.reported"
-        },
-        "pin_name": "period.reported",
-        "source_location": "pins.outputs.period.reported"
-      },
-      {
-        "id": "endpoint-71c05edd3fc2da68",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": ".",
-        "event": {
-          "authored": "operating.report.triggered",
-          "local": "operating.report.triggered",
-          "canonical": "operating.report.triggered"
-        },
-        "pin_name": "operating.report.triggered",
-        "source_location": "pins.outputs.operating.report.triggered"
-      },
-      {
-        "id": "endpoint-7a265b0c75f054de",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": "ingress",
-        "flow_path": "ingress",
-        "event": {
-          "authored": "operating.report.requested",
-          "local": "operating.report.requested",
-          "canonical": "ingress/operating.report.requested"
-        },
-        "pin_name": "operating.report.requested",
-        "source_location": "pins.outputs.operating.report.requested"
-      },
-      {
-        "id": "endpoint-893ad812ba92fff2",
-        "direction": "output_pin",
-        "kind": "flow_output_pin",
-        "flow_id": ".",
-        "event": {
-          "authored": "portfolio.setup",
-          "local": "portfolio.setup",
-          "canonical": "portfolio.setup"
-        },
-        "pin_name": "portfolio.setup",
-        "source_location": "pins.outputs.portfolio.setup"
-      },
-      {
-        "id": "endpoint-dfa515446c7b6f33",
+        "id": "endpoint-20681bf82416d7fb",
         "direction": "output_pin",
         "kind": "flow_output_pin",
         "flow_id": "portfolio",
@@ -825,13 +752,81 @@
           "canonical": "portfolio/period.setup"
         },
         "pin_name": "period.setup",
-        "source_location": "pins.outputs.period.setup"
+        "source_location": "outputs.period.setup"
+      },
+      {
+        "id": "endpoint-2f6385603db9954b",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": "ingress",
+        "flow_path": "ingress",
+        "event": {
+          "authored": "operating.report.requested",
+          "local": "operating.report.requested",
+          "canonical": "ingress/operating.report.requested"
+        },
+        "pin_name": "operating.report.requested",
+        "source_location": "outputs.operating.report.requested"
+      },
+      {
+        "id": "endpoint-5b235c0be5f80513",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": ".",
+        "event": {
+          "authored": "portfolio.setup",
+          "local": "portfolio.setup",
+          "canonical": "portfolio.setup"
+        },
+        "pin_name": "portfolio.setup",
+        "source_location": "outputs.portfolio.setup"
+      },
+      {
+        "id": "endpoint-660b74272ce7ecbf",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": "portfolio",
+        "flow_path": "portfolio",
+        "event": {
+          "authored": "period.reported",
+          "local": "period.reported",
+          "canonical": "portfolio/period.reported"
+        },
+        "pin_name": "period.reported",
+        "source_location": "outputs.period.reported"
+      },
+      {
+        "id": "endpoint-6cf56cd43f5d7bfb",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": "operating",
+        "flow_path": "operating",
+        "event": {
+          "authored": "operating.reported",
+          "local": "operating.reported",
+          "canonical": "operating/operating.reported"
+        },
+        "pin_name": "operating.reported",
+        "source_location": "outputs.operating.reported"
+      },
+      {
+        "id": "endpoint-fec8aeb4b84a4805",
+        "direction": "output_pin",
+        "kind": "flow_output_pin",
+        "flow_id": ".",
+        "event": {
+          "authored": "operating.report.triggered",
+          "local": "operating.report.triggered",
+          "canonical": "operating.report.triggered"
+        },
+        "pin_name": "operating.report.triggered",
+        "source_location": "outputs.operating.report.triggered"
       }
     ],
     "root_input_sources": [],
     "boundary_exposures": [
       {
-        "id": "endpoint-432b7ca14c117698-\u003eendpoint-dfa515446c7b6f33",
+        "id": "endpoint-432b7ca14c117698-\u003eendpoint-20681bf82416d7fb",
         "event": {
           "authored": "period.setup",
           "local": "period.setup",
@@ -855,7 +850,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-dfa515446c7b6f33",
+          "id": "endpoint-20681bf82416d7fb",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "portfolio",
@@ -866,11 +861,11 @@
             "canonical": "portfolio/period.setup"
           },
           "pin_name": "period.setup",
-          "source_location": "pins.outputs.period.setup"
+          "source_location": "outputs.period.setup"
         }
       },
       {
-        "id": "endpoint-598b7cb56cadc598-\u003eendpoint-7a265b0c75f054de",
+        "id": "endpoint-598b7cb56cadc598-\u003eendpoint-2f6385603db9954b",
         "event": {
           "authored": "operating.report.requested",
           "local": "operating.report.requested",
@@ -894,7 +889,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-7a265b0c75f054de",
+          "id": "endpoint-2f6385603db9954b",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "ingress",
@@ -905,11 +900,11 @@
             "canonical": "ingress/operating.report.requested"
           },
           "pin_name": "operating.report.requested",
-          "source_location": "pins.outputs.operating.report.requested"
+          "source_location": "outputs.operating.report.requested"
         }
       },
       {
-        "id": "endpoint-7541ac787a78f62a-\u003eendpoint-52044ea432efaf74",
+        "id": "endpoint-7541ac787a78f62a-\u003eendpoint-6cf56cd43f5d7bfb",
         "event": {
           "authored": "operating.reported",
           "local": "operating.reported",
@@ -933,7 +928,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-52044ea432efaf74",
+          "id": "endpoint-6cf56cd43f5d7bfb",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "operating",
@@ -944,11 +939,11 @@
             "canonical": "operating/operating.reported"
           },
           "pin_name": "operating.reported",
-          "source_location": "pins.outputs.operating.reported"
+          "source_location": "outputs.operating.reported"
         }
       },
       {
-        "id": "endpoint-793ed16b0005f08f-\u003eendpoint-5e5d70a287a15efa",
+        "id": "endpoint-793ed16b0005f08f-\u003eendpoint-660b74272ce7ecbf",
         "event": {
           "authored": "period.reported",
           "local": "period.reported",
@@ -972,7 +967,7 @@
           "source_location": "handler.emit"
         },
         "output": {
-          "id": "endpoint-5e5d70a287a15efa",
+          "id": "endpoint-660b74272ce7ecbf",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": "portfolio",
@@ -983,283 +978,13 @@
             "canonical": "portfolio/period.reported"
           },
           "pin_name": "period.reported",
-          "source_location": "pins.outputs.period.reported"
+          "source_location": "outputs.period.reported"
         }
       }
     ],
     "edges": [
       {
-        "id": "route-16e41651b6052288",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "period.setup",
-          "local": "period.setup",
-          "canonical": "portfolio/period/period.setup"
-        },
-        "producer": {
-          "id": "endpoint-81fb062bc8bdd498",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "portfolio/period",
-          "flow_path": "portfolio/period",
-          "event": {
-            "authored": "period.setup",
-            "local": "period.setup",
-            "canonical": "portfolio/period/period.setup"
-          },
-          "pin_name": "period.setup",
-          "source_location": "pins.inputs.period.setup"
-        },
-        "consumer": {
-          "id": "endpoint-4d5802e23d4ee826",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": "portfolio/period",
-          "flow_path": "portfolio/period",
-          "event": {
-            "authored": "period.setup",
-            "local": "period.setup",
-            "canonical": "portfolio/period/period.setup"
-          },
-          "node_id": "portfolio-collector",
-          "handler_event": "period.setup",
-          "source_file": "portfolio/period/nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"period.setup\"]"
-        },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-34fa538ddd4c75bc",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "operating.report.requested",
-          "local": "operating.report.requested",
-          "canonical": "ingress/operating.report.requested"
-        },
-        "producer": {
-          "id": "endpoint-598b7cb56cadc598",
-          "direction": "producer",
-          "kind": "node_handler",
-          "flow_id": "ingress",
-          "flow_path": "ingress",
-          "event": {
-            "authored": "operating.report.requested",
-            "local": "operating.report.requested",
-            "canonical": "ingress/operating.report.requested"
-          },
-          "node_id": "ingress-node",
-          "handler_event": "operating.report.triggered",
-          "site": "handler.emit",
-          "source_file": "ingress/nodes.yaml",
-          "source_location": "handler.emit"
-        },
-        "consumer": {
-          "id": "endpoint-efdaaafa1026205b",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "operating",
-          "flow_path": "operating",
-          "event": {
-            "authored": "operating.report.requested",
-            "local": "operating.report.requested",
-            "canonical": "operating/operating.report.requested"
-          },
-          "pin_name": "operating.report.requested",
-          "source_location": "pins.inputs.operating.report.requested"
-        },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": "ingress.operating.report.requested",
-          "to": "operating.operating.report.requested",
-          "output_pin": "operating.report.requested",
-          "input_pin": "operating.report.requested"
-        },
-        "resolution": {
-          "mode": "create",
-          "target_kind": "target",
-          "instance_key": {
-            "mode": "create",
-            "field": "operating_instance_id",
-            "source_kind": "event_id",
-            "source_path": "event.id",
-            "derived_from": "instance.operating_instance_id + carries.operating_instance_id.from"
-          }
-        },
-        "requires_runtime_resolution": true
-      },
-      {
-        "id": "route-65e3ca98995a7aa4",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "period.reported",
-          "local": "period.reported",
-          "canonical": "portfolio/period.reported"
-        },
-        "producer": {
-          "id": "endpoint-793ed16b0005f08f",
-          "direction": "producer",
-          "kind": "node_handler",
-          "flow_id": "portfolio",
-          "flow_path": "portfolio",
-          "event": {
-            "authored": "period.reported",
-            "local": "period.reported",
-            "canonical": "portfolio/period.reported"
-          },
-          "node_id": "portfolio-router",
-          "handler_event": "operating.reported",
-          "site": "handler.emit",
-          "source_file": "portfolio/nodes.yaml",
-          "source_location": "handler.emit"
-        },
-        "consumer": {
-          "id": "endpoint-d61eedbcefea1407",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "portfolio/period",
-          "flow_path": "portfolio/period",
-          "event": {
-            "authored": "period.reported",
-            "local": "period.reported",
-            "canonical": "portfolio/period/period.reported"
-          },
-          "pin_name": "period.reported",
-          "source_location": "pins.inputs.period.reported"
-        },
-        "boundary": {
-          "owner_flow_path": "portfolio",
-          "authored_location": "portfolio/schema.yaml:\u003cline\u003e",
-          "from": "portfolio.period.reported",
-          "to": "portfolio/period.period.reported",
-          "output_pin": "period.reported",
-          "input_pin": "period.reported"
-        },
-        "resolution": {
-          "mode": "select",
-          "target_kind": "target",
-          "instance_key": {
-            "mode": "select",
-            "field": "period_id",
-            "source_kind": "payload",
-            "source_path": "payload.period_id",
-            "derived_from": "instance.period_id + carries.period_id.from"
-          }
-        },
-        "requires_runtime_resolution": true
-      },
-      {
-        "id": "route-723a919879031633",
-        "scope": "typed_pubsub",
-        "event": {
-          "authored": "period.reported",
-          "local": "period.reported",
-          "canonical": "portfolio/period/period.reported"
-        },
-        "producer": {
-          "id": "endpoint-d61eedbcefea1407",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "portfolio/period",
-          "flow_path": "portfolio/period",
-          "event": {
-            "authored": "period.reported",
-            "local": "period.reported",
-            "canonical": "portfolio/period/period.reported"
-          },
-          "pin_name": "period.reported",
-          "source_location": "pins.inputs.period.reported"
-        },
-        "consumer": {
-          "id": "endpoint-15657e7f35e21da0",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": "portfolio/period",
-          "flow_path": "portfolio/period",
-          "event": {
-            "authored": "period.reported",
-            "local": "period.reported",
-            "canonical": "portfolio/period/period.reported"
-          },
-          "node_id": "portfolio-collector",
-          "handler_event": "period.reported",
-          "source_file": "portfolio/period/nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"period.reported\"]"
-        },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
-        },
-        "requires_runtime_resolution": false
-      },
-      {
-        "id": "route-8e5ab745a32e3f27",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "operating.reported",
-          "local": "operating.reported",
-          "canonical": "operating/operating.reported"
-        },
-        "producer": {
-          "id": "endpoint-7541ac787a78f62a",
-          "direction": "producer",
-          "kind": "node_handler",
-          "flow_id": "operating",
-          "flow_path": "operating",
-          "event": {
-            "authored": "operating.reported",
-            "local": "operating.reported",
-            "canonical": "operating/operating.reported"
-          },
-          "node_id": "operating-node",
-          "handler_event": "operating.report.requested",
-          "site": "handler.emit",
-          "source_file": "operating/nodes.yaml",
-          "source_location": "handler.emit"
-        },
-        "consumer": {
-          "id": "endpoint-d9417a848a828ab0",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "portfolio",
-          "flow_path": "portfolio",
-          "event": {
-            "authored": "operating.reported",
-            "local": "operating.reported",
-            "canonical": "portfolio/operating.reported"
-          },
-          "pin_name": "operating.reported",
-          "source_location": "pins.inputs.operating.reported"
-        },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": "operating.operating.reported",
-          "to": "portfolio.operating.reported",
-          "output_pin": "operating.reported",
-          "input_pin": "operating.reported"
-        },
-        "resolution": {
-          "mode": "select",
-          "target_kind": "target",
-          "instance_key": {
-            "mode": "select",
-            "field": "portfolio_id",
-            "source_kind": "payload",
-            "source_path": "payload.portfolio_id",
-            "derived_from": "instance.portfolio_id + carries.portfolio_id.from"
-          }
-        },
-        "requires_runtime_resolution": true
-      },
-      {
-        "id": "route-b86857845b1a0e50",
+        "id": "route-2d54f1e23cbddbdc",
         "scope": "inter_flow_connect",
         "event": {
           "authored": "portfolio.setup",
@@ -1267,7 +992,7 @@
           "canonical": "portfolio.setup"
         },
         "producer": {
-          "id": "endpoint-893ad812ba92fff2",
+          "id": "endpoint-5b235c0be5f80513",
           "direction": "output_pin",
           "kind": "flow_output_pin",
           "flow_id": ".",
@@ -1277,10 +1002,10 @@
             "canonical": "portfolio.setup"
           },
           "pin_name": "portfolio.setup",
-          "source_location": "pins.outputs.portfolio.setup"
+          "source_location": "outputs.portfolio.setup"
         },
         "consumer": {
-          "id": "endpoint-49c9d89e71ba2ddc",
+          "id": "endpoint-d580725fad9b4c26",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "portfolio",
@@ -1291,7 +1016,7 @@
             "canonical": "portfolio/portfolio.setup"
           },
           "pin_name": "portfolio.setup",
-          "source_location": "pins.inputs.portfolio.setup"
+          "source_location": "inputs.portfolio.setup"
         },
         "boundary": {
           "owner_flow_path": ".",
@@ -1315,15 +1040,28 @@
         "requires_runtime_resolution": true
       },
       {
-        "id": "route-e4c47dd485769a1d",
-        "scope": "typed_pubsub",
+        "id": "route-31adb35fc81e32ee",
+        "scope": "inter_flow_connect",
         "event": {
           "authored": "operating.report.triggered",
           "local": "operating.report.triggered",
-          "canonical": "ingress/operating.report.triggered"
+          "canonical": "operating.report.triggered"
         },
         "producer": {
-          "id": "endpoint-e187f74eae601bb1",
+          "id": "endpoint-fec8aeb4b84a4805",
+          "direction": "output_pin",
+          "kind": "flow_output_pin",
+          "flow_id": ".",
+          "event": {
+            "authored": "operating.report.triggered",
+            "local": "operating.report.triggered",
+            "canonical": "operating.report.triggered"
+          },
+          "pin_name": "operating.report.triggered",
+          "source_location": "outputs.operating.report.triggered"
+        },
+        "consumer": {
+          "id": "endpoint-625e723ff171189b",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "ingress",
@@ -1334,78 +1072,84 @@
             "canonical": "ingress/operating.report.triggered"
           },
           "pin_name": "operating.report.triggered",
-          "source_location": "pins.inputs.operating.report.triggered"
+          "source_location": "inputs.operating.report.triggered"
         },
-        "consumer": {
-          "id": "endpoint-6bc3088333bab1b7",
-          "direction": "consumer",
-          "kind": "node_handler",
-          "flow_id": "ingress",
-          "flow_path": "ingress",
-          "event": {
-            "authored": "operating.report.triggered",
-            "local": "operating.report.triggered",
-            "canonical": "ingress/operating.report.triggered"
-          },
-          "node_id": "ingress-node",
-          "handler_event": "operating.report.triggered",
-          "source_file": "ingress/nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"operating.report.triggered\"]"
+        "boundary": {
+          "owner_flow_path": ".",
+          "authored_location": "schema.yaml:\u003cline\u003e",
+          "from": ".operating.report.triggered",
+          "to": "ingress.operating.report.triggered",
+          "output_pin": "operating.report.triggered",
+          "input_pin": "operating.report.triggered"
         },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
+        "resolution": {
+          "mode": "static",
+          "target_kind": "target"
         },
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-e7d70eec6662c57d",
-        "scope": "typed_pubsub",
+        "id": "route-36e1e9ad2e69751c",
+        "scope": "inter_flow_connect",
         "event": {
-          "authored": "operating.reported",
-          "local": "operating.reported",
-          "canonical": "portfolio/operating.reported"
+          "authored": "period.setup",
+          "local": "period.setup",
+          "canonical": "portfolio/period.setup"
         },
         "producer": {
-          "id": "endpoint-d9417a848a828ab0",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "portfolio",
-          "flow_path": "portfolio",
-          "event": {
-            "authored": "operating.reported",
-            "local": "operating.reported",
-            "canonical": "portfolio/operating.reported"
-          },
-          "pin_name": "operating.reported",
-          "source_location": "pins.inputs.operating.reported"
-        },
-        "consumer": {
-          "id": "endpoint-a9a0234f7c2a47c6",
-          "direction": "consumer",
+          "id": "endpoint-432b7ca14c117698",
+          "direction": "producer",
           "kind": "node_handler",
           "flow_id": "portfolio",
           "flow_path": "portfolio",
           "event": {
-            "authored": "operating.reported",
-            "local": "operating.reported",
-            "canonical": "portfolio/operating.reported"
+            "authored": "period.setup",
+            "local": "period.setup",
+            "canonical": "portfolio/period.setup"
           },
           "node_id": "portfolio-router",
-          "handler_event": "operating.reported",
+          "handler_event": "portfolio.setup",
+          "site": "handler.emit",
           "source_file": "portfolio/nodes.yaml",
-          "source_line": 1,
-          "source_location": "[\"operating.reported\"]"
+          "source_location": "handler.emit"
         },
-        "typed_pubsub": {
-          "match": "exact",
-          "boundary": "same_flow"
+        "consumer": {
+          "id": "endpoint-15b914c8df2af702",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "portfolio/period",
+          "flow_path": "portfolio/period",
+          "event": {
+            "authored": "period.setup",
+            "local": "period.setup",
+            "canonical": "portfolio/period/period.setup"
+          },
+          "pin_name": "period.setup",
+          "source_location": "inputs.period.setup"
         },
-        "requires_runtime_resolution": false
+        "boundary": {
+          "owner_flow_path": "portfolio",
+          "authored_location": "portfolio/schema.yaml:\u003cline\u003e",
+          "from": "portfolio.period.setup",
+          "to": "portfolio/period.period.setup",
+          "output_pin": "period.setup",
+          "input_pin": "period.setup"
+        },
+        "resolution": {
+          "mode": "create",
+          "target_kind": "target",
+          "instance_key": {
+            "mode": "create",
+            "field": "period_id",
+            "source_kind": "payload",
+            "source_path": "payload.period_id",
+            "derived_from": "instance.period_id + carries.period_id.from"
+          }
+        },
+        "requires_runtime_resolution": true
       },
       {
-        "id": "route-f023f35075e2f43b",
+        "id": "route-6a283d89c2ca875a",
         "scope": "typed_pubsub",
         "event": {
           "authored": "operating.report.requested",
@@ -1413,7 +1157,7 @@
           "canonical": "operating/operating.report.requested"
         },
         "producer": {
-          "id": "endpoint-efdaaafa1026205b",
+          "id": "endpoint-c87d6d63d6e815e8",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "operating",
@@ -1424,7 +1168,7 @@
             "canonical": "operating/operating.report.requested"
           },
           "pin_name": "operating.report.requested",
-          "source_location": "pins.inputs.operating.report.requested"
+          "source_location": "inputs.operating.report.requested"
         },
         "consumer": {
           "id": "endpoint-8423952444c1238b",
@@ -1450,88 +1194,15 @@
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-fc20171c1f8a9775",
-        "scope": "inter_flow_connect",
-        "event": {
-          "authored": "period.setup",
-          "local": "period.setup",
-          "canonical": "portfolio/period.setup"
-        },
-        "producer": {
-          "id": "endpoint-432b7ca14c117698",
-          "direction": "producer",
-          "kind": "node_handler",
-          "flow_id": "portfolio",
-          "flow_path": "portfolio",
-          "event": {
-            "authored": "period.setup",
-            "local": "period.setup",
-            "canonical": "portfolio/period.setup"
-          },
-          "node_id": "portfolio-router",
-          "handler_event": "portfolio.setup",
-          "site": "handler.emit",
-          "source_file": "portfolio/nodes.yaml",
-          "source_location": "handler.emit"
-        },
-        "consumer": {
-          "id": "endpoint-81fb062bc8bdd498",
-          "direction": "input_pin",
-          "kind": "flow_input_pin",
-          "flow_id": "portfolio/period",
-          "flow_path": "portfolio/period",
-          "event": {
-            "authored": "period.setup",
-            "local": "period.setup",
-            "canonical": "portfolio/period/period.setup"
-          },
-          "pin_name": "period.setup",
-          "source_location": "pins.inputs.period.setup"
-        },
-        "boundary": {
-          "owner_flow_path": "portfolio",
-          "authored_location": "portfolio/schema.yaml:\u003cline\u003e",
-          "from": "portfolio.period.setup",
-          "to": "portfolio/period.period.setup",
-          "output_pin": "period.setup",
-          "input_pin": "period.setup"
-        },
-        "resolution": {
-          "mode": "create",
-          "target_kind": "target",
-          "instance_key": {
-            "mode": "create",
-            "field": "period_id",
-            "source_kind": "payload",
-            "source_path": "payload.period_id",
-            "derived_from": "instance.period_id + carries.period_id.from"
-          }
-        },
-        "requires_runtime_resolution": true
-      },
-      {
-        "id": "route-feabddd2371a8a1c",
-        "scope": "inter_flow_connect",
+        "id": "route-a2fda0ac9887768c",
+        "scope": "typed_pubsub",
         "event": {
           "authored": "operating.report.triggered",
           "local": "operating.report.triggered",
-          "canonical": "operating.report.triggered"
+          "canonical": "ingress/operating.report.triggered"
         },
         "producer": {
-          "id": "endpoint-71c05edd3fc2da68",
-          "direction": "output_pin",
-          "kind": "flow_output_pin",
-          "flow_id": ".",
-          "event": {
-            "authored": "operating.report.triggered",
-            "local": "operating.report.triggered",
-            "canonical": "operating.report.triggered"
-          },
-          "pin_name": "operating.report.triggered",
-          "source_location": "pins.outputs.operating.report.triggered"
-        },
-        "consumer": {
-          "id": "endpoint-e187f74eae601bb1",
+          "id": "endpoint-625e723ff171189b",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "ingress",
@@ -1542,24 +1213,33 @@
             "canonical": "ingress/operating.report.triggered"
           },
           "pin_name": "operating.report.triggered",
-          "source_location": "pins.inputs.operating.report.triggered"
+          "source_location": "inputs.operating.report.triggered"
         },
-        "boundary": {
-          "owner_flow_path": ".",
-          "authored_location": "schema.yaml:\u003cline\u003e",
-          "from": ".operating.report.triggered",
-          "to": "ingress.operating.report.triggered",
-          "output_pin": "operating.report.triggered",
-          "input_pin": "operating.report.triggered"
+        "consumer": {
+          "id": "endpoint-6bc3088333bab1b7",
+          "direction": "consumer",
+          "kind": "node_handler",
+          "flow_id": "ingress",
+          "flow_path": "ingress",
+          "event": {
+            "authored": "operating.report.triggered",
+            "local": "operating.report.triggered",
+            "canonical": "ingress/operating.report.triggered"
+          },
+          "node_id": "ingress-node",
+          "handler_event": "operating.report.triggered",
+          "source_file": "ingress/nodes.yaml",
+          "source_line": 1,
+          "source_location": "[\"operating.report.triggered\"]"
         },
-        "resolution": {
-          "mode": "static",
-          "target_kind": "target"
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
         },
         "requires_runtime_resolution": false
       },
       {
-        "id": "route-ff774d9aec649145",
+        "id": "route-a4fafc7b9cdb20ce",
         "scope": "typed_pubsub",
         "event": {
           "authored": "portfolio.setup",
@@ -1567,7 +1247,7 @@
           "canonical": "portfolio/portfolio.setup"
         },
         "producer": {
-          "id": "endpoint-49c9d89e71ba2ddc",
+          "id": "endpoint-d580725fad9b4c26",
           "direction": "input_pin",
           "kind": "flow_input_pin",
           "flow_id": "portfolio",
@@ -1578,7 +1258,7 @@
             "canonical": "portfolio/portfolio.setup"
           },
           "pin_name": "portfolio.setup",
-          "source_location": "pins.inputs.portfolio.setup"
+          "source_location": "inputs.portfolio.setup"
         },
         "consumer": {
           "id": "endpoint-00a27dab3eba28c0",
@@ -1596,6 +1276,321 @@
           "source_file": "portfolio/nodes.yaml",
           "source_line": 1,
           "source_location": "[\"portfolio.setup\"]"
+        },
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
+        },
+        "requires_runtime_resolution": false
+      },
+      {
+        "id": "route-af13a97bab786c95",
+        "scope": "inter_flow_connect",
+        "event": {
+          "authored": "period.reported",
+          "local": "period.reported",
+          "canonical": "portfolio/period.reported"
+        },
+        "producer": {
+          "id": "endpoint-793ed16b0005f08f",
+          "direction": "producer",
+          "kind": "node_handler",
+          "flow_id": "portfolio",
+          "flow_path": "portfolio",
+          "event": {
+            "authored": "period.reported",
+            "local": "period.reported",
+            "canonical": "portfolio/period.reported"
+          },
+          "node_id": "portfolio-router",
+          "handler_event": "operating.reported",
+          "site": "handler.emit",
+          "source_file": "portfolio/nodes.yaml",
+          "source_location": "handler.emit"
+        },
+        "consumer": {
+          "id": "endpoint-2c492888ce7a434e",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "portfolio/period",
+          "flow_path": "portfolio/period",
+          "event": {
+            "authored": "period.reported",
+            "local": "period.reported",
+            "canonical": "portfolio/period/period.reported"
+          },
+          "pin_name": "period.reported",
+          "source_location": "inputs.period.reported"
+        },
+        "boundary": {
+          "owner_flow_path": "portfolio",
+          "authored_location": "portfolio/schema.yaml:\u003cline\u003e",
+          "from": "portfolio.period.reported",
+          "to": "portfolio/period.period.reported",
+          "output_pin": "period.reported",
+          "input_pin": "period.reported"
+        },
+        "resolution": {
+          "mode": "select",
+          "target_kind": "target",
+          "instance_key": {
+            "mode": "select",
+            "field": "period_id",
+            "source_kind": "payload",
+            "source_path": "payload.period_id",
+            "derived_from": "instance.period_id + carries.period_id.from"
+          }
+        },
+        "requires_runtime_resolution": true
+      },
+      {
+        "id": "route-b758b765e1058e14",
+        "scope": "inter_flow_connect",
+        "event": {
+          "authored": "operating.report.requested",
+          "local": "operating.report.requested",
+          "canonical": "ingress/operating.report.requested"
+        },
+        "producer": {
+          "id": "endpoint-598b7cb56cadc598",
+          "direction": "producer",
+          "kind": "node_handler",
+          "flow_id": "ingress",
+          "flow_path": "ingress",
+          "event": {
+            "authored": "operating.report.requested",
+            "local": "operating.report.requested",
+            "canonical": "ingress/operating.report.requested"
+          },
+          "node_id": "ingress-node",
+          "handler_event": "operating.report.triggered",
+          "site": "handler.emit",
+          "source_file": "ingress/nodes.yaml",
+          "source_location": "handler.emit"
+        },
+        "consumer": {
+          "id": "endpoint-c87d6d63d6e815e8",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "operating",
+          "flow_path": "operating",
+          "event": {
+            "authored": "operating.report.requested",
+            "local": "operating.report.requested",
+            "canonical": "operating/operating.report.requested"
+          },
+          "pin_name": "operating.report.requested",
+          "source_location": "inputs.operating.report.requested"
+        },
+        "boundary": {
+          "owner_flow_path": ".",
+          "authored_location": "schema.yaml:\u003cline\u003e",
+          "from": "ingress.operating.report.requested",
+          "to": "operating.operating.report.requested",
+          "output_pin": "operating.report.requested",
+          "input_pin": "operating.report.requested"
+        },
+        "resolution": {
+          "mode": "create",
+          "target_kind": "target",
+          "instance_key": {
+            "mode": "create",
+            "field": "operating_instance_id",
+            "source_kind": "event_id",
+            "source_path": "event.id",
+            "derived_from": "instance.operating_instance_id + carries.operating_instance_id.from"
+          }
+        },
+        "requires_runtime_resolution": true
+      },
+      {
+        "id": "route-d47a1b057fbc08f7",
+        "scope": "typed_pubsub",
+        "event": {
+          "authored": "operating.reported",
+          "local": "operating.reported",
+          "canonical": "portfolio/operating.reported"
+        },
+        "producer": {
+          "id": "endpoint-c768f73e9a16c4c3",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "portfolio",
+          "flow_path": "portfolio",
+          "event": {
+            "authored": "operating.reported",
+            "local": "operating.reported",
+            "canonical": "portfolio/operating.reported"
+          },
+          "pin_name": "operating.reported",
+          "source_location": "inputs.operating.reported"
+        },
+        "consumer": {
+          "id": "endpoint-a9a0234f7c2a47c6",
+          "direction": "consumer",
+          "kind": "node_handler",
+          "flow_id": "portfolio",
+          "flow_path": "portfolio",
+          "event": {
+            "authored": "operating.reported",
+            "local": "operating.reported",
+            "canonical": "portfolio/operating.reported"
+          },
+          "node_id": "portfolio-router",
+          "handler_event": "operating.reported",
+          "source_file": "portfolio/nodes.yaml",
+          "source_line": 1,
+          "source_location": "[\"operating.reported\"]"
+        },
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
+        },
+        "requires_runtime_resolution": false
+      },
+      {
+        "id": "route-d8e0d96849343ac3",
+        "scope": "inter_flow_connect",
+        "event": {
+          "authored": "operating.reported",
+          "local": "operating.reported",
+          "canonical": "operating/operating.reported"
+        },
+        "producer": {
+          "id": "endpoint-7541ac787a78f62a",
+          "direction": "producer",
+          "kind": "node_handler",
+          "flow_id": "operating",
+          "flow_path": "operating",
+          "event": {
+            "authored": "operating.reported",
+            "local": "operating.reported",
+            "canonical": "operating/operating.reported"
+          },
+          "node_id": "operating-node",
+          "handler_event": "operating.report.requested",
+          "site": "handler.emit",
+          "source_file": "operating/nodes.yaml",
+          "source_location": "handler.emit"
+        },
+        "consumer": {
+          "id": "endpoint-c768f73e9a16c4c3",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "portfolio",
+          "flow_path": "portfolio",
+          "event": {
+            "authored": "operating.reported",
+            "local": "operating.reported",
+            "canonical": "portfolio/operating.reported"
+          },
+          "pin_name": "operating.reported",
+          "source_location": "inputs.operating.reported"
+        },
+        "boundary": {
+          "owner_flow_path": ".",
+          "authored_location": "schema.yaml:\u003cline\u003e",
+          "from": "operating.operating.reported",
+          "to": "portfolio.operating.reported",
+          "output_pin": "operating.reported",
+          "input_pin": "operating.reported"
+        },
+        "resolution": {
+          "mode": "select",
+          "target_kind": "target",
+          "instance_key": {
+            "mode": "select",
+            "field": "portfolio_id",
+            "source_kind": "payload",
+            "source_path": "payload.portfolio_id",
+            "derived_from": "instance.portfolio_id + carries.portfolio_id.from"
+          }
+        },
+        "requires_runtime_resolution": true
+      },
+      {
+        "id": "route-ee20328d543db0c2",
+        "scope": "typed_pubsub",
+        "event": {
+          "authored": "period.reported",
+          "local": "period.reported",
+          "canonical": "portfolio/period/period.reported"
+        },
+        "producer": {
+          "id": "endpoint-2c492888ce7a434e",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "portfolio/period",
+          "flow_path": "portfolio/period",
+          "event": {
+            "authored": "period.reported",
+            "local": "period.reported",
+            "canonical": "portfolio/period/period.reported"
+          },
+          "pin_name": "period.reported",
+          "source_location": "inputs.period.reported"
+        },
+        "consumer": {
+          "id": "endpoint-15657e7f35e21da0",
+          "direction": "consumer",
+          "kind": "node_handler",
+          "flow_id": "portfolio/period",
+          "flow_path": "portfolio/period",
+          "event": {
+            "authored": "period.reported",
+            "local": "period.reported",
+            "canonical": "portfolio/period/period.reported"
+          },
+          "node_id": "portfolio-collector",
+          "handler_event": "period.reported",
+          "source_file": "portfolio/period/nodes.yaml",
+          "source_line": 1,
+          "source_location": "[\"period.reported\"]"
+        },
+        "typed_pubsub": {
+          "match": "exact",
+          "boundary": "same_flow"
+        },
+        "requires_runtime_resolution": false
+      },
+      {
+        "id": "route-f833060a045fb0ff",
+        "scope": "typed_pubsub",
+        "event": {
+          "authored": "period.setup",
+          "local": "period.setup",
+          "canonical": "portfolio/period/period.setup"
+        },
+        "producer": {
+          "id": "endpoint-15b914c8df2af702",
+          "direction": "input_pin",
+          "kind": "flow_input_pin",
+          "flow_id": "portfolio/period",
+          "flow_path": "portfolio/period",
+          "event": {
+            "authored": "period.setup",
+            "local": "period.setup",
+            "canonical": "portfolio/period/period.setup"
+          },
+          "pin_name": "period.setup",
+          "source_location": "inputs.period.setup"
+        },
+        "consumer": {
+          "id": "endpoint-4d5802e23d4ee826",
+          "direction": "consumer",
+          "kind": "node_handler",
+          "flow_id": "portfolio/period",
+          "flow_path": "portfolio/period",
+          "event": {
+            "authored": "period.setup",
+            "local": "period.setup",
+            "canonical": "portfolio/period/period.setup"
+          },
+          "node_id": "portfolio-collector",
+          "handler_event": "period.setup",
+          "source_file": "portfolio/period/nodes.yaml",
+          "source_line": 1,
+          "source_location": "[\"period.setup\"]"
         },
         "typed_pubsub": {
           "match": "exact",

@@ -18,7 +18,7 @@ func instanceIndexTestSource(t *testing.T, fieldType string) (semanticview.Sourc
 		"manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml":          "stages: []\n",
 		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"worker/schema.yaml":   "instance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"worker/schema.yaml":   "instance: item_id\ninputs:\n  - item.created\n",
 		"worker/state.yaml":    "item_id: " + fieldType + "\n",
 		"worker/events.yaml":   "item.created:\n  item_id: " + fieldType + "\n",
 		"detail/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",

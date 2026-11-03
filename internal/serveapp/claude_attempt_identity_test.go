@@ -628,7 +628,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	cfg := claudeAttemptProofAgentConfig()
 	for name, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [claude.attempt.proof.requested]\n",
+		"schema.yaml":   "stages: []\ninputs: [claude.attempt.proof.requested]\n",
 		"events.yaml":   "claude.attempt.proof.requested:\n  request: text\n",
 		"agents.yaml": fmt.Sprintf("%s:\n  type: %s\n  role: worker\n  model: regular\n  intent: {inline: %s}\n  subscriptions: [claude.attempt.proof.requested]\n",
 			cfg.ID, cfg.Type, strconv.Quote(cfg.Intent.Content)),

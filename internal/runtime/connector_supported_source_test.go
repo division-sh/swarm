@@ -98,7 +98,7 @@ func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nod
 		"manifest.yaml":                          manifest,
 		"schema.yaml":                            "stages: []\n",
 		boundedProviderFlowID + "/manifest.yaml": manifest,
-		boundedProviderFlowID + "/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: " + inputs + "\n",
+		boundedProviderFlowID + "/schema.yaml":   "stages:\n  active: {}\ninputs: " + inputs + "\n",
 	}
 	if nodes != "" {
 		files[boundedProviderFlowID+"/nodes.yaml"] = nodes

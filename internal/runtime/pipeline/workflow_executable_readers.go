@@ -419,11 +419,7 @@ func appendCompiledFanOutExecutableReaders(out *[]WorkflowExecutableReader, ctx 
 	if !ok {
 		return
 	}
-	beforeSource := len(*out)
 	appendExecutableReader(out, kind+".items_from", plan.ItemsFrom, phase)
-	for i := beforeSource; i < len(*out); i++ {
-		(*out)[i].FanOutAfterWrites = plan.SourceAfterWrites
-	}
 	before := len(*out)
 	appendExecutableReader(out, kind+".identity", plan.Identity, phase)
 	if len(*out) > before {

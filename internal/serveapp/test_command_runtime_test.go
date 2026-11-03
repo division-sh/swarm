@@ -63,7 +63,7 @@ func TestSwarmTestPrivateSQLiteNoLiveLLMProof(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins: {inputs: [inbound.partner.raw, inbound.partner.message]}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\ninputs: [inbound.partner.raw, inbound.partner.message]\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "processed_count: 0\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `receiver:
   inbound.partner.raw:
@@ -1419,7 +1419,7 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 		}
 		writeWorkflowValidationFixtureFile(t, path, updated)
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "enums:\n  PublicConversationScope: {values: [direct, shared], default: direct}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "types.yaml"), "PublicConversationScope: [\"direct\", \"shared\"]\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `message.received:
   _key: conversation_reference
   conversation_reference: text

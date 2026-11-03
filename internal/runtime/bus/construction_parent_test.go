@@ -107,11 +107,11 @@ func TestParentLocalConstructionSelectionUsesRecordedAncestry(t *testing.T) {
 				"parent/schema.yaml":         "stages: []\nconnect:\n  - event: work.done\n    from: child\n    to: .\n",
 				"parent/nodes.yaml":          "collector:\n  work.done:\n    guard: _entity.id != \"\"\n",
 				"parent/child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-				"parent/child/schema.yaml":   "stages: []\npins:\n  outputs: [work.done]\n",
+				"parent/child/schema.yaml":   "stages: []\noutputs: [work.done]\n",
 				"parent/child/events.yaml":   "work.done:\n",
 			}
 			if authoredPin {
-				files["parent/schema.yaml"] += "pins:\n  inputs: [work.done]\n"
+				files["parent/schema.yaml"] += "inputs: [work.done]\n"
 			}
 			source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 			graph := pinrouting.CompileConnectGraph(source)

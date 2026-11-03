@@ -75,7 +75,7 @@ func TestPublicationRunFixtureRequiresExactKnownRun(t *testing.T) {
 func TestRunCreatingRecipientPreviewSharesProposalWithOrdinaryConsumers(t *testing.T) {
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "pins:\n  inputs: [task.requested]\n  outputs: [task.requested]\n",
+		"schema.yaml":   "inputs: [task.requested]\noutputs: [task.requested]\n",
 		"events.yaml":   "task.requested:\n",
 		"nodes.yaml":    "worker:\n  task.requested:\n    guard: true\n",
 	}))

@@ -689,14 +689,14 @@ units:
   catalog-oracle-guards:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
-    run: '^Test(CatalogReplayCleanCensus|CatalogReplayProofReferences|StaticDataInvocationGoldenConsumesAdmittedIdentity)$'
+    run: '^Test(CatalogReplayCleanCensus|StaticDataInvocationGoldenConsumesAdmittedIdentity)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
   catalog-replay-oracle-guards:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
-    run: '^Test(CatalogReplayCleanCensus|CatalogReplayProofReferences)$'
+    run: '^Test(CatalogReplayCleanCensus)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

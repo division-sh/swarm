@@ -4442,6 +4442,10 @@ handler_specification:
       field: fan_out
       type: object
       purpose: For each item in a bounded declared collection, emit one ordinary event through the normal emit pipeline.
+      single_emit_site: >-
+        A handler-level fan_out cannot coexist with rules or on_complete. Verify names both competing sites and teaches:
+        put the fan-out on the rule that should fan out, or use no rules or on_complete. Handler-level fan-out remains
+        terminal; each handler run owns one durable intent, not a continuation across emit sites.
       sub_fields:
         items_from: >-
           Source at exactly one declared top-level payload.* or entity.* collection field, catalog-typed as a list
@@ -4482,12 +4486,11 @@ handler_specification:
           - identity_derived
           - authored_max_items
           - effective_max_items
-          - source_after_writes
           - emit
         consumers: [parser_lowering, bootverify, engine, authoring_view, describe_graph, policy_expression_validation, supported_proof_runners]
         rule: Every execution consumer uses this bundle-qualified compiled row. Raw fan_out syntax remains parser and
           composition input. Consumers must not independently re-derive item type, omitted scalar identity, effective
-          bound, source/write ordering, or emitted payload semantics.
+          bound or emitted payload semantics. Source/write ordering follows the declared execution order, not source overlap.
       empty_collection: >
         An empty collection persists one immediately closed fan-out intent and publishes zero events. Handler
         `advances_to` runs once after that constant-size intent commit. A selected rule's data_accumulation can
@@ -25391,7 +25394,7 @@ static_analyzer:
     spec_basis:
     - rule.consequences.bidirectional_verification
     - rule.consequences.declared_is_authority
-    - type_system.field_forms.verbose
+    - type_system.field_forms
     scope:
       description: For every declared field on the active root or flow-owned Wave 1 entity contract, verify that explicit
         authorial population intent exists.

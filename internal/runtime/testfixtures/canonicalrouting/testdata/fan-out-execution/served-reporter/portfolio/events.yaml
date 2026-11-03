@@ -1,5 +1,5 @@
 account.registered:
-  key: account_id
+  _key: account_id
   portfolio_id: text
   account_id: text
   eng_roles: integer
@@ -8,6 +8,6 @@ account.registered:
   eligible: boolean
 portfolio.closed:
 account.notify.requested:
-  key: account_id
+  _key: account_id
   account_id: text
   command: text

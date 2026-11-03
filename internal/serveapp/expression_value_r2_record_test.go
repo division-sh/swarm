@@ -19,7 +19,7 @@ func TestR2NamedRecordEmitSurvivesServedRestartBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
 			for file, replacement := range map[string]struct{ old, next string }{
-				"types.yaml":  {"    fraction: numeric\n", "    fraction: numeric\n  Report:\n    name: text\n    count: integer\n"},
+				"types.yaml":  {"  fraction: numeric\n", "  fraction: numeric\nReport:\n  name: text\n  count: integer\n"},
 				"events.yaml": {"numeric.completed:\n", "numeric.completed:\n  report: Report\n"},
 				"nodes.yaml":  {`        explicit_double: double(payload.value) + 1.0`, "        explicit_double: double(payload.value) + 1.0\n        report: {name: \"Ada\", count: payload.value}"},
 			} {

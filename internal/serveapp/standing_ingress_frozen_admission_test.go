@@ -519,7 +519,8 @@ func setFrozenIngressRawPolicy(t *testing.T, root string, unsigned bool) {
 	if err := yaml.Unmarshal(body, &schema); err != nil {
 		t.Fatal(err)
 	}
-	schema["pins"] = map[string]any{"inputs": []string{"inbound.telegram_raw.raw"}}
+	schema["inputs"] = []string{"inbound.telegram_raw.raw"}
+	delete(schema, "outputs")
 	body, err = yaml.Marshal(schema)
 	if err != nil {
 		t.Fatal(err)
@@ -545,7 +546,7 @@ func addFrozenIngressSibling(t *testing.T, root, signingKey string) {
 		event = "inbound.telegram.text_message"
 	}
 	writeStandingCandidateFile(t, filepath.Join(sibling, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeStandingCandidateFile(t, filepath.Join(sibling, "schema.yaml"), "stages: []\npins:\n  inputs: ["+event+"]\n")
+	writeStandingCandidateFile(t, filepath.Join(sibling, "schema.yaml"), "stages: []\ninputs: ["+event+"]\n")
 }
 
 func writeFrozenIngressTrigger(t *testing.T, root, provider string, unsigned bool) {

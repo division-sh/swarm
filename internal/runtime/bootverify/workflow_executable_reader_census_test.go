@@ -194,7 +194,6 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 				"line_item_id": runtimecontracts.CELExpression("line_item.id"),
 			}},
 		},
-		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "state.status == 'done'"}},
 	}
 	want := map[string]runtimepipeline.WorkflowEntityFieldLifecyclePhase{
 		"group_by.items_from":  runtimepipeline.WorkflowEntityFieldLifecycleGroupBy,
@@ -202,7 +201,11 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		"fan_out.items_from":   runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
 		"on_complete[0]: condition state.status == 'done'.condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
 	}
-	for _, reader := range canonicalFanOutExecutableReaders(t, handler) {
+	readers := canonicalFanOutExecutableReaders(t, handler)
+	readers = append(readers, handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", runtimecontracts.SystemNodeEventHandler{
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "state.status == 'done'"}},
+	})...)
+	for _, reader := range readers {
 		phase, ok := want[reader.Kind]
 		if !ok {
 			continue

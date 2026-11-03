@@ -46,7 +46,7 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":         "stages: []\n",
 		"owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"owner/schema.yaml":   "instance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
+		"owner/schema.yaml":   "instance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\ninputs:\n  - construct.requested\n",
 		"owner/state.yaml":    "subject_id: text\nentity_type: \"authored-not-owner\"\nvalue: text?\n",
 		"owner/events.yaml":   "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)

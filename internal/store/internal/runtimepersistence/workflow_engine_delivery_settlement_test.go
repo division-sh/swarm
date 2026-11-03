@@ -43,7 +43,7 @@ func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at t
 		"schema.yaml":             "stages: []\n",
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		flowID + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		flowID + "/schema.yaml":   "instance: receiver_key\nstages:\n  active: {}\n  done: {}\npins:\n  inputs: [construct.requested]\n",
+		flowID + "/schema.yaml":   "instance: receiver_key\nstages:\n  active: {}\n  done: {}\ninputs: [construct.requested]\n",
 		flowID + "/state.yaml":    "receiver_key: text\naccount_id: \"preserved\"\nhandled: boolean?\n",
 		flowID + "/events.yaml":   "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)

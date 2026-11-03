@@ -988,7 +988,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 		"schema.yaml":        "stages: []\n",
-		"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 		"review/state.yaml":  "request_id: text\n",
 		"review/events.yaml": "task.started:\n  request_id: text\n", "manifest.yaml":
 
@@ -1520,7 +1520,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 		"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
 		"root/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":        "stages: []\n# fixture: persistence-proof\n",
-		"root/schema.yaml":   "instance: company_id\nstages:\n  qualified: {}\npins:\n  inputs:\n    - company.opened\n",
+		"root/schema.yaml":   "instance: company_id\nstages:\n  qualified: {}\ninputs:\n  - company.opened\n",
 		"root/state.yaml":    "company_id: text\nscore: 9\n",
 		"root/events.yaml":   "company.opened:\n",
 	}, nil)

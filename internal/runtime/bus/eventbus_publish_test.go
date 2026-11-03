@@ -4087,7 +4087,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		"events.yaml":         "route.start:\n",
 		"nodes.yaml":          "project-observer:\n  route.start:\n    guard: instance.id != \"\"\n",
 		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"child/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: [route.start]\n",
+		"child/schema.yaml":   "stages:\n  active: {}\ninputs: [route.start]\n",
 		"child/events.yaml":   "route.start:\n",
 		"child/nodes.yaml":    "child-intake:\n  route.start:\n    guard: instance.id != \"\"\n",
 	})

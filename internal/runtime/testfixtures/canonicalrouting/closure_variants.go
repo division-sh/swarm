@@ -29,7 +29,7 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 	removeClosedVariantFiles(t, root, "events.yaml")
 	writeClosedVariantFile(t, root, "support/state.yaml", "entity_id: \"\"\n")
 	writeClosedVariantFile(t, root, "support/events.yaml", "item.created:\n  entity_id: string?\n")
-	agentBody := "backend:\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - item.created\n  emit_events:\n    - item.created\n"
+	agentBody := "backend:\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n  - item.created\n  emit_events:\n  - item.created\n"
 	if variant == RuntimeAgentMemoryDirectFlow {
 		writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages: []\n")
 		writeClosedVariantFile(t, root, "support/prompts/backend.md", "Handle support events.\n")
@@ -214,7 +214,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	writeClosedVariantFile(t, root, "events.yaml", rootEvents)
 	flowPins := "inputs: " + inputs + "\n"
 	if settings.flowOutput {
-		flowPins += "  outputs:\n    - timer.reminder\n"
+		flowPins += "outputs:\n  - timer.reminder\n"
 	}
 	writeClosedVariantFile(t, root, "support/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "support/schema.yaml", "# fixture: support\nstages:\n  waiting: {}\n  active: {}\n  done: {final: true}\n"+flowPins)

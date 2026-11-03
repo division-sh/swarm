@@ -329,7 +329,6 @@ func assertCatalogOracleCoverage(t *testing.T, plan RunPlan) {
 	const catalog = "github.com/division-sh/swarm/internal/runtime/cataloge2e"
 	guards := []string{
 		"TestCatalogReplayCleanCensus",
-		"TestCatalogReplayProofReferences",
 		"TestStaticDataInvocationGoldenConsumesAdmittedIdentity",
 	}
 	for _, name := range guards {

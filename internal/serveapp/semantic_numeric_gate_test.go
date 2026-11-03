@@ -44,9 +44,8 @@ func TestWorkflowGateSemanticNumericOutcomeExecutionParity(t *testing.T) {
               value: decision.score
   approved: {}
   done: {final: true}
-pins:
-  inputs:
-    - numeric.requested
+inputs:
+  - numeric.requested
 `
 
 			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {

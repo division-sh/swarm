@@ -248,7 +248,7 @@ func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {
 	t.Helper()
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"schema.yaml": "# fixture: catalog-assertion\npins:\n  inputs: [score.requested, assertion.finish]\nstages:\n  " + initial + ": {}\n  finished: {final: true}\n",
+		"schema.yaml": "# fixture: catalog-assertion\ninputs: [score.requested, assertion.finish]\nstages:\n  " + initial + ": {}\n  finished: {final: true}\n",
 		"state.yaml":  "note: \"assertion fixture\"\n",
 		"events.yaml": "score.requested:\n  entity_id: uuid?\nassertion.finish:\n",
 		"nodes.yaml":  "finisher:\n  score.requested: {}\n  assertion.finish:\n    advances_to: finished\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",

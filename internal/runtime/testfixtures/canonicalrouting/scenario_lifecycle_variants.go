@@ -38,9 +38,9 @@ func InstallNovelAuthoredScenarioLifecycle(t testing.TB, root string) {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"stages: {done: {final: true}}", "stages: {active: {}, done: {final: true}}")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  inputs:\n    - fulfillment.requested\n", "  inputs:\n    - fulfillment.requested\n    - "+ScenarioFixtureCloseEvent+"\n")
+		"inputs:\n  - fulfillment.requested\n", "inputs:\n  - fulfillment.requested\n  - "+ScenarioFixtureCloseEvent+"\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  outputs:\n    - fulfillment.requested\n", "  outputs:\n    - fulfillment.requested\n    - "+ScenarioFixtureCloseEvent+"\n")
+		"outputs:\n  - fulfillment.requested\n", "outputs:\n  - fulfillment.requested\n  - "+ScenarioFixtureCloseEvent+"\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"connect:\n", "connect:\n  - {event: "+ScenarioFixtureCloseEvent+", from: ., to: fulfillment}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),

@@ -111,9 +111,6 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		{"schema.yaml", "stages: []\nscheduls: []\n", "scheduls", "schedules", func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }},
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
-		{"types.yaml", "enmus: {}\n", "enmus", "enums", func(d yamlsource.Document) error { _, err := projectTypeCatalogDocument(d.Root()); return err }},
-		{"state.yaml", "value: {type: text, indexde: true}\n", "indexde", "indexed", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
-		{"events.yaml", "work.ready: {value: {type: text, descriptoin: typo}}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := admitEventCatalogDocument(d); return err }},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(tc.body))
@@ -148,7 +145,7 @@ func TestCurrentVocabularyDiskDiagnosticsPreserveSource(t *testing.T) {
 		file, body string
 		load       func(string) error
 	}{
-		{"types.yaml", "enmus: {}\n", func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err }},
+		{"types.yaml", "Thing: {value: {tyep: text}}\n", func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err }},
 		{"state.yaml", "value: {type: text, indexde: true}\n", func(path string) error { _, err := loadOptionalEntityDeclarations(path); return err }},
 		{"events.yaml", "work.ready: {value: {type: text, descriptoin: typo}}\n", func(path string) error { _, err := loadOptionalEventCatalog(path); return err }},
 	} {

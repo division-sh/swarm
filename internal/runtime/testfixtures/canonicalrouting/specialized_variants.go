@@ -57,7 +57,7 @@ inputs:
   native_tools:
     web_search: true
   subscriptions:
-    - task.requested
+  - task.requested
   emit_events: []
 `, agentID, agentID))
 	writeClosedVariantFile(t, root, filepath.Join("prompts", agentID+".md"), "Operate as the managed native lifecycle test agent.\n")

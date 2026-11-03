@@ -40,7 +40,7 @@ func CopyForkReceiverBusinessMutationOwnership(t testing.TB, entitylessProducer 
       writes:
         - {target_field: processed_token, value: payload.token}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
+	applyClosedReplacement(t, filepath.Join(root, "consumer/schema.yaml"), "outputs:\n  - receiver.finished\n", "")
 	removeClosedVariantFiles(t, root, "consumer/events.yaml")
 	removeForkReceiverFinishedConnection(t, root, "consumer")
 	return root
@@ -165,8 +165,8 @@ func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) s
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, receivers, false)
 	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  active: {final: true}", "  active: {}\n  done: {final: true}")
-	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "  inputs: [work.requested]", "  inputs: [work.requested, producer.closed]")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - start.closed\n", "    - start.closed\n    - producer.closed\n")
+	applyClosedReplacement(t, filepath.Join(root, "producer/schema.yaml"), "inputs: [work.requested]", "inputs: [work.requested, producer.closed]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - start.closed\n", "  - start.closed\n  - producer.closed\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [work.requested", "outputs: [producer.closed, work.requested")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: producer.closed, from: ., to: producer}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "start.closed:\n", "start.closed:\nproducer.closed:\n")
@@ -189,7 +189,7 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.seeded", "start.seeded")
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.requested", "start.requested")
 	applyClosedReplacement(t, filepath.Join(inner, "events.yaml"), "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n", "")
-	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "    - receiver.closed\n", "    - receiver.close.requested\n")
+	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "  - receiver.closed\n", "  - receiver.close.requested\n")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  start.seeded:", "  receiver.close.requested:\n    emit: {event: receiver.closed}\n  start.seeded:")
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
@@ -385,7 +385,7 @@ func removeForkReceiverFinishedConnection(t testing.TB, root, receiver string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		fmt.Sprintf("  - {event: receiver.finished, from: %s, to: ., rename: %s.finished}\n", receiver, receiver), "")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), fmt.Sprintf("    - %s.finished\n", receiver), "")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), fmt.Sprintf("  - %s.finished\n", receiver), "")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), forkReceiverReceiptObserver(receiver), "")
 }
 

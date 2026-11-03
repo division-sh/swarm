@@ -39,7 +39,7 @@ func CopyForkFanOutReceiverOwnership(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "settled/state.yaml"),
 		"marker: text\n", "marker: text\nnumber: 0\n")
 	for _, receiver := range []string{"consumer", "settled"} {
-		applyClosedReplacement(t, filepath.Join(root, receiver, "schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
+		applyClosedReplacement(t, filepath.Join(root, receiver, "schema.yaml"), "outputs:\n  - receiver.finished\n", "")
 		removeClosedVariantFiles(t, root, receiver+"/events.yaml")
 		removeForkReceiverFinishedConnection(t, root, receiver)
 	}
@@ -60,12 +60,12 @@ func CopyForkFanOutReceiverOwnership(t testing.TB) string {
         fields: {token: entry}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"    - start.closed\n", "    - start.closed\n    - start.checkpointed\n")
+		"  - start.closed\n", "  - start.closed\n  - start.checkpointed\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"start.closed:\n", "start.closed:\nstart.checkpointed:\nwork.cut:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  outputs: [work.requested, receiver.closed, receiver.seeded]\n",
-		"  outputs: [work.requested, receiver.closed, receiver.seeded, work.cut]\n")
+		"outputs: [work.requested, receiver.closed, receiver.seeded]\n",
+		"outputs: [work.requested, receiver.closed, receiver.seeded, work.cut]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
 		"  start.closed:\n    advances_to: done\n", "  start.closed:\n    advances_to: done\n  start.checkpointed:\n    emit:\n      event: work.cut\n")
 	return root
@@ -101,7 +101,7 @@ func CopyForkFanOutBarrierReceiver(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"connect:\n", "connect:\n  - {event: batch.completed, from: producer, to: .}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"    - start.checkpointed\n", "    - start.checkpointed\n    - batch.completed\n")
+		"  - start.checkpointed\n", "  - start.checkpointed\n  - batch.completed\n")
 	applyClosedReplacement(t, filepath.Join(root, "state.yaml"),
 		"marker: text\n", "marker: text\ncompleted_total: 0\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),

@@ -24,17 +24,12 @@ func VerifyExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgresForTest(t *t
 
 	t.Run("accumulator", func(t *testing.T) {
 		ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
-		nodeKey := pipelineNode(t, ".", "node-a").Key()
 		instance, result := executeExistingOwnerBehavior(t, fixture, ctx, pc, "accumulator", "work.ready", json.RawMessage(`{"item_id":"a"}`), nil, nil)
 		if !result.handled {
 			t.Fatal("accumulator execution was not handled")
 		}
-		nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any)
-		if !ok {
-			t.Fatalf("accumulator node bucket = %#v, want persisted node-a bucket", instance.StateBuckets)
-		}
-		if _, ok := nodeBucket["handler_accumulators"]; !ok {
-			t.Fatalf("accumulator bucket = %#v, want persisted handler_accumulators", nodeBucket)
+		if want := []any{map[string]any{"item_id": "a"}}; !reflect.DeepEqual(instance.Fields["items"], want) {
+			t.Fatalf("accumulator list = %#v, want %#v", instance.Fields["items"], want)
 		}
 	})
 

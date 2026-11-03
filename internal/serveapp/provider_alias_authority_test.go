@@ -503,13 +503,13 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 	for _, name := range names {
 		nodes += "  " + name + ":\n    guard: true\n"
 	}
-	pins := "pins:\n  inputs: [" + strings.Join(names, ", ") + "]\n"
+	pins := "inputs: [" + strings.Join(names, ", ") + "]\n"
 	rootSchema := "# fixture: provider-authority\nconnect:\n"
 	if scenario.alphaReceiver == "." {
-		rootSchema = "# fixture: provider-authority\npins:\n  inputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
+		rootSchema = "# fixture: provider-authority\ninputs: [" + strings.Join(names[1:], ", ") + "]\nconnect:\n"
 	}
 	if scenario.publicConnected {
-		rootSchema = "# fixture: provider-authority\npins:\n  inputs: [public.text_message, public.callback_action]\n  outputs: [public.text_message, public.callback_action]\nconnect:\n"
+		rootSchema = "# fixture: provider-authority\ninputs: [public.text_message, public.callback_action]\noutputs: [public.text_message, public.callback_action]\nconnect:\n"
 		for _, name := range []string{"public.text_message", "public.callback_action"} {
 			rootSchema += "  - {event: " + name + ", from: ., to: " + scenario.alphaReceiver + "}\n"
 		}
@@ -555,7 +555,7 @@ func writeProviderAliasAuthorityFixture(t *testing.T, scenario providerAliasScen
 			receiverNames = append(receiverNames, "public.text_message", "public.callback_action")
 		}
 		if hasReceiver {
-			files[alias+"-receiver/schema.yaml"] += "pins:\n  inputs: [" + strings.Join(receiverNames, ", ") + "]\n"
+			files[alias+"-receiver/schema.yaml"] += "inputs: [" + strings.Join(receiverNames, ", ") + "]\n"
 		}
 		receiverNodes := "observer:\n"
 		for _, name := range receiverNames {

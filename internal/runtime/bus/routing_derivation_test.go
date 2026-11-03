@@ -140,7 +140,7 @@ func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 		"parent/manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
 		"parent/child/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"parent/child/support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"parent/child/support/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: [work.requested]\n",
+		"parent/child/support/schema.yaml":   "stages:\n  active: {}\ninputs: [work.requested]\n",
 		"parent/child/support/events.yaml":   "work.requested:\n",
 		"parent/child/support/agents.yaml": `
 worker:
@@ -222,9 +222,8 @@ func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) se
 
 	write(filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	write(filepath.Join(root, "schema.yaml"), `stages: []
-pins:
-  inputs:
-    - root.start
+inputs:
+  - root.start
 `)
 	write(filepath.Join(root, "events.yaml"), "root.start:\n")
 
@@ -237,8 +236,7 @@ pins:
 	write(filepath.Join(root, "orders", "schema.yaml"), instance+`stages:
   active: {}
   done: {final: true}
-pins:
-  inputs: [root.start]
+inputs: [root.start]
 `)
 	write(filepath.Join(root, "orders", "events.yaml"), "root.start:\naddon_a.start:\naddon_b.start:\n")
 	write(filepath.Join(root, "orders", "nodes.yaml"), `
@@ -587,7 +585,7 @@ func routeMaterializationConfigVarBundle(t *testing.T, publicName, subscription 
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":             "stages: []\n",
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"operating/schema.yaml":   "stages: []\ninstance: instance_key\npins:\n  inputs: [opco.product_initialization_requested]\n",
+		"operating/schema.yaml":   "stages: []\ninstance: instance_key\ninputs: [opco.product_initialization_requested]\n",
 		"operating/state.yaml":    "instance_key: text\n",
 		"operating/events.yaml":   "opco.product_initialization_requested:\n",
 		"operating/agents.yaml":   agent,
@@ -671,10 +669,10 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: []\n",
 		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [scan.requested]\n",
+		"producer/schema.yaml":   "stages: []\noutputs: [scan.requested]\n",
 		"producer/events.yaml":   "scan.requested:\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [scan.requested]\n",
+		"consumer/schema.yaml":   "stages: []\ninputs: [scan.requested]\n",
 		"consumer/events.yaml":   "scan.requested:\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  scan.requested: {}\n",
 	})

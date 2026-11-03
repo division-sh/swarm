@@ -59,7 +59,7 @@ func CopyUnissuedFanOutReply(t testing.TB) string {
 	t.Helper()
 	root := CopyPublishedFanOutReply(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  inputs: [request.started, request.stop]\n", "  inputs: [request.started, request.stop, request.checkpoint]\n")
+		"inputs: [request.started, request.stop]\n", "inputs: [request.started, request.stop, request.checkpoint]\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.stop:\n", "request.stop:\nrequest.checkpoint:\n  note: text\nrequest.checkpointed:\n  note: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "result-observer:\n", `checkpoint-node:

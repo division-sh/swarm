@@ -72,7 +72,7 @@ func issue642TimerCrashFixture(t *testing.T, repo string) string {
   timer.check:
     advances_to: checked
 `,
-		"schema.yaml": "stages:\n  waiting:\n    timers:\n      - {after: 1s, emit: timer.check}\n  checked: {final: true}\npins:\n  inputs: [timer.scheduled, timer.check]\n  outputs: [timer.check]\n",
+		"schema.yaml": "stages:\n  waiting:\n    timers:\n      - {after: 1s, emit: timer.check}\n  checked: {final: true}\ninputs: [timer.scheduled, timer.check]\noutputs: [timer.check]\n",
 		"events.yaml": "timer.scheduled:\ntimer.check:\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {

@@ -47,7 +47,7 @@ func selectedExternalResourceFixture(t *testing.T, backend string, providerURLs 
 	if err != nil {
 		t.Fatal(err)
 	}
-	const outputPins = "  outputs:\n"
+	const outputPins = "outputs:\n"
 	if strings.Count(string(schema), outputPins) != 1 {
 		t.Fatalf("external fixture output pins changed: %s", schema)
 	}

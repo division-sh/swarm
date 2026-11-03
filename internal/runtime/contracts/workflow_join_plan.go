@@ -61,7 +61,7 @@ func (b *WorkflowContractBundle) compileFanOutJoinPlan(plan WorkflowJoinPlan, ev
 		return WorkflowJoinPlan{}, fmt.Errorf("fan-out delivery join requires the exact same-handler top-level compiled fan_out site")
 	}
 	fanOut, err := b.CompileFanOutPlan(plan.Node, eventType, handler, WorkflowFanOutSite{
-		Source: "handler.fan_out", Kind: FanOutSiteHandler, Index: -1, Spec: handler.FanOut, Writes: handler.DataAccumulation.Writes,
+		Source: "handler.fan_out", Kind: FanOutSiteHandler, Index: -1, Spec: handler.FanOut,
 	})
 	if err != nil {
 		return WorkflowJoinPlan{}, err

@@ -179,7 +179,7 @@ func assertCatalogTierOwners(t *testing.T, f catalogTierFixture, plan, full RunP
 			t.Fatalf("whole catalog unit changed its canonical execution/obligation: %s: %v", unit.ID, err)
 		}
 	}
-	for _, name := range []string{"TestStaticDataInvocationGoldenConsumesAdmittedIdentity", "TestCatalogReplayCleanCensus", "TestCatalogReplayProofReferences", "TestCatalogRequiredSmoke"} {
+	for _, name := range []string{"TestStaticDataInvocationGoldenConsumesAdmittedIdentity", "TestCatalogReplayCleanCensus", "TestCatalogRequiredSmoke"} {
 		if owners[TestRoot{Package: catalogTierPackage, Name: name}] != 1 {
 			t.Fatalf("catalog canary %s does not have one owner", name)
 		}
@@ -243,7 +243,7 @@ func TestCatalogTierCompositionRefusesInvalidOwners(t *testing.T) {
 		{name: "missing-complement-unit", tier: ProfileCore, extras: []string{"catalog-runtime"}, edit: func(p *Policy) { delete(p.Units, "catalog-replay-oracle-guards") }},
 		{name: "missing-complement-root", tier: ProfileCore, extras: []string{"catalog-runtime"}, edit: func(p *Policy) {
 			u := p.Units["catalog-replay-oracle-guards"]
-			u.Run = "^TestCatalogReplayCleanCensus$"
+			u.Run = "^$"
 			p.Units["catalog-replay-oracle-guards"] = u
 		}},
 		{name: "foreign-complement-root", tier: ProfileCore, extras: []string{"catalog-runtime"}, edit: func(p *Policy) {

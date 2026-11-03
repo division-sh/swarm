@@ -68,10 +68,10 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 					"schema.yaml":               []byte("stages: []\n"),
 					"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-					"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+					"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 				}
 				if state == "healthy_same_service_sibling" {
-					members["coordinator/schema.yaml"] = []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.partner.raw.issues]}\n")
+					members["coordinator/schema.yaml"] = []byte("stages: []\ninputs: [inbound.telegram.raw, inbound.partner.raw.issues]\n")
 				}
 				for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 					directory := ""
@@ -382,7 +382,7 @@ func TestStandingRecoveryReadbackDoesNotObserveDeclarationFallback(t *testing.T)
 		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":               []byte("stages: []\n"),
 		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 	}
 	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 		if entry.ID() != "telegram" {
@@ -479,7 +479,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 				"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
 				"schema.yaml":               []byte("stages: []\n"),
 				"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-				"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.partner.raw.issues]}\n"),
+				"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw, inbound.partner.raw.issues]\n"),
 			}
 			for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
 				directory := ""

@@ -67,7 +67,7 @@ func TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores(t *tes
 				lifecycle := &flowConstructorLifecycleRecorder{}
 				files := map[string]string{
 					"schema.yaml":        "stages: []\n",
-					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 					"review/state.yaml":  "request_id: text\n",
 					"review/events.yaml": "task.started:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}
@@ -159,7 +159,7 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				files := map[string]string{
 					"schema.yaml":        "stages: []\n",
-					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+					"review/schema.yaml": "instance: request_id\nstages:\n  pending: {}\ninputs:\n  - task.started\n",
 					"review/state.yaml":  "request_id: text\nbrief: text\nnote: text?\ncount: 0\n" + test.fields,
 					"review/events.yaml": "task.started:\n  request_id: text\n  brief: text\n  note: text?\n  message: text?\n" + test.eventFields, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}

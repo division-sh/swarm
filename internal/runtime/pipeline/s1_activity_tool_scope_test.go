@@ -34,7 +34,7 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 	t.Run("unlinked_whatsapp_refusal", func(t *testing.T) {
 		files := map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			"schema.yaml":   "stages: []\npins:\n  inputs: [inbound.whatsapp.text_message]\n",
+			"schema.yaml":   "stages: []\ninputs: [inbound.whatsapp.text_message]\n",
 			"policy.yaml":   "operator_account: '+15550100'\n",
 		}
 		for _, role := range []string{"manifest", "trigger", "connector", "channel"} {
@@ -77,7 +77,7 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 	t.Run("registered_account_credentials", func(t *testing.T) {
 		files := map[string]string{
 			"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-			"schema.yaml":   "stages: []\npins:\n  inputs: [inbound.telegram.text_message]\n",
+			"schema.yaml":   "stages: []\ninputs: [inbound.telegram.text_message]\n",
 			"policy.yaml":   "operator_account: '420079'\n",
 		}
 		for _, role := range []string{"manifest", "trigger", "connector", "channel"} {

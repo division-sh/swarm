@@ -34,7 +34,7 @@ func TestDeploymentConstructionNativeCommitBothStores(t *testing.T) {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-					"schema.yaml":        "pins:\n  outputs:\n    - records.ready\n",
+					"schema.yaml":        "outputs:\n  - records.ready\n",
 					"events.yaml":        "records.ready:\n  body: text\n",
 					"nested/schema.yaml": "stages: []\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "nested/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				}, nil, ownStoreTestAgentManager, nil)

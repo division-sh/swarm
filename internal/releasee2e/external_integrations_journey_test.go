@@ -411,7 +411,7 @@ func writeExternalMCPJourneySource(t *testing.T, root, policy string) {
 	t.Helper()
 	for path, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "stages: []\npins:\n  inputs: [external.requested, external.completed]\n",
+		"schema.yaml":   "stages: []\ninputs: [external.requested, external.completed]\n",
 		"events.yaml":   "external.requested: {text: string}\nexternal.completed: {text: string, receipt: string}\n",
 		"policy.yaml":   policy,
 		"agents.yaml":   "worker:\n  role: integration\n  model: regular\n  subscriptions: [external.requested]\n  tools: [partner.ping]\n  emit_events: [external.completed]\n  intent:\n    inline: 'Call partner.ping with the current input text, then emit_external_completed with text set to its exact echo and receipt set to its exact receipt. Learn the receipt only from the tool result. Do not invent the result or produce prose.'\n",
@@ -531,7 +531,7 @@ func requirePublicOAuthStatus(t *testing.T, result releaseCommandResult, want st
 func writeOAuthJourneySource(t *testing.T, root, endpoint string, command func(...string)) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\npins:\n  inputs: [oauth.requested]\n")
+	writeReleaseFile(t, filepath.Join(root, "schema.yaml"), "stages: []\ninputs: [oauth.requested]\n")
 	writeReleaseFile(t, filepath.Join(root, "events.yaml"), "oauth.requested: {text: string}\n")
 	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), "sender:\n  oauth.requested:\n    activity:\n      id: send_slack\n      tool: slack.post_message\n      input:\n        channel: \"C123\"\n        text: payload.text\n")
 	command("import", "slack", root, "--json")

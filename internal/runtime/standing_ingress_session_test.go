@@ -43,7 +43,7 @@ func standingSessionRuntimeFixture(t *testing.T) (*Runtime, *standingSessionBind
 	}
 	for name, body := range map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n",
-		"schema.yaml":   "stages:\n  active:\n    gate:\n      decision: retire_service\n      outcomes:\n        retire:\n          advances_to: done\n  done:\n    final: true\npins:\n  inputs: [inbound.whatsapp.message]\n  outputs: [inbound.whatsapp.message]\n",
+		"schema.yaml":   "stages:\n  active:\n    gate:\n      decision: retire_service\n      outcomes:\n        retire:\n          advances_to: done\n  done:\n    final: true\ninputs: [inbound.whatsapp.message]\noutputs: [inbound.whatsapp.message]\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)

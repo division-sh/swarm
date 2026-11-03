@@ -273,8 +273,8 @@ func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, pos
 	// This is a retained budget-projection fixture, not constructor qualification.
 	instanceQuery := `INSERT INTO flow_instances
 		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
-		 current_state, gates, bookkeeping, accumulator, config, revision, entered_state_at, created_at, updated_at)
-		VALUES ($1,$2,$3,'budget_recovery','flow','static',TRUE,$4,'{}','{}','{}','{}',1,$5,$5,$5)`
+		 current_state, bookkeeping, accumulator, config, revision, entered_state_at, created_at, updated_at)
+		VALUES ($1,$2,$3,'budget_recovery','flow','static',TRUE,$4,'{}','{}','{}',1,$5,$5,$5)`
 	if _, err := db.ExecContext(ctx, instanceQuery, runID, instance, entityID, state, at); err != nil {
 		t.Fatalf("seed flow instance %s: %v", instance, err)
 	}

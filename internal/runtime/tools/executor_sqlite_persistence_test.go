@@ -218,7 +218,7 @@ status: text
 
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "state", "types:\n  Brief:\n    summary: text\n", `
+	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "state", "Brief:\n  summary: text\n", `
 business_brief: Brief
 tags: [text]
 `)

@@ -66,7 +66,7 @@ func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, sele
 	t.Helper()
 	repo := runForkExecutionRepoRoot(t)
 	root := canonicalrouting.CopyForkFanOutConsumer(t, false, false)
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  pending: {}\npins:\n  inputs: [items.ready]\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  pending: {}\ninputs: [items.ready]\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "items.ready:\n  items: [text]\nitems.child:\n  value: text\n")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})

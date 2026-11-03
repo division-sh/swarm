@@ -368,8 +368,8 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			members[entry.Label()] = entry.Bytes()
 		}
 		delete(members, "nodes.yaml")
-		members["schema.yaml"] = []byte("stages: []\npins:\n  inputs: [scan.unroutable_requested, fixture.close.requested]\n  outputs: [scan.unroutable_requested]\n")
-		members["discovery/schema.yaml"] = []byte("stages: []\npins:\n  inputs: [scan.other_requested]\n")
+		members["schema.yaml"] = []byte("stages: []\ninputs: [scan.unroutable_requested, fixture.close.requested]\noutputs: [scan.unroutable_requested]\n")
+		members["discovery/schema.yaml"] = []byte("stages: []\ninputs: [scan.other_requested]\n")
 		members["discovery/events.yaml"] = []byte("scan.other_requested:\n")
 		members["discovery/nodes.yaml"] = []byte("scan-orchestrator:\n  scan.other_requested: {}\n")
 		artifact, err := sourceartifact.AdmitMembers(members)
@@ -914,9 +914,8 @@ func runStartTestArtifact(eventName string) *sourceartifact.AdmittedSourceArtifa
 		"schema.yaml": []byte(fmt.Sprintf(`stages:
   ready: {}
   done: {final: true}
-pins:
-  inputs: [%s, fixture.close.requested]
-  outputs: [%s]
+inputs: [%s, fixture.close.requested]
+outputs: [%s]
 connect:
   - event: %s
     from: .
@@ -931,8 +930,7 @@ connect:
 		"discovery/schema.yaml": []byte(fmt.Sprintf(`stages:
   ready: {}
   done: {final: true}
-pins:
-  inputs: [%s]
+inputs: [%s]
 `, eventName)),
 		"discovery/nodes.yaml": []byte(fmt.Sprintf(`scan-orchestrator:
   %s:
