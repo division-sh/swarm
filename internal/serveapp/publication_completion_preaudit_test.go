@@ -306,7 +306,7 @@ connect:
 
 type publicationCompletionAudit struct {
 	mu                sync.Mutex
-	originalContext context.Context
+	originalContext   context.Context
 	native            runtimebus.APIEventPublicationCommitOwner
 	workflow          pipeline.WorkflowPersistenceOwner
 	obligations       pipelineobligation.Store

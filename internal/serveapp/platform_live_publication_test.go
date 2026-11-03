@@ -153,10 +153,39 @@ func testRunlessPlatformLivePublication(t *testing.T, backend string) {
 	}
 	var pausedEvent operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, fixture.Endpoint, "event.get", map[string]any{"event_id": unavailable.ID()}, &pausedEvent)
+	if len(pausedEvent.Deliveries) != len(paused.DeliveryRoutes) {
+		t.Fatal("paused platform readback lost its retained deliveries", pausedEvent)
+	}
 	for _, delivery := range pausedEvent.Deliveries {
-		if delivery.Target.FlowID == "other" && (delivery.Status == "delivered" || delivery.Terminal) {
+		if delivery.Target.FlowID == "other" && (delivery.Status == "delivered" || delivery.Terminal || delivery.StartedAt != nil) {
 			t.Fatal("paused platform delivery executed before resume", delivery)
 		}
+	}
+	requireServedJSONRPCResult(t, fixture.Endpoint, "run.continue", map[string]any{"run_id": runs["other"]}, &map[string]any{})
+	waitIssue2564LiveRunSettlement(t, issue2564ServedFixture{Endpoint: fixture.Endpoint}, runs["other"])
+	var resumed operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, fixture.Endpoint, "event.get", map[string]any{"event_id": unavailable.ID()}, &resumed)
+	if resumed.EventID != unavailable.ID() || resumed.RunID != "" || len(resumed.Deliveries) != len(pausedEvent.Deliveries) {
+		t.Fatal("resume changed the retained platform occurrence", pausedEvent, resumed)
+	}
+	resumedPaused := 0
+	for _, before := range pausedEvent.Deliveries {
+		if before.Target.FlowID != "other" {
+			continue
+		}
+		resumedPaused++
+		matched := 0
+		for _, after := range resumed.Deliveries {
+			if after.DeliveryID == before.DeliveryID && after.Target == before.Target && after.Status == "delivered" && after.Terminal && after.Failure == nil && after.RetryCount == 0 {
+				matched++
+			}
+		}
+		if matched != 1 {
+			t.Fatal("resume did not settle the exact paused delivery once", before, resumed.Deliveries)
+		}
+	}
+	if resumedPaused != 1 {
+		t.Fatal("resume did not observe the exact paused subscriber", pausedEvent.Deliveries)
 	}
 	requireServedJSONRPCResult(t, fixture.Endpoint, "run.stop", map[string]any{"run_id": runs["other"]}, &map[string]any{})
 	if _, err := owner.CommitPublication(ctx, plan.PublicationCommand()); !errors.Is(err, runtimebus.ErrAPIEventLiveRunChanged) {
