@@ -11,13 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// The mutable installer is retired. Preparation consumes native evidence;
-// reset/source/refusal proofs remain with their existing admission owners.
-func TestRoutePreparationResetLockOrderAndReplacedTableRefusal(t *testing.T) {
-	t.Run("reset", TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner)
-	t.Run("foreign_source", TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission)
-}
-
 func TestRoutePreparationPreservesRetirementAndEpochRefusal(t *testing.T) {
 	t.Run("retirement", TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration)
 	t.Run("stale_epoch", func(t *testing.T) {
