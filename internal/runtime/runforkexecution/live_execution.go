@@ -302,7 +302,7 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 	}
 	if p.forkOperation != nil {
 		record, found, _, projectionErr := p.owner.observeSelectedForkOperation(ctx, *p.forkOperation, p.operation)
-		if projectionErr != nil || !found || record.Status != runfork.ForkOperationActivated {
+		if !activatedForkOperationObserved(record, found, projectionErr) {
 			return out, errors.Join(err, projectionErr, errors.New("acknowledged live handoff lacks its exact immutable operation result"))
 		}
 		out.ExecutedEventCount = selectedForkRecordedOutcome(record).ExecutedEventCount
@@ -317,6 +317,10 @@ func (c selectedContractForkLocalRuntimeContainer) activateLiveHandoff(p *Prepar
 		err = errors.Join(err, target.ReconcileAcknowledgedLiveFork(use.WorkContext(), out.Materialization.ForkRunID))
 	}
 	return out, err
+}
+
+func activatedForkOperationObserved(record runfork.ForkOperationRecord, found bool, err error) bool {
+	return err == nil && found && record.Status == runfork.ForkOperationActivated
 }
 
 func (p *PreparedSelectedFork) acquireOrdinaryLiveTarget(req SelectedContractExecutionRequest) (*runtimepkg.Runtime, *runtimepkg.RuntimeContextUse, error) {
