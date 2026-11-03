@@ -38,27 +38,27 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 		query = `INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, slug, name, flow_template, mode, parent_instance, instance_key,
 			config, status, stage_defined, current_state, bookkeeping, accumulator,
-			revision, entered_state_at, created_at, updated_at, terminated_at
-		) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+			revision, entered_state_at, created_at, updated_at, terminated_at, life
+		) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`
 		if postgres {
 			query = `INSERT INTO flow_instances (
 				run_id, instance_path, entity_id, entity_type, slug, name, flow_template, mode, parent_instance, instance_key,
 				config, status, stage_defined, current_state, bookkeeping, accumulator,
-				revision, entered_state_at, created_at, updated_at, terminated_at
+				revision, entered_state_at, created_at, updated_at, terminated_at, life
 			) VALUES ($1::uuid, $2, $3::uuid, NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''),
-				$7, $8, NULLIF($9, ''), NULLIF($10, ''), $11::jsonb, $12, $13, $14, $15::jsonb, $16::jsonb, 1, $17, $18, $19, $20)`
+				$7, $8, NULLIF($9, ''), NULLIF($10, ''), $11::jsonb, $12, $13, $14, $15::jsonb, $16::jsonb, 1, $17, $18, $19, $20, $21)`
 		}
 		args = []any{record.Identity.RunID, record.Identity.Route.InstancePath, record.EntityID, record.EntityType,
 			record.Slug, record.Name, record.WorkflowName, record.Mode, record.ParentInstance, record.InstanceKey, string(record.Config), record.Status,
 			record.StageDefined, record.CurrentState, string(record.Bookkeeping), string(record.Accumulator),
-			record.EnteredStageAt, record.CreatedAt, record.UpdatedAt, nullableWorkflowTerminationTime(record.TerminatedAt)}
+			record.EnteredStageAt, record.CreatedAt, record.UpdatedAt, nullableWorkflowTerminationTime(record.TerminatedAt), record.Life}
 	} else {
 		query = `UPDATE flow_instances SET slug = NULLIF(?, ''), name = NULLIF(?, ''),
 			config = ?, status = ?, current_state = ?, bookkeeping = ?, accumulator = ?,
 			revision = revision + 1, entered_state_at = ?, updated_at = ?, terminated_at = ?
 			WHERE run_id = ? AND instance_path = ? AND entity_id = ? AND revision = ? AND current_state = ?
 			AND flow_template = ? AND mode = ? AND entity_type IS NULLIF(?, '')
-			AND parent_instance IS NULLIF(?, '') AND instance_key IS NULLIF(?, '')`
+			AND parent_instance IS NULLIF(?, '') AND instance_key IS NULLIF(?, '') AND life = ?`
 		if postgres {
 			query = `UPDATE flow_instances SET slug = NULLIF($1, ''), name = NULLIF($2, ''),
 				config = $3::jsonb, status = $4, current_state = $5,
@@ -68,13 +68,13 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 				AND revision = $14 AND current_state = $15 AND flow_template = $16 AND mode = $17
 				AND entity_type IS NOT DISTINCT FROM NULLIF($18, '')
 				AND parent_instance IS NOT DISTINCT FROM NULLIF($19, '')
-				AND instance_key IS NOT DISTINCT FROM NULLIF($20, '')`
+				AND instance_key IS NOT DISTINCT FROM NULLIF($20, '') AND life = $21`
 		}
 		args = []any{record.Slug, record.Name, string(record.Config), record.Status, record.CurrentState,
 			string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt,
 			record.UpdatedAt, nullableWorkflowTerminationTime(record.TerminatedAt), record.Identity.RunID,
 			record.Identity.Route.InstancePath, record.EntityID, record.ExpectedRevision, record.ExpectedState,
-			record.WorkflowName, record.Mode, record.EntityType, record.ParentInstance, record.InstanceKey}
+			record.WorkflowName, record.Mode, record.EntityType, record.ParentInstance, record.InstanceKey, record.Life}
 	}
 	var fact workflowEngineStateFact
 	write := transactiontest.BeginWorkflowHeaderJSON(ctx, len(record.Config))
@@ -168,6 +168,9 @@ func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres b
 		return pipeline.WorkflowInstance{}, err
 	}
 	lifecycle, header := target.Lifecycle, target.Lifecycle.State
+	if header.Life != expected.Life {
+		return pipeline.WorkflowInstance{}, pipeline.InstanceRestarted(expected.Identity, expected.Life, header.Life)
+	}
 	if expected.Transition.PreservesState() && (header.Revision != revision || header.CurrentState != expected.ExpectedState) {
 		return pipeline.WorkflowInstance{}, workflowEngineStateRevisionConflict(expected)
 	}

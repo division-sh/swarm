@@ -137,6 +137,7 @@ type OperatorEntitySummary struct {
 	FlowInstance       string     `json:"flow_instance"`
 	EntityType         string     `json:"entity_type"`
 	StageDefined       *bool      `json:"stage_defined"`
+	Life               *int64     `json:"life"`
 	CurrentState       *string    `json:"current_state"`
 	Revision           *int64     `json:"revision"`
 	EnteredStateAt     *time.Time `json:"entered_state_at"`

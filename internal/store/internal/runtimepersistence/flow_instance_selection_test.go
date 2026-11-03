@@ -158,23 +158,22 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 					request.Mode = mode
 					requireR7SelectionNoMutation(t, f, func() {
 						selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+						if mode != contracts.FlowInputResolutionModeSelect {
+							if err != nil || selected.Activation == nil || selected.Identity() != winner.Identity || selected.Activation.Instance.CurrentState != "pending" {
+								t.Fatalf("finished receiver did not prepare same-identity restart: %+v %v", selected, err)
+							}
+							return
+						}
 						if err == nil || selected.Activation != nil || selected.Observation.Valid() {
 							t.Fatalf("final-stage occupancy became creation or execution: %+v %v", selected, err)
 						}
 						unavailable, refused := selected.UnavailableReceiver()
-						if refused != (mode != contracts.FlowInputResolutionModeCreate) || refused && unavailable != owner {
+						if !refused || unavailable != owner {
 							t.Fatalf("final-stage refusal lost exact occupied receiver: %+v refused=%t", unavailable, refused)
 						}
-						if mode == contracts.FlowInputResolutionModeCreate {
-							var conflict *pipeline.FlowInstanceActivationConflict
-							if !errors.As(err, &conflict) || conflict.Owner != owner {
-								t.Fatalf("final-stage create lost occupied identity: %v", err)
-							}
-						} else {
-							var terminal *pipeline.NoHandlerError
-							if !errors.As(err, &terminal) || terminal.FlowID != "worker" || terminal.Stage != "done" {
-								t.Fatalf("final-stage selection lost proven availability refusal: %v", err)
-							}
+						var terminal *pipeline.NoHandlerError
+						if !errors.As(err, &terminal) || terminal.FlowID != "worker" || terminal.Stage != "done" {
+							t.Fatalf("final-stage selection lost proven availability refusal: %v", err)
 						}
 						observed, found, readErr := index.LookupFlowInstance(f.ctx, request.Lookup)
 						if readErr != nil || !found || observed.Identity() != winner.Identity {
@@ -187,6 +186,38 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 					})
 				})
 			}
+			t.Run("restart_exact_replay", func(t *testing.T) {
+				restart := request
+				restart.Mode = contracts.FlowInputResolutionModeCreate
+				restart.Constructor.OccurredAt = winner.OccurredAt.Add(2 * time.Second)
+				restart.Constructor.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "item.created", "constructor-fixture", "", []byte(`{"item_id":"business-key"}`), 0, owner.RunID, events.EventEnvelope{}, restart.Constructor.OccurredAt)
+				selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, restart)
+				if err != nil || selected.Activation == nil || selected.Identity() != winner.Identity {
+					t.Fatalf("prepare same-identity restart: %+v %v", selected, err)
+				}
+				committer := agentFixtureFlowActivationCommitter{store: f.store}
+				if _, err := committer.CommitFlowInstanceActivation(f.ctx, *selected.Activation); err != nil {
+					t.Fatalf("commit restart: %v", err)
+				}
+				if _, err := committer.CommitFlowInstanceActivation(f.ctx, *selected.Activation); err != nil {
+					t.Fatalf("replay restart: %v", err)
+				}
+				observed, found, err := index.LookupFlowInstance(f.ctx, restart.Lookup)
+				if err != nil || !found || observed.Identity() != winner.Identity {
+					t.Fatalf("restart changed identity: %+v found=%t err=%v", observed, found, err)
+				}
+				header, err := observed.WorkflowInstance()
+				if err != nil || header.CurrentState != "pending" || header.Status != "active" || !header.TerminatedAt.IsZero() || header.Fields["item_id"] != "business-key" {
+					t.Fatalf("restart did not restore initial state: %+v %v", header, err)
+				}
+				var life, births int
+				if err := f.db.QueryRowContext(f.ctx, `SELECT life FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&life); err != nil || life != 2 {
+					t.Fatalf("restart/replay life=%d want=2 err=%v", life, err)
+				}
+				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath).Scan(&births); err != nil || births != 2 {
+					t.Fatalf("restart lost immutable life history: births=%d err=%v", births, err)
+				}
+			})
 			if err := f.workflows.MarkTerminated(f.ctx, owner, identity.NormalizeEntityID(winner.Identity.EntityID), winner.OccurredAt.AddDate(0, 0, 1)); err != nil {
 				t.Fatal(err)
 			}

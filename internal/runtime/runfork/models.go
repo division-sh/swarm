@@ -201,6 +201,7 @@ type RunForkMaterializedEntitySnapshotMetadata struct {
 	Name           string          `json:"name,omitempty"`
 	Source         string          `json:"source"`
 	StageDefined   bool            `json:"stage_defined"`
+	Life           int64           `json:"life"`
 	FlowTemplate   string          `json:"flow_template"`
 	Mode           string          `json:"mode"`
 	Status         string          `json:"status,omitempty"`

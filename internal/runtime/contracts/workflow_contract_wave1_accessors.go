@@ -51,9 +51,6 @@ func (b *WorkflowContractBundle) ResolveFlowOperatorAccount(flowID string) (Flow
 		if _, err := b.ResolveFlowTemplateInstance(flowID); err != nil {
 			return absent, err
 		}
-		if len(b.FlowFinalStages(flowID)) != 0 {
-			return absent, fmt.Errorf("flow %s uses instance: operator_account and must not declare a final stage; end customer child flows instead", flowID)
-		}
 	} else {
 		if inPolicy && inState {
 			return absent, fmt.Errorf("flow %s operator_account occurs in both policy.yaml and state.yaml; keep exactly one", flowID)

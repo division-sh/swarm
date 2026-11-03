@@ -97,6 +97,7 @@ type WorkflowEngineStateRecord struct {
 	Status           string
 	CurrentState     string
 	StageDefined     bool
+	Life             int64
 	EntityType       string
 	Slug             string
 	Name             string
@@ -115,6 +116,9 @@ type WorkflowEngineStateRecord struct {
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
+	if r.Life <= 0 {
+		return fmt.Errorf("workflow engine state requires its positive captured life")
+	}
 	if err := r.validateConstructionIdentity(); err != nil {
 		return err
 	}
@@ -432,6 +436,7 @@ func workflowEngineStateRecord(
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: identity.RowID(),
+		Life:           instance.Life,
 		ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,

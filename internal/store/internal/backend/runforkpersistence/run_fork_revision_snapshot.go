@@ -86,6 +86,7 @@ type runForkRevisionEntityMetadata struct {
 	CreatedAt                time.Time                                      `json:"created_at"`
 	ConstructionKind         string                                         `json:"construction_kind"`
 	StageDefined             bool                                           `json:"stage_defined"`
+	Life                     int64                                          `json:"life"`
 	FlowTemplate             string                                         `json:"flow_template"`
 	Mode                     string                                         `json:"mode"`
 	Status                   string                                         `json:"status"`

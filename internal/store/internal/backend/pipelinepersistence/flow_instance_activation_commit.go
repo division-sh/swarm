@@ -263,7 +263,7 @@ func loadFlowInstanceActivationEqual(
 		m.projection_version, m.projection, m.occurred_at, r.plan, r.plan_hash
 		FROM flow_instances fi
 		JOIN workflow_instance_initial_materializations m
-			ON m.run_id = fi.run_id AND m.entity_id = fi.entity_id AND m.instance_path = fi.instance_path
+			ON m.run_id = fi.run_id AND m.entity_id = fi.entity_id AND m.instance_path = fi.instance_path AND m.life = fi.life
 		JOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path
 		WHERE fi.run_id = ? AND fi.instance_path = ?`
 	if postgres {
@@ -271,7 +271,7 @@ func loadFlowInstanceActivationEqual(
 			m.projection_version, m.projection, m.occurred_at, r.plan, r.plan_hash
 			FROM flow_instances fi
 			JOIN workflow_instance_initial_materializations m
-				ON m.run_id = fi.run_id AND m.entity_id = fi.entity_id AND m.instance_path = fi.instance_path
+				ON m.run_id = fi.run_id AND m.entity_id = fi.entity_id AND m.instance_path = fi.instance_path AND m.life = fi.life
 			JOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path
 			WHERE fi.run_id = $1::uuid AND fi.instance_path = $2`
 	}
@@ -385,7 +385,7 @@ func insertFlowInstanceActivation(
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	if err := insertFlowConstructionReceipt(ctx, tx, postgres, record.Identity.RunID, record.EntityID,
-		record.Identity.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
+		record.Identity.Route.InstancePath, record.State.Life, record.InitialMaterialization, record.CreatedAt); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	if postgres {
@@ -419,16 +419,16 @@ func insertFlowInstanceActivation(
 	return lifecycle, nil
 }
 
-func insertFlowConstructionReceipt(ctx context.Context, tx *sql.Tx, postgres bool, runID, entityID, path string, raw []byte, occurredAt time.Time) error {
+func insertFlowConstructionReceipt(ctx context.Context, tx *sql.Tx, postgres bool, runID, entityID, path string, life int64, raw []byte, occurredAt time.Time) error {
 	query := `INSERT INTO workflow_instance_initial_materializations
-		(run_id, entity_id, instance_path, projection_version, projection, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?)`
+		(run_id, entity_id, instance_path, life, projection_version, projection, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`
 	if postgres {
 		query = `INSERT INTO workflow_instance_initial_materializations
-			(run_id, entity_id, instance_path, projection_version, projection, occurred_at)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)`
+			(run_id, entity_id, instance_path, life, projection_version, projection, occurred_at)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7)`
 	}
-	_, err := tx.ExecContext(ctx, query, runID, entityID, path, runtimepipeline.FlowConstructionReceiptVersion, raw, occurredAt)
+	_, err := tx.ExecContext(ctx, query, runID, entityID, path, life, runtimepipeline.FlowConstructionReceiptVersion, raw, occurredAt)
 	if err != nil {
 		return fmt.Errorf("insert flow initial materialization: %w", err)
 	}

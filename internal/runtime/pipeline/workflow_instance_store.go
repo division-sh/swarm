@@ -60,6 +60,7 @@ type WorkflowInstance struct {
 	TerminatedAt       time.Time
 	CurrentState       string
 	StageDefined       bool
+	Life               int64
 	Revision           int64
 	EnteredStageAt     time.Time
 	TransitionHistory  []WorkflowTransitionRecord
@@ -353,7 +354,7 @@ func (r WorkflowTargetPersistenceRecord) Validate(route runtimeflowidentity.Rout
 			return fmt.Errorf("workflow target lifecycle companion is incomplete or disagrees with exact receiver route")
 		}
 		if header.EntityID != entityID.String() || header.FlowInstance != route.InstancePath || header.CurrentState == "" ||
-			header.Revision <= 0 || header.EnteredStageAt.IsZero() || header.CreatedAt.IsZero() || header.UpdatedAt.IsZero() {
+			header.Life <= 0 || header.Revision <= 0 || header.EnteredStageAt.IsZero() || header.CreatedAt.IsZero() || header.UpdatedAt.IsZero() {
 			return fmt.Errorf("workflow target constructed header requires exact identity and lifecycle progress")
 		}
 		if r.Presence == WorkflowTargetPersistenceComplete && (header.EntityType == "" || r.State.EntityType != header.EntityType) {
@@ -385,7 +386,7 @@ func (r WorkflowTargetPersistenceRecord) DecodeComplete(route runtimeflowidentit
 		EntityID: header.EntityID, WorkflowName: r.Lifecycle.WorkflowName, WorkflowVersion: r.Lifecycle.WorkflowVersion,
 		ParentInstance: r.Lifecycle.ParentInstance, InstanceKey: r.Lifecycle.InstanceKey,
 		Mode: r.Lifecycle.Mode, Status: r.Lifecycle.Status, TerminatedAt: r.Lifecycle.TerminatedAt,
-		CurrentState: header.CurrentState, StageDefined: r.Lifecycle.StageDefined, Revision: header.Revision, EnteredStageAt: header.EnteredStageAt,
+		CurrentState: header.CurrentState, StageDefined: r.Lifecycle.StageDefined, Life: header.Life, Revision: header.Revision, EnteredStageAt: header.EnteredStageAt,
 		Fields: r.State.Fields, Bookkeeping: header.Bookkeeping, Accumulator: header.Accumulator,
 		Config: r.Lifecycle.Config, FlowInstance: header.FlowInstance, EntityType: header.EntityType,
 		Slug: header.Slug, Name: header.Name, CreatedAt: header.CreatedAt, UpdatedAt: header.UpdatedAt,
@@ -449,6 +450,7 @@ type WorkflowInstancePersistenceRecord struct {
 	TerminatedAt    time.Time
 	CurrentState    string
 	StageDefined    bool
+	Life            int64
 	Revision        int64
 	EnteredStageAt  time.Time
 	Fields          json.RawMessage
@@ -474,6 +476,9 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 }
 
 func decodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceRecord) (WorkflowInstance, error) {
+	if record.Life <= 0 {
+		return WorkflowInstance{}, fmt.Errorf("constructed workflow %s requires a positive life", record.FlowInstance)
+	}
 	if strings.TrimSpace(record.EntityType) != "" && len(record.Fields) == 0 {
 		return WorkflowInstance{}, fmt.Errorf("constructed workflow %s is missing its declared field row", record.FlowInstance)
 	}
@@ -539,6 +544,7 @@ func decodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		TerminatedAt:       record.TerminatedAt.UTC(),
 		CurrentState:       strings.TrimSpace(record.CurrentState),
 		StageDefined:       record.StageDefined,
+		Life:               record.Life,
 		Revision:           record.Revision,
 		EnteredStageAt:     record.EnteredStageAt.UTC(),
 		StateBuckets:       projection.Accumulator,

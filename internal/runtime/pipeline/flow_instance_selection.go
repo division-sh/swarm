@@ -3,10 +3,12 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // Selection contains an admitted receiver, a pure R5.1 construction plan, or
@@ -93,7 +95,7 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 		return FlowInstanceSelection{}, fmt.Errorf("instance index returned an observation as absence")
 	}
 	if found {
-		return selectObservedFlowInstance(request, observation)
+		return selectObservedFlowInstance(ctx, planner, request, observation)
 	}
 	if request.Mode == contracts.FlowInputResolutionModeSelect {
 		return FlowInstanceSelection{}, &WorkflowInstanceLookupMiss{RequestedKey: request.Lookup.FlowID()}
@@ -101,16 +103,46 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 	return prepareMissingFlowInstance(ctx, planner, request)
 }
 
-func selectObservedFlowInstance(request FlowInstanceSelectionRequest, observation FlowInstanceObservation) (FlowInstanceSelection, error) {
+func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivationPlanner, request FlowInstanceSelectionRequest, observation FlowInstanceObservation) (FlowInstanceSelection, error) {
 	if err := observation.ValidateSelection(request.Lookup); err != nil {
 		return FlowInstanceSelection{}, err
-	}
-	if request.Mode == contracts.FlowInputResolutionModeCreate {
-		return FlowInstanceSelection{}, flowInstanceOccupiedConflict(observation.Owner())
 	}
 	instance, err := observation.WorkflowInstance()
 	if err != nil {
 		return FlowInstanceSelection{}, err
+	}
+	if request.Mode != contracts.FlowInputResolutionModeSelect && instance.Status == "active" && instance.TerminatedAt.IsZero() {
+		topology, found := semanticview.WorkflowStageTopology(request.Lookup.Source(), instance.WorkflowName)
+		if !found {
+			return FlowInstanceSelection{}, fmt.Errorf("existing receiver requires its compiled stage topology")
+		}
+		stage, err := topology.ResolveStoredStage(instance.CurrentState)
+		if err != nil {
+			return FlowInstanceSelection{}, err
+		}
+		if stage.IsFinal() {
+			if planner == nil || instance.Life <= 0 || instance.Life == math.MaxInt64 {
+				return FlowInstanceSelection{}, fmt.Errorf("finished receiver requires its constructor and incrementable life")
+			}
+			constructor := request.Constructor
+			constructor.Instance = observation.Identity()
+			plan, err := planner.PrepareFlowInstanceActivation(ctx, constructor)
+			if err != nil {
+				return FlowInstanceSelection{}, err
+			}
+			if plan.Identity != observation.Identity() {
+				return FlowInstanceSelection{}, fmt.Errorf("instance restart changed its observed identity")
+			}
+			plan.Instance.Life = instance.Life + 1
+			plan.Restart = &FlowInstanceRestart{Life: instance.Life, Revision: instance.Revision, FinalStage: stage}
+			if err := plan.Validate(); err != nil {
+				return FlowInstanceSelection{}, err
+			}
+			return FlowInstanceSelection{Activation: &plan}, nil
+		}
+	}
+	if request.Mode == contracts.FlowInputResolutionModeCreate {
+		return FlowInstanceSelection{}, flowInstanceOccupiedConflict(observation.Owner())
 	}
 	stage := ""
 	if instance.StageDefined {
