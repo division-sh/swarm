@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -34,6 +35,7 @@ func (am *AgentManager) observeInstallingAgentAttachment(ctx context.Context, id
 	}
 	key, active, executor, receipt, hash := am.agentAttachment(identity, required)
 	if active == nil || am.workflowInstances == nil || required != nil && executor != required {
+		log.Printf("S2_READINESS_OBSERVATION actor=%+v key=%+v active=%p executor=%p required=%p workflow=%t", identity, key, active, executor, required, am.workflowInstances != nil)
 		return false, false, nil
 	}
 	if err := receipt.Validate(); err != nil {
@@ -62,6 +64,7 @@ func (am *AgentManager) observeInstallingAgentAttachment(ctx context.Context, id
 		installing = row.Eligible() && row.AttemptState == "accepted" && row.Phase.Valid()
 	}
 	if err != nil || !installing {
+		log.Printf("S2_READINESS_OBSERVATION actor=%+v installing=%t found=%t eligible=%t phase=%v state=%s err=%v", identity, installing, found, row.Eligible(), row.Phase, row.AttemptState, err)
 		return false, false, err
 	}
 	if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, receipt); err != nil {
@@ -73,6 +76,9 @@ func (am *AgentManager) observeInstallingAgentAttachment(ctx context.Context, id
 	defer am.dynamicFlowReadinessMu.Unlock()
 	observed = ownerCtx.Err() == nil && am.dynamicFlowActiveAttempts[key] == active && am.dynamicFlowReadinessAttempts[key] == executor &&
 		active.receipt == receipt && active.planHash == hash && agentAttachmentMatches(active, executor, required)
+	if !observed || !readinessPlanOwnsAgent(row.Plan, identity) {
+		log.Printf("S2_READINESS_OBSERVATION actor=%+v observed=%t planned=%t owner_error=%v same_active=%t same_executor=%t same_receipt=%t same_hash=%t retained=%t", identity, observed, readinessPlanOwnsAgent(row.Plan, identity), ownerCtx.Err(), am.dynamicFlowActiveAttempts[key] == active, am.dynamicFlowReadinessAttempts[key] == executor, active.receipt == receipt, active.planHash == hash, agentAttachmentMatches(active, executor, required))
+	}
 	return observed, observed && readinessPlanOwnsAgent(row.Plan, identity), nil
 }
 
