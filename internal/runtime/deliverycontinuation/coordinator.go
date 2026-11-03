@@ -301,10 +301,11 @@ func (c *Coordinator) BeginRetirement() {
 		return
 	}
 	c.mu.Lock()
+	retired := c.retired
 	c.retired = true
 	cancel := c.cancel
 	c.mu.Unlock()
-	if cancel != nil {
+	if cancel != nil && !retired {
 		cancel()
 	}
 }
