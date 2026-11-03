@@ -480,8 +480,6 @@ func requiredForkReplayResumeBlockers() []string {
 		runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven,
 		runfork.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
 		runfork.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported,
-		runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating,
-		runfork.RunForkBlockerContractSwapRouteRecoveryMissing,
 		runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating,
 		runfork.RunForkBlockerContractFrontierExecutionUnsupported,
 		runfork.RunForkBlockerContractFrontierRouteUnresolved,

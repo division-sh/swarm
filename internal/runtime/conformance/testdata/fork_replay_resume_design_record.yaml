@@ -205,15 +205,11 @@ rows:
   - id: contract_swap
     fact: contract_swap
     disposition: split_sibling
-    owner: runtime.run_fork.contract_swap_boot_resume_admission
-    blocker_codes:
-      - contract_swap_boot_resume_admission_non_mutating
-      - contract_swap_route_recovery_missing
-    enforcement_point: internal/runtime/runforkexecution/contract_swap_admission.go
+    owner: store.run_fork.replay_resume_admission
+    enforcement_point: internal/store/internal/backend/runforkpersistence/run_fork_replay_resume_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionConsumesCanonicalPrerequisites}
-      - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionFailsClosedWithoutRouteRecovery}
-    rationale: "Contract-swap readiness is non-mutating prerequisite evidence; mutation is limited to admitted selected-frontier work."
+      - {kind: issue, issue: 1723}
+    rationale: "The store taxonomy names contract swap as a split sibling; the deleted non-mutating builder supplied no mutation authority."
 
   - id: historical_replay_execution
     fact: historical_replay_execution
@@ -222,7 +218,7 @@ rows:
     blocker_codes: [historical_replay_execution_admission_non_mutating]
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
       - {kind: go_test, name: TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation}
     rationale: "Legacy-named runtime owner validates the matrix and admits only bounded delivery_event_replay_ready work today."
 
@@ -232,7 +228,7 @@ rows:
     owner: runtime.run_fork.historical_replay_execution_admission
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
     rationale: "Source events are payload/lineage evidence; fork execution mints new fork-local events."
 
   - id: event_deliveries
@@ -245,7 +241,7 @@ rows:
       - committed_replay_scope_replay_unsupported
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithoutMutation}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsReplayablePrimitiveWithoutMutation}
       - {kind: go_test, name: TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork}
     rationale: "Only owner-authorized delivery_event_replay_ready work becomes executable; all other delivery histories block or become lineage."
 
@@ -255,7 +251,7 @@ rows:
     owner: runtime.run_fork.historical_replay_execution_admission
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
     rationale: "Source receipts are outcomes, not fork suppressors."
 
   - id: dead_letters
@@ -264,7 +260,7 @@ rows:
     owner: runtime.run_fork.historical_replay_execution_admission
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
     rationale: "Source dead letters are source outcomes and never suppress fork-local work."
 
   - id: retry_idempotency
@@ -273,7 +269,7 @@ rows:
     owner: runtime.run_fork.historical_replay_execution_admission
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
     rationale: "Retry/idempotency semantics need a later owner; source state cannot be reused as fork truth."
 
   - id: emitted_follow_ups
@@ -282,7 +278,7 @@ rows:
     owner: runtime.run_fork.historical_replay_execution_admission
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
     rationale: "Follow-ups are regenerated by fork-local execution when supported, not copied."
 
   - id: timers
@@ -292,7 +288,7 @@ rows:
     blocker_codes: [timer_history_unproven]
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionDisposition}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionRejectsStaleTimerReconstructionDisposition}
       - {kind: go_test, name: TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation}
     rationale: "Timer-bearing selected execution remains fail-closed until #642 provides a long-lived selected-fork timer owner."
 
@@ -307,7 +303,7 @@ rows:
       - selected_contract_dynamic_route_topology_unproven
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionFailsClosedWithoutRouteRecovery}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionClassifiesFacts}
       - {kind: go_test, name: TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence}
     rationale: "Admitted fixed construction and compiled declarations own instance identity. Selected binding/frontier recovery is a separate required proof; source/current membership rows are never copied."
 
@@ -318,7 +314,7 @@ rows:
     blocker_codes: [session_history_unproven]
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractConversationLineageOwner}
     rationale: "Source sessions may be lineage/no-action evidence only under selected policies."
 
   - id: turns
@@ -328,7 +324,7 @@ rows:
     blocker_codes: [active_turn_history_unproven]
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractConversationLineageOwner}
     rationale: "Source turns are not copied or resumed."
 
   - id: audits
@@ -338,7 +334,7 @@ rows:
     blocker_codes: [conversation_audit_history_unproven]
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractConversationLineageOwner}
     rationale: "Source audit rows are lineage/no-action evidence only."
 
   - id: non_agent_node_system_work
@@ -367,7 +363,7 @@ rows:
       - source_active_conversation_session_coupling_after_fork_point
     enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
     proof_refs:
-      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner}
+      - {kind: go_test, name: TestBuildHistoricalReplayDeliveryEventReplayAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner}
       - {kind: go_test, name: TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBranchDivergence}
     rationale: "Post-T source facts are source-run divergence evidence, not fork suppressors."
 
