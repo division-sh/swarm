@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -560,6 +561,7 @@ func (a *Adapter) persistExactObligation(ctx context.Context, tx *sql.Tx, obliga
 		return DurableHandoffProof{}, fmt.Errorf("commit delivery obligation: %w", err)
 	}
 	inserted, err := result.RowsAffected()
+	log.Printf("S2_DELIVERY_WRITE writer=commit_obligation tx=%p delivery=%s event=%s run=%s authority=%s execution=%s generation=%d inserted=%d err=%v", tx, obligation.DeliveryID(), obligation.EventID(), obligation.RunID(), obligation.Authority().Kind(), obligation.Authority().ExecutionID(), obligation.Authority().Generation(), inserted, err)
 	if err != nil {
 		return DurableHandoffProof{}, fmt.Errorf("commit delivery obligation: read affected rows: %w", err)
 	}
@@ -1087,6 +1089,7 @@ func (a *Adapter) persistPipelineHandoffTx(ctx context.Context, tx *sql.Tx, even
 	if err != nil {
 		return fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
 	}
+	log.Printf("S2_DELIVERY_WRITE writer=pipeline_handoff tx=%p event=%s", tx, eventID)
 	return nil
 }
 
@@ -1235,6 +1238,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 		}
 	}
 	claim, err := AdmitPersistedClaim(record.DeliveryID, record.RunID, events.EncodeDeliveryRouteIdentity(record.RouteIdentity), token, version, record.SubscriberClass, record.SubscriberID)
+	log.Printf("S2_DELIVERY_WRITE writer=claim_locked tx=%p delivery=%s event=%s run=%s claim_version=%d token=%s", tx, record.DeliveryID, record.EventID, record.RunID, version, token)
 	if err != nil {
 		return ClaimedObligation{}, err
 	}
@@ -1756,6 +1760,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("settle delivery obligation: %w", err)
 	}
+	log.Printf("S2_DELIVERY_WRITE writer=settle tx=%p delivery=%s status=%s claim_version=%d", tx, claim.DeliveryID(), status, claim.Version())
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery settlement lost claim", ErrConflict)
 	}

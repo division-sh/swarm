@@ -22,7 +22,7 @@ func observeSelectedActivationActor(ctx context.Context, req publishSelectedCont
 	if !ok || managed == nil || token.Identity != actor.Identity || req.Prepared == nil || req.Prepared.catalog == nil {
 		return errors.New("selected activation requires its exact lifecycle token and preparation")
 	}
-	if err := managed.ProveUnpublishedActivation(token); err != nil {
+	if err := managed.ProveUnpublishedActivationContext(ctx, token); err != nil {
 		return err
 	}
 	plan, err := actor.Identity.Plan()

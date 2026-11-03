@@ -155,6 +155,15 @@ func TestWorkspaceGatewayActivationRequiresCurrentActor(t *testing.T) {
 	if err := am.proveUnpublishedActivationActor(observed.ctx, observed.token, observed.actor); err != nil {
 		t.Fatal(err)
 	}
+	am.lifecycle.mu.Lock()
+	am.lifecycle.phase = runtimeLifecycleShuttingDown
+	am.lifecycle.mu.Unlock()
+	if am.ProveUnpublishedActivation(observed.token) == nil || am.ProveUnpublishedActivationContext(observed.ctx, observed.token) == nil {
+		t.Fatal("fresh observation borrowed shutdown grace without accepted readiness")
+	}
+	am.lifecycle.mu.Lock()
+	am.lifecycle.phase = runtimeLifecycleRunning
+	am.lifecycle.mu.Unlock()
 	changed := observed.actor
 	changed.ExecutionMode = "mock"
 	if err := am.proveUnpublishedActivationActor(observed.ctx, observed.token, changed); err == nil {

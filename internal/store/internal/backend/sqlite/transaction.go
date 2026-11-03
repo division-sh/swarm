@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"strings"
 	"time"
@@ -408,6 +409,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	probe.BeforeCommit()
 	commitAttempted = true
 	err = tx.Commit()
+	log.Printf("S2_SQLITE_COMMIT tx=%p err=%v", tx, err)
 	if err == nil {
 		probe.OrderingCommitted()
 	}

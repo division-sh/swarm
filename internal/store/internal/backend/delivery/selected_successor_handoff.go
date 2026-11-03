@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -72,6 +73,31 @@ func (a *Adapter) TransferSelectedLiveAuthority(ctx context.Context, attempt *mu
 			return err
 		}
 		if blocked != 0 {
+			log.Printf("S2_HANDOFF_EXPECTED tx=%p run=%s predecessor=%s generation=%d bundle=%s blocked=%d", tx, runID, predecessor.ID, predecessor.SelectedFork.Generation, grant.BundleHash, blocked)
+			rows, observationErr := tx.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),status,
+				CAST(selected_execution_id AS TEXT),selected_execution_generation,authority_bundle_hash,
+				continuation_handoff_at,current_attempt_open,current_attempt_version,claim_version,updated_at
+				FROM event_deliveries WHERE run_id=$1 AND execution_authority_kind='selected_contract_fork'
+				AND (continuation_handoff_at IS NULL OR (status IN ('pending','failed','in_progress')
+				AND (selected_execution_id<>$2 OR selected_execution_generation<>$3 OR authority_bundle_hash<>$4
+				OR current_attempt_open IS NOT NULL OR status='in_progress')))`, runID, predecessor.ID, predecessor.SelectedFork.Generation, grant.BundleHash)
+			if observationErr == nil {
+				for rows.Next() {
+					var id, eventID, status string
+					var execution, bundle sql.NullString
+					var generation, attemptVersion, claimVersion sql.NullInt64
+					var open sql.NullBool
+					var handed, updated any
+					if scanErr := rows.Scan(&id, &eventID, &status, &execution, &generation, &bundle, &handed, &open, &attemptVersion, &claimVersion, &updated); scanErr != nil {
+						log.Printf("S2_HANDOFF_OBSERVATION scan_error=%v", scanErr)
+						break
+					}
+					log.Printf("S2_HANDOFF_ROW tx=%p delivery=%s event=%s run=%s status=%s execution=%+v generation=%+v bundle=%+v handoff=%v open=%+v attempt=%+v claim=%+v updated=%v", tx, id, eventID, runID, status, execution, generation, bundle, handed, open, attemptVersion, claimVersion, updated)
+				}
+				log.Printf("S2_HANDOFF_OBSERVATION rows_error=%v close_error=%v", rows.Err(), rows.Close())
+			} else {
+				log.Printf("S2_HANDOFF_OBSERVATION query_error=%v", observationErr)
+			}
 			return fmt.Errorf("live delivery handoff has %d unparked or foreign continuations", blocked)
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET execution_authority_kind='normal_runtime',
@@ -189,5 +215,6 @@ func (a *Adapter) transferSelectedSuccessorAuthorityTx(ctx context.Context, tx *
 	if _, err := tx.ExecContext(ctx, query, successor.ExecutionID(), successor.Generation(), successor.ForkRunID(), predecessorID, priorGeneration, bundleHash); err != nil {
 		return fmt.Errorf("transfer selected delivery successor authority: %w", err)
 	}
+	log.Printf("S2_DELIVERY_WRITE writer=selected_successor tx=%p run=%s predecessor=%s prior_generation=%d successor=%s generation=%d", tx, successor.ForkRunID(), predecessorID, priorGeneration, successor.ExecutionID(), successor.Generation())
 	return nil
 }

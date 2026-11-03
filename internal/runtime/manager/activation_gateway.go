@@ -16,21 +16,29 @@ import (
 // not a second admission grant. An old generation or published route cannot use
 // the pre-publication probe entrance.
 func (am *AgentManager) ProveUnpublishedActivation(token effects.LifecycleToken) error {
-	_, err := am.unpublishedActivationRevision(token)
+	return am.ProveUnpublishedActivationContext(context.Background(), token)
+}
+
+// ProveUnpublishedActivationContext retains only the caller's exact accepted
+// readiness ownership; a token alone cannot enter shutdown grace.
+func (am *AgentManager) ProveUnpublishedActivationContext(ctx context.Context, token effects.LifecycleToken) error {
+	_, _, err := am.unpublishedActivationState(ctx, token)
 	return err
 }
 
-func (am *AgentManager) unpublishedActivationRevision(token effects.LifecycleToken) (string, error) {
-	revision, _, err := am.unpublishedActivationState(token)
-	return revision, err
-}
-
-func (am *AgentManager) unpublishedActivationState(token effects.LifecycleToken) (string, agenttopology.Admission, error) {
+func (am *AgentManager) unpublishedActivationState(ctx context.Context, token effects.LifecycleToken) (string, agenttopology.Admission, error) {
+	if err := ctx.Err(); err != nil {
+		return "", agenttopology.Admission{}, err
+	}
 	if am != nil && am.lifecycle != nil && token.Valid() {
+		acceptedReadiness, err := am.acceptedReadinessRegistration(ctx, token.Identity)
+		if err != nil {
+			return "", agenttopology.Admission{}, err
+		}
 		am.lifecycle.mu.Lock()
 		defer am.lifecycle.mu.Unlock()
 		cell := am.lifecycle.cells[token.Identity]
-		if am.lifecycle.phase == runtimeLifecycleRunning && cell != nil && cell.view.Phase == AgentLifecycleRunning && cell.execution != nil {
+		if (am.lifecycle.phase == runtimeLifecycleRunning || am.lifecycle.registrationWithinShutdownGrace(ctx, acceptedReadiness)) && cell != nil && cell.view.Phase == AgentLifecycleRunning && cell.execution != nil {
 			execution := cell.execution
 			if execution.token == token && !execution.fenced && execution.routeToken == (effects.LifecycleToken{}) && execution.route == nil && execution.loopDone != nil && execution.generationCtx != nil && execution.generationCtx.Err() == nil {
 				return cell.view.ConfigRevision, cell.view.Topology, nil
@@ -46,7 +54,7 @@ func (am *AgentManager) ProveUnpublishedFlowActor(ctx context.Context, token eff
 	if err := am.proveUnpublishedActivationActor(ctx, token, actor); err != nil {
 		return agenttopology.FlowReadinessPlan{}, err
 	}
-	_, topology, err := am.unpublishedActivationState(token)
+	_, topology, err := am.unpublishedActivationState(ctx, token)
 	if err != nil {
 		return agenttopology.FlowReadinessPlan{}, err
 	}
@@ -142,7 +150,7 @@ func (am *AgentManager) proveUnpublishedActivationActor(ctx context.Context, tok
 	if err != nil {
 		return err
 	}
-	current, err := am.unpublishedActivationRevision(token)
+	current, _, err := am.unpublishedActivationState(ctx, token)
 	if err != nil {
 		return err
 	}
