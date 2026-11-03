@@ -2427,16 +2427,20 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 				route = runtimeflowidentity.StoredRoute("review", "review", "review")
 			}
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: route}
+			plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+				Identity: runtimeflowidentity.Instance{TemplateID: route.ScopeKey, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID, InstancePath: route.InstancePath, EntityID: runID, HasStoredPath: true},
+				RunID:    runID, BundleHash: binding.BundleHash, WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
+			}
 			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", runID, route.InstancePath, binding)
 			if err != nil {
 				t.Fatal(err)
 			}
 			foreign := owner
 			foreign.RunID = uuid.NewString()
-			if err := am.AdoptSelectedFlowActivation(ctx, foreign, attempt, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
+			if err := am.AdoptSelectedFlowActivation(ctx, foreign, attempt, plan, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
 				t.Fatalf("foreign transfer changed ownership: %v", err)
 			}
-			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
+			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, plan, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
 				t.Fatal("unadmitted attempt acquired a local owner")
 			}
 			instances.activationAttempts[flowActivationReadinessKey(runID, route.InstancePath)] = attempt
@@ -2446,10 +2450,10 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 					RunStatus: "running", InstanceStatus: "active", Phase: runtimepipeline.FlowAttachmentReady,
 				},
 			}
-			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err != nil {
+			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, plan, true); err != nil {
 				t.Fatal(err)
 			}
-			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err == nil {
+			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, plan, true); err == nil {
 				t.Fatal("duplicate transfer acquired a second owner")
 			}
 			if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
