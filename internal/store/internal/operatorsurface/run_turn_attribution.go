@@ -100,8 +100,20 @@ func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgr
 	if err != nil {
 		return out, err
 	}
-	if !found || trigger.RunID != delivery.RunID {
+	if !found {
 		return out, fmt.Errorf("settled turn trigger does not belong to its exact run")
+	}
+	admitted, err := trigger.Decode()
+	if err != nil {
+		return out, err
+	}
+	adapter := operatorSQLiteDelivery
+	if postgres {
+		adapter = operatorPostgresDelivery
+	}
+	runID, err := adapter.EventDeliveryRunID(ctx, q, admitted.Event(), delivery.DeliveryID, delivery.RunID)
+	if err != nil || runID != delivery.RunID {
+		return out, errors.Join(err, fmt.Errorf("settled turn trigger does not belong to its exact run"))
 	}
 	out.EventType = trigger.EventName
 	var logicalTurn sql.NullString
