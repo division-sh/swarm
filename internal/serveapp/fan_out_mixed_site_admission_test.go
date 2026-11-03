@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 // Invariant: native MockOnly startup refuses competing handler emit sites
@@ -29,8 +30,7 @@ func TestOwnedMockFanOutMixedSitesRefuseBothStores(t *testing.T) {
 				opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true}
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db"))
 				if backend == "postgres" {
-					installServeRuntimeEmptyPostgresTestStores(t, nil)
-					opts.ConfigPath = writeMockAgentRuntimeConfig(t, backend, "")
+					opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
 					opts.StoreMode, opts.StoreModeSet = backend, true
 				}
 				process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), ownedMockLifecycleRoot(t), opts)

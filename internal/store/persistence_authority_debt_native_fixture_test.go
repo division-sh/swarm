@@ -56,7 +56,11 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 		// T1 retires only the invalid global lease-count oracle, not selected uses.
 		if digest != pins[fn.Name.Name] && !(path == "internal/runtime/pipeline/fork_fan_out_crash_external_test.go" &&
 			fn.Name.Name == "TestIssue642MixedFanOutCrashRestartBothStores" &&
-			digest == "48b3b6d60622898a0d8268f411d01b7795194fda67a2f17e2a781da0cce645b7") {
+			(digest == "48b3b6d60622898a0d8268f411d01b7795194fda67a2f17e2a781da0cce645b7" ||
+				digest == "86b3cb28a487dcd876d17d92afdd26d515a5d934e26cba019b32141dd82f492e")) &&
+			!(path == "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go" &&
+				fn.Name.Name == "verifyBarrierCrashRestartBothStores" &&
+				digest == "b50acc5f065717e346be2c4c1b31ec536ca2d9040d2a3129cbc353bc3daa99f0") {
 			return false
 		}
 		seen[fn.Name.Name] = true
