@@ -242,7 +242,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		Subordinate: runtimesessions.LifecycleMutationPlan{
 			Action:            runtimesessions.LifecycleMutationRotateCurrentSet,
 			TerminationReason: runtimesessions.TerminationReasonNormal,
-			TerminationDetail: "restart", CheckpointSummary: "clean restart",
+			TerminationDetail: "restart",
 		},
 		Now: now.Add(2 * time.Second),
 	}

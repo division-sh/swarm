@@ -393,7 +393,6 @@ func openAICompatibleTestConfig(baseURL string) *config.Config {
 			Backend: "openai_compatible",
 			Session: config.LLMSessionConfig{
 				LockTTL:               time.Second,
-				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
 			},
 			OpenAICompatible: config.OpenAICompatibleConfig{

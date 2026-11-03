@@ -1715,7 +1715,7 @@ func selectedForkAPIProviderConfig(backend, model, baseURL string) *config.Confi
 		Models: llmselection.ModelAliases{
 			llmselection.ModelAliasRegular: {backend: model},
 		},
-		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		Session: config.LLMSessionConfig{LockTTL: time.Second, RotateOnParseFailures: 3},
 	}}
 	switch backend {
 	case llmselection.BackendOpenAICompatible:
@@ -1988,7 +1988,7 @@ fi
 		Models: llmselection.ModelAliases{
 			llmselection.ModelAliasRegular: {llmselection.BackendClaudeCLI: "claude-selected-fork"},
 		},
-		Session:   config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		Session:   config.LLMSessionConfig{LockTTL: time.Second, RotateOnParseFailures: 3},
 		ClaudeCLI: config.ClaudeCLIConfig{Command: "claude", OutputFormat: "stream-json"},
 	}}
 	cfg.Workspace.DockerBin = dockerPath

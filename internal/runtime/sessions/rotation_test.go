@@ -21,14 +21,14 @@ func requireRotationRefusal(t *testing.T, err error, want RotationRefusalReason)
 func TestRotationRequestNormalization(t *testing.T) {
 	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
 	base, err := NormalizeRotationRequest(identity, " owner ", RotationMetadata{
-		OperationID: " op ", CheckpointSummary: " summary ", RetryReason: " session in use ",
+		OperationID: " op ", RetryReason: " session in use ",
 		TerminationReason: " NORMAL ",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	equivalent, err := NormalizeRotationRequest(identity, "owner", RotationMetadata{
-		OperationID: "op", CheckpointSummary: "summary", RetryReason: "session in use", TerminationReason: TerminationReasonNormal,
+		OperationID: "op", RetryReason: "session in use", TerminationReason: TerminationReasonNormal,
 	})
 	if err != nil || base.Digest != equivalent.Digest || base.Metadata != equivalent.Metadata || base.LockOwner != equivalent.LockOwner {
 		t.Fatalf("canonical request mismatch: first=%+v second=%+v err=%v", base, equivalent, err)
@@ -60,13 +60,13 @@ func TestInMemoryRotationReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata := RotationMetadata{OperationID: "rotation-a", CheckpointSummary: "summary", RetryReason: "session in use"}
+	metadata := RotationMetadata{OperationID: "rotation-a", RetryReason: "session in use"}
 	first, err := registry.Rotate(ctx, predecessor, metadata)
 	if err != nil || first == nil {
 		t.Fatalf("first rotation=%+v err=%v", first, err)
 	}
 	replayed, err := registry.Rotate(ctx, predecessor, RotationMetadata{
-		OperationID: " rotation-a ", CheckpointSummary: " summary ", RetryReason: " session in use ", TerminationReason: " NORMAL ",
+		OperationID: " rotation-a ", RetryReason: " session in use ", TerminationReason: " NORMAL ",
 	})
 	if err != nil || replayed == nil || *replayed != *first || len(registry.History(identity)) != 1 {
 		t.Fatalf("replay=%+v first=%+v history=%d err=%v", replayed, first, len(registry.History(identity)), err)
@@ -77,9 +77,8 @@ func TestInMemoryRotationReceipts(t *testing.T) {
 		t.Fatalf("caller mutated immutable receipt: lease=%+v err=%v", unchanged, err)
 	}
 	for _, changed := range []RotationMetadata{
-		{OperationID: "rotation-a", CheckpointSummary: "different", RetryReason: metadata.RetryReason},
-		{OperationID: "rotation-a", CheckpointSummary: metadata.CheckpointSummary, RetryReason: "different"},
-		{OperationID: "rotation-a", CheckpointSummary: metadata.CheckpointSummary, RetryReason: metadata.RetryReason, TerminationReason: TerminationReasonFailed},
+		{OperationID: "rotation-a", RetryReason: "different"},
+		{OperationID: "rotation-a", RetryReason: metadata.RetryReason, TerminationReason: TerminationReasonFailed},
 	} {
 		_, err := registry.Rotate(ctx, predecessor, changed)
 		requireRotationRefusal(t, err, RotationRequestConflict)
@@ -191,7 +190,7 @@ func TestInMemoryRotationReceiptSurvivesReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata := RotationMetadata{OperationID: "rotation-before-reset", CheckpointSummary: "checkpoint"}
+	metadata := RotationMetadata{OperationID: "rotation-before-reset"}
 	if _, err := registry.Rotate(ctx, predecessor, metadata); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +204,7 @@ func TestInMemoryRotationReceiptSurvivesReset(t *testing.T) {
 	historyLen := len(registry.History(identity))
 	_, err = registry.Rotate(ctx, current, metadata)
 	requireRotationRefusal(t, err, RotationSuccessorNotCurrent)
-	_, err = registry.Rotate(ctx, current, RotationMetadata{OperationID: metadata.OperationID, CheckpointSummary: "different"})
+	_, err = registry.Rotate(ctx, current, RotationMetadata{OperationID: metadata.OperationID, RetryReason: "different"})
 	requireRotationRefusal(t, err, RotationRequestConflict)
 	if got := len(registry.History(identity)); got != historyLen {
 		t.Fatalf("reset replay changed history: got=%d want=%d", got, historyLen)
@@ -276,7 +275,7 @@ func TestInMemoryRotationChangedKeyConcurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, errs[i] = registry.Rotate(ctx, predecessor, RotationMetadata{OperationID: "changed-key", CheckpointSummary: []string{"one", "two"}[i]})
+			_, errs[i] = registry.Rotate(ctx, predecessor, RotationMetadata{OperationID: "changed-key", RetryReason: []string{"one", "two"}[i]})
 		}(i)
 	}
 	close(start)

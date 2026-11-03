@@ -75,7 +75,6 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 		"  backend: openai_responses",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n")
 

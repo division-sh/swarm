@@ -73,7 +73,7 @@ func TestSingleDeploymentConfigPreservesOmittedAndExplicitLeafValues(t *testing.
 	})
 	for _, source := range []string{"", "{}", "runtime: {}\nllm: {session: {}}\n"} {
 		t.Run("omitted/"+source, func(t *testing.T) {
-			before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic", Session: LLMSessionConfig{RotateAfterTurns: 40}}}
+			before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic", Session: LLMSessionConfig{}}}
 			got := before
 			if err := decodeConfigSourceTest(source, &got); err != nil || !reflect.DeepEqual(got, before) {
 				t.Fatalf("omitted values changed defaults: got=%#v error=%v", got, err)
@@ -81,15 +81,15 @@ func TestSingleDeploymentConfigPreservesOmittedAndExplicitLeafValues(t *testing.
 		})
 	}
 	for _, source := range []string{
-		"runtime: {recovery_on_startup: false}\nllm: {backend: '', session: {rotate_after_turns: 0}}\nplatform: {packs: {platform_dirs: []}}\n",
-		"runtime: {<<: {recovery_on_startup: false}}\nllm: {<<: {backend: '', session: {rotate_after_turns: 0}}}\nplatform: {packs: {platform_dirs: []}}\n",
+		"runtime: {recovery_on_startup: false}\ndatabase: {pool_size: 0}\nllm: {backend: ''}\nplatform: {packs: {platform_dirs: []}}\n",
+		"runtime: {<<: {recovery_on_startup: false}}\ndatabase: {<<: {pool_size: 0}}\nllm: {<<: {backend: ''}}\nplatform: {packs: {platform_dirs: []}}\n",
 	} {
 		t.Run("explicit/"+source, func(t *testing.T) {
-			got := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic", Session: LLMSessionConfig{RotateAfterTurns: 40}}, Platform: PlatformConfig{Packs: PlatformPacksConfig{PlatformDirs: []string{"old"}}}}
+			got := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, Database: DatabaseConfig{PoolSize: 7}, LLM: LLMConfig{Backend: "anthropic"}, Platform: PlatformConfig{Packs: PlatformPacksConfig{PlatformDirs: []string{"old"}}}}
 			if err := decodeConfigSourceTest(source, &got); err != nil {
 				t.Fatal(err)
 			}
-			if got.Runtime.RecoveryOnStartup || got.LLM.Backend != "" || got.LLM.Session.RotateAfterTurns != 0 || len(got.Platform.Packs.PlatformDirs) != 0 {
+			if got.Runtime.RecoveryOnStartup || got.LLM.Backend != "" || got.Database.PoolSize != 0 || len(got.Platform.Packs.PlatformDirs) != 0 {
 				t.Fatalf("explicit false/empty/zero/sequence lost: %#v", got)
 			}
 		})

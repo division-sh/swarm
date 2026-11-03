@@ -41,7 +41,7 @@ func memoryConversationRecord(session *Session) (ConversationRecord, bool, error
 	}
 	return ConversationRecord{
 		SessionID: session.ID, AgentID: session.AgentID, Identity: identity, Memory: session.Memory,
-		Watchdog: session.Watchdog, Messages: session.Messages, Summary: BuildSessionSummary(session),
+		Watchdog: session.Watchdog, Messages: session.Messages,
 		TurnCount: session.TurnCount, Status: "active",
 	}, true, nil
 }

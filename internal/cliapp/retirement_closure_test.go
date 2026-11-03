@@ -117,8 +117,8 @@ func TestRetirementClosureSelectedDocumentMergeIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Config.Runtime.RecoveryOnStartup || got.Config.LLM.Session.RotateAfterTurns != 40 || got.Path != selected {
-		t.Fatalf("single-document merge/default isolation lost: path=%q recovery=%t rotation=%d", got.Path, got.Config.Runtime.RecoveryOnStartup, got.Config.LLM.Session.RotateAfterTurns)
+	if got.Config.Runtime.RecoveryOnStartup || got.Path != selected {
+		t.Fatalf("single-document merge/default isolation lost: path=%q recovery=%t", got.Path, got.Config.Runtime.RecoveryOnStartup)
 	}
 }
 
@@ -288,7 +288,7 @@ func TestRetirementClosureExpandedPresenceAndEmptyMap(t *testing.T) {
 	if !got.CLI.Paths.SwarmDirSet || got.CLI.Paths.SwarmDir != "" {
 		t.Fatalf("explicit empty presence lost: %#v", got.CLI.Paths)
 	}
-	if !got.Config.Runtime.RecoveryOnStartup || got.Config.LLM.Session.RotateAfterTurns != 40 || got.Path != explicit {
+	if !got.Config.Runtime.RecoveryOnStartup || got.Path != explicit {
 		t.Fatal("empty mapping did not preserve built-in defaults or selected source")
 	}
 }

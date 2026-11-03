@@ -353,11 +353,8 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, leaseInput *runtimesessions
 			newID := uuid.NewString()
 			newGrantID := uuid.NewString()
 			expires := now.Add(s.sessionLockTTL)
-			runtimeState := sqliteSessionRuntimeStateJSON(rotation.CheckpointSummary, retryReason, rec.sessionID)
-			conversation, err := json.Marshal(runtimellm.RotationCheckpointConversation(rotation.CheckpointSummary))
-			if err != nil {
-				return err
-			}
+			runtimeState := sqliteSessionRuntimeStateJSON("", retryReason, rec.sessionID)
+			conversation := []byte("[]")
 			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: rec.sessionID, LockOwner: lockOwner, GrantID: newGrantID, ExpiresAt: expires}
 			var receiptJSON []byte
 			if rotation.OperationID != "" {

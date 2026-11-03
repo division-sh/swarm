@@ -186,7 +186,7 @@ func (r *AnthropicAPIRuntime) recoverManagedCompletionContinuation(ctx context.C
 }
 
 func (r *AnthropicAPIRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.events)
 }
 
 func (r *AnthropicAPIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {

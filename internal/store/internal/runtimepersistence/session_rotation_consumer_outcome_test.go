@@ -18,7 +18,7 @@ import (
 // The store performs real SQL and acknowledges COMMIT. Only the subsequent
 // candidate sink fails; no wrapper fabricates a committed session result.
 func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testing.T) {
-	for _, operation := range []string{"turn", "parse", "prepare", "prepare_acquire"} {
+	for _, operation := range []string{"parse", "prepare_acquire"} {
 		for _, fail := range []bool{false, true} {
 			phase := "healthy"
 			if fail {
@@ -44,7 +44,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				}
 				oldID := lease.SessionID
 				var predecessor *sessions.Lease
-				if operation == "turn" || operation == "parse" {
+				if operation == "parse" {
 					predecessor, err = store.Acquire(ctx, identity, "worker-1")
 					if err != nil {
 						t.Fatal(err)
@@ -97,27 +97,21 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				defer registration.Release()
 				var result *sessions.Lease
 				switch operation {
-				case "turn":
-					result, err = runtimellm.MaybeRotateAfterTurn(ctx, session, store, predecessor, 1, nil)
 				case "parse":
 					result, err = runtimellm.MaybeRotateAfterParseFailures(ctx, session, store, predecessor, 1, nil)
 				default:
 					cfg := &config.Config{}
-					cfg.LLM.Session.RotateAfterTurns = 1
 					err = runtimellm.NewMockRuntime(cfg, store, "worker-1", nil, nil, nil, runtimellm.MockRuntimeOptions{}).PrepareManagedSession(ctx, session)
 				}
 				if fail && !errors.Is(err, failure) || !fail && err != nil {
 					t.Fatalf("handoff error not preserved: %v", err)
 				}
-				prepared := operation == "prepare" || operation == "prepare_acquire"
+				prepared := operation == "prepare_acquire"
 				if fail && prepared && !errors.Is(err, cleanup) {
 					t.Fatalf("release handoff error lost: %v", err)
 				}
 				wantRows, wantRotations, wantSubmits := 2, 1, 1
 				if prepared {
-					wantSubmits = 3
-				}
-				if operation == "prepare_acquire" && fail {
 					wantRows, wantRotations, wantSubmits = 1, 0, 2
 				}
 				if rotationSubmits != wantRotations || submits != wantSubmits {
@@ -134,7 +128,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 					t.Fatalf("session rows=%d want=%d", count, wantRows)
 				}
 				if wantRotations == 1 {
-					if committedID == "" || session.ID != committedID || session.ProviderSessionID != "" || session.TurnCount != 0 || session.ParseFailures != 0 || len(session.Messages) != 1 || session.Messages[0].Role != "system" {
+					if committedID == "" || session.ID != committedID || session.ProviderSessionID != "" || session.TurnCount != 0 || session.ParseFailures != 0 || len(session.Messages) != 0 {
 						t.Fatalf("committed successor not adopted: %+v durable=%s", session, committedID)
 					}
 					if !prepared && (result == nil || result.SessionID != committedID || result.RetriesFromSessionID != oldID) {

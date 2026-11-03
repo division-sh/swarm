@@ -211,7 +211,6 @@ type LLMConfig struct {
 
 type LLMSessionConfig struct {
 	LockTTL               time.Duration `yaml:"lock_ttl"`
-	RotateAfterTurns      int           `yaml:"rotate_after_turns"`
 	RotateOnParseFailures int           `yaml:"rotate_on_parse_failures"`
 }
 
@@ -302,9 +301,6 @@ func (c *Config) validate(backendOverride string) error {
 	}
 	if c.LLM.Session.LockTTL <= 0 {
 		return errors.New("llm.session.lock_ttl must be > 0")
-	}
-	if c.LLM.Session.RotateAfterTurns <= 0 {
-		return errors.New("llm.session.rotate_after_turns must be > 0")
 	}
 	if c.LLM.Session.RotateOnParseFailures <= 0 {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")

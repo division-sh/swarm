@@ -101,7 +101,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			Backend: llmselection.DefaultBackendID(),
 			Session: config.LLMSessionConfig{
 				LockTTL:               10 * time.Second,
-				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
 			},
 			ClaudeCLI: config.ClaudeCLIConfig{

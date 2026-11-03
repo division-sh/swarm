@@ -188,7 +188,7 @@ func (r *OpenAIResponsesRuntime) recoverManagedCompletionContinuation(ctx contex
 }
 
 func (r *OpenAIResponsesRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.events)
 }
 
 func (r *OpenAIResponsesRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {

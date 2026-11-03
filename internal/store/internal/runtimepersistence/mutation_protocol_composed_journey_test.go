@@ -115,7 +115,7 @@ func newMutationProtocolJourneyFixtureWithRoot(t *testing.T, backend, root strin
 	config := map[string]any{
 		"runtime": map[string]any{"recovery_on_startup": false},
 		"store":   map[string]any{"backend": backend, "sqlite": map[string]any{"path": sqlitePath}},
-		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_after_turns": 40, "rotate_on_parse_failures": 3}},
+		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_on_parse_failures": 3}},
 	}
 	if backend == "postgres" {
 		var cleanup func()

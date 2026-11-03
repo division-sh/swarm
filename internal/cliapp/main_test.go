@@ -2656,13 +2656,13 @@ llm:
   backend: claude_cli
   session:
     lock_ttl: 10s
-    rotate_after_turns: 40
     rotate_on_parse_failures: 3
   claude_cli:
     command: true
     timeout: 2s
     output_format: json
-`, parsed.Host, parsed.Port, parsed.Database, parsed.User, parsed.SSLMode))
+`,
+		parsed.Host, parsed.Port, parsed.Database, parsed.User, parsed.SSLMode))
 }
 
 func TestSetPostgresEnvFromDSNConsumesCanonicalTypedConnection(t *testing.T) {
@@ -2758,7 +2758,7 @@ func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	if !cfg.Runtime.RecoveryOnStartup {
 		t.Fatalf("recovery_on_startup = false, want built-in true regardless of retired environment override")
 	}
-	if cfg.LLM.Session.LockTTL != 10*time.Second || cfg.LLM.Session.RotateAfterTurns != 40 || cfg.LLM.Session.RotateOnParseFailures != 3 {
+	if cfg.LLM.Session.LockTTL != 10*time.Second || cfg.LLM.Session.RotateOnParseFailures != 3 {
 		t.Fatalf("session defaults = %#v, want built-ins", cfg.LLM.Session)
 	}
 	if cfg.LLM.ClaudeCLI.Command != "claude" ||
@@ -2789,7 +2789,6 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 		"  backend: claude_cli",
 		"  session:",
 		"    lock_ttl: 22s",
-		"    rotate_after_turns: 55",
 		"    rotate_on_parse_failures: 9",
 		"  claude_cli:",
 		"    command: echo",
@@ -2805,7 +2804,7 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 	if !cfg.Runtime.RecoveryOnStartup {
 		t.Fatalf("runtime.recovery_on_startup = false, want true from config")
 	}
-	if cfg.LLM.Session.LockTTL != 22*time.Second || cfg.LLM.Session.RotateAfterTurns != 55 || cfg.LLM.Session.RotateOnParseFailures != 9 {
+	if cfg.LLM.Session.LockTTL != 22*time.Second || cfg.LLM.Session.RotateOnParseFailures != 9 {
 		t.Fatalf("session config = %#v, want typed config values", cfg.LLM.Session)
 	}
 	if cfg.LLM.ClaudeCLI.Command != "echo" || cfg.LLM.ClaudeCLI.Timeout != 44*time.Second || cfg.LLM.ClaudeCLI.OutputFormat != "json" {
@@ -2832,7 +2831,6 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 		"  backend: claude_cli",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 		"  claude_cli:",
 		"    command: true",
@@ -2845,7 +2843,6 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 		"  openai_compatible:",
 		"    base_url: https://example.test/v1",
@@ -2880,7 +2877,6 @@ func TestLoadRuntimeConfigWithOptions_BackendOverrideSkipsOverriddenProfileValid
 				"  backend: openai_compatible",
 				"  session:",
 				"    lock_ttl: 10s",
-				"    rotate_after_turns: 40",
 				"    rotate_on_parse_failures: 3",
 			},
 		},
@@ -2891,7 +2887,6 @@ func TestLoadRuntimeConfigWithOptions_BackendOverrideSkipsOverriddenProfileValid
 				"  backend: claude_cli",
 				"  session:",
 				"    lock_ttl: 10s",
-				"    rotate_after_turns: 40",
 				"    rotate_on_parse_failures: 3",
 				"  claude_cli:",
 				"    output_format: json",
@@ -2925,7 +2920,6 @@ func TestLoadRuntimeConfigWithOptions_RejectsRetiredModelEnvForConfiguredPaths(t
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
 
@@ -2968,7 +2962,6 @@ func TestLoadRuntimeConfigWithOptions_RejectsLegacyBackendBeforeOverride(t *test
 		"  backend: api",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n")
 	_, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: "runtime.yaml", BackendOverride: "claude_cli"})
@@ -2985,7 +2978,6 @@ func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
 	p := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -3452,7 +3444,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 		"      anthropic: claude-custom",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n"))
 	t.Setenv("SWARM_CONFIG", configPath)

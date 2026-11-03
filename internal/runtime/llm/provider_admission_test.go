@@ -282,7 +282,6 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 		LLM: config.LLMConfig{
 			Session: config.LLMSessionConfig{
 				LockTTL:               time.Second,
-				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
 			},
 			ProviderLimits: map[string]config.LLMProviderLimitPolicy{

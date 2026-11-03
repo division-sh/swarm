@@ -121,7 +121,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						stubServeRuntimeWorkspaceLifecycle(t)
 						opts.StoreMode, opts.StoreModeSet = "postgres", true
 					}
-					text := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: %s\n  models:\n    regular:\n      %s: request-A\n  openai_compatible:\n    base_url: http://completion-2270.test\n  openai_responses:\n    base_url: http://completion-2270.test\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, profileID, profileID)
+					text := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: %s\n  models:\n    regular:\n      %s: request-A\n  openai_compatible:\n    base_url: http://completion-2270.test\n  openai_responses:\n    base_url: http://completion-2270.test\n  session:\n    lock_ttl: 10s\n    rotate_on_parse_failures: 3\n", storeConfig, profileID, profileID)
 					wantObserved := "reported-B"
 					if profileID == llmselection.BackendClaudeCLI {
 						text += fmt.Sprintf("workspace:\n  image: %s\n", image)
