@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -29,6 +30,45 @@ func TestWorkflowTimerCauseReplayPreservesImmutableFacts(t *testing.T) {
 	if err := initial.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("life_start_and_timer_scope", func(t *testing.T) {
+		instance := WorkflowInstance{Life: 2, CreatedAt: at, EnteredStageAt: at.Add(48 * time.Hour)}
+		started := at.Add(24 * time.Hour)
+		if _, err := instance.LifeStartedAt(); err == nil {
+			t.Fatal("restarted life inferred its start from the old birth or current stage")
+		}
+		if err := retainInstanceLifeStart(&instance, started); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := instance.LifeStartedAt(); err != nil || !got.Equal(started) {
+			t.Fatalf("retained life start = %v %v", got, err)
+		}
+		if err := retainInstanceLifeStart(&instance, started); err != nil {
+			t.Fatalf("exact life-start replay refused: %v", err)
+		}
+		if err := retainInstanceLifeStart(&instance, started.Add(time.Second)); err == nil {
+			t.Fatal("initial-entry replay moved the life start")
+		}
+		bundle := loadWorkflowTempBundle(t, workflowTimerOwnerSourceFiles())
+		selected := semanticview.Wrap(bundle)
+		cause := workflowTimerCause{Kind: workflowTimerCauseInitial, Life: 1, EventType: "state:waiting", ToState: "waiting", OccurredAt: started, ExecutionMode: executionmode.Live}
+		first, err := workflowTimerActivationForCause(selected, runID, entityID, initial.Route, bundle.Semantics.Timers[0], initial.Ref.Generation, cause, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cause.Life = 2
+		next, err := workflowTimerActivationForCause(selected, runID, entityID, initial.Route, bundle.Semantics.Timers[0], initial.Ref.Generation, cause, time.Hour)
+		if err != nil || first.Ref.ActivationID == next.Ref.ActivationID || next.RoutingSource.Life() != 2 || first.RoutingSource.Life() != 1 || !next.FireAt.Equal(first.FireAt) {
+			t.Fatalf("timer life changed its clock or reused the previous arm: first=%+v next=%+v err=%v", first, next, err)
+		}
+		kept, err := workflowTimersForLife(2, []WorkflowTimerActivation{first, next})
+		if err != nil || len(kept) != 1 || kept[0].Ref != next.Ref || first.Status != workflowTimerStatusActive {
+			t.Fatalf("timer selection crossed life or retired the old arm: %+v %v", kept, err)
+		}
+		cause.Life = 0
+		if _, err := workflowTimerActivationForCause(selected, runID, entityID, initial.Route, bundle.Semantics.Timers[0], initial.Ref.Generation, cause, time.Hour); err == nil {
+			t.Fatal("timer constructor repaired missing captured life")
+		}
+	})
 	for _, status := range []string{workflowTimerStatusActive, workflowTimerStatusFired, workflowTimerStatusCancelled} {
 		t.Run(status, func(t *testing.T) {
 			current := initial
@@ -59,6 +99,12 @@ func TestWorkflowTimerCauseReplayPreservesImmutableFacts(t *testing.T) {
 		{"source", func(a *WorkflowTimerActivation) {
 			a.EntityID = uuid.NewString()
 			a.RoutingSource, err = events.NewRootRoutingSource(a.EntityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"life", func(a *WorkflowTimerActivation) {
+			a.RoutingSource, err = a.RoutingSource.WithLife(2)
 			if err != nil {
 				t.Fatal(err)
 			}

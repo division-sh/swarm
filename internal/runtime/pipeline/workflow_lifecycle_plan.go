@@ -470,10 +470,13 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 		return err
 	}
 	fromState, toState := "", ""
-	cause := workflowTimerCause{OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
+	cause := workflowTimerCause{Life: effect.Life(), OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
 	switch effect.Kind() {
 	case runtimeworkflowlifecycle.KindInitialEntry:
 		if err := validateWorkflowInitialEntry(pc.SemanticSource(), *instance, effect.InitialStage()); err != nil {
+			return err
+		}
+		if err := retainInstanceLifeStart(instance, effect.OccurredAt()); err != nil {
 			return err
 		}
 		toState = effect.InitialStage()
@@ -622,6 +625,10 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runI
 }
 
 func retainWorkflowTimerActivations(source semanticview.Source, instance WorkflowInstance, active []WorkflowTimerActivation, currentState, nextState, eventType string, plan *WorkflowLifecycleMutationPlan) (map[string]WorkflowTimerActivation, error) {
+	active, err := workflowTimersForLife(instance.Life, active)
+	if err != nil {
+		return nil, err
+	}
 	retained := make(map[string]WorkflowTimerActivation, len(active))
 	for _, activation := range active {
 		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.DeclarationKey)
