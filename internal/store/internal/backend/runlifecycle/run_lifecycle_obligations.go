@@ -333,18 +333,6 @@ func summarizeTimerRun(ctx context.Context, tx *sql.Tx, runID string, selectedNo
 	return summary, summary.Validate()
 }
 
-func postgresRunSessionNextWakeTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time) (*time.Time, error) {
-	summary, err := sessionstore.ReadRunSummary(ctx, tx, sessionstore.SummaryDialectPostgres, runID, selectedNow)
-	if err != nil {
-		return nil, err
-	}
-	return optionalWake(summary.NextExpiry), nil
-}
-
-func PostgresRunSessionNextWakeTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time) (*time.Time, error) {
-	return postgresRunSessionNextWakeTx(ctx, tx, runID, selectedNow)
-}
-
 func (s *RunLifecyclePostgresOwner) LoadRunCompletionOwnerSummariesTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time, catalog runtimerunlifecycle.FinalCatalog) (RunCompletionOwnerSummaries, error) {
 	return s.loadPostgresRunCompletionOwnerSummaries(ctx, tx, runID, selectedNow, catalog)
 }
