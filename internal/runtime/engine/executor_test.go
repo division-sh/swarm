@@ -4779,6 +4779,18 @@ join:
 	if triggerResult.FanOutIntent.Cardinality != 2 || triggerResult.FanOutBarrier.IntentKey != triggerResult.FanOutIntent.Key || len(triggerResult.EmitIntents) != 0 {
 		t.Fatalf("barrier trigger ownership = intent:%#v barrier:%#v emits:%#v", triggerResult.FanOutIntent, triggerResult.FanOutBarrier, triggerResult.EmitIntents)
 	}
+	producer, err := events.NewRootRoutingSource(request.EntityID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ProducerSource, err = producer.WithLife(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	laterLife, err := exec.ExecuteSemanticFixture(context.Background(), request)
+	if err != nil || laterLife.FanOutBarrier == nil || laterLife.FanOutBarrier.RoutingSource.Life() != 7 || laterLife.FanOutIntent == nil || laterLife.FanOutIntent.Capsule.ProducerSource.Life() != 7 {
+		t.Fatalf("fan-out construction lost its captured life: %+v %v", laterLife, err)
+	}
 
 	bound, err := declaration.BindFanOutIntent(triggerResult.FanOutIntent.Key.TriggeringDeliveryID, declaration.Generation())
 	if err != nil {
