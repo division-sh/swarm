@@ -14,7 +14,6 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
 )
@@ -156,11 +155,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 			if err != nil {
 				return err
 			}
-			nextWake, err := storerunlifecycle.PostgresRunSessionNextWakeTx(sqlCtx, tx, identity.RunID, now)
-			if err != nil {
-				return err
-			}
-			if nextWake == nil {
+			if !current.leaseExpires.Valid || !current.leaseExpires.Time.After(now) {
 				return errors.New("acquired live session has no exact lease expiry")
 			}
 			value.lease = &runtimesessions.Lease{
@@ -408,11 +403,7 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, leaseInput *runtimesessio
 			if _, err := tx.ExecContext(sqlCtx, `UPDATE agent_sessions SET successor_session_id=$2::uuid, updated_at=$3 WHERE session_id=$1::uuid AND status='terminated'`, currentID, newID, now); err != nil {
 				return err
 			}
-			nextWake, err := storerunlifecycle.PostgresRunSessionNextWakeTx(sqlCtx, tx, identity.RunID, now)
-			if err != nil {
-				return err
-			}
-			if nextWake == nil {
+			if !expires.After(now) {
 				return errors.New("rotated live session has no exact lease expiry")
 			}
 			if err := addAgentSessionFacts(attempt, currentRunID, currentID); err != nil {
@@ -470,15 +461,7 @@ func (s *LLMPostgresOwner) IncrementTurnOutcome(ctx context.Context, lease *runt
 			if err != nil {
 				return err
 			}
-			if err := addAgentSessionFacts(attempt, storedRunID, storedSessionID); err != nil {
-				return err
-			}
-			var now time.Time
-			if err := tx.QueryRowContext(sqlCtx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
-				return fmt.Errorf("read selected-store session time: %w", err)
-			}
-			_, err = storerunlifecycle.PostgresRunSessionNextWakeTx(sqlCtx, tx, identity.RunID, now.UTC())
-			return err
+			return addAgentSessionFacts(attempt, storedRunID, storedSessionID)
 		})
 		return struct{}{}, err
 	})
