@@ -280,6 +280,18 @@ func TestIncidentsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "not a valid LogLevel",
 		},
 		{
+			name: "malformed incident padded level exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				incident := validRuntimeIncident("incident-1")
+				incident["level"] = " warn "
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"incidents": []any{incident}})
+			},
+			wantCode:   3,
+			wantStderr: "not a valid LogLevel",
+		},
+		{
 			name: "malformed incident missing sample message exits three",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
