@@ -266,10 +266,10 @@ func validateEventPublishDelivery(prefix string, delivery eventPublishDelivery) 
 			return fmt.Errorf("malformed event.publish result: %s.%s is required", prefix, field.name)
 		}
 	}
-	if _, ok := eventObservationValidSubscriberTypes[strings.TrimSpace(delivery.SubscriberType)]; !ok {
+	if _, ok := eventObservationValidSubscriberTypes[delivery.SubscriberType]; !ok {
 		return fmt.Errorf("malformed event.publish result: %s.subscriber_type=%q is not a valid SubscriberType", prefix, delivery.SubscriberType)
 	}
-	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
+	if _, ok := eventObservationValidDeliveryStatuses[delivery.Status]; !ok {
 		return fmt.Errorf("malformed event.publish result: %s.status=%q is not a valid DeliveryStatus", prefix, delivery.Status)
 	}
 	if delivery.Attempt < 1 {
