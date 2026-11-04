@@ -211,6 +211,13 @@ func projectRunForkConstructionContext(plan runfork.RunForkPlan, forkRunID strin
 		return events.DeliveryContext{}, err
 	}
 	child := events.DeliveryContext{Joins: append([]events.JoinAdmissionReceipt(nil), source.Joins...)}
+	if source.Life != nil {
+		life, err := runfork.ProjectInstanceLifeOwnership(plan.SourceRunID, forkRunID, *source.Life)
+		if err != nil {
+			return events.DeliveryContext{}, err
+		}
+		child.Life = &life
+	}
 	if source.Reply != nil {
 		id, err := projectRunForkReplyReference(plan.SourceRunID, forkRunID, plan.ReplyContexts, source.Reply.ID)
 		if err != nil {

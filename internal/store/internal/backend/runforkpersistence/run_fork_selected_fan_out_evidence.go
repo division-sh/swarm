@@ -329,7 +329,7 @@ func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event eve
 	if err != nil {
 		return events.DeliveryRoute{}, err
 	}
-	if projected.Context.Reply != nil || len(projected.Context.Joins) != 0 {
+	if !projected.Context.Empty() {
 		entities, err := loadRunForkEntityStates(snapshot)
 		if err != nil {
 			return events.DeliveryRoute{}, err
@@ -354,6 +354,7 @@ func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event eve
 }
 
 func projectSelectedFanOutNodeReceiver(snapshot *runForkRevisionSnapshot, event events.Event, source events.DeliveryRoute, childRun string) (events.DeliveryRoute, error) {
+	life := source.Target.Life()
 	var publication []events.DeliveryRoute
 	for _, delivery := range snapshot.Deliveries {
 		if delivery.Snapshot.EventID == event.ID() {
@@ -372,6 +373,9 @@ func projectSelectedFanOutNodeReceiver(snapshot *runForkRevisionSnapshot, event 
 		}
 		target.FlowInstance = route.InstancePath
 		source.Target, err = events.NewEntitylessReceiverTarget(target)
+		if err == nil {
+			source.Target, err = source.Target.WithLife(life)
+		}
 		return source, err
 	}
 	state, err := loadRunForkConstructedEntityState(snapshot, target.EntityID)
@@ -388,6 +392,10 @@ func projectSelectedFanOutNodeReceiver(snapshot *runForkRevisionSnapshot, event 
 	}
 	target.EntityID, target.FlowInstance = projection.Fork.EntityID, projection.Fork.FlowInstance
 	source.Target, err = events.NewExistingEntityTarget(target)
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
+	source.Target, err = source.Target.WithLife(life)
 	if err != nil {
 		return events.DeliveryRoute{}, err
 	}

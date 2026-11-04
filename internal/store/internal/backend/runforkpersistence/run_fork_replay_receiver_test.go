@@ -161,6 +161,10 @@ func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T)
 		t.Fatal(err)
 	}
 	delivery.Route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: snapshot.RunID, EntityID: snapshot.RunID})
+	delivery.Route.Target, err = delivery.Route.Target.WithLife(7)
+	if err != nil {
+		t.Fatal(err)
+	}
 	delivery.Route.Initialization = events.ReceiverInitialization{}
 	delivery.Route.ConnectClaim = events.ConnectExecutionClaim{}
 	delivery.DeliveryID, err = deliverylifecycle.DeliveryID(event.ID(), delivery.Route)
@@ -169,12 +173,13 @@ func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T)
 	}
 	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: delivery.DeliveryID, RunID: delivery.RunID, EventID: delivery.EventID, Route: delivery.Route, Status: delivery.Status}}}
 	setReplayReceiverConstructedHistory(t, snapshot, snapshot.RunID, snapshot.RunID, ".", event.CreatedAt())
+	snapshot.EntityMetadata[0].Life = 7
 	childRun := eventtest.UUID("replay-child")
 	child, err := projectRunForkReplayInitializedReceiver(snapshot, event, delivery, childRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := child.Target.Route(); got.EntityID != childRun || got.FlowInstance != childRun || !child.Target.ExistingEntity() {
+	if got := child.Target.Route(); got.EntityID != childRun || got.FlowInstance != childRun || !child.Target.ExistingEntity() || child.Target.Life() != 7 || child.Initialization.ConstructionTarget().Life() != 7 {
 		t.Fatalf("replay retained source root ownership: %+v", child)
 	}
 }
