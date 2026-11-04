@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -75,6 +76,42 @@ func TestPublicationTargetDecisionReadsOnlyNarrowedCoordinate(t *testing.T) {
 	if !errors.As(err, &terminated) || len(reader.lookups) != 2 {
 		t.Fatalf("stale list availability replaced exact receiver refusal: %v reads=%+v", err, reader.lookups)
 	}
+	t.Run("captured_source_life", func(t *testing.T) {
+		projection, reader, target := publicationDecisionFixture(t)
+		runID := reader.observations[1].Owner().RunID
+		source, err := events.NewStaticFlowRoutingSource(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := func(source events.RoutingSource) events.Event {
+			return eventtest.RunCreatingRootIngressWithRoutingSource(eventtest.UUID("captured-source-life-event"), "source.result", "fixture", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, source, time.Now().UTC())
+		}
+		if err := projection.requireCurrentSourceLife(event(source)); err != nil || len(reader.lookups) != 1 || reader.lookups[0].ExactPath() != target.FlowInstance {
+			t.Fatalf("source lifetime escaped its exact read: %+v %v", reader.lookups, err)
+		}
+		foreign, err := source.WithLife(2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = projection.requireCurrentSourceLife(event(foreign))
+		failure, typed := failures.EnvelopeFromError(err)
+		if !typed || failure.Class != failures.ClassStaleArrival || failure.Detail.Code != "instance_restarted" || len(reader.lookups) != 2 {
+			t.Fatalf("publication adopted another life: reads=%+v error=%v", reader.lookups, err)
+		}
+		fault := errors.New("source-life observation failed")
+		reader.err = fault
+		if err := projection.requireCurrentSourceLife(event(source)); !errors.Is(err, fault) {
+			t.Fatalf("failed source read borrowed captured inventory: %v", err)
+		}
+		reader.err = nil
+		root, err := events.NewRootRoutingSource(runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := projection.requireCurrentSourceLife(event(root)); err != nil || reader.lookups[len(reader.lookups)-1].ExactPath() != runID {
+			t.Fatalf("root source life borrowed another coordinate: %+v %v", reader.lookups, err)
+		}
+	})
 }
 
 func TestPublicationTargetDecisionPreservesExactReadFailures(t *testing.T) {
