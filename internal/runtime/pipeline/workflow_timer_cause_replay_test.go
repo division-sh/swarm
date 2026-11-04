@@ -48,7 +48,7 @@ func TestWorkflowTimerCauseReplayPreservesImmutableFacts(t *testing.T) {
 		if err := retainInstanceLifeStart(&instance, started.Add(time.Second)); err == nil {
 			t.Fatal("initial-entry replay moved the life start")
 		}
-		bundle := loadWorkflowTempBundle(t, workflowTimerOwnerSourceFiles())
+		bundle := workflowTimerOwnerBundleWithDelay(t, false, "1h")
 		selected := semanticview.Wrap(bundle)
 		cause := workflowTimerCause{Kind: workflowTimerCauseInitial, Life: 1, EventType: "state:waiting", ToState: "waiting", OccurredAt: started, ExecutionMode: executionmode.Live}
 		first, err := workflowTimerActivationForCause(selected, runID, entityID, initial.Route, bundle.Semantics.Timers[0], initial.Ref.Generation, cause, time.Hour)
