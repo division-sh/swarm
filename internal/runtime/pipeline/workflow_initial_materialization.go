@@ -465,6 +465,9 @@ func validateFlowConstructionOutgoingOccurrence(receipt FlowConstructionReceipt)
 	if err := receipt.CreationEvent.DeliveryContext.Validate(); err != nil {
 		return fmt.Errorf("flow construction outgoing context: %w", err)
 	}
+	if life := receipt.CreationEvent.DeliveryContext.Life; life != nil && life.RunID != receipt.RunID {
+		return fmt.Errorf("flow construction outgoing life crosses its publication run")
+	}
 	if _, err := canonicaljson.Decode(receipt.CreationEvent.Payload); err != nil {
 		return fmt.Errorf("flow construction outgoing payload: %w", err)
 	}
