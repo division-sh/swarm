@@ -909,6 +909,10 @@ func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	if err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
 	}
+	effect, err = effect.WithLife(normalized.Life)
+	if err != nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
+	}
 	prepared, err := s.lifecycleOwner.PrepareWorkflowLifecycleMutation(ctx, owner, &normalized, []runtimeworkflowlifecycle.Effect{effect}, false)
 	if err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err

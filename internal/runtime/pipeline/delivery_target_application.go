@@ -82,6 +82,10 @@ func withDeliveryTargetApplication(ctx context.Context, application DeliveryTarg
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	deliveryContext := events.DeliveryContextFromContext(ctx)
+	life := events.InstanceLife{RunID: application.Event().RunID(), FlowInstance: application.Route().InstancePath, Life: application.Owner().Life()}
+	deliveryContext.Life = &life
+	ctx = events.WithDeliveryContext(ctx, deliveryContext)
 	return context.WithValue(ctx, deliveryTargetApplicationContextKey{}, application)
 }
 
@@ -127,6 +131,13 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	if err != nil {
 		return DeliveryTargetApplication{}, fmt.Errorf("project admitted delivery target onto execution event: %w", err)
 	}
+	deliveryContext := executionEvent.DeliveryContext()
+	life := events.InstanceLife{RunID: evt.RunID(), FlowInstance: route.InstancePath, Life: owner.Life()}
+	if err := life.Validate(); err != nil {
+		return DeliveryTargetApplication{}, err
+	}
+	deliveryContext.Life = &life
+	executionEvent = events.NewContextDeliveryEvent(executionEvent, deliveryContext).Event()
 	application := DeliveryTargetApplication{
 		owner: owner, flowID: flowID, route: route, event: executionEvent,
 		state: WorkflowState{Metadata: map[string]any{}}, presence: WorkflowTargetPersistenceAbsent,

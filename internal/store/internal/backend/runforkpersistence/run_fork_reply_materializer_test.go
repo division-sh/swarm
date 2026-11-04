@@ -45,6 +45,7 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 	}
 	constructed := selectedWorkflowConstructionRecordFixture(t, sourceRun, "bundle-v2:sha256:"+strings.Repeat("a", 64), owner, initial, executionmode.Live)
 	entry := timeridentity.StageEntryRef{
+		Life:  1,
 		RunID: sourceRun, FlowScope: owner.ScopeKey, InstanceID: owner.InstanceID, InstancePath: owner.InstancePath, EntityID: owner.EntityID,
 		Stage: "awaiting", Cause: "delivery", EventID: request, OccurrenceID: "original-return-arm", TransitionID: "original-transition",
 	}

@@ -51,7 +51,7 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowide
 	} else if transition != nil {
 		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("unchanged workflow stage cannot carry a transition")
 	}
-	return runtimeworkflowlifecycle.NewAcceptedEvent(
+	effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(
 		route,
 		entityID,
 		event.ID(),
@@ -60,6 +60,19 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowide
 		event.CreatedAt(),
 		transition,
 	)
+	if err != nil {
+		return runtimeworkflowlifecycle.Effect{}, err
+	}
+	if life := event.DeliveryContext().Life; life != nil {
+		if err := life.Validate(); err != nil {
+			return runtimeworkflowlifecycle.Effect{}, err
+		}
+		if life.RunID != event.RunID() || life.FlowInstance != route.InstancePath {
+			return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("lifecycle event life crosses its exact execution coordinate")
+		}
+		return effect.WithLife(life.Life)
+	}
+	return effect, nil
 }
 
 func (o pipelineWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(ctx context.Context, effects []runtimeworkflowlifecycle.Effect) error {

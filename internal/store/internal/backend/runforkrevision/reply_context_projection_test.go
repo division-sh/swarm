@@ -92,6 +92,7 @@ func TestReplyContextProjectionNormalizesWithoutLosingOriginOrDisposition(t *tes
 		t.Fatal(err)
 	}
 	entry := timeridentity.StageEntryRef{
+		Life:  1,
 		RunID: "11111111-1111-4111-8111-111111111111", FlowScope: "collector", InstanceID: "one",
 		InstancePath: "collector/one", EntityID: "22222222-2222-4222-8222-222222222222", Stage: "collecting", Cause: "construction",
 	}
