@@ -201,6 +201,9 @@ func (p publicationTargetOwnerEvidence) replyOriginOwner(origin events.RouteIden
 
 func (p publicationTargetOwnerEvidence) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
 	plan = plan.Normalized()
+	if err := p.requireCurrentSourceLife(plan.Event); err != nil {
+		return RoutePlan{}, err
+	}
 	var err error
 	if err = p.resolveNodeTargetOwners(&plan, nil); err != nil {
 		return RoutePlan{}, err

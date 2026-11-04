@@ -5,9 +5,92 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func (p publicationTargetOwnerEvidence) requireCurrentSourceLife(event events.Event) error {
+	source := event.RoutingSource()
+	if source.Life() == 0 || !p.required {
+		return nil
+	}
+	if p.context == nil || p.source == nil {
+		return fmt.Errorf("instance publication requires its exact source-life observation")
+	}
+	route := source.Route()
+	if source.Kind() == events.RoutingSourceRoot {
+		route.FlowID, route.FlowInstance = semanticview.RootExecutionFlowID(p.source), event.RunID()
+	}
+	if publicationSourceMatches(route, p.prospective.Candidate().Route) && source.Life() == p.prospective.Candidate().Life {
+		fact, _ := correlation.SourceArtifactFactFromContext(p.context)
+		return p.prospective.ValidatePublication(fact, event)
+	}
+	selected, err := p.sourceLifeObservation(route)
+	if err != nil {
+		return err
+	}
+	if selected.Valid() {
+		return p.requireObservedSourceLife(selected, source.Life())
+	}
+	return p.requireConstructedSourceLife(event, route)
+}
+
+func publicationSourceMatches(route, candidate events.RouteIdentity) bool {
+	return route.FlowID == candidate.FlowID && route.FlowInstance == candidate.FlowInstance && (route.EntityID == "" || route.EntityID == candidate.EntityID)
+}
+
+func (p publicationTargetOwnerEvidence) sourceLifeObservation(route events.RouteIdentity) (pipeline.FlowInstanceObservation, error) {
+	scope, _ := p.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
+	var selected pipeline.FlowInstanceObservation
+	for _, listed := range scope.observations {
+		identity := listed.Identity()
+		if !publicationSourceMatches(route, events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}) {
+			continue
+		}
+		if selected.Valid() {
+			return pipeline.FlowInstanceObservation{}, fmt.Errorf("publication source has ambiguous instance observations")
+		}
+		selected = listed
+	}
+	return selected, nil
+}
+
+func (p publicationTargetOwnerEvidence) requireObservedSourceLife(selected pipeline.FlowInstanceObservation, captured int64) error {
+	current, err := p.decisionObservation(selected)
+	if err != nil {
+		return err
+	}
+	instance, err := current.WorkflowInstance()
+	if err != nil {
+		return err
+	}
+	if instance.Life != captured {
+		return pipeline.InstanceRestarted(current.Owner(), captured, instance.Life)
+	}
+	return nil
+}
+
+func (p publicationTargetOwnerEvidence) requireConstructedSourceLife(event events.Event, route events.RouteIdentity) error {
+	found := false
+	for candidate, plan := range p.activationOwners {
+		if publicationSourceMatches(route, candidate) && plan.Instance.Life == event.RoutingSource().Life() {
+			if found {
+				return fmt.Errorf("publication source has ambiguous admitted constructors")
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: event.RunID(), Route: plan.Identity.Route()}
+			if err := owner.Validate(); err != nil || plan.Readiness.RunID != owner.RunID {
+				return fmt.Errorf("publication source construction crosses its exact run")
+			}
+			found = true
+		}
+	}
+	if found {
+		return nil
+	}
+	return fmt.Errorf("publication source is absent from its admitted instance observations")
+}
 
 func workflowInstanceTargetAvailability(instance pipeline.WorkflowInstance) pipeline.DeliveryTargetAvailability {
 	stage := ""
