@@ -513,7 +513,7 @@ func validateConversationSummary(prefix string, item conversationSummary) error 
 	if err := validateConversationOpaqueIDArg(prefix+".agent_id", item.AgentID); err != nil {
 		return fmt.Errorf("malformed %s: %w", prefix, err)
 	}
-	if strings.TrimSpace(item.RunID) != "" {
+	if item.RunID != "" {
 		if err := validateConversationOpaqueIDArg(prefix+".run_id", item.RunID); err != nil {
 			return fmt.Errorf("malformed %s: %w", prefix, err)
 		}
@@ -524,7 +524,7 @@ func validateConversationSummary(prefix string, item conversationSummary) error 
 	if item.MessageCount < 0 {
 		return fmt.Errorf("malformed %s: message_count must be non-negative", prefix)
 	}
-	switch strings.TrimSpace(item.Status) {
+	switch item.Status {
 	case "active", "terminated":
 	default:
 		return fmt.Errorf("malformed %s: status=%q is not a valid conversation status", prefix, item.Status)
