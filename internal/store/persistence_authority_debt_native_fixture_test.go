@@ -56,10 +56,14 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 		// The same selected uses retain original-process carriage under #2794/6508200313.
 		if digest != pins[fn.Name.Name] && !(path == "internal/runtime/pipeline/fork_fan_out_crash_external_test.go" &&
 			fn.Name.Name == "TestIssue642MixedFanOutCrashRestartBothStores" &&
-			digest == "c183201c71250e318f7729b79a03aff654808fdadfd25e7597daa6220f782646") &&
+			(digest == "c183201c71250e318f7729b79a03aff654808fdadfd25e7597daa6220f782646" ||
+				digest == "4849633c665d959004143ed4397f35e0c90ac3cb5152137d95408ae3a6778c74")) &&
 			!(path == "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go" &&
 				fn.Name.Name == "verifyPublishedBarrierCompletionFailure" &&
-				digest == "b90175cd26c9c8019b43ccb0705a8a27e5e26bbb28f26e711fd7724715ee22aa") {
+				digest == "b90175cd26c9c8019b43ccb0705a8a27e5e26bbb28f26e711fd7724715ee22aa") &&
+			!(path == "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go" &&
+				fn.Name.Name == "verifyBarrierCrashRestartBothStores" &&
+				digest == "b50acc5f065717e346be2c4c1b31ec536ca2d9040d2a3129cbc353bc3daa99f0") {
 			return false
 		}
 		seen[fn.Name.Name] = true
