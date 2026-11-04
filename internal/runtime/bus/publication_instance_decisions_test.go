@@ -104,6 +104,19 @@ func TestPublicationTargetDecisionReadsOnlyNarrowedCoordinate(t *testing.T) {
 			t.Fatalf("failed source read borrowed captured inventory: %v", err)
 		}
 		reader.err = nil
+		current, err := admitConstructionIndexTestObservation(projection.source, runID, reader.observations[1].Identity(), "", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader.observations[1] = current
+		err = projection.requireCurrentSourceLife(event(source))
+		failure, typed = failures.EnvelopeFromError(err)
+		if !typed || failure.Class != failures.ClassStaleArrival || failure.Detail.Code != "instance_restarted" {
+			t.Fatalf("cached first-life inventory overrode current source life: %v", err)
+		}
+		if err := projection.requireCurrentSourceLife(event(foreign)); err != nil {
+			t.Fatalf("exact current source life was refused: %v", err)
+		}
 		root, err := events.NewRootRoutingSource(runID)
 		if err != nil {
 			t.Fatal(err)
