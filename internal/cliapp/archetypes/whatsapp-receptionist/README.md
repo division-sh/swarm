@@ -24,6 +24,20 @@ to retain pairing across restarts.
 The session provider does not pace sends. Flows must pace themselves;
 high-rate sending risks WhatsApp account restrictions or a ban.
 
+## Beta limitations
+
+Typing from another linked device does not take over the conversation: those
+self echoes are discarded, and the receptionist keeps answering. The owner can
+read the chat in their own WhatsApp app. For intervention, an integrating app
+must use its owner-agent relay; this echo starter does not implement that relay.
+
+Treat an inbound `external_account` as an opaque delivered sender ID, not a
+phone number. An app can bind it to a role through its own code ceremony, but
+must establish its stability for the same sender across the supported message
+kinds and reconnect first. The provider accepts phone-number and LID forms and
+does not normalize them into one identity. Mocked messages do not establish
+live stability; do not add a phone lookup or silently merge those IDs.
+
 In `swarm test` scenarios, `whatsapp.send_text` returns a deterministic
 schema-valid response without pairing or sending a real message. A `derive`
 scenario can override that response with `connector_responses`; mocked
