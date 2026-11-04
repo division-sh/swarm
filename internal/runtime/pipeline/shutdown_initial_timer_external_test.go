@@ -59,7 +59,7 @@ func TestAcceptedInitialTimerReconciliationDuringShutdownBothStores(t *testing.T
 					"schema.yaml":          "stages:\n  active: {}\n",
 					"events.yaml":          "work.requested:\n  order_id: text\n",
 					"orders/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-					"orders/schema.yaml":   "instance: order_id\npins:\n  inputs: [order.created, work.requested]\nstages:\n  active:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\n",
+					"orders/schema.yaml":   "instance: order_id\ninputs: [order.created, work.requested]\nstages:\n  active:\n    timers:\n      - {after: 1h, emit: timer.elapsed}\n",
 					"orders/events.yaml":   "order.created:\n  order_id: text\nwork.requested:\n  order_id: text\ntimer.elapsed:\n",
 					"orders/state.yaml":    "order_id: {type: text, indexed: true}\n",
 					"orders/agents.yaml":   "worker:\n  model: regular\n  intent: {inline: Observe work.}\n  subscriptions: [work.requested]\n",

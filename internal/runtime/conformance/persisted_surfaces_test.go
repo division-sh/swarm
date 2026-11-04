@@ -1895,25 +1895,26 @@ func testTrackedEntityToolWrites(t *testing.T, backend string) {
 	}
 	before, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, runID, entityID)
 	if err != nil {
-		t.Fatalf("read root before generated-tool refusal: %v", err)
+		t.Fatalf("read root before generated write: %v", err)
 	}
-	_, err = exec.Execute(ctx, "save_state_status", map[string]any{
+	if _, err := exec.Execute(ctx, "save_state_status", map[string]any{
 		"value": "rechecked",
-	})
-	var refusal *runtimefailures.Error
-	if !errors.As(err, &refusal) || refusal.Failure.Class != runtimefailures.ClassInternalFailure ||
-		refusal.Failure.Detail.Code != "current_entity_context_missing" || refusal.Failure.Operation != "role_scoped_entity_tool.current_entity" {
-		t.Fatalf("generated root write must refuse its ineligible current subject: %v", err)
+	}); err != nil {
+		t.Fatalf("save_state_status(root): %v", err)
 	}
 	after, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, runID, entityID)
-	if err != nil || !reflect.DeepEqual(after, before) {
-		t.Fatalf("generated root refusal changed fields or mutation evidence: before=%+v after=%+v err=%v", before, after, err)
+	if err != nil {
+		t.Fatalf("read root after generated write: %v", err)
+	}
+	rootFields, err := decodeJSONMapErr(after.Fields)
+	if err != nil || rootFields["status"] != "rechecked" || len(after.Mutations) <= len(before.Mutations) {
+		t.Fatalf("generated root save omitted its authored field or history: fields=%+v before=%+v after=%+v err=%v", rootFields, before, after, err)
 	}
 	if err := trackedMutationStateMatchesEntityState(selected, runID, entityID); err != nil {
-		t.Fatalf("trackedMutationStateMatchesEntityState(root refusal): %v", err)
+		t.Fatalf("trackedMutationStateMatchesEntityState(root generated write): %v", err)
 	}
 
-	// Generated tools require a real non-root current subject, not the run's entity.
+	// Independently reconstruct generated writes to a non-root current subject.
 	ctx, exec, selected, runID = newEntityToolConformanceHarness(t, backend, "accounts")
 	current, ok := runtimebus.InboundEventFromContext(ctx)
 	if !ok || current.EntityID() == "" || current.EntityID() == runID {
