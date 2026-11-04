@@ -368,6 +368,9 @@ func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness,
 			statuses = append(statuses, delivery.Status)
 		}
 		t.Logf("evidence output observation: event=%s sequence_type=%T deliveries=%v dead_letters=%d", event.EventName, event.Payload["sequence"], statuses, len(event.DeadLetters))
+		for _, dead := range event.DeadLetters {
+			t.Logf("evidence observer failure: class=%s code=%s component=%s operation=%s", dead.Failure.Class, dead.Failure.Detail.Code, dead.Failure.Component, dead.Failure.Operation)
+		}
 	}
 	t.Fatal("authored evidence output did not settle at its observer")
 }
