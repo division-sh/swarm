@@ -16,7 +16,7 @@ test database/service. A private inherited lifetime descriptor joins launched
 descendants, including work with redirected stdio, before a phase can complete.
 Ordinary broad/native admission is unchanged. `test-results/preflight/` retains
 source/build/selection identity, phase timings, failures and unstarted work.
-The five-minute warm-vemew target is soft: an overrun requires reviewed
+The five-minute warm-run target is soft: an overrun requires reviewed
 re-ranking, never shorter test deadlines or automatic selector changes.
 An overrun alone does not make a complete passing command fail.
 
