@@ -459,9 +459,6 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	}
 	traceParams["run_id"] = runID
 	if opts.deliverySummary {
-		if !opts.untilSet {
-			traceParams["until"] = opts.reference.UTC().Format(time.RFC3339Nano)
-		}
 		result, err := fetchDiagnosticRunTraceSummary(ctx, client, traceParams)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
@@ -508,9 +505,13 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["cursor"] = cursor
 	}
+	until := readwindow.BoundInput{Value: o.until, Set: o.untilSet}
+	if o.deliverySummary && !o.untilSet {
+		until = readwindow.BoundInput{Value: o.reference.UTC().Format(time.RFC3339Nano), Set: true}
+	}
 	window, err := readwindow.Resolve(readwindow.Input{
 		Since:        readwindow.BoundInput{Value: o.since, Set: o.sinceSet},
-		Until:        readwindow.BoundInput{Value: o.until, Set: o.untilSet},
+		Until:        until,
 		ReferenceUTC: o.reference,
 	})
 	if err != nil {
