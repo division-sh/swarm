@@ -277,6 +277,9 @@ func TestFlowConstructionReceiptV3RejectsIdentityAndOccurrenceCorruption(t *test
 		{"missing_occurrence_parent", func(r *FlowConstructionReceipt) { r.CreationEvent.ParentEventID = "" }},
 		{"wrong_occurrence_mode", func(r *FlowConstructionReceipt) { r.CreationEvent.ExecutionMode = executionmode.Mock }},
 		{"duplicate_occurrence_payload", func(r *FlowConstructionReceipt) { r.CreationEvent.Payload = []byte(`{"key":1,"key":2}`) }},
+		{"foreign_occurrence_life", func(r *FlowConstructionReceipt) {
+			r.CreationEvent.DeliveryContext.Life.RunID = "44444444-4444-4444-8444-444444444444"
+		}},
 		{"incoming_equals_outgoing", func(r *FlowConstructionReceipt) { r.CreationEvent.EventID = r.CreatingInput.EventID }},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
