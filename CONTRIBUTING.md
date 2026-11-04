@@ -74,9 +74,6 @@ this workflow change does not install or relax an external merge gate.
 The orchestrator and CI-health owner triage a nightly red: U1000 findings go to
 the code owner for a small fix-forward cleanup PR, while analyzer/runner failures
 remain tracked under #2535/#2353. Failed evidence is not ignored or relabeled.
-The noncompiling [#2438](https://github.com/division-sh/swarm/issues/2438)
-configuration remains explicitly parked under E's
-[#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
 ### Candidate Qualification
 
