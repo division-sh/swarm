@@ -54,6 +54,11 @@ func (p deliveryPlanner) resolvePreparedRoutePlan(projection publicationTargetOw
 			return RoutePlan{}, err
 		}
 	}
+	if p.preparedOwners != nil {
+		if err := projection.requireCurrentSourceLife(p.preparedOwners.event); err != nil {
+			return RoutePlan{}, err
+		}
+	}
 	plan, err = projection.resolveRoutePlan(plan)
 	if err != nil {
 		return RoutePlan{}, err
@@ -201,9 +206,6 @@ func (p publicationTargetOwnerEvidence) replyOriginOwner(origin events.RouteIden
 
 func (p publicationTargetOwnerEvidence) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
 	plan = plan.Normalized()
-	if err := p.requireCurrentSourceLife(plan.Event); err != nil {
-		return RoutePlan{}, err
-	}
 	var err error
 	if err = p.resolveNodeTargetOwners(&plan, nil); err != nil {
 		return RoutePlan{}, err
