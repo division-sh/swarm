@@ -146,6 +146,16 @@ func TestCLIReadWindowSupportedSurfacesRejectReversedBoundsWithoutRequest(t *tes
 			}
 		})
 	}
+	t.Run("run trace implicit summary until", func(t *testing.T) {
+		args := []string{"run", "trace", "run-1", "--delivery-summary", "--since", reference.Add(time.Hour).Format(time.RFC3339Nano)}
+		_, calls, code, stderr := executeCLIReadWindowCommand(t, args, reference)
+		if code != 2 || calls != 0 {
+			t.Fatalf("code/calls = %d/%d, want 2/0 stderr=%s", code, calls, stderr)
+		}
+		if !strings.Contains(stderr, "--until must be greater than or equal to --since") {
+			t.Fatalf("stderr = %q", stderr)
+		}
+	})
 }
 
 func TestCLIReadWindowEveryPublicBoundRejectsExplicitBlankWithoutRequest(t *testing.T) {
