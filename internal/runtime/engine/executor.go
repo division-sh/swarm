@@ -1868,7 +1868,7 @@ func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent 
 	if err != nil {
 		return fanoutbarrier.Registration{}, err
 	}
-	routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String())
+	routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String(), frame.req.ProducerSource.Life())
 	if err != nil {
 		return fanoutbarrier.Registration{}, err
 	}
@@ -1880,16 +1880,23 @@ func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent 
 	return registration, registration.Validate()
 }
 
-func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string) (events.RoutingSource, error) {
+func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string, life int64) (events.RoutingSource, error) {
 	entityID = strings.TrimSpace(entityID)
+	var source events.RoutingSource
+	var err error
 	if ref.FlowPath() == "." {
-		return events.NewRootRoutingSource(entityID)
+		source, err = events.NewRootRoutingSource(entityID)
+	} else {
+		source, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+			FlowID:       ref.FlowPath(),
+			FlowInstance: strings.Trim(strings.TrimSpace(route.InstancePath), "/"),
+			EntityID:     entityID,
+		})
 	}
-	return events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID:       ref.FlowPath(),
-		FlowInstance: strings.Trim(strings.TrimSpace(route.InstancePath), "/"),
-		EntityID:     entityID,
-	})
+	if err != nil {
+		return events.RoutingSource{}, err
+	}
+	return source.WithLife(life)
 }
 
 func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontracts.FanOutCompiledPlan, cardinality int) (fanoutobligation.IntentRequest, error) {
