@@ -33,7 +33,10 @@ func (i WorkflowInstance) LifeStartedAt() (time.Time, error) {
 }
 
 func retainInstanceLifeStart(instance *WorkflowInstance, started time.Time) error {
-	if instance.Life <= 1 {
+	if instance == nil || instance.Life <= 0 || started.IsZero() {
+		return fmt.Errorf("instance life start requires exact life and occurrence time")
+	}
+	if instance.Life == 1 {
 		return nil
 	}
 	if instance.Bookkeeping == nil {
