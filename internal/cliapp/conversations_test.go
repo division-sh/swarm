@@ -443,6 +443,129 @@ func TestConversationCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestConversationCommandsValidateSummaryResponses(t *testing.T) {
+	const turnID = "00000000-0000-4000-8000-000000000002"
+	paths := []struct {
+		name   string
+		args   []string
+		method string
+		params map[string]any
+		result func() (map[string]any, map[string]any)
+	}{
+		{
+			name: "list", args: []string{"conversation", "list"}, method: conversationListMethod,
+			result: func() (map[string]any, map[string]any) {
+				summary := validConversationSummary("sess-1")
+				return map[string]any{"conversations": []map[string]any{summary}}, summary
+			},
+		},
+		{
+			name: "view", args: []string{"conversation", "view", "sess-1"}, method: conversationListTurnsMethod,
+			params: map[string]any{"session_id": "sess-1"},
+			result: func() (map[string]any, map[string]any) {
+				result := validConversationDetail("sess-1")
+				return result, result["conversation"].(map[string]any)
+			},
+		},
+		{
+			name: "turn", args: []string{"conversation", "turn", "sess-1", turnID}, method: conversationGetTurnMethod,
+			params: map[string]any{"session_id": "sess-1", "turn_id": turnID},
+			result: func() (map[string]any, map[string]any) {
+				result := validConversationTurnDetail("sess-1", 1)
+				return result, result["session"].(map[string]any)
+			},
+		},
+	}
+	cases := []struct {
+		name       string
+		mutate     func(map[string]any)
+		wantCode   int
+		wantStderr string
+	}{
+		{name: "active with run"},
+		{
+			name:   "terminated with run",
+			mutate: func(summary map[string]any) { summary["status"] = "terminated" },
+		},
+		{
+			name:   "omitted run",
+			mutate: func(summary map[string]any) { delete(summary, "run_id") },
+		},
+		{
+			name:       "padded status",
+			mutate:     func(summary map[string]any) { summary["status"] = " active " },
+			wantCode:   3,
+			wantStderr: "not a valid conversation status",
+		},
+		{
+			name:       "blank represented run",
+			mutate:     func(summary map[string]any) { summary["run_id"] = " " },
+			wantCode:   3,
+			wantStderr: "run_id is required",
+		},
+	}
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					setCLIAPITestToken(t, "test-token")
+					var calls atomic.Int32
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						calls.Add(1)
+						var request jsonRPCRequest
+						if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+							t.Errorf("decode request: %v", err)
+							http.Error(w, "invalid request", http.StatusBadRequest)
+							return
+						}
+						if request.Method != path.method {
+							t.Errorf("method = %q, want %q", request.Method, path.method)
+						}
+						if len(request.Params) != len(path.params) {
+							t.Errorf("params = %#v, want %#v", request.Params, path.params)
+						}
+						for key, want := range path.params {
+							if !reflect.DeepEqual(request.Params[key], want) {
+								t.Errorf("param %s = %#v, want %#v", key, request.Params[key], want)
+							}
+						}
+						result, summary := path.result()
+						if tc.mutate != nil {
+							tc.mutate(summary)
+						}
+						writeJSONRPCResult(t, w, request.ID, result)
+					}))
+					defer server.Close()
+
+					var stdout, stderr bytes.Buffer
+					code := executeRootCommandWithOptions(context.Background(), t.TempDir(), path.args, &stdout, &stderr, testRootCommandOptions(server))
+					if got := calls.Load(); got != 1 {
+						t.Fatalf("calls = %d, want 1", got)
+					}
+					if code != tc.wantCode {
+						t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+					}
+					if tc.wantStderr != "" {
+						if !strings.Contains(stderr.String(), tc.wantStderr) {
+							t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
+						}
+						if stdout.Len() != 0 {
+							t.Fatalf("stdout = %q, want no rendering", stdout.String())
+						}
+					} else {
+						if stderr.Len() != 0 {
+							t.Fatalf("stderr = %q, want empty", stderr.String())
+						}
+						if !strings.Contains(stdout.String(), "sess-1") {
+							t.Fatalf("stdout = %q, want session identity", stdout.String())
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func validConversationSummary(sessionID string) map[string]any {
 	return map[string]any{
 		"session_id":    sessionID,
