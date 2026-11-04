@@ -199,6 +199,7 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			retireStoreTestWorkFixture(t)
 			if err := process.Release(fixture.ctx); err != nil {
 				t.Fatalf("release first fixture process: %v", err)
 			}
