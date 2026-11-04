@@ -60,6 +60,22 @@ func TestA2StageEntryUsesAdmittedOccurrenceNotClock(t *testing.T) {
 	if first == makeEntry("event-2", "delivery-2", now) || first == makeEntry("event-1", "delivery-3", now) {
 		t.Fatal("distinct accepted occurrences reused one stage entry")
 	}
+	initial, err := NewInitialEntry(owner.Route, identity.NormalizeEntityID("entity-1"), "waiting", executionmode.Live, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstEntry, _, err := initial.StageEntry(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := initial.WithLife(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondEntry, _, err := next.StageEntry(owner)
+	if err != nil || firstEntry.Life != 1 || secondEntry.Life != 2 || firstEntry.Key() == secondEntry.Key() || firstEntry.RunID != secondEntry.RunID || firstEntry.InstancePath != secondEntry.InstancePath || firstEntry.EntityID != secondEntry.EntityID {
+		t.Fatalf("life did not distinguish initial entry while retaining its instance: first=%+v second=%+v err=%v", firstEntry, secondEntry, err)
+	}
 }
 
 func TestA2StageEntryRejectsMissingOrForeignOccurrence(t *testing.T) {
@@ -82,5 +98,10 @@ func TestA2StageEntryRejectsMissingOrForeignOccurrence(t *testing.T) {
 	}
 	if _, _, err := LoadStageEntry(map[string]any{"stage_entry": nil}); err == nil {
 		t.Fatal("present null entry was treated as lawful absence")
+	}
+	for _, life := range []int64{0, -1} {
+		if _, err := effect.WithLife(life); err == nil {
+			t.Fatalf("effect accepted invalid captured life %d", life)
+		}
 	}
 }

@@ -47,7 +47,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			entry := timeridentity.StageEntryRef{RunID: run, EntityID: entity, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID, InstancePath: owner.Route.InstancePath, Stage: "awaiting", Cause: "construction"}
+			entry := timeridentity.StageEntryRef{Life: 1, RunID: run, EntityID: entity, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID, InstancePath: owner.Route.InstancePath, Stage: "awaiting", Cause: "construction"}
 			ref, err := declaration.BindStageEntry(entry, attemptgeneration.Generation{})
 			if err != nil {
 				t.Fatal(err)

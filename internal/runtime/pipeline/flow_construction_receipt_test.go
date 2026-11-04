@@ -422,6 +422,7 @@ func TestFlowConstructionReceiptV3ChildReturnAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := timeridentity.StageEntryRef{
+		Life:  1,
 		RunID: receipt.RunID, FlowScope: receipt.Identity.ScopeKey, InstanceID: receipt.Identity.InstanceID,
 		InstancePath: receipt.Identity.InstancePath, EntityID: receipt.EntityID, Stage: "initial", Cause: "construction",
 	}

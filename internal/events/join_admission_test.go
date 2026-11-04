@@ -15,7 +15,7 @@ func TestA2DeliveryContextRetainsExactJoinReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := timeridentity.StageEntryRef{RunID: "run-1", FlowScope: "collector", InstanceID: "one", InstancePath: "collector/one", EntityID: "entity-1", Stage: "collecting", Cause: "delivery", EventID: "entry-event-1", OccurrenceID: "entry-delivery-1", TransitionID: "transition-1"}
+	entry := timeridentity.StageEntryRef{Life: 1, RunID: "run-1", FlowScope: "collector", InstanceID: "one", InstancePath: "collector/one", EntityID: "entity-1", Stage: "collecting", Cause: "delivery", EventID: "entry-event-1", OccurrenceID: "entry-delivery-1", TransitionID: "transition-1"}
 	bound, err := declaration.BindStageEntry(entry, attemptgeneration.Generation{})
 	if err != nil {
 		t.Fatal(err)

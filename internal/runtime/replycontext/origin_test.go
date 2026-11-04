@@ -52,7 +52,7 @@ func a2ReplyOriginRecord(t *testing.T) Record {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := timeridentity.StageEntryRef{RunID: "run", FlowScope: "collector", InstanceID: "one", InstancePath: "collector/one", EntityID: "entity", Stage: "collecting", Cause: "construction"}
+	entry := timeridentity.StageEntryRef{Life: 1, RunID: "run", FlowScope: "collector", InstanceID: "one", InstancePath: "collector/one", EntityID: "entity", Stage: "collecting", Cause: "construction"}
 	ref, err := declaration.BindStageEntry(entry, attemptgeneration.Generation{})
 	if err != nil {
 		t.Fatal(err)

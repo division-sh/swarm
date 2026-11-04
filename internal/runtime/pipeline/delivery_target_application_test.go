@@ -80,6 +80,14 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	if application.State().EntityID != identity.EntityID {
 		t.Fatalf("appearing exact target state = %#v", application.State())
 	}
+	incomingLife := events.InstanceLife{RunID: testPipelineRunID, FlowInstance: "producer/one", Life: 7}
+	contextWithSource := events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &incomingLife, Reply: &events.ReplyContextRef{ID: "retained-reply"}})
+	executionContext := withDeliveryTargetApplication(contextWithSource, application)
+	wantLife := events.InstanceLife{RunID: testPipelineRunID, FlowInstance: identity.InstancePath, Life: owner.Life()}
+	installed := events.DeliveryContextFromContext(executionContext)
+	if installed.Life == nil || *installed.Life != wantLife || installed.ReplyContextID() != "retained-reply" || application.Event().DeliveryContext().Life == nil || *application.Event().DeliveryContext().Life != wantLife || incomingLife.FlowInstance != "producer/one" {
+		t.Fatalf("application borrowed producer life or changed continuation evidence: %+v", installed)
+	}
 	foreignLife, err := owner.WithLife(2)
 	if err != nil {
 		t.Fatal(err)

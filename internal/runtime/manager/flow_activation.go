@@ -297,6 +297,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: runtimepipeline.WorkflowInstance{
+			Life:               1,
 			InstanceID:         instanceID,
 			StorageRef:         flowPath,
 			EntityID:           flowEntityID,

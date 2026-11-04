@@ -234,6 +234,9 @@ func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateR
 		return fmt.Errorf("lifecycle entry disagrees with the committing state bookkeeping")
 	}
 	if found {
+		if entry.Life != record.Life {
+			return InstanceRestarted(record.Identity, entry.Life, record.Life)
+		}
 		return entry.RequireOwner(record.Identity.RunID, record.Identity.Route.ScopeKey, record.Identity.Route.InstanceID, record.Identity.Route.InstancePath, record.EntityID, record.CurrentState)
 	}
 	return nil
@@ -531,6 +534,9 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 
 func validateWorkflowLifecycleEffectOwner(owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, effect runtimeworkflowlifecycle.Effect) error {
 	route, entityID := owner.Route, effect.EntityID()
+	if effect.Life() != instance.Life {
+		return InstanceRestarted(owner, effect.Life(), instance.Life)
+	}
 	if effect.OccurredAt().IsZero() {
 		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
 	}
@@ -669,6 +675,9 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	entry, found, err := runtimeworkflowlifecycle.LoadStageEntry(instance.Bookkeeping)
 	if err != nil || !found {
 		return errors.Join(err, fmt.Errorf("join arm requires its committed lifecycle entry"))
+	}
+	if entry.Life != instance.Life {
+		return InstanceRestarted(owner, entry.Life, instance.Life)
 	}
 	if err := entry.RequireOwner(runID, route.ScopeKey, route.InstanceID, route.InstancePath, entityID.String(), nextStage); err != nil {
 		return err

@@ -446,7 +446,7 @@ func TestRetainedJoinComparisonRequiresExactUniqueActivations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{RunID: "run", FlowScope: ".", InstanceID: "one", InstancePath: ".", EntityID: "entity", Stage: "review", Cause: "construction"}, loopruntime.Activation{}.Generation())
+		ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{Life: 1, RunID: "run", FlowScope: ".", InstanceID: "one", InstancePath: ".", EntityID: "entity", Stage: "review", Cause: "construction"}, loopruntime.Activation{}.Generation())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -567,7 +567,7 @@ func TestRetainedJoinOutcomeFenceDoesNotBorrowRunReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{RunID: "run", FlowScope: ".", InstanceID: "run", InstancePath: "run", EntityID: "run", Stage: "working", Cause: "construction"}, loop.Generation())
+	ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{Life: 1, RunID: "run", FlowScope: ".", InstanceID: "run", InstancePath: "run", EntityID: "run", Stage: "working", Cause: "construction"}, loop.Generation())
 	if err != nil {
 		t.Fatal(err)
 	}
