@@ -134,7 +134,7 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 		CreatedAt:               event.CreatedAt().UTC().Truncate(time.Microsecond),
 		RoutingSourceKind:       event.RoutingSource().Kind().StorageCode(),
 		RoutingSourceAuthority:  event.RoutingSource().Authority().StorageCode(),
-		SourceRoute:             marshalSourceRoute(event.RoutingSource()),
+		SourceRoute:             EncodeSourceRoute(event.RoutingSource()),
 		TargetRoute:             marshalRoute(envelope.Target),
 		TargetSet:               marshalRouteSet(envelope.TargetSet),
 		RouteSettlement:         rawSettlement,
@@ -547,7 +547,8 @@ type sourceRouteFact struct {
 	Life int64 `json:"life,omitempty"`
 }
 
-func marshalSourceRoute(source events.RoutingSource) []byte {
+// EncodeSourceRoute is shared by native publication and fixed-cut reconstruction.
+func EncodeSourceRoute(source events.RoutingSource) []byte {
 	raw, _ := json.Marshal(sourceRouteFact{RouteIdentity: source.Route(), Life: source.Life()})
 	return raw
 }
