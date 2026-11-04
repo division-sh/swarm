@@ -1807,7 +1807,6 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 		"    base_url: "+providerURL,
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -4467,18 +4466,6 @@ func requireNoServedDeliveryStatusDuring(t *testing.T, db *sql.DB, backend, even
 		if got := servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status); got != 0 {
 			t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d during blocked interval, want 0",
 				backend, eventID, subscriberType, subscriberID, status, got)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
-func requireNoServedReceiptOutcomeDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(duration)
-	for time.Now().Before(deadline) {
-		if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
-			t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d during blocked interval, want 0",
-				backend, eventID, subscriberType, subscriberID, outcome, got)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -8351,7 +8338,6 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -8567,7 +8553,6 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")

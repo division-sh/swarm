@@ -51,7 +51,6 @@ func NormalizeRotationRequest(identity agentmemory.Identity, lockOwner string, m
 		return RotationRequest{}, fmt.Errorf("lockOwner is required")
 	}
 	metadata.OperationID = strings.TrimSpace(metadata.OperationID)
-	metadata.CheckpointSummary = strings.TrimSpace(metadata.CheckpointSummary)
 	metadata.RetryReason = strings.TrimSpace(metadata.RetryReason)
 	reason := strings.TrimSpace(metadata.TerminationReason.String())
 	if reason == "" {
@@ -65,10 +64,9 @@ func NormalizeRotationRequest(identity agentmemory.Identity, lockOwner string, m
 	canonical := struct {
 		Identity          agentmemory.Identity `json:"identity"`
 		LockOwner         string               `json:"lock_owner"`
-		CheckpointSummary string               `json:"checkpoint_summary"`
 		RetryReason       string               `json:"retry_reason"`
 		TerminationReason TerminationReason    `json:"termination_reason"`
-	}{identity, lockOwner, metadata.CheckpointSummary, metadata.RetryReason, metadata.TerminationReason}
+	}{identity, lockOwner, metadata.RetryReason, metadata.TerminationReason}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return RotationRequest{}, fmt.Errorf("encode rotation request: %w", err)

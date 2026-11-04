@@ -8,13 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-type HistoricalReplayExecutionAdmissionRequest struct {
-	ReplayResumeAdmission      runfork.RunForkReplayResumeAdmission
-	SelectedExecutionAdmission runfork.RunForkSelectedContractExecutionAdmission
-	ContractSwapAdmission      runfork.RunForkContractSwapBootResumeAdmission
-	RouteRecovery              *runfork.RunForkSelectedContractRouteRecovery
-}
-
 type HistoricalReplayDeliveryEventReplayAdmissionRequest struct {
 	ForkRunID             string
 	SourceRunID           string
@@ -145,106 +138,6 @@ func BuildHistoricalReplayExecution(req HistoricalReplayExecutionRequest) (runfo
 		BlockedSiblings:            historicalReplayExecutionBlockedSiblings(admission.BlockedSiblings),
 		InvalidPaths:               admission.InvalidPaths,
 	}, nil
-}
-
-func BuildHistoricalReplayExecutionAdmission(req HistoricalReplayExecutionAdmissionRequest) (runfork.RunForkHistoricalReplayExecutionAdmission, error) {
-	replayAdmission := req.ReplayResumeAdmission
-	if strings.TrimSpace(replayAdmission.Owner) != runfork.RunForkReplayResumeAdmissionOwner {
-		return runfork.RunForkHistoricalReplayExecutionAdmission{}, fmt.Errorf("historical replay execution admission requires %s; got %q", runfork.RunForkReplayResumeAdmissionOwner, replayAdmission.Owner)
-	}
-	selectedAdmission := req.SelectedExecutionAdmission
-	if err := validateContractSwapSelectedExecutionAdmission(selectedAdmission); err != nil {
-		return runfork.RunForkHistoricalReplayExecutionAdmission{}, fmt.Errorf("historical replay execution admission selected prerequisite: %w", err)
-	}
-	contractSwapAdmission := req.ContractSwapAdmission
-	if err := validateHistoricalReplayContractSwapAdmission(selectedAdmission, replayAdmission, contractSwapAdmission); err != nil {
-		return runfork.RunForkHistoricalReplayExecutionAdmission{}, err
-	}
-	if req.RouteRecovery != nil {
-		if err := validateContractSwapRouteRecovery(selectedAdmission, *req.RouteRecovery); err != nil {
-			return runfork.RunForkHistoricalReplayExecutionAdmission{}, fmt.Errorf("historical replay execution admission route recovery prerequisite: %w", err)
-		}
-	}
-
-	blockers := []runfork.RunForkUnsupportedBlocker{}
-	for _, blocker := range replayAdmission.UnsupportedBlockers {
-		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
-	}
-	for _, blocker := range selectedAdmission.UnsupportedBlockers {
-		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
-	}
-	for _, blocker := range contractSwapAdmission.UnsupportedBlockers {
-		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
-	}
-	blockers = appendRunForkUnsupportedBlocker(blockers, runfork.RunForkUnsupportedBlocker{
-		Code:    runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating,
-		Message: "historical replay execution admission is non-mutating; bounded fork re-execution mutation remains separately gated",
-	})
-
-	var routeTopologyOwner, recipientPlanningOwner string
-	if selectedAdmission.RouteTopology != nil {
-		routeTopologyOwner = selectedAdmission.RouteTopology.Owner
-	}
-	if selectedAdmission.RecipientPlanning != nil {
-		recipientPlanningOwner = selectedAdmission.RecipientPlanning.Owner
-	}
-	var routeRecoveryOwner, runtimeRouteRecoveryOwner string
-	if req.RouteRecovery != nil {
-		routeRecoveryOwner = req.RouteRecovery.Owner
-		runtimeRouteRecoveryOwner = req.RouteRecovery.RuntimeRecoveryOwner
-	}
-	selection := selectedAdmission.ContractSelection
-
-	return runfork.RunForkHistoricalReplayExecutionAdmission{
-		Owner:                           runfork.RunForkHistoricalReplayExecutionAdmissionOwner,
-		NonMutating:                     true,
-		ExecutionSupported:              false,
-		FutureExecutionOwner:            runfork.RunForkHistoricalReplayExecutionOwner,
-		ForkRunID:                       selectedAdmission.ForkRunID,
-		SourceRunID:                     selectedAdmission.SourceRunID,
-		ForkEventID:                     selectedAdmission.ForkEventID,
-		ContractSelection:               &selection,
-		ReplayResumeAdmissionOwner:      replayAdmission.Owner,
-		SelectedExecutionAdmissionOwner: selectedAdmission.Owner,
-		SelectedBindingOwner:            selectedAdmission.ContractBindingOwner,
-		RouteTopologyOwner:              routeTopologyOwner,
-		RouteRecoveryOwner:              routeRecoveryOwner,
-		RuntimeRouteRecoveryOwner:       runtimeRouteRecoveryOwner,
-		RecipientPlanningOwner:          recipientPlanningOwner,
-		ContractSwapAdmissionOwner:      contractSwapAdmission.Owner,
-		FactAdmissions:                  historicalReplayFactAdmissions(replayAdmission),
-		Prerequisites:                   historicalReplayPrerequisites(req.RouteRecovery != nil),
-		RequiredConsumers:               historicalReplayRequiredConsumers(),
-		BlockedSiblings:                 historicalReplayBlockedSiblings(),
-		InvalidPaths:                    historicalReplayInvalidPaths(),
-		UnsupportedBlockers:             blockers,
-	}, nil
-}
-
-func validateHistoricalReplayContractSwapAdmission(
-	selectedAdmission runfork.RunForkSelectedContractExecutionAdmission,
-	replayAdmission runfork.RunForkReplayResumeAdmission,
-	admission runfork.RunForkContractSwapBootResumeAdmission,
-) error {
-	if strings.TrimSpace(admission.Owner) != runfork.RunForkContractSwapBootResumeAdmissionOwner {
-		return fmt.Errorf("historical replay execution admission requires %s; got %q", runfork.RunForkContractSwapBootResumeAdmissionOwner, admission.Owner)
-	}
-	if !admission.NonMutating {
-		return fmt.Errorf("historical replay execution admission requires non-mutating contract-swap admission")
-	}
-	if admission.BootResumeSupported {
-		return fmt.Errorf("historical replay execution admission cannot consume mutating contract-swap admission")
-	}
-	if strings.TrimSpace(admission.SelectedExecutionAdmissionOwner) != selectedAdmission.Owner ||
-		strings.TrimSpace(admission.ReplayResumeAdmissionOwner) != replayAdmission.Owner {
-		return fmt.Errorf("historical replay execution admission contract-swap prerequisite owner mismatch")
-	}
-	if strings.TrimSpace(admission.ForkRunID) != strings.TrimSpace(selectedAdmission.ForkRunID) ||
-		strings.TrimSpace(admission.SourceRunID) != strings.TrimSpace(selectedAdmission.SourceRunID) ||
-		strings.TrimSpace(admission.ForkEventID) != strings.TrimSpace(selectedAdmission.ForkEventID) {
-		return fmt.Errorf("historical replay execution admission contract-swap identity does not match selected execution admission")
-	}
-	return nil
 }
 
 func historicalReplayFactAdmissions(replay runfork.RunForkReplayResumeAdmission) []runfork.RunForkHistoricalReplayFactAdmission {
@@ -615,52 +508,6 @@ func stringInSet(value string, items []string) bool {
 		}
 	}
 	return false
-}
-
-func historicalReplayPrerequisites(routeRecoveryPresent bool) []runfork.RunForkSelectedContractExecutionBoundary {
-	disposition := runfork.RunForkSelectedContractDispositionPrerequisite
-	routeRecoveryReason := "selected route recovery is consumed when present; missing recovery remains a named blocker from contract-swap admission"
-	if !routeRecoveryPresent {
-		disposition = runfork.RunForkSelectedContractDispositionFailClosed
-	}
-	return []runfork.RunForkSelectedContractExecutionBoundary{
-		{
-			Concept:     "replay_resume_admission",
-			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       runfork.RunForkReplayResumeAdmissionOwner,
-			Reason:      "historical replay execution admission consumes the canonical store taxonomy and does not recompute source fact classifications",
-		},
-		{
-			Concept:     "selected_contract_execution_admission",
-			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       runfork.RunForkSelectedContractExecutionAdmissionOwner,
-			Reason:      "selected binding/source/frontier evidence must come from the selected execution admission owner",
-		},
-		{
-			Concept:     "selected_contract_route_topology",
-			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       runfork.RunForkSelectedContractRouteTopologyOwner,
-			Reason:      "route topology is prerequisite evidence; source routing rows remain invalid as fork truth",
-		},
-		{
-			Concept:     "selected_contract_recipient_planning",
-			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       runfork.RunForkSelectedContractRecipientPlanningOwner,
-			Reason:      "future delivery work must consume recipient planning rather than deriving recipients from source deliveries or current routes",
-		},
-		{
-			Concept:     "selected_contract_route_recovery",
-			Disposition: disposition,
-			Owner:       runfork.RunForkSelectedContractRouteRecoveryOwner,
-			Reason:      routeRecoveryReason,
-		},
-		{
-			Concept:     "contract_swap_boot_resume_admission",
-			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       runfork.RunForkContractSwapBootResumeAdmissionOwner,
-			Reason:      "contract-swap readiness is an adjacent non-mutating prerequisite and must not be recomputed by historical replay admission",
-		},
-	}
 }
 
 func historicalReplayRequiredConsumers() []runfork.RunForkSelectedContractExecutionBoundary {

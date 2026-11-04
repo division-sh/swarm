@@ -139,7 +139,7 @@ func (r *MockRuntime) recoverManagedCompletionContinuation(ctx context.Context, 
 }
 
 func (r *MockRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.events)
 }
 
 func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Session, call ForkChatCall) (*Response, error) {

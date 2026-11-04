@@ -288,7 +288,7 @@ func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func managedHITLProviderConfig(backend, baseURL string) *config.Config {
 	return &config.Config{LLM: config.LLMConfig{
 		Backend:          backend,
-		Session:          config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
+		Session:          config.LLMSessionConfig{LockTTL: time.Second, RotateOnParseFailures: 3},
 		Models:           map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-model"}},
 		OpenAICompatible: config.OpenAICompatibleConfig{BaseURL: baseURL},
 		OpenAIResponses:  config.OpenAIResponsesConfig{BaseURL: baseURL},

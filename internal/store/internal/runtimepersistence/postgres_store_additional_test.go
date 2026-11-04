@@ -1520,9 +1520,8 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 		t.Fatalf("Acquire: %v", err)
 	}
 	rotated, err := registry.Rotate(sessionCtx, lease, runtimesessions.RotationMetadata{
-		CheckpointSummary: "rotation_reason=session not found",
-		RetryReason:       "session not found",
-		OperationID:       uuid.NewString(),
+		RetryReason: "session not found",
+		OperationID: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)

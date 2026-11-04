@@ -31,7 +31,7 @@ func TestLoadFanOutWorkers(t *testing.T) {
 		{name: "overflow", declaration: "18446744073709551616", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n"
+			source := "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_on_parse_failures: 3\n"
 			if tc.declaration != "" {
 				source += "runtime:\n  fan_out_workers: " + tc.declaration + "\n"
 			}

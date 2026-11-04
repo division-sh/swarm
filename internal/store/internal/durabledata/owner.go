@@ -388,6 +388,11 @@ func (o *Owner) commitSourceEvaluationTx(ctx context.Context, tx *sql.Tx, evalua
 			evaluation.compiled.VersionID, operationKind, evaluation.command.SourceInvocationID, result.CompletedAt); err != nil {
 			return fmt.Errorf("record resource head history: %w", err)
 		}
+		if err := advanceLiveRunHeadPinsTx(ctx, tx, liveHeadDeclaration{
+			flowPath: evaluation.command.Declaration.FlowPath, eventName: evaluation.command.Declaration.EventName,
+		}, string(evaluation.compiled.Manifest.SchemaDigest), string(evaluation.compiled.VersionID), result.CompletedAt); err != nil {
+			return err
+		}
 	}
 	evaluation.result = result
 	return nil
@@ -1319,12 +1324,7 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 			return runtimedata.NewDomainError(runtimedata.CodeAccessDenied, "run %s does not exist", runID)
 		}
 		for _, ref := range refs {
-			var schemaDigest runtimedata.SchemaDigest
-			var versionID runtimedata.VersionID
-			err := tx.QueryRowContext(txctx, o.query(`
-				SELECT schema_digest, version_id FROM resource_version_pins
-				WHERE run_id = %s AND flow_path = %s AND event_name = %s
-			`, 3), runID, ref.FlowPath, ref.EventName).Scan(&schemaDigest, &versionID)
+			schemaDigest, versionID, err := o.readRunResourceBindingTx(txctx, tx, runID, ref)
 			if errors.Is(err, sql.ErrNoRows) {
 				return runtimedata.NewDomainError(runtimedata.CodeAccessDenied, "run %s has no exact pin for declaration %s", runID, ref.Key())
 			}

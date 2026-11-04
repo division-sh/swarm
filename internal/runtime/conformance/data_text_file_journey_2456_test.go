@@ -270,8 +270,9 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 			forked, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, map[string]any{
 				"source_run_id": runID, "bundle_hash": before, "idempotency_key": uuid.NewString(),
 			})
-			if len(rpcErr) != 0 || forked.ForkRunID == "" || forked.ForkRunID == runID || len(forked.DataPins) != 0 {
-				t.Fatalf("publication fork invented a creation pin: fork=%+v error=%s", forked, rpcErr)
+			if len(rpcErr) != 0 || forked.ForkRunID == "" || forked.ForkRunID == runID || len(forked.DataPins) != 1 ||
+				forked.DataPins[0].VersionID != version.VersionID || forked.DataPins[0].Selection != "fork_inherited" {
+				t.Fatalf("publication fork lost its historical head binding: fork=%+v error=%s", forked, rpcErr)
 			}
 			var forkPin string
 			if err := f.db.QueryRowContext(f.ctx, `SELECT MIN(CAST(m.version_id AS TEXT)) FROM resource_feed_publication_members m

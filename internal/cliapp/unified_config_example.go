@@ -36,7 +36,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("llm.backend", "anthropic", "Active LLM backend profile."),
 		e("llm.models.regular.anthropic", "claude-sonnet-4-5", "Anthropic model to use for the regular alias."),
 		e("llm.session.lock_ttl", "10s", "How long a session lock can be held before it expires."),
-		e("llm.session.rotate_after_turns", "40", "Rotate an LLM session after this many turns."),
 		e("llm.session.rotate_on_parse_failures", "3", "Rotate an LLM session after repeated parse failures."),
 		e("llm.provider_limits.anthropic.rate_limit", "30/m", "Provider-wide request rate limit."),
 		e("llm.provider_limits.anthropic.rate_limit_max_wait", "30s", "Maximum wait for provider-wide rate limiting."),

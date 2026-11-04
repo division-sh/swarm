@@ -7761,7 +7761,7 @@ engine:
           - Platform session IDs remain platform-owned; external provider session IDs, when present, are stored only as provider
             implementation details.
           - Session rotation and retry lineage must be accounted for by the adapter contract.
-          - 'Standalone Registry.Rotate normalizes exact memory identity, requested lease owner, optional operation ID, checkpoint summary, retry diagnostic, and termination reason once. Omitted termination reason is normal; explicit reasons use the closed current enum and are canonicalized before digest and persistence. Unknown and legacy reasons fail before mutation. Retry text never classifies termination. Managed parse-failure rotation explicitly uses failed; turn-limit rotation uses normal.'
+          - 'Standalone Registry.Rotate normalizes exact memory identity, requested lease owner, optional operation ID, retry diagnostic, and termination reason once. Omitted termination reason is normal; explicit reasons use the closed current enum and are canonicalized before digest and persistence. Unknown and legacy reasons fail before mutation. Retry text never classifies termination. Managed parse-failure rotation explicitly uses failed. Rotation starts an empty successor conversation; no clipped predecessor checkpoint is generated.'
           - 'A nonempty Registry.Rotate operation ID is a store-wide logical key. A matching canonical request digest may replay only the complete immutable stored lease result, and only while the exact successor and original lease authority are current and unexpired. A changed request returns typed request_conflict; stale successor or lease authority returns typed successor_not_current. Neither refusal nor replay mutates session lineage, revisions, story, or run candidates. An empty operation ID requests a new rotation. Lookup, authority validation, rotation, receipt persistence, and coupled effects commit atomically under one selected-store transaction; the process-local registry follows the same policy under its lock.'
           - Claude CLI provider child-session identity is the durable external-effect attempt ID. First turns start that child;
             continued turns resume the selected-store confirmed provider head and fork into a fresh attempt-owned child.
@@ -8447,6 +8447,49 @@ engine:
         - true to false terminates the complete active/suspended set before successor config publication.
         - true to true reconfiguration retains the complete current set and its conversation state. After an admitted in-place upgrade, the new prompt or model applies from the next turn on API and Claude CLI backends; existing accepted work is not replayed. Only the agent's own rotation rule requests rotation.
         - fire and teardown terminate the complete current set.
+      context_compaction:
+        ownership: Compaction preserves the exact actor/session, canonical conversation and current process/session grant.
+          It changes only the private rendering boundary for a later provider request, never execution authority.
+        routes:
+          anthropic: Use documented on-demand compaction only for the exact official endpoint and explicitly supported
+            concrete model. Preserve the signed compaction block and required beta header on compaction and replay.
+          openai_responses: Use the documented standalone compact endpoint only for the exact official endpoint and
+            explicitly supported concrete model. Retain its complete output window, including opaque and unknown members.
+          openai_compatible: Use the platform model-written summary. Protocol compatibility and caching do not establish
+            native compaction; DeepSeek has no documented native compaction route.
+          claude_cli: The CLI owns native compaction of its retained provider backing. No platform transcript serializer
+            or guessed token budget is imposed on that backing.
+        budget:
+          capacity: W is the documented concrete-route context capacity; O is the request's actual output reservation,
+            including a documented provider default when the request omits that field.
+          trigger: 'floor(min(0.8 * W, W - O - 65536))'
+          keep: 'floor(0.16 * (W - O))'
+          estimate: Price rendered system, tools and messages using UTF-16 character count divided by four, rounded up,
+            plus role/block overhead. Retain whole recent messages and intact tool-call/result groups.
+          unknown: Report context_compaction_unavailable for an unknown or invalid budget. An unchanged route without
+            a documented budget may continue its ordinary request with that named warning, but cannot guess capacity,
+            truncate history or rotate. Forced compaction or incompatible native replay without a budget refuses typed.
+        summary: The same admitted provider/model writes structured text preserving intent, exact facts, completed work,
+          errors, pending work and next action. It must not call tools or claim a business result. A platform summary is
+          replayed as background followed by the exact retained tail; the original conversation remains durable.
+        checkpoint: An append-only private runtime_state.context_checkpoints member binds the exact session, parent,
+          covered and first-kept coordinates, canonical-prefix/system/tools hashes, concrete route/model, acknowledged
+          effect operation/attempt/result and summary or complete native output. No new table or migration exists.
+        installation: Settle the auxiliary provider call and actual usage through the existing effect/spend owner without
+          an agent turn, delivery completion, accepted emission or provider-head mutation. Install only after store ACK,
+          under fresh native admission, exact live grant, unchanged canonical snapshot and parent. A refused installation
+          preserves the previous boundary; an exact retry reuses the settled result without another provider charge.
+        replay: Never compact an unfinished tool chain or change a frozen provider request. The existing resume journal
+          binds the checkpoint identity and exact rendered request; replay and tool-result prefix checks remain exact.
+          Changed native prompt, tools, model or route requires a new compaction from canonical evidence, not reinterpretation
+          of the old opaque result. Opaque and signed data remain private and are not exposed by public state DTOs.
+        eligibility: Existing turn-end settlement decides durable assistant/tool eligibility. No-emit frames remain absent
+          next turn; accepted-emission frames retain their existing treatment. Maintenance is not an accepted emission.
+        overflow: A confirmed pre-inference HTTP 400 context_length_exceeded with no usage may retire that rejected attempt,
+          maximally compact and make one fresh normally admitted request. Generic errors, ambiguous length finish reasons,
+          cancellation, native refusal, frozen replay and unfinished tool rounds do not authorize this retry.
+        rotation: There is no turn-count rotation deployment key or clipped rotation checkpoint. A remaining authored
+          retired key receives the configuration owner's existing unknown-key refusal, without an alias or migration.
       admission_rule: Only memory is an authored memory selector; other fields fail current-vocabulary admission.
       compatibility_policy: Unsupported fields, schemas, rows, aliases, and global-memory authority are rejected. There is no
         migration, backfill, dual reader/writer, export, purge, or fallback path.
@@ -8638,7 +8681,7 @@ engine:
           resource_row: Declaration, run-pinned version_id, and one row with ordinal, value, and business key only when keyed.
           resource_rows: Declaration, run-pinned version_id, and rows with exact item count, encoded-items bytes, and continuation.
           cursors: Static v1 and resource v2 are distinct closed contracts. Resource cursors bind the run, canonical actor, declaration, version, and offset; both item and whole-result byte ceilings apply.
-        authorization: Static arms consume flow_data_access; resource arms consume exact compiled data_access grants and immutable run pins. The tool is not universal, does not require permissions, is not granted by tools:, and is independent of native_tools.file_io. Filename input, ambient paths, latest-head selection, and compatibility aliases are invalid.
+        authorization: Static arms consume flow_data_access; resource arms consume exact compiled data_access grants and run-scoped version bindings. A served live run's binding follows the declaration head at creation and after each accepted import; one read retains its selected version. The tool is not universal, does not require permissions, is not granted by tools:, and is independent of native_tools.file_io. Filename input, ambient reader-side head selection, and compatibility aliases are invalid.
       fail_closed_rules:
         - Empty filenames are invalid.
         - Absolute paths are invalid.
@@ -16871,7 +16914,7 @@ platform_tables:
       description: Complete immutable child evaluation and defect evidence retained by failed parent run creation.
       ddl: "CREATE TABLE resource_run_creation_child_evaluations (\n    parent_run_id        UUID NOT NULL REFERENCES resource_run_creation_operations(run_id),\n    source_invocation_id UUID NOT NULL REFERENCES resource_run_creation_child_reservations(source_invocation_id),\n    observed_head_revision BIGINT NOT NULL CHECK (observed_head_revision >= 0),\n    context_json         JSONB NOT NULL,\n    evaluation_json      JSONB NOT NULL,\n    defects_json         JSONB NOT NULL,\n    PRIMARY KEY (parent_run_id, source_invocation_id)\n);"
     resource_version_pins:
-      description: Exact immutable run dependency pins; terminal forkable runs retain their versions until the run is deleted.
+      description: Exact run dependency bindings; served live bindings follow accepted head imports, while terminal forkable runs retain their versions until the run is deleted.
       ddl: |-
         CREATE TABLE resource_version_pins (
             run_id               UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -24362,7 +24405,6 @@ configuration_source_authority:
             runtime_mode: split_unsupported
             models: supported
             session.lock_ttl: supported
-            session.rotate_after_turns: supported
             session.rotate_on_parse_failures: supported
             provider_limits: supported
             claude_api.default_model: split_unsupported
@@ -24882,7 +24924,7 @@ workspace_model:
         process_replacement: A process-local source projection or container generation never changes writable workspace identity. For the same admitted bundle and semantic workspace key, replacement processes attach fresh containers to the existing Docker volume or resolve the existing host workspace root.
     /data:
       description: Read-only reference data projected from the exact actor's compiled static-data grants and selected run's
-        immutable resource-version pins.
+        exact resource-version bindings; served live bindings follow accepted declaration imports.
       access: read-only
       scope: actor-specific; workspace class changes only /workspace scope and never widens /data authority
       lifecycle: Materialized immediately before execution from canonical bundle/store facts and mounted for that actor.
@@ -39775,8 +39817,9 @@ api_specification:
         recipient and source admission. A keyless root is already constructed without an argument
         by serve startup; a bare event is not a run-birth request.
         Each rows publication retains its own immutable request, source-invocation and version binding.
-        Later publication of the same declaration neither replaces earlier inputs nor changes an
-        existing run pin. Imports, publication bindings, feed obligations and API completion commit
+        Later publication of the same declaration does not replace earlier inputs. Its accepted
+        import moves the served live run's declaration binding to the new head; the publication's
+        own version binding remains immutable. Imports, publication bindings, feed obligations and API completion commit
         together under the native live-run fence. Feed-only publication creates no synthetic event.
         Invalid payload admission precedes resource effects; exact replay/conflict precedes fresh
         source/feed admission, including after the transport cache expires. Original public-completion
@@ -43526,7 +43569,7 @@ agent_lifecycle_authority:
   exact_live_session_acquire_hydrate:
     owner: the selected live-session store capability
     rule: Persistent provider startup acquires the exact session lease and decodes that same session's conversation/runtime state in one lifecycle-cell-validated SQLite/Postgres transaction. Separate Acquire followed by standalone LoadActiveConversation, latest-active lookup, empty-history fallback, or swallowed hydration error is forbidden.
-    grant: Every successful acquisition, including one by the same lease-holder label, atomically mints a fresh opaque grant distinct from session identity and expiry. A live other-owner grant rejects acquisition. An exact renewal keeps the grant and monotonically extends its representable expiry; it cannot revive an expired or replaced grant. The acquired grant and decoded conversation come from the same locked row. Turn-limit and parse-failure rotation persist the predecessor checkpoint as the successor's initial conversation system message as well as its runtime summary, so fresh acquire/hydrate and every later turn include that checkpoint exactly once without borrowing stale caller messages. Each executable invocation builds its frame and request from that acquired base before merging staged input; no caller may reacquire merely to authorize an obsolete in-memory snapshot. A returned lease accompanied by an acquisition error is acknowledged authority and must be released by exact-grant cleanup before returning the error.
+    grant: Every successful acquisition, including one by the same lease-holder label, atomically mints a fresh opaque grant distinct from session identity and expiry. A live other-owner grant rejects acquisition. An exact renewal keeps the grant and monotonically extends its representable expiry; it cannot revive an expired or replaced grant. The acquired grant and decoded conversation come from the same locked row. Context compaction retains the canonical conversation and the exact session; its validated checkpoint and retained tail render the next provider request without rotating the session or generating a clipped rotation summary. Each executable invocation builds its frame and request from that acquired base before merging staged input; no caller may reacquire merely to authorize an obsolete in-memory snapshot. A returned lease accompanied by an acquisition error is acknowledged authority and must be released by exact-grant cleanup before returning the error.
     failure: Missing or stale lifecycle authority, lease conflict, suspended state, row/decode failure, or transaction failure returns an error before provider execution and before platform.agent_started is published.
     adapters: [anthropic_api, claude_cli, openai_compatible, openai_responses]
   live_session_mutable_projection:
@@ -44073,7 +44116,7 @@ managed_external_effect_authority:
     current_delivery_response_continuation:
       owner: settled runtime_external_effect_attempt evidence plus selected-store authorization and the normal provider adapter loop
       rule: A crash after atomic completion settlement but before delivery settlement reuses the canonical parsed response only for the same reclaimed normal-agent delivery. Immutable settlement evidence carries the original request bytes/fingerprint, callable-plan fingerprint and surface, parsed response, exact original turn/conversation projection, stable frame coordinate, and typed tool-output authority. The managed conversation root asks the selected store once for this continuation immediately after current session/claim admission and before provider-turn logical-operation identity, frame construction, model selection, credential resolution, request construction, or provider dispatch. Recursive live provider-frame calls never perform delivery-scoped recovery. The selected store verifies operation, request, callable plan, bundle, concrete actor, run, route, subscriber, current claim, current lifecycle generation, and memory contract before returning a continuation-only handle. Memory-backed session identity remains exact. Stateless recovery may project only the current process execution authority and fresh process-local session UUID after proving the continuation fingerprint is unchanged; no other callable fact may change.
-      projection: The selected store owns the monotonic response_settled -> conversation_projected -> response_consumed phase. For memory-backed sessions, exact immutable conversation bytes and the turn-count compare-and-set commit atomically with conversation_projected. Stateless continuations commit only that durable phase while projecting the same immutable messages onto the current in-memory session. When a consumed response has nonterminal or failed tool work, response consumption atomically records one valid-by-construction agentframe TurnToolContinuation containing the exact parent frame and canonical typed tool-result JSON. Root recovery resumes that exact successor frame without re-consuming the predecessor response; its successful settlement atomically replaces the predecessor active checkpoint. A consumed no-tool or terminal-tool response carries no successor. Repeated exact projection/consumption is idempotent; any mismatched payload, identity, memory contract, session rule, turn transition, surface, successor frame/result, or phase fails closed. The adapter never increments or upserts a second conversation projection. Only after conversation_projected may the normal tool/output loop consume the response. Configured turn-limit session rotation occurs only at a later managed-conversation root after exact continuation recovery reports no work, and before that root constructs provider-turn authority or a provider frame. One delivery and all of its live or recovered successor tool frames therefore retain one exact session coordinate; adapters never rotate after response projection or between frames. Every provider transport/process launch, heartbeat, response observation, completion resettlement, budget reservation, and spend write is structurally unavailable on the recovered predecessor handle.
+      projection: The selected store owns the monotonic response_settled -> conversation_projected -> response_consumed phase. For memory-backed sessions, exact immutable conversation bytes and the turn-count compare-and-set commit atomically with conversation_projected. Stateless continuations commit only that durable phase while projecting the same immutable messages onto the current in-memory session. When a consumed response has nonterminal or failed tool work, response consumption atomically records one valid-by-construction agentframe TurnToolContinuation containing the exact parent frame and canonical typed tool-result JSON. Root recovery resumes that exact successor frame without re-consuming the predecessor response; its successful settlement atomically replaces the predecessor active checkpoint. A consumed no-tool or terminal-tool response carries no successor. Repeated exact projection/consumption is idempotent; any mismatched payload, identity, memory contract, session rule, turn transition, surface, successor frame/result, or phase fails closed. The adapter never increments or upserts a second conversation projection. Only after conversation_projected may the normal tool/output loop consume the response. Conversation length never rotates the session. Compaction may establish a rendering boundary only at a later managed-conversation root after exact continuation recovery reports no work; it cannot rewrite a frozen provider frame or its tool continuation. One delivery and all of its live or recovered successor tool frames therefore retain one exact session coordinate; adapters never rotate after response projection or between frames. Every provider transport/process launch, heartbeat, response observation, completion resettlement, budget reservation, and spend write is structurally unavailable on the recovered predecessor handle.
       grant_attachment: A fresh attempt's continuation-only current projection remains bound to the exact grant admitted with its provider invocation. On reclaimed-delivery recovery, the selected store validates the current claim, lifecycle, memory, session and settled-response evidence before returning a distinct continuation-only handle. The runtime acquires a fresh grant for the exact hydrated session and binds it to that handle before projection; the selected projection transaction validates the current claim, lifecycle, memory, session, base conversation and bound grant together. Recovery eligibility is carried by the bound handle, not a caller-selected projection flag. The old handle cannot borrow the new grant. Projecting a memory-backed response requires the still-current bound grant in the same transaction as conversation and phase mutation; replay of an already committed exact phase is receipt-only and cannot mutate the session. No provider dispatch or historical-grant revival is allowed.
       output: Settlement mints one immutable typed tool-output authority from the provider operation id and settlement time. Each terminal emit call derives its exact event id and created_at from that authority plus its stable call coordinate, so replay reaches the selected store as an exact duplicate instead of authoring a second occurrence. Managed terminal output without that typed authority or without the dedicated output executor fails closed. Provider-native MCP execution remains the separately owned pre-settlement call surface.
       forbidden: [provider redispatch, inferred latest turn, raw transcript reconstruction, per-provider-frame delivery recovery, predecessor response reuse by a successor frame, claim-token reuse, cross-delivery replay, current-plan widening, direct delivery settlement before response consumption]
@@ -44162,7 +44205,6 @@ managed_external_effect_authority:
         - {path: internal/runtime/llm/completion_authority_test.go, test: TestAllManagedAdaptersDelegateRecoveryOnlyToConversationRoot}
         - {path: internal/runtime/llm/conversation_test.go, test: TestManagedConversationRootResumesExactConsumedToolContinuation}
         - {path: internal/runtime/llm/conversation_test.go, test: TestManagedConversationRootDoesNotRepeatConsumedTerminalTool}
-        - {path: internal/runtime/llm/session_rotation_test.go, test: TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame}
         - {path: internal/runtime/llm/session_rotation_test.go, test: TestPrepareManagedSessionRejectsStaleSessionWithoutRotation}
         - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestCompletionResponseSuccessorCheckpointMatrixSQLite}
         - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestCompletionResponseSuccessorCheckpointMatrixPostgres}

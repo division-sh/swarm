@@ -282,7 +282,6 @@ func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) strin
 		"  backend: claude_cli",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")

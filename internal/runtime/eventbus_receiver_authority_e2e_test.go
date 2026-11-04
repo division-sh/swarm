@@ -90,7 +90,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				Runtime: config.RuntimeConfig{MaxConcurrentAgents: 4, EventPollInterval: 5 * time.Millisecond},
 				LLM: config.LLMConfig{
 					Backend: "anthropic",
-					Session: config.LLMSessionConfig{LockTTL: 30 * time.Second, RotateAfterTurns: 8, RotateOnParseFailures: 2},
+					Session: config.LLMSessionConfig{LockTTL: 30 * time.Second, RotateOnParseFailures: 2},
 					Models:  map[string]map[string]string{"regular": {"anthropic": "test-model"}, "cheap": {"anthropic": "test-haiku"}},
 				},
 			}

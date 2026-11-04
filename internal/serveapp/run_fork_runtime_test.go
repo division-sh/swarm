@@ -126,13 +126,13 @@ llm:
   backend: claude_cli
   session:
     lock_ttl: 10s
-    rotate_after_turns: 40
     rotate_on_parse_failures: 3
   claude_cli:
     command: true
     timeout: 2s
     output_format: json
-`, parsed.Host, parsed.Port, parsed.Database, parsed.User, parsed.SSLMode))
+`,
+		parsed.Host, parsed.Port, parsed.Database, parsed.User, parsed.SSLMode))
 }
 
 func writeRuntimeConfigText(t *testing.T, path, configText string) {

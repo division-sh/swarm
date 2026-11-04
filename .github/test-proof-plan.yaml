@@ -1063,8 +1063,9 @@ units:
   serveapp-other:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^Test([ABD-H].*|2376.*)$'
+    run: '^Test([ABD-H].*|ContextCompactionPreservesMemoryAcrossRestartBothStores|2376.*)$'
     required_children:
+      TestContextCompactionPreservesMemoryAcrossRestartBothStores: [summary/default_sqlite, summary/explicit_postgres, summary_overflow/default_sqlite, summary_overflow/explicit_postgres, summary_overflow_deepseek/default_sqlite, summary_overflow_deepseek/explicit_postgres, anthropic_native/default_sqlite, anthropic_native/explicit_postgres, openai_native/default_sqlite, openai_native/explicit_postgres]
       TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores: [default_sqlite, explicit_postgres]
       TestExactOriginPublicationWaitHeldDiagnosticBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1

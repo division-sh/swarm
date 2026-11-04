@@ -9,6 +9,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	storedata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -66,6 +67,11 @@ func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutatio
 			}
 			out.Source = source
 		}
+		if current.State == runtimerunlifecycle.StateLive {
+			if err := storedata.BindLiveRunHeadsTx(ctx, tx, current.RunID, source.BundleHash(), postgres, time.Now().UTC()); err != nil {
+				return runtimerunlifecycle.FlowRunReconciliation{}, err
+			}
+		}
 		return out, nil
 	}
 	request := runtimerunlifecycle.CreateRequest{RunID: uuid.NewString(), Origin: runtimerunlifecycle.DeploymentRunOrigin(), Source: source, RootAdmission: root, StartedAt: time.Now().UTC(), LiveScope: scope}
@@ -79,6 +85,9 @@ func reconcileFlowRunTx(ctx context.Context, tx *sql.Tx, mutation flowRunMutatio
 	}
 	if !found || out.RunID != request.RunID {
 		return runtimerunlifecycle.FlowRunReconciliation{}, fmt.Errorf("reconciled deployment run did not become its landing run")
+	}
+	if err := storedata.BindLiveRunHeadsTx(ctx, tx, request.RunID, source.BundleHash(), postgres, request.StartedAt); err != nil {
+		return runtimerunlifecycle.FlowRunReconciliation{}, err
 	}
 	out.Created = true
 	return out, nil

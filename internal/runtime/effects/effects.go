@@ -1552,6 +1552,9 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			req.CompletionRequest, _ = ctx.Value(completionRequestContextKey{}).(CompletionRequest)
 		}
 		req.TurnTimeout = turnTimeoutFromContext(ctx)
+		if req.CompletionRequest.Purpose == ContextCompactionPurpose {
+			req.TurnTimeout = nil
+		}
 		if req.TurnTimeout != nil {
 			if err := req.TurnTimeout.Validate(); err != nil {
 				return Attempt{}, err

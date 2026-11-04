@@ -41,7 +41,7 @@ func memoryConversationRecord(session *Session) (ConversationRecord, bool, error
 	}
 	return ConversationRecord{
 		SessionID: session.ID, AgentID: session.AgentID, Identity: identity, Memory: session.Memory,
-		Watchdog: session.Watchdog, Messages: session.Messages, Summary: BuildSessionSummary(session),
+		Watchdog: session.Watchdog, Messages: session.Messages,
 		TurnCount: session.TurnCount, Status: "active",
 	}, true, nil
 }
@@ -121,6 +121,7 @@ func acquireContinuedMemory(ctx context.Context, acquirer LiveSessionAcquirer, s
 		}
 		session.ID = lease.SessionID
 		session.Messages = append([]Message(nil), hydrated.Messages...)
+		session.ContextCheckpoints = cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints)
 		session.TurnCount = hydrated.TurnCount
 		session.Watchdog = hydrated.Watchdog
 		session.RetryReason = hydrated.RetryReason
@@ -133,6 +134,7 @@ func acquireContinuedMemory(ctx context.Context, acquirer LiveSessionAcquirer, s
 			session.ID = lease.SessionID
 		}
 	}
+	session.acquiredCanonicalMessages = len(session.Messages)
 	if session.pendingAsync != nil && !transient {
 		session.Messages = append(session.Messages, *session.pendingAsync)
 	}

@@ -1198,9 +1198,9 @@ llm:
   backend: anthropic
   session:
     lock_ttl: 10s
-    rotate_after_turns: 40
     rotate_on_parse_failures: 3
-`, parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
+`,
+		parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
 	path := filepath.Join(t.TempDir(), "swarm-postgres.yaml")
 	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, configText)), 0o644); err != nil {
 		t.Fatalf("write channel onboarding PostgreSQL runtime config: %v", err)

@@ -376,7 +376,6 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurre
 		Action:            runtimesessions.LifecycleMutationRotateCurrentSet,
 		TerminationReason: runtimesessions.TerminationReasonNormal,
 		TerminationDetail: "agent_reconfigured",
-		CheckpointSummary: "agent reconfigured",
 	}
 	recA := base
 	recA.Config.Tools = []string{"tool-a"}

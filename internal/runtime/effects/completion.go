@@ -217,12 +217,13 @@ func (s CompletionSpend) Validate() error {
 }
 
 type CompletionSettlement struct {
-	Settlement   Settlement
-	Usage        CompletionUsage
-	AgentTurn    *CompletionAgentTurn
-	Spend        CompletionSpend
-	ProviderHead *CompletionProviderHead
-	Now          time.Time
+	MaintenanceSurfaceID string
+	Settlement           Settlement
+	Usage                CompletionUsage
+	AgentTurn            *CompletionAgentTurn
+	Spend                CompletionSpend
+	ProviderHead         *CompletionProviderHead
+	Now                  time.Time
 }
 
 // DrainedCompletionSettlement is the immutable-only completion surface for an
@@ -354,6 +355,16 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	}
 	switch attempt.Authority.Target.Kind {
 	case UsageTargetAgentTurn:
+		if attempt.Authority.CompletionRequest.Purpose == ContextCompactionPurpose {
+			if s.AgentTurn != nil || s.ProviderHead != nil || !attempt.Authority.Target.Memory.Enabled ||
+				s.MaintenanceSurfaceID == "" || s.Settlement.CompletionProjectionPhase != "" || s.Spend.AgentIdentity.Normalize() != attempt.Authority.Target.AgentIdentity.Normalize() {
+				return fmt.Errorf("context compaction cannot project a business turn or provider head")
+			}
+			break
+		}
+		if s.MaintenanceSurfaceID != "" {
+			return fmt.Errorf("ordinary completion cannot carry maintenance evidence")
+		}
 		if s.AgentTurn == nil {
 			return fmt.Errorf("agent-turn completion settlement requires turn evidence")
 		}

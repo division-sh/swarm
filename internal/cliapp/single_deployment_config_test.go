@@ -55,7 +55,7 @@ func TestSingleDeploymentConfigSelectsOnlyDeclaredFile(t *testing.T) {
 			t.Run(selection+"/"+ignored, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				root := t.TempDir()
-				globalBody := "llm:\n  session:\n    rotate_after_turns: 7\nconnection:\n  api_server: http://127.0.0.1:4101\n"
+				globalBody := "llm:\n  session:\nconnection:\n  api_server: http://127.0.0.1:4101\n"
 				projectBody := "runtime:\n  recovery_on_startup: false\nserve:\n  api_listen_addr: 127.0.0.1:4102\n"
 				if ignored == "invalid" {
 					globalBody, projectBody = "llm: [\n", "invented_project_setting: true\n"
@@ -72,7 +72,7 @@ func TestSingleDeploymentConfigSelectsOnlyDeclaredFile(t *testing.T) {
 					writeSingleDeploymentConfig(t, deployment, selected)
 					wantPath = deployment
 				case "locator", "flag":
-					writeSingleDeploymentConfig(t, deployment, "llm:\n  session:\n    rotate_after_turns: 8\n")
+					writeSingleDeploymentConfig(t, deployment, "llm:\n  session:\n")
 					wantPath = filepath.Join(t.TempDir(), "operator.yaml")
 					writeSingleDeploymentConfig(t, wantPath, selected)
 					if selection == "locator" {
@@ -91,8 +91,8 @@ func TestSingleDeploymentConfigSelectsOnlyDeclaredFile(t *testing.T) {
 				if loaded.Path != wantPath || loaded.DeploymentConfigured() != (wantPath != "") {
 					t.Fatalf("source path/intent = %q/%t, want %q/%t", loaded.Path, loaded.DeploymentConfigured(), wantPath, wantPath != "")
 				}
-				if loaded.Config.LLM.Session.RotateAfterTurns != 40 || loaded.cli.Connection.APIServer != "" {
-					t.Fatalf("ignored file supplied omitted values: rotate=%d server=%q", loaded.Config.LLM.Session.RotateAfterTurns, loaded.cli.Connection.APIServer)
+				if loaded.cli.Connection.APIServer != "" {
+					t.Fatalf("ignored file supplied omitted values: server=%q", loaded.cli.Connection.APIServer)
 				}
 				wantListen := ""
 				if wantPath != "" {

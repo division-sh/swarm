@@ -49,11 +49,13 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				return err
 			}
 			if permit.Kind == completionSettlementDrained {
-				drained, err := runtimeeffects.ProjectDrainedCompletionSettlement(attempt, attemptSettlement)
-				if err != nil {
-					return err
+				if attempt.Authority.CompletionRequest.Purpose != runtimeeffects.ContextCompactionPurpose {
+					drained, err := runtimeeffects.ProjectDrainedCompletionSettlement(attempt, attemptSettlement)
+					if err != nil {
+						return err
+					}
+					attemptSettlement = drained.CompletionSettlement()
 				}
-				attemptSettlement = drained.CompletionSettlement()
 				outcome.disposition = runtimeeffects.CompletionSettlementDrained
 			} else {
 				outcome.disposition = runtimeeffects.CompletionSettlementCurrent
@@ -126,7 +128,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				}
 				outcome.continuation = &admitted
 			}
-			if permit.Kind == completionSettlementDrained {
+			if permit.Kind == completionSettlementDrained && attempt.Authority.CompletionRequest.Purpose != runtimeeffects.ContextCompactionPurpose {
 				drain, drainErr := s.settleProviderDrainTx(txctx, tx, mutation, attempt, attemptSettlement, permit.Drain)
 				err = drainErr
 				if err != nil {
@@ -200,11 +202,13 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				return err
 			}
 			if permit.Kind == completionSettlementDrained {
-				drained, err := runtimeeffects.ProjectDrainedCompletionSettlement(attempt, attemptSettlement)
-				if err != nil {
-					return err
+				if attempt.Authority.CompletionRequest.Purpose != runtimeeffects.ContextCompactionPurpose {
+					drained, err := runtimeeffects.ProjectDrainedCompletionSettlement(attempt, attemptSettlement)
+					if err != nil {
+						return err
+					}
+					attemptSettlement = drained.CompletionSettlement()
 				}
-				attemptSettlement = drained.CompletionSettlement()
 				outcome.disposition = runtimeeffects.CompletionSettlementDrained
 			} else {
 				outcome.disposition = runtimeeffects.CompletionSettlementCurrent
@@ -275,7 +279,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				}
 				outcome.continuation = &admitted
 			}
-			if permit.Kind == completionSettlementDrained {
+			if permit.Kind == completionSettlementDrained && attempt.Authority.CompletionRequest.Purpose != runtimeeffects.ContextCompactionPurpose {
 				drain, drainErr := s.settleProviderDrainTx(txctx, tx, mutation, attempt, attemptSettlement, permit.Drain)
 				err = drainErr
 				if err != nil {
@@ -437,6 +441,8 @@ func validateCompletionAttemptRow(attempt runtimeeffects.Attempt, settlement run
 	expectedSurfaceID := ""
 	if settlement.AgentTurn != nil {
 		expectedSurfaceID = strings.TrimSpace(settlement.AgentTurn.CapabilitySurfaceID)
+	} else if attempt.Authority.CompletionRequest.Purpose == runtimeeffects.ContextCompactionPurpose {
+		expectedSurfaceID = settlement.MaintenanceSurfaceID
 	}
 	if strings.TrimSpace(capabilitySurfaceID) != expectedSurfaceID {
 		return fmt.Errorf("completion attempt capability surface does not match settlement")
@@ -500,6 +506,9 @@ func validateCompletionAgentFrame(raw []byte, attempt runtimeeffects.Attempt, tu
 }
 
 func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, effects *mutationprotocol.Attempt, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
+	if attempt.Authority.CompletionRequest.Purpose == runtimeeffects.ContextCompactionPurpose {
+		return runtimellm.ValidateContextCompactionSettlement(attempt, settlement)
+	}
 	if attempt.Authority.Target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
 		return insertForkCompletionPostgres(ctx, tx, attempt, settlement)
 	}
@@ -570,6 +579,9 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 }
 
 func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, effects *mutationprotocol.Attempt, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
+	if attempt.Authority.CompletionRequest.Purpose == runtimeeffects.ContextCompactionPurpose {
+		return runtimellm.ValidateContextCompactionSettlement(attempt, settlement)
+	}
 	if attempt.Authority.Target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
 		return insertForkCompletionSQLite(ctx, tx, attempt, settlement)
 	}

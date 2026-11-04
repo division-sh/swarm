@@ -97,7 +97,6 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"llm.models":                              section,
 		"llm.session":                             section,
 		"llm.session.lock_ttl":                    {},
-		"llm.session.rotate_after_turns":          {},
 		"llm.session.rotate_on_parse_failures":    {},
 		"llm.provider_limits":                     section,
 		"llm.claude_cli":                          section,

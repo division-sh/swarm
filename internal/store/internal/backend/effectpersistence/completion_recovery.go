@@ -630,7 +630,11 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		},
 		Now: now,
 	}
-	if target.Kind == runtimeeffects.UsageTargetAgentTurn {
+	settlement.Spend.AgentIdentity = target.AgentIdentity
+	if authority.CompletionRequest.Purpose == runtimeeffects.ContextCompactionPurpose {
+		settlement.MaintenanceSurfaceID = recovered.CapabilitySurfaceID
+	}
+	if target.Kind == runtimeeffects.UsageTargetAgentTurn && authority.CompletionRequest.Purpose != runtimeeffects.ContextCompactionPurpose {
 		if _, err := uuid.Parse(strings.TrimSpace(target.SessionID)); err != nil || agentID == "" {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery agent-turn identity for attempt %s is incomplete", recovered.AttemptID)
 		}

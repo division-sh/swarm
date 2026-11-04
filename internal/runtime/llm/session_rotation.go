@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
-func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sessions.Registry, acquirer LiveSessionAcquirer, lockOwner string, rotateAfter int, sink any) error {
+func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sessions.Registry, acquirer LiveSessionAcquirer, lockOwner string, sink any) error {
 	if s == nil {
 		return errors.New("managed session is required")
 	}
@@ -37,60 +37,7 @@ func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sess
 		s.adoptedFromID = ""
 		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-conversation", "prepare_session", map[string]any{"session_id": s.ID}))
 	}
-	if rotateAfter <= 0 || s.TurnCount < rotateAfter {
-		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, nil)
-	}
-	if strings.TrimSpace(lease.SessionID) != strings.TrimSpace(s.ID) {
-		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink,
-			fmt.Errorf("managed session changed before rotation: have=%s want=%s", strings.TrimSpace(lease.SessionID), strings.TrimSpace(s.ID)))
-	}
-	releaseLease := lease
-	rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, registry, lease, rotateAfter, sink)
-	if rotated != nil {
-		releaseLease = rotated
-	}
-	return releasePreProviderSessionLease(ctx, registry, releaseLease, s.AgentID, sink, rotateErr)
-}
-
-func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Registry, predecessor *sessions.Lease, rotateAfter int, sink any) (*sessions.Lease, error) {
-	if s == nil || registry == nil || rotateAfter <= 0 {
-		return nil, nil
-	}
-	if !s.Memory.Enabled {
-		return nil, nil
-	}
-	if s.TurnCount < rotateAfter {
-		return nil, nil
-	}
-	oldSessionID := s.ID
-	oldTurnCount := s.TurnCount
-	oldParseFailures := s.ParseFailures
-	summary := BuildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
-	lease, err := registry.Rotate(ctx, predecessor, sessions.RotationMetadata{
-		CheckpointSummary: summary,
-	})
-	// A returned lease acknowledges rotation even if its postcommit handoff failed.
-	if lease == nil {
-		return nil, err
-	}
-	s.ID = lease.SessionID
-	s.ProviderSessionID = ""
-	s.TurnCount = 0
-	s.ParseFailures = 0
-	s.Messages = RotationCheckpointConversation(summary)
-	if sink != nil {
-		LogSessionRotatedForRun(ctx, sink, s.MemoryIdentity, oldSessionID, lease.SessionID, fmt.Sprintf("turn_limit_reached:%d", rotateAfter), oldTurnCount, oldParseFailures)
-	} else {
-		LogSessionRotated(
-			s.MemoryIdentity,
-			oldSessionID,
-			lease.SessionID,
-			fmt.Sprintf("turn_limit_reached:%d", rotateAfter),
-			oldTurnCount,
-			oldParseFailures,
-		)
-	}
-	return lease, err
+	return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, nil)
 }
 
 func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry sessions.Registry, predecessor *sessions.Lease, threshold int, sink any) (*sessions.Lease, error) {
@@ -106,9 +53,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 	oldSessionID := s.ID
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
-	summary := BuildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
 	lease, err := registry.Rotate(ctx, predecessor, sessions.RotationMetadata{
-		CheckpointSummary: summary,
 		TerminationReason: sessions.TerminationReasonFailed,
 	})
 	if lease == nil {
@@ -118,7 +63,8 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 	s.ProviderSessionID = ""
 	s.TurnCount = 0
 	s.ParseFailures = 0
-	s.Messages = RotationCheckpointConversation(summary)
+	s.Messages = nil
+	s.ContextCheckpoints = nil
 	if sink != nil {
 		LogSessionRotatedForRun(ctx, sink, s.MemoryIdentity, oldSessionID, lease.SessionID, fmt.Sprintf("parse_failures_threshold:%d", threshold), oldTurnCount, oldParseFailures)
 	} else {
@@ -132,48 +78,6 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 		)
 	}
 	return lease, err
-}
-
-func BuildSessionSummary(s *Session) string {
-	if s == nil || len(s.Messages) == 0 {
-		return "No prior turns."
-	}
-	parts := make([]string, 0, 6)
-	start := len(s.Messages) - 6
-	if start < 0 {
-		start = 0
-	}
-	for _, m := range s.Messages[start:] {
-		role := strings.TrimSpace(m.Role)
-		if role == "" {
-			role = "unknown"
-		}
-		content := strings.TrimSpace(m.Content)
-		if len(content) > 180 {
-			content = content[:180] + "..."
-		}
-		parts = append(parts, fmt.Sprintf("%s: %s", role, content))
-	}
-	return strings.Join(parts, "\n")
-}
-
-func BuildRotationCheckpoint(reason string, s *Session) string {
-	summary := BuildSessionSummary(s)
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return summary
-	}
-	if strings.TrimSpace(summary) == "" {
-		return fmt.Sprintf("rotation_reason=%s", reason)
-	}
-	return fmt.Sprintf("rotation_reason=%s\n%s", reason, summary)
-}
-
-func RotationCheckpointConversation(summary string) []Message {
-	if strings.TrimSpace(summary) == "" {
-		return []Message{}
-	}
-	return []Message{{Role: "system", Content: "Previous session summary:\n" + summary}}
 }
 
 func LogSessionRotated(identity agentmemory.Identity, oldSessionID, newSessionID, reason string, turnCount, parseFailures int) {

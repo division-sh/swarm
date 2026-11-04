@@ -158,11 +158,12 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
-		Tools:        tools,
-		Messages:     append([]Message(nil), hydrated.Messages...),
-		TurnCount:    hydrated.TurnCount,
-		Watchdog:     hydrated.Watchdog,
+		SystemPrompt:       systemPrompt,
+		Tools:              tools,
+		Messages:           append([]Message(nil), hydrated.Messages...),
+		ContextCheckpoints: cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints),
+		TurnCount:          hydrated.TurnCount,
+		Watchdog:           hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
@@ -185,7 +186,7 @@ func (r *AnthropicAPIRuntime) recoverManagedCompletionContinuation(ctx context.C
 }
 
 func (r *AnthropicAPIRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.events)
 }
 
 func (r *AnthropicAPIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -253,6 +254,13 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, err
 	}
+	compactor := r.contextCompactor()
+	if err := compactContext(ctx, s, lease, message, managed, resolvedModel, compactor, false); err != nil {
+		return nil, err
+	}
+	if err := bindFrozenContextCheckpoint(s, managed); err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -269,6 +277,9 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
+	if managed != nil && managed.resume != nil {
+		reqJSON = append([]byte(nil), managed.resume.Journal.Call.Request.Body...)
+	}
 	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
 	if err != nil {
 		return nil, err
@@ -276,6 +287,14 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 
 	start := time.Now()
 	rawResp, parsed, dispatch, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
+	if payload, retry, repairErr := compactor.retryRejectedContext(ctx, s, lease, message, managed, resolvedModel, rawResp, dispatch); retry {
+		if repairErr != nil {
+			return nil, repairErr
+		}
+		retryCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "context_compaction_retry:1")
+		rawResp, parsed, dispatch, lastErr = r.sendAdmittedRequest(retryCtx, profile, resolvedModel, payload, managed)
+		reqJSON = payload
+	}
 	latency := time.Since(start)
 	completionUsage := apiCompletionUsageFromRaw(rawResp, "input_tokens", "output_tokens")
 
@@ -416,8 +435,18 @@ func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model stri
 	if err := validateProviderReplayToolNames(s.Messages, input); err != nil {
 		return anthropicRequest{}, err
 	}
-	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
-	for _, m := range s.Messages {
+	replay, err := replayContextCompaction(s, contextCompactionRoute("anthropic", r.apiURL), model)
+	if err != nil {
+		return anthropicRequest{}, err
+	}
+	msgs := make([]anthropicMessage, 0, len(replay.Messages)+2)
+	if len(replay.Native) != 0 {
+		if replay.Method != "anthropic_native" {
+			return anthropicRequest{}, contextCompactionLimitation("native_checkpoint_transport_mismatch")
+		}
+		msgs = append(msgs, anthropicMessage{Role: "assistant", Content: replay.Native})
+	}
+	for _, m := range replay.Messages {
 		am, ok, err := toAnthropicMessage(m)
 		if err != nil {
 			return anthropicRequest{}, err
@@ -530,8 +559,13 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.credentialCache.snapshot())
 	req.Header.Set("anthropic-version", "2023-06-01")
+	if anthropicRequestNeedsCompactionBeta(payload) {
+		req.Header.Set("anthropic-beta", anthropicCompactionBeta)
+	}
 	var attempt *runtimeeffects.Handle
-	if managed != nil {
+	if managed != nil && managed.compactionOperationID != "" {
+		attempt, err = runtimeeffects.BeginContextCompaction(ctx, "anthropic_api", managed.compactionOperationID, managed.frame, payload)
+	} else if managed != nil {
 		call, callErr := managedHTTPProviderCall(payload, req, managed)
 		if callErr != nil {
 			return nil, anthropicResponse{}, nil, callErr
@@ -629,11 +663,16 @@ func convertAnthropicResponse(parsed anthropicResponse, names map[string]string)
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
+	Model      string                      `json:"model"`
+	MaxTokens  int                         `json:"max_tokens"`
+	System     string                      `json:"system,omitempty"`
+	Messages   []anthropicMessage          `json:"messages"`
+	Tools      []anthropicTool             `json:"tools,omitempty"`
+	Compaction *anthropicCompactionRequest `json:"compaction,omitempty"`
+}
+
+type anthropicCompactionRequest struct {
+	Type string `json:"type"`
 }
 
 type anthropicMessage struct {

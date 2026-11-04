@@ -12,7 +12,11 @@ func acquireLiveSessionAndConversation(ctx context.Context, acquirer LiveSession
 	if acquirer == nil {
 		return nil, ConversationRecord{}, fmt.Errorf("live session acquirer is required")
 	}
-	return acquirer.AcquireLiveSession(ctx, identity, lockOwner)
+	lease, record, err := acquirer.AcquireLiveSession(ctx, identity, lockOwner)
+	if err == nil {
+		err = validateContextCompactionCheckpoints(record.SessionID, record.Messages, record.ContextCheckpoints)
+	}
+	return lease, record, err
 }
 
 type transientLiveSessionAcquirer struct {

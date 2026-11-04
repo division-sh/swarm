@@ -161,11 +161,12 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 			}
 			return ""
 		}(),
-		SystemPrompt: systemPrompt,
-		Tools:        tools,
-		Messages:     append([]Message(nil), hydrated.Messages...),
-		TurnCount:    hydrated.TurnCount,
-		Watchdog:     hydrated.Watchdog,
+		SystemPrompt:       systemPrompt,
+		Tools:              tools,
+		Messages:           append([]Message(nil), hydrated.Messages...),
+		ContextCheckpoints: cloneContextCompactionCheckpoints(hydrated.ContextCheckpoints),
+		TurnCount:          hydrated.TurnCount,
+		Watchdog:           hydrated.Watchdog,
 	}
 	if resolved.Enabled() {
 		s.RetryReason = strings.TrimSpace(hydrated.RetryReason)
@@ -188,7 +189,7 @@ func (r *OpenAICompatibleRuntime) recoverManagedCompletionContinuation(ctx conte
 }
 
 func (r *OpenAICompatibleRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
-	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.liveSessions, r.lockOwner, r.events)
 }
 
 func (r *OpenAICompatibleRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -263,6 +264,13 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, err
 	}
+	compactor := r.contextCompactor()
+	if err := compactContext(ctx, s, lease, message, managed, resolvedModel, compactor, false); err != nil {
+		return nil, err
+	}
+	if err := bindFrozenContextCheckpoint(s, managed); err != nil {
+		return nil, err
+	}
 	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
@@ -284,6 +292,9 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-compatible request: %w", err)
 	}
+	if managed != nil && managed.resume != nil {
+		reqJSON = append([]byte(nil), managed.resume.Journal.Call.Request.Body...)
+	}
 	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
 	if err != nil {
 		return nil, err
@@ -291,6 +302,14 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 
 	start := time.Now()
 	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
+	if payload, retry, repairErr := compactor.retryRejectedContext(ctx, s, lease, message, managed, resolvedModel, rawResp, dispatch); retry {
+		if repairErr != nil {
+			return nil, repairErr
+		}
+		retryCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "context_compaction_retry:1")
+		rawResp, parsed, dispatch, err = r.sendAdmittedRequest(retryCtx, profile, resolvedModel, payload, managed)
+		reqJSON = payload
+	}
 	latency := time.Since(start)
 	completionUsage := apiCompletionUsageFromRaw(rawResp, "prompt_tokens", "completion_tokens")
 	if err != nil {
@@ -453,11 +472,18 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, lease
 }
 
 func (r *OpenAICompatibleRuntime) buildRequest(s *Session, input Message, model string) (openAICompatibleRequest, error) {
-	msgs := make([]openAICompatibleMessage, 0, len(s.Messages)+2)
+	replay, err := replayContextCompaction(s, contextCompactionRoute("openai_compatible", r.baseURL+"/chat/completions"), model)
+	if err != nil {
+		return openAICompatibleRequest{}, err
+	}
+	if len(replay.Native) != 0 {
+		return openAICompatibleRequest{}, contextCompactionLimitation("native_checkpoint_transport_mismatch")
+	}
+	msgs := make([]openAICompatibleMessage, 0, len(replay.Messages)+2)
 	if strings.TrimSpace(s.SystemPrompt) != "" {
 		msgs = append(msgs, openAICompatibleMessage{Role: "system", Content: s.SystemPrompt})
 	}
-	for _, m := range s.Messages {
+	for _, m := range replay.Messages {
 		msgs = append(msgs, toOpenAICompatibleMessages(m)...)
 	}
 	msgs = append(msgs, toOpenAICompatibleMessages(input)...)
@@ -509,7 +535,9 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
 	var attempt *runtimeeffects.Handle
-	if managed != nil {
+	if managed != nil && managed.compactionOperationID != "" {
+		attempt, err = runtimeeffects.BeginContextCompaction(ctx, "openai_compatible", managed.compactionOperationID, managed.frame, payload)
+	} else if managed != nil {
 		call, callErr := managedHTTPProviderCall(payload, req, managed)
 		if callErr != nil {
 			return nil, openAICompatibleResponse{}, nil, callErr

@@ -77,7 +77,6 @@ func (l *Lease) ValidateFor(identity agentmemory.Identity, sessionID string) err
 }
 
 type RotationMetadata struct {
-	CheckpointSummary string
 	RetryReason       string
 	TerminationReason TerminationReason
 	OperationID       string
@@ -95,7 +94,6 @@ type LifecycleMutationPlan struct {
 	Action            LifecycleMutationAction `json:"action"`
 	TerminationReason TerminationReason       `json:"termination_reason,omitempty"`
 	TerminationDetail string                  `json:"termination_detail,omitempty"`
-	CheckpointSummary string                  `json:"checkpoint_summary,omitempty"`
 }
 
 func (p LifecycleMutationPlan) Normalize() (LifecycleMutationPlan, error) {
@@ -104,10 +102,9 @@ func (p LifecycleMutationPlan) Normalize() (LifecycleMutationPlan, error) {
 		p.Action = LifecycleMutationNone
 	}
 	p.TerminationDetail = strings.TrimSpace(p.TerminationDetail)
-	p.CheckpointSummary = strings.TrimSpace(p.CheckpointSummary)
 	switch p.Action {
 	case LifecycleMutationNone:
-		if p.TerminationReason != "" || p.TerminationDetail != "" || p.CheckpointSummary != "" {
+		if p.TerminationReason != "" || p.TerminationDetail != "" {
 			return LifecycleMutationPlan{}, fmt.Errorf("subordinate lifecycle action none cannot carry mutation metadata")
 		}
 	case LifecycleMutationRotateCurrentSet:
@@ -123,9 +120,6 @@ func (p LifecycleMutationPlan) Normalize() (LifecycleMutationPlan, error) {
 		}
 		if err := validateRuntimeTerminationReason(p.TerminationReason); err != nil {
 			return LifecycleMutationPlan{}, err
-		}
-		if p.CheckpointSummary != "" {
-			return LifecycleMutationPlan{}, fmt.Errorf("terminate_current_set cannot carry checkpoint_summary")
 		}
 	default:
 		return LifecycleMutationPlan{}, fmt.Errorf("unknown subordinate lifecycle action %q", p.Action)
@@ -158,7 +152,6 @@ type Record struct {
 	Identity             agentmemory.Identity
 	Status               string
 	TurnCount            int
-	CheckpointSummary    string
 	RetryReason          string
 	RetriesFromSessionID string
 	LockOwner            string
@@ -351,7 +344,6 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, lease *Lease, rotation R
 	rec.SessionID = terminated.SuccessorSessionID
 	rec.ProviderSessionID = ""
 	rec.Status = "active"
-	rec.CheckpointSummary = strings.TrimSpace(rotation.CheckpointSummary)
 	rec.RetryReason = retryReason
 	rec.RetriesFromSessionID = oldSessionID
 	rec.TurnCount = 0

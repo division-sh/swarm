@@ -1218,7 +1218,6 @@ func writeStandingMockRuntimeConfigWithRecovery(t *testing.T, backend, sqlitePat
 		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")

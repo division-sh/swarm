@@ -231,7 +231,6 @@ func openAIResponsesTestConfig(baseURL string) *config.Config {
 			Backend: "openai_responses",
 			Session: config.LLMSessionConfig{
 				LockTTL:               time.Second,
-				RotateAfterTurns:      40,
 				RotateOnParseFailures: 3,
 			},
 			OpenAIResponses: config.OpenAIResponsesConfig{

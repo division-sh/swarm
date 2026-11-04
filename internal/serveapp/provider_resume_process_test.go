@@ -327,7 +327,7 @@ func writeProviderResumeConfig(t *testing.T, backend, profile, root, providerURL
 	document["runtime"] = map[string]any{"recovery_on_startup": true}
 	document["workspace"] = map[string]any{"backend": "host", "allow_exec_on_host": true}
 	llm := map[string]any{"backend": profile, "models": map[string]any{"resume-model": map[string]any{profile: "resume-model"}},
-		"session": map[string]any{"lock_ttl": "10s", "rotate_after_turns": 40, "rotate_on_parse_failures": 3}}
+		"session": map[string]any{"lock_ttl": "10s", "rotate_on_parse_failures": 3}}
 	if profile != "anthropic" {
 		llm[profile] = map[string]any{"base_url": providerURL + "/v1"}
 	}
