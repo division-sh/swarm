@@ -167,7 +167,7 @@ func validateRuntimeIncident(prefix string, incident runtimeIncident) error {
 	if incident.Count < 1 {
 		return fmt.Errorf("malformed %s: count must be at least 1", prefix)
 	}
-	if _, ok := runtimeIncidentValidLevels[strings.TrimSpace(incident.Level)]; !ok {
+	if _, ok := runtimeIncidentValidLevels[incident.Level]; !ok {
 		return fmt.Errorf("malformed %s: level=%q is not a valid LogLevel", prefix, incident.Level)
 	}
 	if incident.SampleMessage == nil {
