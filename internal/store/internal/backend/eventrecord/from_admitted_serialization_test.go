@@ -45,7 +45,7 @@ func fromAdmittedOuterMarshalClone(admitted events.AdmittedEvent, settlement eve
 		SourceEventID: event.ParentEventID(), CreatedAt: event.CreatedAt().UTC().Truncate(time.Microsecond),
 		RoutingSourceKind:      event.RoutingSource().Kind().StorageCode(),
 		RoutingSourceAuthority: event.RoutingSource().Authority().StorageCode(),
-		SourceRoute:            marshalSourceRoute(event.RoutingSource()), TargetRoute: marshalRoute(envelope.Target),
+		SourceRoute:            EncodeSourceRoute(event.RoutingSource()), TargetRoute: marshalRoute(envelope.Target),
 		TargetSet: marshalRouteSet(envelope.TargetSet), RouteSettlement: rawSettlement,
 	}
 	if provenance, ok := event.OperatorReference(); ok {
