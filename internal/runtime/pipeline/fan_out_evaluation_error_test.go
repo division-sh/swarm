@@ -63,4 +63,49 @@ func TestFanOutCompositeLoadPreservesJoinedFailureAndCleanup(t *testing.T) {
 	if len(owner.retryRelease) != 0 || len(owner.commands) != 0 {
 		t.Fatal("load failure entered retry or durable commit")
 	}
+	for _, test := range []struct {
+		name      string
+		failure   error
+		wantBlock bool
+	}{
+		{"canceled", &FanOutEvaluationLoadError{Cause: context.Canceled}, false},
+		{"deadline", &FanOutEvaluationLoadError{Cause: context.DeadlineExceeded}, false},
+		{"joined_cancellation", errors.Join(&FanOutEvaluationLoadError{Cause: context.Canceled}, context.DeadlineExceeded), false},
+		{"independent_sibling", errors.Join(&FanOutEvaluationLoadError{Cause: context.Canceled}, sibling), true},
+		{"independent_hydration", &FanOutEvaluationLoadError{Cause: errors.Join(context.Canceled, hydration)}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			releases := 0
+			owner := &joinedFanOutEvaluationOwner{
+				failure: test.failure,
+				group:   failedFanOutEvaluationClose{failure: closing},
+				fanOutClaimOutcomeOwner: &fanOutClaimOutcomeOwner{
+					claimFn: func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
+						return fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: claim.Key}}, claim, true, nil
+					},
+					releaseFn: func(ctx context.Context, got fanoutobligation.Claim) (FanOutClaimSettlement, error) {
+						releases++
+						if got != claim || ctx.Err() != nil {
+							t.Fatal("release lost exact claim or retained cancellation")
+						}
+						return FanOutClaimSettlement{}, releasing
+					},
+				},
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			disposition, err := pc.claimAndServeFanOutTurn(ctx, owner, nil, time.Now())
+			if (len(owner.blocks) != 0) != test.wantBlock || (!test.wantBlock && disposition != fanOutTurnYielded) {
+				t.Errorf("disposition=%v blocks=%d wantBlock=%v", disposition, len(owner.blocks), test.wantBlock)
+			}
+			for _, cause := range []error{test.failure, closing, releasing} {
+				if !errors.Is(err, cause) {
+					t.Errorf("lost failure %v: %v", cause, err)
+				}
+			}
+			if releases != 1 || len(owner.retryRelease) != 0 || len(owner.commands) != 0 {
+				t.Fatalf("release=%d retry=%d commit=%d", releases, len(owner.retryRelease), len(owner.commands))
+			}
+		})
+	}
 }

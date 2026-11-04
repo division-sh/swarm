@@ -152,6 +152,9 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	}
 	var loadErr *FanOutEvaluationLoadError
 	if errors.As(groupErr, &loadErr) {
+		if fanOutEvaluationCancellationOnly(groupErr) {
+			return fanOutTurnYielded, groupErr
+		}
 		stage := loadErr.Stage
 		if stage == "" {
 			stage = "load_evaluation"
@@ -484,6 +487,30 @@ const (
 	fanOutFailureRetry
 	fanOutFailureItemSemantic
 )
+
+// Joined independent faults must not be hidden by an accompanying cancellation.
+func fanOutEvaluationCancellationOnly(err error) bool {
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return true
+	}
+	switch cause := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := cause.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, child := range causes {
+			if !fanOutEvaluationCancellationOnly(child) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return fanOutEvaluationCancellationOnly(cause.Unwrap())
+	default:
+		return false
+	}
+}
 
 func fanOutPrecommitFailure(err error) (json.RawMessage, fanOutFailureDisposition) {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
