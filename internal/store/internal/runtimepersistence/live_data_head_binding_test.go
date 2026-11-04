@@ -24,7 +24,7 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, _ := newP16RaceStore(t, backend)
 			fixture := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-				"schema.yaml":          "pins:\n  outputs:\n    - records.ready\n",
+				"schema.yaml":          "outputs:\n  - records.ready\n",
 				"events.yaml":          "records.ready:\n  body: text\n",
 				"nested/schema.yaml":   "stages: []\n",
 				"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
@@ -205,7 +205,7 @@ func TestServedLiveRunDeclarationHeadBindingBothStores(t *testing.T) {
 
 			otherSelected := newStopCommitStoreOwner(t, backend, db)
 			otherFiles := map[string]string{
-				"schema.yaml":             "pins:\n  outputs:\n    - records.ready\n",
+				"schema.yaml":             "outputs:\n  - records.ready\n",
 				"events.yaml":             "records.ready:\n  body: integer\n",
 				"nested/schema.yaml":      "stages: []\n",
 				"different/schema.yaml":   "stages: []\n",
