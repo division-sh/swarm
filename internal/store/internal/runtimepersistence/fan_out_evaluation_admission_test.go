@@ -94,7 +94,7 @@ func TestFanOutEvaluationSingleAdmissionRealConsumersBothStores(t *testing.T) {
 
 func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []string{"healthy", "expiry", "cancel", "validation_error", "retired_grant", "source_head", "stop"} {
+		for _, cut := range []string{"healthy", "expiry", "cancel", "cancel_load", "validation_error", "retired_grant", "source_head", "stop"} {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				f := newGroupProofFixture(t, backend, 1)
 				if err := f.group.Close(f.ctx); err != nil {
@@ -116,6 +116,10 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 				}
 				independent := errors.New("independent hydrated-input validation failure")
 				var before map[string][]string
+				if cut == "cancel_load" {
+					before = f.snapshot(t)
+					cancel()
+				}
 				input, group, err := f.owner.BeginFanOutEvaluation(ctx, f.claim, func(input pipeline.FanOutEvaluationInput) error {
 					if err := input.Validate(f.intent); err != nil {
 						return err
@@ -199,6 +203,11 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 				case "cancel":
 					if group != nil || !errors.Is(err, context.Canceled) {
 						t.Fatalf("cancel opened a group: %v %v", group, err)
+					}
+				case "cancel_load":
+					var load *pipeline.FanOutEvaluationLoadError
+					if group != nil || !errors.As(err, &load) || load.Stage != "" || !errors.Is(load.Cause, context.Canceled) {
+						t.Fatalf("canceled native load lost its typed cause: group=%v err=%T %v", group, err, err)
 					}
 				case "validation_error":
 					var load *pipeline.FanOutEvaluationLoadError
