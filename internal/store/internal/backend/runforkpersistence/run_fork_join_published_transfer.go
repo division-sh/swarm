@@ -251,6 +251,10 @@ func projectRunForkPublishedJoinRoute(plan runfork.RunForkPlan, command generics
 	if err != nil {
 		return events.DeliveryRoute{}, err
 	}
+	route.Target, err = route.Target.WithLife(command.RoutingSource.Life())
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
 	// Source construction initialization is retained in source history; the
 	// child already owns its separately admitted exact materialization.
 	route.Initialization = events.ReceiverInitialization{}
