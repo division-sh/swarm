@@ -22,6 +22,8 @@ workflows.
 
 ## Local Checks
 
+### Developer Feedback
+
 Use direct public commands and Go tooling rather than private helper scripts.
 For routine local iteration, run the changed-package selector first. It uses
 the git diff against `origin/master`, expands in-repository reverse
@@ -30,14 +32,18 @@ command it reports:
 
 ```bash
 go build ./cmd/swarm
-go run ./cmd/swarm-unused
-go run ./cmd/swarm-test-changed
 go run ./cmd/swarm-test-changed -dry-run
+go run ./cmd/swarm-test-changed
 go run ./cmd/swarm-test
-go run ./cmd/swarm-test --tier lifecycle
-go run ./cmd/swarm-test --full
 go run ./cmd/swarm-openrpc-gen --check
 ```
+
+These are development commands, not a list of qualification steps to run in
+sequence. The changed-package selector and no-context runner do not replace
+reviewer-selected proof. Keep Go's test cache for ordinary iteration; do not
+habitually force `-count=1` on every local test.
+
+### Optional Native Unused Analysis
 
 `go run ./cmd/swarm-unused` defaults to native-only analysis on the current
 host, not the complete CI platform union. The guard internally pins its analysis
@@ -72,20 +78,32 @@ The noncompiling [#2438](https://github.com/division-sh/swarm/issues/2438)
 configuration remains explicitly parked under E's
 [#2496](https://github.com/division-sh/swarm/issues/2496) until compile repair.
 
-Before pushing a clean committed candidate, run
-`go run ./cmd/swarm-test preflight`. This fixed local cross-package guard set
-replaces the shared portion of focused proof; it is not an extra local tier.
-Record `Local-Tier: focused` plus `Preflight: pass (Ns)`, then retain separately
-the affected behavioral/race/stateful receipts the reviewer requires. Five
-minutes on warm vemew is a soft measurement target, never a truncated selection
-or a relaxed deadline. See [local preflight](cmd/swarm-test/README.md) and the
-[#2353-backed failure readout](cmd/swarm-test-timing/README.md#failure-evidence-readback).
-Native unused cadence and every hosted qualification obligation remain separate.
+### Candidate Qualification
 
-The reviewer records exactly one `CI-Tier: core|lifecycle|full` and one
-`Local-Tier: core|lifecycle|full` line in the PR body. The two decisions are
-independent. An absent CI tier selects core feedback; invalid or duplicate tier
-instructions select full. A reviewer may add one `CI-Units: unit-a, unit-b` line
+Commit the clean candidate and upload its signed SHA to a non-PR staging branch
+before running:
+
+```bash
+go run ./cmd/swarm-test preflight
+```
+
+After a complete pass, push the **same SHA** to the PR. A rebase needs a fresh
+exact-head preflight; old-head status does not transfer. The command never
+pushes. The [canonical runner runbook](cmd/swarm-test/README.md) owns staging,
+authentication, clean-source admission, receipts and status publication.
+
+For focused local qualification, record `Local-Tier: focused` and
+`Preflight: pass (Ns)`, with the affected behavioral, both-store, race and
+stateful receipts selected by the reviewer. Preflight replaces their shared
+guards; it is not an additional local tier or hosted qualification. The
+five-minute warm-run target is soft, never permission to truncate the selection
+or relax a deadline. Native unused cadence remains separate. Retain failures
+through the [canonical failure readout](cmd/swarm-test-timing/README.md#failure-evidence-readback).
+
+The reviewer records exactly one `CI-Tier: core|lifecycle|full` line in the PR
+body, independently of local qualification. An absent CI tier selects core
+feedback; invalid or duplicate tier instructions select full. A reviewer may
+add one `CI-Units: unit-a, unit-b` line
 naming existing hosted full-plan units outside the selected tier. Empty,
 malformed, duplicate, unknown, local-only or already-selected units refuse.
 The planner preserves the original unit contracts and rejects overlapping work.
@@ -99,37 +117,33 @@ after approval; old-head green or a different selection digest does not qualify.
 The `CI tier: <tier>; selection: <digest>; run: <id>; attempt: <n>` check and
 successful Required test summary must share the trusted App, head, run, attempt
 and check suite. This is not a branch-freshness rule.
-Local
-qualification uses explicit `--tier TIER` or `--full` and retains the effective
-plan and receipts under `test-results/local`. The reviewer compares that command
-and receipt with Local-Tier; an absent or invalid local instruction cannot earn
-thin qualification credit. No GitHub lookup or authorization sidecar is used.
-Explicit qualification requires clean tracked and untracked non-ignored source,
-with unchanged HEAD before planning and after execution. Ignored receipts are
-permitted; dirty source is allowed only for non-qualifying developer feedback.
+
+Focused qualification is review metadata, not a `--tier focused` command.
+When an explicit local tier is selected instead, use `--tier core`,
+`--tier lifecycle` or `--full`, record the matching `Local-Tier`, and retain its
+plan and receipts under `test-results/local`. Do not add a duplicate local tier
+to focused proof. The runner runbook defines the source fences and receipt
+requirements for each path; dirty source earns developer feedback only.
 
 Compilation-product reuse likewise requires a clean complete worktree, including
 root Go and embedded inputs. Non-ignored dirt or active Go workspace mode bypasses
 reuse and compiles freshly; a workspace path does not identify external module
 contents. Ignored receipt outputs remain allowed.
 
-`swarm-test-changed` and no-context `swarm-test` are developer feedback, not
-substitutes for the reviewer-required tier. Do not habitually force
-`-count=1` for every local iteration because it defeats Go's local test cache.
-The no-argument runner is the bounded local tier, not an exhaustive `./...` run.
 Completion requires a terminal PASS for each selected executable root and its
 declared backend children. Finite profile replacements, opt-in live proofs, and
 subprocess helpers are explicit non-credit deferrals in
 `internal/testplanning/deferrals.go`; an undeclared SKIP fails completion.
 Core owns ordinary roots and fixed safety/smoke canaries. Lifecycle additionally
 owns retained both-store restart and recovery families. Full owns every admitted
-root, both unchanged 900s backend soaks, and hosted native Linux/Darwin unused
-union. The root census explicitly records every lower-tier deferral; omitted
-proofs earn no execution credit. Schedule and unverified master use full;
+root and both unchanged 900s backend soaks. Native Linux/Darwin unused analysis
+belongs to the separate cadence above, not a full-tier PR. The root census
+explicitly records every lower-tier deferral; omitted proofs earn no execution
+credit. Schedule and unverified master use full;
 manual dispatch is full-only. Local full cannot claim Darwin credit.
-High-risk semantic/runtime migrations require full local
-`go run ./cmd/swarm-test --full` when the issue
-gate or reviewer asks for it.
+For the actual selected commands and their proof boundaries, follow the
+reviewer's named obligations and the runner runbook rather than inferring a
+whole local tier from the type of change.
 
 Postgres-backed tests should use the supported host setup in
 [internal/testutil/POSTGRES.md](internal/testutil/POSTGRES.md). Keep the test
