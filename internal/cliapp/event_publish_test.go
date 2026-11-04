@@ -650,10 +650,26 @@ func TestEventPublishMalformedResultsFailClosed(t *testing.T) {
 			wantStderr: "deliveries[0].subscriber_type",
 		},
 		{
+			name: "padded subscriber type",
+			mutate: func(result map[string]any) {
+				delivery := result["deliveries"].([]any)[0].(map[string]any)
+				delivery["subscriber_type"] = " agent "
+			},
+			wantStderr: "deliveries[0].subscriber_type",
+		},
+		{
 			name: "invalid delivery status",
 			mutate: func(result map[string]any) {
 				delivery := result["deliveries"].([]any)[0].(map[string]any)
 				delivery["status"] = "locally_published"
+			},
+			wantStderr: "deliveries[0].status",
+		},
+		{
+			name: "padded delivery status",
+			mutate: func(result map[string]any) {
+				delivery := result["deliveries"].([]any)[0].(map[string]any)
+				delivery["status"] = " delivered "
 			},
 			wantStderr: "deliveries[0].status",
 		},
