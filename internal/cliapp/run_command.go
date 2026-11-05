@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/google/uuid"
@@ -437,7 +438,7 @@ func loadRunCommandPayload(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("read --payload: %w", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
+	if err := canonicaljson.DecodeInto(raw, &payload); err != nil {
 		return nil, fmt.Errorf("--payload must be a JSON object: %w", err)
 	}
 	if payload == nil {
