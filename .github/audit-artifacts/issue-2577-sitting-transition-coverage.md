@@ -12,6 +12,12 @@ be reported from actual child completions, not inferred from the root name.
   Noise/service peer. It captures actual CLI QR output before asking the peer to
   pair; it does not install a pre-paired device. Its `--yes` approvals are
   scripted, not interactive-terminal or signal-handling proof.
+- `TestWhatsAppPublicSittingPromptCancellationBothStores` uses an actual Linux
+  pseudo-terminal and the same public CLI/SDK-peer owners, cancelling the
+  command context at the account and claimant prompts. It checks joined return,
+  unchanged account/operation/claim/binding/capture/pairing observations and no
+  SDK logout. This is not an executed phone session or an OS-signal subprocess
+  proof; the binary's existing signal-to-command-context wiring is unchanged.
 - `TestWhatsAppReservedPairingCheckpointBothStores` also exercises the actual
   callback and native store owners, but `pairedBootstrapStateFixture` supplies
   retained paired SDK state. That setup is not a phone/server QR handshake.
@@ -35,12 +41,15 @@ be reported from actual child completions, not inferred from the root name.
 | Signed pairing, stream end, authenticated successor | `TestChannelConnectWhatsAppRegistersAccountBothStores` | External peer performs signed pairing and post-login; tests the pending checkpoint before stream end, both serve-stopped/running. Not a real WhatsApp server. |
 | Linked but unapproved account preview | new public early-flow root; `TestWhatsAppReservedPairingCheckpointBothStores` | Must preserve the original operation/account and no execution authority. This was the actual field-failure cut. |
 | Inbound while preview approval waits | new public early-flow root, `preview`; native checkpoint callback | Encrypted service-peer input and callback completion before CLI approval; no ACK/capture/operation mutation, reusable same connection. Native callback additionally checks no fatal failure/fence. |
-| Explicit account approval | new public early-flow root; native checkpoint `comms`/`hitl` cells | Public CLI scripted approval and exact native admission. Actual interactive input and its cancellation remain a separate gap below. |
+| Explicit account approval | new public early-flow root; cancellation root's claimant child; native checkpoint `comms`/`hitl` cells | Scripted `--yes`, genuine terminal `y` before claimant cancellation, and exact native admission. These have distinct proof scopes. |
+| Cancel while account approval waits | public prompt-cancellation root, `account`; `TestChannelConfirmationInputCancellationJoinsWithoutClosingStdin` | Linux terminal context cancellation, no answer/approval/logout or observed account-state write; borrowed descriptor remains usable with unchanged flags. No reader goroutine or caller-file close. |
 | Reject the previewed account | native checkpoint `reject_comms`/`reject_hitl` cells | Selected-store refusal/unlink controls, using retained SDK-state fixture. Not the full interactive CLI rejection composition. |
 | Operator challenge wait | new public early-flow root, `challenge`; `TestWhatsAppOrdinarySetupTextCannotPoisonClaimRecoveryBothStores` | Ordinary encrypted traffic cannot claim the operator or poison the pending connection; exact emitted challenge is used. |
 | Inbound while challenge waits | new public early-flow root, `challenge` | False/no ACK, unchanged operation/capture rows, same connection still reusable. No business holder is installed during this standalone enrollment. |
 | Genuine operator claim | new public early-flow root; `TestWhatsAppRuntimeClaimSettlesBeforeAcknowledgementBothStores`; `TestWhatsAppRuntimeClaimDoesNotAutoBindFirstSenderBothStores` | Real SDK decrypt/claim with exact synthetic sender and durable-before-ACK controls; not phone-to-ID stability proof. |
 | Claimed identity awaiting confirmation | new public early-flow root, `confirmation` | CLI output hold before scripted confirmation; exact operation remains the enrollment owner. |
+| Cancel while claimant confirmation waits | public prompt-cancellation root, `claimant`; reader cancellation control | Genuine terminal account approval and encrypted claim precede cancellation; no claimant acceptance/decline, no binding/logout, same pairing. |
+| Genuine yes/no and end of input | `TestChannelCLIExplicitPairingClaimConfirmationJourney`; `TestChannelConfirmationInputPreservesAnswersAndEOF`; `TestChannelCLIClaimantNoAndEOFPreserveDecline` | Explicit answers retain their existing actions. EOF is still default-no, not cancellation or approval. Cancellation wins over a concurrently returned answer/EOF in `TestChannelConfirmationCancellationWinsOverAnswerOrEOF`. |
 | Ordinary inbound while claimant confirmation waits | new public early-flow root, `confirmation` | False/no ACK and unchanged capture/operation; subsequent confirmation still succeeds on the original connection. |
 | Confirmed deployment registration | new public early-flow root; `TestDeploymentChannelRegistrationWithoutRuntimeBothStores` | Public account readback and exact bound operator; deployment registration is not business/Inbox READY. |
 | Authored source takes the account and replies | new public early-flow root via `requireOfflinePairedWhatsAppServiceRoundTrip`; `TestRunServeWhatsAppAuthoredCustomerReplyBothStores` | Actual SDK service-peer ingress/outbound and native activity request/result conservation. No LLM substitute for native activity. |
@@ -61,13 +70,17 @@ be reported from actual child completions, not inferred from the root name.
 ## Readiness Gaps That Must Not Be Hidden
 
 1. The interactive confirmation reader blocked on SIGINT in the stopped
-   sitting. Scripted `--yes` tests do not close that gap. Establish separately
-   reviewed safe handling before invitation; do not expand this callback repair
-   into an unreviewed prompt/lifetime change or ask the user to recover it live.
-2. Public interruption at the unapproved interactive prompt and all concurrent
-   inbound schedules during login, reset and logout are not a single composed
-   end-to-end test. Existing native controls have the narrower scopes above.
-   Reviewer-f owns the final prepared-journey gate and disposition of these gaps.
+   sitting. The cancellation controls above must have complete exact-source
+   receipts and the separately reviewed safe-handling gate before invitation.
+   Finite injected readers are not a claim that arbitrary blocking readers are
+   cancellable; execution coverage is Linux, with Darwin compilation separately
+   labelled. Do not ask the user to recover an input-lifetime failure live.
+2. All concurrent inbound schedules during login, reset and logout are not a
+   single composed end-to-end test. Existing native controls have the narrower
+   scopes above. The authored public reply source consumes raw/text input;
+   edit/revoke projection unit controls do not establish that source consumes
+   those event kinds. Reviewer-f owns the final prepared-journey gate and
+   disposition of these gaps.
 3. The actual display/relay must be rehearsed offline, including visibility to
    the operator. Use only the current invocation's complete unexpired frame for
    a live scan; expired captured images are rehearsal/refusal-only. No fallback

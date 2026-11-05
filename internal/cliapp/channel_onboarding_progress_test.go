@@ -82,22 +82,22 @@ func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
 			{Operation: channelonboarding.Operation{OperationID: "first", Provider: "telegram", AccountReference: "420079"}},
 			{Operation: channelonboarding.Operation{OperationID: "second", Provider: "telegram", ExpectedAccount: "420080"}},
 		}
-		if _, err := selectDeploymentAccount(rows, "", nil, io.Discard, false); err == nil {
+		if _, err := selectDeploymentAccount(t.Context(), rows, "", nil, io.Discard, false); err == nil {
 			t.Fatal("noninteractive ambiguous logout selected an account")
 		}
 		var output bytes.Buffer
-		chosen, err := selectDeploymentAccount(rows, "", strings.NewReader("n\ny\n"), &output, true)
+		chosen, err := selectDeploymentAccount(t.Context(), rows, "", strings.NewReader("n\ny\n"), &output, true)
 		if err != nil || chosen.OperationID != "second" || !strings.Contains(output.String(), "420079") || !strings.Contains(output.String(), "420080") {
 			t.Fatal("interactive selection lost the exact choice", chosen.OperationID, output.String(), err)
 		}
-		chosen, err = selectDeploymentAccount(rows, "420080", nil, io.Discard, false)
+		chosen, err = selectDeploymentAccount(t.Context(), rows, "420080", nil, io.Discard, false)
 		if err != nil || chosen.OperationID != "second" || chosen.AccountConfirmed {
 			t.Fatal("pending replacement was hidden or approved by selection", err)
 		}
-		if _, err := selectDeploymentAccount([]channelOnboardingResult{rows[0], rows[0]}, "", strings.NewReader("y\n"), io.Discard, true); err == nil {
+		if _, err := selectDeploymentAccount(t.Context(), []channelOnboardingResult{rows[0], rows[0]}, "", strings.NewReader("y\n"), io.Discard, true); err == nil {
 			t.Fatal("interactive selection accepted duplicate account evidence")
 		}
-		if _, err := selectDeploymentAccount(rows, "420081", nil, io.Discard, false); err == nil {
+		if _, err := selectDeploymentAccount(t.Context(), rows, "420081", nil, io.Discard, false); err == nil {
 			t.Fatal("missing account selected another account")
 		}
 	})
