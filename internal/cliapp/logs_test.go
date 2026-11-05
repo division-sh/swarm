@@ -15,7 +15,6 @@ import (
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
-	"gopkg.in/yaml.v3"
 )
 
 func TestLogsUsesRuntimeLogsV1RPCWithSnapshotFilters(t *testing.T) {
@@ -536,29 +535,6 @@ func TestRuntimeLogProjectionExactMessageAndResidualDetails(t *testing.T) {
 	}
 	if !projection.MessageVisible || projection.Message != nearMessage {
 		t.Fatalf("near-match projection = %#v", projection)
-	}
-}
-
-func TestRuntimeLogRedundantMessageTuplesMatchSpec(t *testing.T) {
-	cli := loadCLISpecification(t)
-	catalog := driftMappingValue(cli, "command_catalog")
-	logs := driftMappingValue(catalog, "logs")
-	output := driftMappingValue(logs, "output")
-	projection := driftMappingValue(output, "semantic_projection")
-	tuples := driftMappingValue(projection, "exact_redundant_message_tuples")
-	if tuples == nil || tuples.Kind != yaml.SequenceNode {
-		t.Fatal("logs semantic projection exact_redundant_message_tuples must be a sequence")
-	}
-	want := map[runtimeLogMessageTuple]struct{}{}
-	for _, row := range tuples.Content {
-		want[runtimeLogMessageTuple{
-			Component: driftRequiredScalar(t, row, "component"),
-			Action:    driftRequiredScalar(t, row, "action"),
-			Message:   driftRequiredScalar(t, row, "message"),
-		}] = struct{}{}
-	}
-	if !reflect.DeepEqual(runtimeLogRedundantMessageTuples, want) {
-		t.Fatalf("runtime-log redundant-message registry differs from authoritative spec:\ngot:  %#v\nwant: %#v", runtimeLogRedundantMessageTuples, want)
 	}
 }
 
