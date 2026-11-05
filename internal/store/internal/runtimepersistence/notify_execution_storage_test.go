@@ -29,7 +29,7 @@ func TestNotifyExecutionStorageKeepsExactScopeAndOriginalReadOwnerBothStores(t *
 				t.Fatal(err)
 			}
 			var cursor NotifyFanOutCursorStorage
-			if err := fixture.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, run).Scan(&cursor.Total, &cursor.Cursor, &cursor.Owed, &cursor.Blocked); err != nil {
+			if err := fixture.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, run).Scan(&cursor.Total, &cursor.Cursor, &cursor.Owed, &cursor.Blocked, &cursor.Open); err != nil {
 				t.Fatal(err)
 			}
 			var work NotifyFanOutWorkStorage

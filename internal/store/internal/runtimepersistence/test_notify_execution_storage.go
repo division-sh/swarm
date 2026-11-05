@@ -11,7 +11,7 @@ import (
 )
 
 type NotifyCompletedTurnsStorage struct{ Turns, Instances int }
-type NotifyFanOutCursorStorage struct{ Total, Cursor, Owed, Blocked int }
+type NotifyFanOutCursorStorage struct{ Total, Cursor, Owed, Blocked, Open int }
 type NotifyFanOutWorkStorage struct {
 	Intents, FloorOne, Minimum, Maximum int
 	Revisions, Facts                    int64
@@ -165,7 +165,7 @@ func ReadNotifyFanOutCursorForTest(ctx context.Context, selected any, runID stri
 	}
 	var out NotifyFanOutCursorStorage
 	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Total, &out.Cursor, &out.Owed, &out.Blocked)
+		return tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Total, &out.Cursor, &out.Owed, &out.Blocked, &out.Open)
 	})
 	if err != nil {
 		return NotifyFanOutCursorStorage{}, err

@@ -9,21 +9,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // This single read follows the failed verdict, outside its exhausted budget.
-func logNotifyAllChildrenDrainCounts(t *testing.T, db *sql.DB, runID string) {
+func logNotifyAllChildrenDrainCounts(t *testing.T, selected notifyAllChildrenStore, runID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started := time.Now()
-	var owed, open, blocked int
-	err := db.QueryRowContext(ctx, `SELECT
-		COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0)
-		FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&owed, &open, &blocked)
-	t.Logf("fan_out_drain_after_failure run=%s observed=%s elapsed=%s owed=%d open=%d blocked=%d error=%v", runID, started.UTC().Format(time.RFC3339Nano), time.Since(started), owed, open, blocked, err)
+	counts, err := storetest.ReadNotifyFanOutCursor(ctx, notifyAllChildrenNativeObservationOwner(selected), runID)
+	if err != nil {
+		t.Logf("fan_out_drain_after_failure run=%s observed=%s elapsed=%s unavailable=%v", runID, started.UTC().Format(time.RFC3339Nano), time.Since(started), err)
+		return
+	}
+	t.Logf("fan_out_drain_after_failure run=%s observed=%s elapsed=%s owed=%d open=%d blocked=%d", runID, started.UTC().Format(time.RFC3339Nano), time.Since(started), counts.Owed, counts.Open, counts.Blocked)
 }
 
 // Observe after the original timeout. Never print payload, SQL text, claim
