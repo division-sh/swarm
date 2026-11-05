@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,7 +107,7 @@ func consumptionEvents(receive *PackReceiveDescription) []PackEventDescription {
 	}
 	var normalized, raw []PackEventDescription
 	for _, event := range receive.Events {
-		if !eventidentity.IsCanonicalName(event.Event) {
+		if !runtimeidentity.IsCanonicalName(event.Event) {
 			continue
 		}
 		if event.Kind == "normalized" {
