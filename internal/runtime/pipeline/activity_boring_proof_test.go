@@ -18,6 +18,7 @@ import (
 	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -409,7 +410,7 @@ func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBor
 		CurrentState: "pending", CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
 		Fields: map[string]any{"marker": entity}, EntityType: "state",
 	})
-	if err := fixture.native.Construct(ctx, instance); err != nil {
+	if err := fixture.native.Construct(effects.WithExecutionMode(ctx, intent.ExecutionMode), instance); err != nil {
 		t.Fatal(err)
 	}
 	source := eventtest.ExistingRunRootIngressWithRoutingSource(intent.SourceEventID, "research/source.requested", "", intent.SourceTaskID,
