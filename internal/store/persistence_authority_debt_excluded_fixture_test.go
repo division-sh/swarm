@@ -16,10 +16,17 @@ func debtReviewedExcludedFixture(finding authorityFinding) string {
 			declaration = finding.Member
 		}
 		context = "bf98ca60306a0fa727206f73aecb6d27e6a9a366183114a0fe7cd8bbfd62c02e"
+		if finding.Member == "declaration:a93689c088d0eac109b63733b72f50d2c90bacd48405c1eff84a8b6105cf1d5b" &&
+			finding.Resolved == "unresolved|source-context:6632b5256bfc7f4f796dee46748546cad0f83930df4a23794fcd179e971e8f37" {
+			context = "6632b5256bfc7f4f796dee46748546cad0f83930df4a23794fcd179e971e8f37"
+		}
 		reason = "native served construction; real selected executor; canonical source/turn readback; opt-in proof remains unqualified"
 	case "internal/serveapp/issue642_future_provider_test.go\x00issue642WaitFutureProviderCompletion":
 		declaration = "declaration:69bf4b7d588cc2455f6ce5c20aea5e8968aba3e962c8d66a45d2190e8e18f9bf"
 		context = "bf98ca60306a0fa727206f73aecb6d27e6a9a366183114a0fe7cd8bbfd62c02e"
+		if finding.Resolved == "unresolved|source-context:6632b5256bfc7f4f796dee46748546cad0f83930df4a23794fcd179e971e8f37" {
+			context = "6632b5256bfc7f4f796dee46748546cad0f83930df4a23794fcd179e971e8f37"
+		}
 		reason = "existing run-header, delivery-summary and completion-diagnostic readers; no raw authority"
 	case "internal/serveapp/lifecycle_template_race_enabled_test.go\x00package":
 		declaration = "declaration:15b255986e7151c0f5da8f981d54571c0da322a06f5634a51027a327c67e2cf7"

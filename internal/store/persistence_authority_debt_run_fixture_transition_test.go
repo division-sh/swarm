@@ -46,6 +46,37 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("portable-runtime-signatures", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := debtPortableRuntimeSignatureTransitions()
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+		}
+		if len(before) != 5 || len(after) != 5 || authorityDebtCount(before) != 7 || authorityDebtCount(after) != 7 {
+			t.Fatal("portable signatures must preserve five identities and seven occurrences")
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("portable comparison mutated its inputs")
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse portable signature correspondence admitted")
+		}
+		for _, pair := range pairs {
+			for _, landed := range []bool{false, true} {
+				t.Run(pair[0].Declaration+"/"+pair[0].Operation+map[bool]string{false: "/forward", true: "/landed"}[landed], func(t *testing.T) {
+					debtRunFixtureSignatureHostileControls(t, pair, before, after, landed)
+				})
+			}
+		}
+	})
 	t.Run("live-rollback-signatures", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		pairs := debtLiveRollbackSignatureTransitions()
