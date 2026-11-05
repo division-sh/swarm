@@ -14,7 +14,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/google/uuid"
 )
 

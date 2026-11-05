@@ -13,7 +13,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
 

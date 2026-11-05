@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/testutil/replayconformance"
+	"github.com/division-sh/swarm/tests/support/testutil/replayconformance"
 )
 
 func TestCatalogReplayTranscriptIdentityAdmissionFailsClosed(t *testing.T) {

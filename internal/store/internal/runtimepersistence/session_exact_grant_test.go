@@ -13,7 +13,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testing.T) {

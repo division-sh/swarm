@@ -7,8 +7,8 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/testutil/llmapi"
 	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 )
 
 func TestManagedProviderHTTPRejections(t *testing.T) {

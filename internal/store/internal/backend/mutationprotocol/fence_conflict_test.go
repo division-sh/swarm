@@ -10,7 +10,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/lib/pq"
 	"strings"
 	"sync/atomic"

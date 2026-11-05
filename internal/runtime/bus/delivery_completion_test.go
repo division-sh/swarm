@@ -14,7 +14,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
+	runtimepipelinefixture "github.com/division-sh/swarm/tests/support/testutil/runtimepipelinefixture"
 )
 
 type publishAndWaitCommitSpy struct {

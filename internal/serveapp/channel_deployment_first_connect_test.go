@@ -28,7 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"go.mau.fi/whatsmeow/types"
 )
 

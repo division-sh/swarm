@@ -37,8 +37,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/google/uuid"
 )
 

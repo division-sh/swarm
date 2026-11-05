@@ -24,8 +24,8 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 // Keep the original T17 success oracle active. Construction is read through

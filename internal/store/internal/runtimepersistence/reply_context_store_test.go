@@ -17,7 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
 

@@ -57,7 +57,7 @@ func validatePersistenceDebtEnvelopes(policy Policy) error {
 		run, skip, timeout := persistenceDebtCensusRun, "", "20m"
 		children := map[string][]string{persistenceNativeFamilyRoot: persistenceNativeFamilyChildren}
 		if id == "store-admission-full" {
-			packages = append(packages, policy.Module+"/internal/testpostgres")
+			packages = append(packages, policy.Module+"/tests/support/testpostgres")
 			run, skip = persistenceDebtAdmissionRun, ""
 			timeout = ""
 			children = nil
@@ -112,13 +112,13 @@ func TestPersistenceAuthorityCensusPartitionPreservesEveryRoot(t *testing.T) {
 				owners := map[TestRoot][]string{}
 				for _, unit := range plan.Units {
 					for _, selected := range unit.SelectedRoots {
-						if selected.Package == policy.Module+"/internal/store" || selected.Package == policy.Module+"/internal/testpostgres" {
+						if selected.Package == policy.Module+"/internal/store" || selected.Package == policy.Module+"/tests/support/testpostgres" {
 							owners[selected] = append(owners[selected], unit.ID)
 						}
 					}
 				}
 				wantTotal := 0
-				for _, pkg := range []string{policy.Module + "/internal/store", policy.Module + "/internal/testpostgres"} {
+				for _, pkg := range []string{policy.Module + "/internal/store", policy.Module + "/tests/support/testpostgres"} {
 					for _, name := range inventory.Packages[pkg].Roots {
 						want := "store-admission-full"
 						if pkg == policy.Module+"/internal/store" && (name == persistenceDebtRoot || name == persistenceNativeFamilyRoot) {

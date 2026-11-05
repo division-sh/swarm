@@ -65,14 +65,14 @@ Run tests with an invocation-scoped DSN instead of a persistent shell export:
 
 ```bash
 SWARM_TEST_POSTGRES_DSN='host=127.0.0.1 port=5432 user=swarm_test password=swarm-test dbname=postgres sslmode=disable' \
-  go run ./cmd/swarm-test -- ./internal/testutil
+  go run ./cmd/swarm-test -- ./tests/support/testutil
 ```
 
 URL DSNs are equally supported:
 
 ```bash
 SWARM_TEST_POSTGRES_DSN='postgres://swarm_test:swarm-test@127.0.0.1:5432/postgres?sslmode=disable' \
-  go test ./internal/testutil -run '^TestStartPostgres' -count=1
+  go test ./tests/support/testutil -run '^TestStartPostgres' -count=1
 ```
 
 A set but invalid DSN fails closed and never falls through to Docker.

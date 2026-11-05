@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/connectorapi"
-	"github.com/division-sh/swarm/internal/testutil/llmapi"
-	"github.com/division-sh/swarm/internal/testutil/mcpapi"
+	"github.com/division-sh/swarm/tests/support/testutil/connectorapi"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
+	"github.com/division-sh/swarm/tests/support/testutil/mcpapi"
 )
 
 const externalMCPStdioArgument = "release-e2e-mcp-stdio"

@@ -25628,7 +25628,7 @@ test_specification:
         The admitted plan remains canonically sorted and immutable. Execution is a deterministic permutation:
         formatting, OpenRPC, the ranked existing package phases (internal/runtime/core/worklifetime,
         internal/runtime/effects, internal/runtime/deliverycontinuation, internal/runtime/manager,
-        internal/testutil, scripts/rewrite-stages-2566, internal/store/internal/backend/authoractivity,
+        tests/support/testutil, scripts/rewrite-stages-2566, internal/store/internal/backend/authoractivity,
         cmd/swarm-test-timing, internal/testtiming), exact-base/head complexity, every remaining selected package
         in canonical order, then unchanged full native go vet ./.... Rank never adds membership, omits future
         canonical packages, changes commands/selectors/required children, or splits package invocations.
@@ -26298,7 +26298,7 @@ test_specification:
       promoted_by: '#2143'
       transcript:
         version: catalog-replay-transcript/v1
-        owner: internal/testutil/replayconformance
+        owner: tests/support/testutil/replayconformance
         identity: >
           The immutable typed transcript records its exact version, current
           platform-spec SHA-256 digest, canonical bundle hash and fixture source,
@@ -26361,7 +26361,7 @@ test_specification:
         journal cannot substitute for a rejected-input or semantic-outcome proof.
       projection:
         version: catalog-replay-projection/v1
-        owner: internal/testutil/replayconformance
+        owner: tests/support/testutil/replayconformance
         event_facts: >
           Compare constructor class, event type, task, run, entity and flow identity,
           canonical payload bytes, execution mode, chain depth, producer type and ID,

@@ -19,7 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/google/uuid"
 )
 

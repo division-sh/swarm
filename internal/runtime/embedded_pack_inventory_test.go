@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/providertriggers"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 func embeddedTriggerCatalog(t testing.TB) *providertriggers.CatalogSnapshot {

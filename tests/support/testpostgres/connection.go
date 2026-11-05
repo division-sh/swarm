@@ -171,7 +171,7 @@ func ConnectionFromEnvironment() (Connection, error) {
 		return Connection{}, err
 	}
 	if !set {
-		return Connection{}, fmt.Errorf("%s is not set; use `go run ./cmd/swarm-test` or configure host Postgres using internal/testutil/POSTGRES.md", SourceEnv)
+		return Connection{}, fmt.Errorf("%s is not set; use `go run ./cmd/swarm-test` or configure host Postgres using tests/support/testutil/POSTGRES.md", SourceEnv)
 	}
 	return connection, nil
 }

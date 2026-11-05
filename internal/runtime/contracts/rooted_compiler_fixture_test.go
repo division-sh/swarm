@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 // Compiler unit fixtures retain their genuine filesystem admission in memory.

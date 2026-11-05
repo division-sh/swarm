@@ -13,8 +13,8 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {

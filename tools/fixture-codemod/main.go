@@ -131,7 +131,7 @@ func patternClass(member string) string {
 		"call:github.com/division-sh/swarm/internal/store/storetest.Database",
 		"call:github.com/division-sh/swarm/internal/runtime/pipeline.(*github.com/division-sh/swarm/internal/runtime/pipeline.workflowInstanceStore).testDB":
 		return "generic-raw-getter-calls"
-	case "call:github.com/division-sh/swarm/internal/testutil.StartPostgres",
+	case "call:github.com/division-sh/swarm/tests/support/testutil.StartPostgres",
 		"call:github.com/division-sh/swarm/internal/store/storetest.AdmitPostgresRuntimeStore",
 		"call:github.com/division-sh/swarm/internal/runtime/pipeline.newPostgresWorkflowInstanceStoreForTest",
 		"call:github.com/division-sh/swarm/internal/runtime/pipeline.newSQLiteWorkflowInstanceStoreTestDB",

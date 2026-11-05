@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func forEachTerminalEffectBackend(t *testing.T, run func(*testing.T, neutralEffectParityFixture)) {

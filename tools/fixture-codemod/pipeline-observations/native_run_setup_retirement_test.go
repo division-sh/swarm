@@ -50,7 +50,7 @@ func decodeRunSetupTransitions(data []byte) ([]runSetupTransition, error) {
 // callers. Their assertions are independently exercised by the named receipts.
 func semanticRunSetupFile(path string) bool {
 	switch path {
-	case "internal/testutil/runlifecyclefixture/fixture.go",
+	case "tests/support/testutil/runlifecyclefixture/fixture.go",
 		"internal/runtime/runtime_shutdown_admission_test.go", "internal/runtime/runtime_shutdown_fan_out_test.go",
 		"internal/runtime/runtime_log_native_external_test.go", "internal/runtime/author_activity_test_context_test.go",
 		"internal/runtime/runtime_startup_readiness_test.go",
@@ -160,7 +160,7 @@ func runSetupEscapes(source []byte) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if path != "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture" {
+		if path != "github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture" {
 			continue
 		}
 		alias := "runlifecyclefixture"
@@ -210,10 +210,10 @@ func TestNativeRunSetupInterpreterAndConsumerCapabilityStayRetired(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, probe := range []string{
-		"import fixture \"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture\"; func probe(){fixture.Materialize()}",
-		"import fixture \"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture\"; func probe(){fixture.CreateSQLiteScenarioSchema()}",
-		"import fixture \"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture\"; var x=func(){fixture.PostgresCreateRunInMutation()}()",
-		"import . \"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture\"; func probe(){Materialize()}",
+		"import fixture \"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture\"; func probe(){fixture.Materialize()}",
+		"import fixture \"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture\"; func probe(){fixture.CreateSQLiteScenarioSchema()}",
+		"import fixture \"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture\"; var x=func(){fixture.PostgresCreateRunInMutation()}()",
+		"import . \"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture\"; func probe(){Materialize()}",
 	} {
 		if escapes, err := runSetupEscapes([]byte("package hostile\n" + probe)); err != nil || len(escapes) == 0 {
 			t.Fatalf("restored run escape accepted: %s/%v", probe, err)

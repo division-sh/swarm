@@ -32,8 +32,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 

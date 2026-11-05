@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func withTestProviderTriggerPlatformInventory(t *testing.T, configText string) string {

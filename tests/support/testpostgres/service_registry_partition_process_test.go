@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func proveIndependentRegistryProcesses(t *testing.T) {
@@ -27,7 +27,7 @@ func proveIndependentRegistryProcesses(t *testing.T) {
 	}
 	root := t.TempDir()
 	_, source, _, _ := runtime.Caller(0)
-	repo := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+	repo := filepath.Clean(filepath.Join(filepath.Dir(source), "..", "..", ".."))
 	runner := filepath.Join(root, "swarm-test")
 	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
 	build.Dir = repo
@@ -91,7 +91,7 @@ func startNamespaceProcess(t *testing.T, repo, binRoot, runner, docker string) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.command = exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+	p.command = exec.Command(runner, "--", "./tests/support/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 	p.command.Dir = repo
 	p.command.Env = descendantSettlementEnvironment(os.Environ(), binRoot, stateHome, false, "SWARM_TEST_PROCESS_PREFIX="+p.prefix)
 	p.command.Stdout, p.command.Stderr = log, log

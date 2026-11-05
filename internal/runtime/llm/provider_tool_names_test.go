@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/testutil/llmapi"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 )
 
 func TestProviderToolWireNamesAcrossAPIEncoders(t *testing.T) {

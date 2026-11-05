@@ -22,8 +22,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 // Native component construction keeps its genuine original process owner;

@@ -33,8 +33,8 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 type testInboundTargetResolver interface {

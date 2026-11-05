@@ -25,7 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"gopkg.in/yaml.v3"
 )
 

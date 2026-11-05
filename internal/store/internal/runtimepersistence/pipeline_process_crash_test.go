@@ -23,7 +23,7 @@ import (
 	storeownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"

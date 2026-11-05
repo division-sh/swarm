@@ -23,7 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testcatalog"
-	"github.com/division-sh/swarm/internal/testutil/replayconformance"
+	"github.com/division-sh/swarm/tests/support/testutil/replayconformance"
 	"github.com/google/uuid"
 )
 
