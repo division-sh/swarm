@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/connectorapi"
+	"github.com/division-sh/swarm/tests/support/testutil/connectorapi"
 	"gopkg.in/yaml.v3"
 )
 

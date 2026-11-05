@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testtiming"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 func runCompletion(profile string, explicit bool) int {

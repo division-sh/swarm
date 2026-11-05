@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 func completionHostPreflight(ctx context.Context) error {

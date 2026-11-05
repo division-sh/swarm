@@ -102,44 +102,44 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
-		"internal/testutil/runtimepipelinefixture/context.go": {
+		"tests/support/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.runtime_execution_persistence_authority",
 			Reason:         "test-only fixture exposes transaction-bound execution for hostile atomicity proof; production runtime has no raw SQL context capability",
 		},
-		"internal/testutil/postgres.go": {
+		"tests/support/testutil/postgres.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,
 			Reason:         "testutil is the thin testing adapter over the canonical testpostgres lifecycle owner",
 		},
-		"internal/testutil/runlifecyclefixture/fixture.go": {
+		"tests/support/testutil/runlifecyclefixture/fixture.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2111,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.run_lifecycle_authority",
 			Reason:         "test-only hostile readback fixtures deliberately materialize persisted run states that valid lifecycle construction forbids",
 		},
-		"internal/testpostgres/connection.go": {
+		"tests/support/testpostgres/connection.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,
 			Reason:         "testpostgres owns the typed Postgres DSN and connector boundary used by test lifecycle consumers",
 		},
-		"internal/testpostgres/capacity.go": {
+		"tests/support/testpostgres/capacity.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1702,
 			Reason:         "shared test-server admission reads max_connections before resource writes; it exposes no product SQL authority",
 		},
-		"internal/testpostgres/capacity_probe.go": {
+		"tests/support/testpostgres/capacity_probe.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1702,
 			Reason:         "private capacity fixtures independently read database names and metadata through the canonical test connection for no-mutation proof",
 		},
-		"internal/testpostgres/manager.go": {
+		"tests/support/testpostgres/manager.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,
 			Reason:         "testpostgres owns server-scoped template, sandbox, lease, reconciliation, and cleanup SQL",
 		},
-		"internal/testpostgres/service_registry.go": {
+		"tests/support/testpostgres/service_registry.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          1943,
 			Reason:         "runner-owned service verification reads canonical Postgres settings through the typed test connection",

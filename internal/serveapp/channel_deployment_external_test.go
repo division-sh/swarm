@@ -24,10 +24,10 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/serveapp"
-	"github.com/division-sh/swarm/internal/testpostgres"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/testutil/telegramapi"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/telegramapi"
 	"github.com/google/uuid"
 )
 

@@ -48,7 +48,7 @@ func TestProductionAdvisoryLocksHaveNamedNonEngineTargets(t *testing.T) {
 		filepath.FromSlash("internal/store/internal/startupownership/sqlite_possession_unix.go"): {
 			"int(coordinate.Fd())": true,
 		},
-		filepath.FromSlash("internal/testpostgres/file_lock_unix.go"): {
+		filepath.FromSlash("tests/support/testpostgres/file_lock_unix.go"): {
 			"int(file.Fd())":   true,
 			"int(l.file.Fd())": true,
 		},
@@ -113,8 +113,8 @@ func TestProductionAdvisoryLocksHaveNamedNonEngineTargets(t *testing.T) {
 		filepath.FromSlash("internal/store/devscratch/epoch_unix.go") + ":fd":                                              1,
 		filepath.FromSlash("internal/store/devscratch/epoch_unix.go") + ":int(file.Fd())":                                  1,
 		filepath.FromSlash("internal/store/internal/startupownership/sqlite_possession_unix.go") + ":int(coordinate.Fd())": 2,
-		filepath.FromSlash("internal/testpostgres/file_lock_unix.go") + ":int(file.Fd())":                                  1,
-		filepath.FromSlash("internal/testpostgres/file_lock_unix.go") + ":int(l.file.Fd())":                                1,
+		filepath.FromSlash("tests/support/testpostgres/file_lock_unix.go") + ":int(file.Fd())":                             1,
+		filepath.FromSlash("tests/support/testpostgres/file_lock_unix.go") + ":int(l.file.Fd())":                           1,
 	} {
 		if found[key] != want {
 			t.Fatalf("advisory-lock target %s count=%d, want %d", key, found[key], want)

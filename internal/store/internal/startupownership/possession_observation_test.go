@@ -16,8 +16,8 @@ import (
 	"time"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 	"github.com/lib/pq"
 )
 

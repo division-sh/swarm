@@ -12,7 +12,7 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/lib/pq"
 )
 

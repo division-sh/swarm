@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {

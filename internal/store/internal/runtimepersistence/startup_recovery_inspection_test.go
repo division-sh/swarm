@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testplanning"
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 type startupRecoveryInspector interface {

@@ -25,7 +25,7 @@ import (
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	runlifecyclefixture "github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 )
 
 type rowQueryer interface {

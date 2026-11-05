@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func TestWorkspaceObserverRejectsAbsentAmbiguousAndInvalidStores(t *testing.T) {

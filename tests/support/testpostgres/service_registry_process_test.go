@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func TestServiceCreatorKeepsCapturedImageAuthority(t *testing.T) {
@@ -95,7 +95,7 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	writeFakeDocker(t, dockerBin, python, dockerState)
 	runner := filepath.Join(root, "swarm-test")
 	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
@@ -103,7 +103,7 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	}
 
 	stateHome := filepath.Join(root, "state-home")
-	run := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+	run := exec.Command(runner, "--", "./tests/support/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 	run.Dir = repoRoot
 	run.Env = append(withoutPostgresConnectionEnv(os.Environ()), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "XDG_STATE_HOME="+stateHome)
 	if out, err := os.Create(filepath.Join(root, "runner.log")); err != nil {
@@ -242,7 +242,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 	root := t.TempDir()
 	runner := filepath.Join(root, "swarm-test")
 	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
 	build.Dir = repoRoot
 	if output, err := build.CombinedOutput(); err != nil {
@@ -256,7 +256,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 	if limit := conservativeRunCapacity(cpu, memory); capacity > limit {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		command := exec.CommandContext(ctx, runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+		command := exec.CommandContext(ctx, runner, "--", "./tests/support/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 		command.Env = append(withoutPostgresConnectionEnv(os.Environ()),
 			"PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"),
 			"XDG_STATE_HOME="+stateHome,
@@ -304,7 +304,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 		}
 	}()
 	for index, prefix := range prefixes {
-		command := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+		command := exec.Command(runner, "--", "./tests/support/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 		command.Env = append(withoutPostgresConnectionEnv(os.Environ()),
 			"PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"),
 			"XDG_STATE_HOME="+stateHome,
@@ -400,7 +400,7 @@ func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
 	root := t.TempDir()
 	runner := filepath.Join(root, "swarm-test")
 	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
 	build.Dir = repoRoot
 	if output, err := build.CombinedOutput(); err != nil {
@@ -483,7 +483,7 @@ esac
 						t.Fatal(err)
 					}
 
-					command := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+					command := exec.Command(runner, "--", "./tests/support/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 					command.Dir = repoRoot
 					command.Env = descendantSettlementEnvironment(os.Environ(), root, stateHome, test.explicitDSN,
 						"SWARM_TEST_DESCENDANT_STARTED="+started,

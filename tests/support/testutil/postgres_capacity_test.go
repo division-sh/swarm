@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 func TestPostgresHelperCapacityAdmissionNative(t *testing.T) {

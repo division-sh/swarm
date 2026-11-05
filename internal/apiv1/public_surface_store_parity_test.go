@@ -127,7 +127,7 @@ func TestPublicSurfaceStoreParitySourceRolesShareFixtureClassification(t *testin
 		"internal/store/selected/selectedtest/fixture.go":     "package selectedtest; func OpenFixture() {}",
 		"internal/store/selected/selectedtesting/ordinary.go": "package selectedtesting; func OpenOrdinary() {}",
 		"internal/cliapp/production.go":                       "package cliapp; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
-		"internal/testutil/fixturetest/consumer.go":           "package fixturetest; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
+		"tests/support/testutil/fixturetest/consumer.go":      "package fixturetest; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
 		"internal/store/internal/selectedtest/ordinary.go":    "package selectedtest; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
 	} {
 		full := filepath.Join(root, path)

@@ -18,7 +18,7 @@ var preflightCandidates = []TestRoot{
 	preflightRoot("internal/store", "TestPersistenceAuthorityFindingRegistry"),
 	preflightRoot("internal/store", "TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority"),
 	preflightRoot("internal/store/internal/backend/authoractivity", "TestOrderingScopeConstructorInventoryIsClosed"),
-	preflightRoot("internal/testutil", "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"),
+	preflightRoot("tests/support/testutil", "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"),
 	preflightRoot("internal/testtiming", "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres"),
 	preflightRoot("internal/runtime/effects", "TestDirectPrimitiveOwnershipManifestIsTotal"),
 	preflightRoot("internal/runtime/deliverycontinuation", "TestExecutableDeliveryContinuationHasClosedProductionConsumers"),

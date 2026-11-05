@@ -9,8 +9,8 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 func TestStartPostgres_Smoke(t *testing.T) {

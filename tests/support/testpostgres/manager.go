@@ -157,7 +157,7 @@ func ManagerFromEnvironment(ctx context.Context) (*Manager, error) {
 	}
 	manager, err := NewManager(ctx, connection)
 	if err != nil {
-		return nil, fmt.Errorf("%s is set but unusable; no Docker fallback is available; see internal/testutil/POSTGRES.md: %w", SourceEnv, err)
+		return nil, fmt.Errorf("%s is set but unusable; no Docker fallback is available; see tests/support/testutil/POSTGRES.md: %w", SourceEnv, err)
 	}
 	return manager, nil
 }
@@ -1219,7 +1219,7 @@ func waitForDatabase(ctx context.Context, db *sql.DB, timeout time.Duration) err
 
 func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
 	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 	path := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	source, err := yamlsource.LoadFile(path)
 	if err != nil {

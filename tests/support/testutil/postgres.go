@@ -12,7 +12,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 var postgresManagers = struct {
@@ -121,7 +121,7 @@ func postgresManagerForConnection(ctx context.Context, connection testpostgres.C
 
 func platformSpecPath() (string, error) {
 	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 	path := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("platform spec not found: %w", err)

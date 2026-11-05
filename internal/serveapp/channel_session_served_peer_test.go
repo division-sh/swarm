@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/whatsappfixture"
 	"go.mau.fi/whatsmeow"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waE2E"

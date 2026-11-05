@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestImplicitTransactionScopeEndsAtSettlement(t *testing.T) {
