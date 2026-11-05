@@ -1,7 +1,6 @@
 package cliapp
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func packConsumptionFragments(provider string, component PackComponentDescription) ([]PackConsumptionFragment, error) {
@@ -19,9 +18,7 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 	}
 	fragments := []PackConsumptionFragment{{Scope: component.Scope, File: "provider setup", Purpose: "selected provider provenance", YAML: setup}}
 	if component.HasChannel {
-		policy, err := consumptionYAML(map[string]any{"operator_account": &yaml.Node{
-			Kind: yaml.ScalarNode, Tag: "!!str", Value: "REPLACE_OPERATOR_ACCOUNT", Style: yaml.DoubleQuotedStyle,
-		}})
+		policy, err := consumptionYAML(map[string]any{"operator_account": yamlsource.QuotedString("REPLACE_OPERATOR_ACCOUNT")})
 		if err != nil {
 			return nil, err
 		}
@@ -177,18 +174,6 @@ func consumptionFieldType(field string, kind runtimecontracts.ToolSchemaKind) bo
 }
 
 func consumptionYAML(value any) (string, error) {
-	var document yaml.Node
-	if err := document.Encode(value); err != nil {
-		return "", err
-	}
-	var out bytes.Buffer
-	encoder := yaml.NewEncoder(&out)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(&document); err != nil {
-		return "", err
-	}
-	if err := encoder.Close(); err != nil {
-		return "", err
-	}
-	return out.String(), nil
+	raw, err := yamlsource.Marshal(value)
+	return string(raw), err
 }
