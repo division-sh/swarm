@@ -208,18 +208,11 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			return Snapshot{}, fmt.Errorf("scan timer obligation: %w", err)
 		}
 		if scopedLife {
-			var source events.RoutingSource
-			if err := json.Unmarshal(sourceRaw, &source); err != nil {
-				return Snapshot{}, fmt.Errorf("decode instance-life timer source: %w", err)
+			matches, err := timerMatchesInstanceLife(sourceRaw, runID, life)
+			if err != nil {
+				return Snapshot{}, err
 			}
-			path := source.Route().FlowInstance
-			if source.Kind() == events.RoutingSourceRoot {
-				path = source.Route().EntityID
-			}
-			if runID != life.RunID || path != life.FlowInstance || source.Life() <= 0 {
-				return Snapshot{}, fmt.Errorf("instance-life timer source contradicts its retained owner")
-			}
-			if source.Life() != life.Life {
+			if !matches {
 				continue
 			}
 		}
@@ -301,6 +294,21 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		})
 	}
 	return snapshot, nil
+}
+
+func timerMatchesInstanceLife(raw []byte, runID string, life events.InstanceLife) (bool, error) {
+	var source events.RoutingSource
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return false, fmt.Errorf("decode instance-life timer source: %w", err)
+	}
+	path := source.Route().FlowInstance
+	if source.Kind() == events.RoutingSourceRoot {
+		path = source.Route().EntityID
+	}
+	if runID != life.RunID || path != life.FlowInstance || source.Life() <= 0 {
+		return false, fmt.Errorf("instance-life timer source contradicts its retained owner")
+	}
+	return source.Life() == life.Life, nil
 }
 
 func timerTimeValue(raw any) (time.Time, error) {
