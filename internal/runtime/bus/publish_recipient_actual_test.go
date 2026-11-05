@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestPublishRecipientActualRetainsHandlerEventAndExactAgent(t *testing.T) {

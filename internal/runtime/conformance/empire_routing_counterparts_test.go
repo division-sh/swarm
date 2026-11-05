@@ -6,7 +6,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 // These paths identify the Empire evidence inspected at a528e0b. Empire's

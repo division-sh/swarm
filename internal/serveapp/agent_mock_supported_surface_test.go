@@ -20,7 +20,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"

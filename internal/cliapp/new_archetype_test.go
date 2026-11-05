@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	swarmassets "github.com/division-sh/swarm"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {

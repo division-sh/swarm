@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func readServedClockHeader(t *testing.T, endpoint, runID string) operatorread.RunHeader {

@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"

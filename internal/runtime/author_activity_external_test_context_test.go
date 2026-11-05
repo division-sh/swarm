@@ -15,7 +15,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"

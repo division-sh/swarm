@@ -41,7 +41,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 

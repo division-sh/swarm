@@ -27,7 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"

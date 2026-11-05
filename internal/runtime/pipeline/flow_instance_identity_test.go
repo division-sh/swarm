@@ -11,7 +11,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {

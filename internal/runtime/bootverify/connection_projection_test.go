@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestConnectionMixedProjectionBoot(t *testing.T) {

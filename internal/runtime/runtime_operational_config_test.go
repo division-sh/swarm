@@ -14,7 +14,7 @@ import (
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"

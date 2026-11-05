@@ -25,7 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"

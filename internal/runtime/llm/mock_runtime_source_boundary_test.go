@@ -43,7 +43,7 @@ func TestMockRuntimeImportCensusUsesFixtureRoleWithoutAuthorizingProduction(t *t
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(full, []byte("package probe; import _ \"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting\""), 0o644); err != nil {
+		if err := os.WriteFile(full, []byte("package probe; import _ \"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting\""), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -123,7 +123,7 @@ func mockRuntimeImportViolations(repo string) ([]string, error) {
 				if err != nil {
 					return err
 				}
-				if strings.Contains(value, "/internal/runtime/cataloge2e") || strings.Contains(value, "/internal/runtime/testfixtures/") {
+				if strings.Contains(value, "/internal/runtime/cataloge2e") || strings.Contains(value, "/tests/support/runtime/testfixtures/") {
 					violations = append(violations, "production source "+filepath.ToSlash(strings.TrimPrefix(path, repo+string(filepath.Separator)))+" imports private test owner "+value)
 				}
 			}

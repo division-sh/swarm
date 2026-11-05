@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 

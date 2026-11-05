@@ -13,15 +13,45 @@ import (
 
 func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
 	repoRoot := repoRoot(t)
-	if err := ValidatePromptSchemaGuardsForBundle(loadPromptTestBundle(t, repoRoot)); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemasForBundle(t *testing.T) {
-	bundle := loadPromptTestBundle(t, repoRoot(t))
-	if err := ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
-		t.Fatal(err)
+	for _, test := range []struct {
+		name   string
+		intent string
+		bad    bool
+	}{
+		{name: "declared fields"},
+		{name: "business intent", intent: "Review the submitted work and explain the conclusion."},
+		{name: "unknown structural field", intent: "When you call emit_item_created with:\n- item_id: the created item id\n- items: the intake items\n- unknown_field: unsupported\n", bad: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writePromptTestBundle(t, repoRoot)
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("item.created:\n  item_id: string\n  items: [string]\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if test.intent != "" {
+				if err := os.WriteFile(filepath.Join(root, "prompts", "ops-lead.md"), []byte(test.intent+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+			if err != nil {
+				t.Fatal(err)
+			}
+			findings, err := PromptSchemaGuardFindingsForBundle(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !test.bad {
+				if len(findings) != 0 {
+					t.Fatalf("valid intent refused: %+v", findings)
+				}
+				return
+			}
+			if len(findings) != 1 || findings[0].CheckID != "agent_prompt_lint_structural" || findings[0].Severity != "hard_invalidity" ||
+				!strings.Contains(findings[0].Message, "fields not in item.created schema: [unknown_field]") ||
+				filepath.Base(findings[0].Location) != "ops-lead.md" {
+				t.Fatalf("explicit schema drift not refused with its source: %+v", findings)
+			}
+		})
 	}
 }
 
@@ -134,16 +164,6 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 	if !contents["Root reviewer intent."] || !contents["Flow reviewer intent."] {
 		t.Fatalf("guard contents = %#v, want root and flow scoped intent", contents)
 	}
-}
-
-func loadPromptTestBundle(t *testing.T, repoRoot string) *WorkflowContractBundle {
-	t.Helper()
-	bundleRoot := writePromptTestBundle(t, repoRoot)
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, bundleRoot, DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return bundle
 }
 
 func writePromptTestBundle(t *testing.T, repoRoot string) string {

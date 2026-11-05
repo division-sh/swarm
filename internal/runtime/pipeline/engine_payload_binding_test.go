@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestPipelineEngineEvaluatorConsumesAdmittedHandlerPayloadTypeForTemplateReply(t *testing.T) {
