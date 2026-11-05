@@ -852,6 +852,15 @@ jobs:
         with:
           path: ${{ runner.temp }}/debt-analysis
           key: ${{ steps.debt-identity.outputs.key }}
+      - name: Capture soak PostgreSQL service log
+        if: matrix.unit == 'conformance-soak-postgres'
+        continue-on-error: true
+        run: |
+          mkdir -p test-results/evidence
+          (docker events --since "$(date +%s)" --filter type=container --filter event=start \
+            --filter label=com.division.swarm.test-postgres.managed=1 --format '{{.Actor.ID}}' |
+            while IFS= read -r container; do docker logs --timestamps --follow "$container"; done) \
+            >test-results/evidence/postgres-service.log 2>&1 </dev/null &
       - name: Run exact planned proof unit
         shell: bash
         env:
