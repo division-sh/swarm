@@ -912,9 +912,9 @@ func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) 
 			continue
 		}
 		prior := base.Files[path]
-		fixtureRelocated := approvedCatalogFixtureDecodeRelocation(base, current, path)
+		relocatedPrior, fixtureRelocated := approvedFixtureDecodeRelocation(base, current, path)
 		if fixtureRelocated {
-			prior = base.Files["internal/providerconnectors/catalog_types.go"]
+			prior = relocatedPrior
 		}
 		if entry.NodeSites > prior.NodeSites || entry.DirectDecodeRoots > prior.DirectDecodeRoots {
 			return fmt.Errorf("decode site %s rose from node/root %d/%d to %d/%d", path, prior.NodeSites, prior.DirectDecodeRoots, entry.NodeSites, entry.DirectDecodeRoots)
@@ -943,15 +943,27 @@ func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) 
 	return nil
 }
 
-func approvedCatalogFixtureDecodeRelocation(base, current canonicalDecodeBypassInventory, path string) bool {
+func approvedFixtureDecodeRelocation(base, current canonicalDecodeBypassInventory, path string) (canonicalDecodeBypassFile, bool) {
 	// Gate D #2486: the generic reader loses every runtime caller; the existing
 	// fixture reader moves intact and remains charged to its accepted-base budget.
 	const old = "internal/providerconnectors/catalog_types.go"
 	const moved = "internal/providerconnectors/catalog_conformance.go"
-	return path == moved && base.Files[moved].NodeSites == 0 && base.Files[moved].DirectDecodeRoots == 0 &&
+	if path == moved && base.Files[moved].NodeSites == 0 && base.Files[moved].DirectDecodeRoots == 0 &&
 		base.Files[old] == (canonicalDecodeBypassFile{Family: "closure_pack_platform", DirectDecodeRoots: 1}) &&
 		current.Files[old].NodeSites == 0 && current.Files[old].DirectDecodeRoots == 0 &&
-		current.Files[moved] == (canonicalDecodeBypassFile{Family: "excluded_test_tooling", DirectDecodeRoots: 1})
+		current.Files[moved] == (canonicalDecodeBypassFile{Family: "excluded_test_tooling", DirectDecodeRoots: 1}) {
+		return base.Files[old], true
+	}
+	const oldRuntime = "internal/runtime/testfixtures/canonicalrouting/fixture.go"
+	const movedRuntime = "tests/support/runtime/testfixtures/canonicalrouting/fixture.go"
+	_, destinationExisted := base.Files[movedRuntime]
+	_, sourceRemains := current.Files[oldRuntime]
+	prior := canonicalDecodeBypassFile{Family: "excluded_test_fixture", NodeSites: 13, DirectDecodeRoots: 4}
+	if path == movedRuntime && !destinationExisted && !sourceRemains &&
+		base.Files[oldRuntime] == prior && current.Files[movedRuntime] == prior {
+		return prior, true
+	}
+	return canonicalDecodeBypassFile{}, false
 }
 
 func TestCatalogFixtureDecodeRelocationPreservesAcceptedBaseBudget(t *testing.T) {
@@ -977,7 +989,7 @@ func TestCatalogFixtureDecodeRelocationPreservesAcceptedBaseBudget(t *testing.T)
 		{moved: {Family: "canonical_owner", DirectDecodeRoots: 1}},
 	} {
 		current.Files = hostile
-		if approvedCatalogFixtureDecodeRelocation(base, current, moved) {
+		if _, approved := approvedFixtureDecodeRelocation(base, current, moved); approved {
 			t.Fatalf("hostile relocation admitted: %#v", hostile)
 		}
 		if hostile[moved].Family != "canonical_owner" {
@@ -988,6 +1000,60 @@ func TestCatalogFixtureDecodeRelocationPreservesAcceptedBaseBudget(t *testing.T)
 			t.Fatal("fixture reader was relabeled as the canonical YAML substrate")
 		}
 	}
+	t.Run("portable runtime fixture", func(t *testing.T) {
+		const old = "internal/runtime/testfixtures/canonicalrouting/fixture.go"
+		const moved = "tests/support/runtime/testfixtures/canonicalrouting/fixture.go"
+		entry := canonicalDecodeBypassFile{Family: "excluded_test_fixture", NodeSites: 13, DirectDecodeRoots: 4}
+		base := canonicalDecodeBypassInventory{NodeSiteCeiling: 13, DirectDecodeCeiling: 4, Files: map[string]canonicalDecodeBypassFile{old: entry}}
+		current := canonicalDecodeBypassInventory{NodeSiteCeiling: 13, DirectDecodeCeiling: 4, Files: map[string]canonicalDecodeBypassFile{moved: entry}}
+		if prior, approved := approvedFixtureDecodeRelocation(base, current, moved); !approved || prior != entry {
+			t.Fatalf("exact fixture relocation lost its prior: %#v, %t", prior, approved)
+		}
+		if err := validateDecodeBypassMonotone(base, current); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateDecodeBypassMonotone(current, current); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateDecodeBypassMonotone(current, base); err == nil {
+			t.Fatal("reverse fixture relocation admitted")
+		}
+		for _, hostile := range []map[string]canonicalDecodeBypassFile{
+			{old: entry, moved: entry},
+			{old: {}, moved: entry},
+			{moved: {Family: entry.Family, NodeSites: 14, DirectDecodeRoots: 4}},
+			{moved: {Family: entry.Family, NodeSites: 13, DirectDecodeRoots: 5}},
+			{"tests/support/runtime/testfixtures/canonicalrouting/foreign.go": entry},
+			{moved: {Family: "excluded_test_tooling", NodeSites: 13, DirectDecodeRoots: 4}},
+			{moved: {Family: "canonical_owner", NodeSites: 13, DirectDecodeRoots: 4}},
+		} {
+			current.Files = hostile
+			if _, approved := approvedFixtureDecodeRelocation(base, current, moved); approved {
+				t.Fatalf("hostile fixture relocation admitted: %#v", hostile)
+			}
+			if hostile[moved].Family != "canonical_owner" {
+				if err := validateDecodeBypassMonotone(base, current); err == nil {
+					t.Fatalf("hostile fixture relocation admitted: %#v", hostile)
+				}
+			} else if err := validateYAMLDecodeSites(current, hostile); err == nil {
+				t.Fatal("runtime fixture relabeled as canonical YAML substrate")
+			}
+		}
+		current.Files = map[string]canonicalDecodeBypassFile{moved: entry}
+		for _, hostile := range []map[string]canonicalDecodeBypassFile{
+			{old: entry, moved: {}},
+			{old: {Family: entry.Family, NodeSites: 12, DirectDecodeRoots: 4}},
+			{old: {Family: "excluded_test_tooling", NodeSites: 13, DirectDecodeRoots: 4}},
+		} {
+			base.Files = hostile
+			if _, approved := approvedFixtureDecodeRelocation(base, current, moved); approved {
+				t.Fatalf("foreign base fixture budget admitted: %#v", hostile)
+			}
+			if err := validateDecodeBypassMonotone(base, current); err == nil {
+				t.Fatalf("foreign base fixture budget admitted: %#v", hostile)
+			}
+		}
+	})
 }
 
 func collectCustomYAMLDecoders(root string) (map[string]string, error) {
