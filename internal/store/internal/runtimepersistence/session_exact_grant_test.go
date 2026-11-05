@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -169,6 +171,61 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 		if err := selected.db.QueryRowContext(ctx, `SELECT COALESCE(lease_holder,''),COALESCE(lease_grant_id,''),lease_expires_at IS NULL FROM agent_sessions WHERE session_id=$1`, expiredExact.SessionID).Scan(&holder, &grant, &expiryNull); err != nil || holder != "" || grant != "" || !expiryNull {
 			t.Fatalf("expired cleanup left authority: holder=%q grant=%q expiry_null=%v err=%v", holder, grant, expiryNull, err)
 		}
+		t.Run("captured_instance_life", func(t *testing.T) {
+			backend := "sqlite"
+			if selected.postgres {
+				backend = "postgres"
+			}
+			f, request := newR7SelectionProof(t, backend)
+			runID := request.Lookup.RunID()
+			identity := mustTestAgentIdentityForRun(runID, "life-agent", "")
+			seedTestAgentRow(t, f.ctx, f.db, selected.postgres, identity, "active")
+			captured := events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}
+			ctx := runtimeeffects.WithDifferentOwner(f.ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+			ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &captured})
+			store := f.store.(interface {
+				sessions.Registry
+				runtimellm.ConversationPersistence
+			})
+			lease, err := store.Acquire(ctx, identity, "captured-life-worker")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fault only the native currentness coordinate; this does not claim to
+			// perform the atomic reset or its session lifecycle composition.
+			if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$1`, runID); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotRotationEffects(t, ctx, f.db, runID)
+			for name, write := range map[string]func() error{
+				"acquire":   func() error { _, err := store.Acquire(ctx, identity, "captured-life-worker"); return err },
+				"renew":     func() error { _, err := store.Renew(ctx, lease); return err },
+				"increment": func() error { _, err := store.IncrementTurnOutcome(ctx, lease); return err },
+				"rotate": func() error {
+					_, err := store.Rotate(ctx, lease, sessions.RotationMetadata{RetryReason: "old-life"})
+					return err
+				},
+				"conversation": func() error {
+					return store.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Status: "active", Memory: agentmemory.Plan{Enabled: true}})
+				},
+			} {
+				if err := write(); err == nil {
+					t.Fatalf("%s accepted a predecessor-life session", name)
+				} else if envelope, ok := failures.EnvelopeFromError(err); !ok || envelope.Class != failures.ClassStaleArrival || envelope.Detail.Code != "instance_restarted" {
+					t.Fatalf("%s lost typed stale-life refusal: %v", name, err)
+				}
+				requireRotationEffectsUnchanged(t, before, snapshotRotationEffects(t, ctx, f.db, runID))
+			}
+			captured.Life = 2
+			ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &captured})
+			current, err := store.Acquire(ctx, identity, "captured-life-worker")
+			if err != nil {
+				t.Fatalf("exact current life refused: %v", err)
+			}
+			if result, err := store.ReleaseOutcome(ctx, current); err != nil || !result.Acknowledged {
+				t.Fatalf("release exact current life: %+v %v", result, err)
+			}
+		})
 	})
 }
 
