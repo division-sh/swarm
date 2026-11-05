@@ -1,4 +1,4 @@
-package eventidentity
+package identity
 
 import (
 	"fmt"
@@ -12,23 +12,23 @@ import (
 var eventTypeTokenPattern = regexp.MustCompile("^[a-z0-9_]+$")
 var eventPathSegmentPattern = regexp.MustCompile("^[a-z0-9_-]+$")
 
-type Scope struct {
+type EventScope struct {
 	Path         string
 	LocalEvents  []string
 	InputEvents  []string
 	OutputEvents []string
 }
 
-type DescendantScope struct {
+type DescendantEventScope struct {
 	Path        string
 	LocalEvents []string
 }
 
-func Normalize(raw string) string {
+func NormalizeEventName(raw string) string {
 	return strings.Trim(strings.TrimSpace(raw), "/")
 }
 
-func IsValidName(raw string) bool {
+func IsValidEventName(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return false
@@ -54,16 +54,16 @@ func IsValidName(raw string) bool {
 	return true
 }
 
-// IsCanonicalName reports whether raw is an exact concrete event identity,
+// IsCanonicalEventName reports whether raw is an exact concrete event identity,
 // without accepting whitespace or slash normalization aliases.
-func IsCanonicalName(raw string) bool {
-	return raw == Normalize(raw) && IsValidName(raw)
+func IsCanonicalEventName(raw string) bool {
+	return raw == NormalizeEventName(raw) && IsValidEventName(raw)
 }
 
-// IsCanonicalPattern reports whether raw uses the closed authored wildcard
+// IsCanonicalEventPattern reports whether raw uses the closed authored wildcard
 // grammar: exact path/name tokens plus whole-token * and whole-segment **.
-func IsCanonicalPattern(raw string) bool {
-	if raw == "" || raw != Normalize(raw) || !strings.Contains(raw, "*") {
+func IsCanonicalEventPattern(raw string) bool {
+	if raw == "" || raw != NormalizeEventName(raw) || !strings.Contains(raw, "*") {
 		return false
 	}
 	for _, segment := range strings.Split(raw, "/") {
@@ -109,9 +109,9 @@ func isProviderDirectoryEventPosition(parts []string, index int) bool {
 	return len(parts) >= 3 && parts[0] == "inbound" && index == 1
 }
 
-// ProviderKeyError supplies the directory owner's teaching error. It diagnoses
+// ProviderEventKeyError supplies the directory owner's teaching error. It diagnoses
 // only concrete provider keys, not general event validity or wildcard admission.
-func ProviderKeyError(raw string) error {
+func ProviderEventKeyError(raw string) error {
 	for _, segment := range strings.Split(raw, "/") {
 		parts := strings.Split(segment, ".")
 		if !isProviderDirectoryEventPosition(parts, 1) || parts[1] == "*" {
@@ -124,12 +124,12 @@ func ProviderKeyError(raw string) error {
 	return nil
 }
 
-func IsCanonicalDeclaration(raw string) bool {
-	return IsCanonicalName(raw) || IsCanonicalPattern(raw)
+func IsCanonicalEventDeclaration(raw string) bool {
+	return IsCanonicalEventName(raw) || IsCanonicalEventPattern(raw)
 }
 
-func LeafName(raw string) string {
-	raw = Normalize(raw)
+func EventLeafName(raw string) string {
+	raw = NormalizeEventName(raw)
 	if raw == "" {
 		return ""
 	}
@@ -139,21 +139,21 @@ func LeafName(raw string) string {
 	return raw
 }
 
-func SplitRouteSegments(raw string) []string {
-	raw = Normalize(raw)
+func SplitEventRouteSegments(raw string) []string {
+	raw = NormalizeEventName(raw)
 	if raw == "" {
 		return nil
 	}
 	return strings.Split(raw, "/")
 }
 
-func NormalizeList(in []string) []string {
+func NormalizeEventNames(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(in))
 	for _, item := range in {
-		item = Normalize(item)
+		item = NormalizeEventName(item)
 		if item == "" {
 			continue
 		}
@@ -166,51 +166,51 @@ func IsLocalEvent(localEvents map[string]struct{}, raw string) bool {
 	if len(localEvents) == 0 {
 		return false
 	}
-	_, ok := localEvents[Normalize(raw)]
+	_, ok := localEvents[NormalizeEventName(raw)]
 	return ok
 }
 
-func (s Scope) ResolveEvent(raw string, descendants []DescendantScope) string {
-	raw = Normalize(raw)
+func (s EventScope) ResolveEvent(raw string, descendants []DescendantEventScope) string {
+	raw = NormalizeEventName(raw)
 	if raw == "" {
 		return ""
 	}
 	if strings.Contains(raw, "/") {
-		if absolute, ok := ExternalizeDescendantForFlow(s.Path, raw, descendantLocalEventSets(descendants)); ok {
+		if absolute, ok := ExternalizeDescendantEventForFlow(s.Path, raw, descendantLocalEventSets(descendants)); ok {
 			return absolute
 		}
 		return raw
 	}
-	return ExternalizeForFlow(s.Path, s.LocalEvents, raw)
+	return ExternalizeEventForFlow(s.Path, s.LocalEvents, raw)
 }
 
-func (s Scope) ResolveSubscriptionPattern(raw string, descendants []DescendantScope) string {
-	raw = Normalize(raw)
+func (s EventScope) ResolveSubscriptionPattern(raw string, descendants []DescendantEventScope) string {
+	raw = NormalizeEventName(raw)
 	if raw == "" {
 		return ""
 	}
 	if strings.Contains(raw, "/") && !strings.Contains(raw, "://") {
-		if absolute, ok := ExternalizeDescendantForFlow(s.Path, raw, descendantLocalEventSets(descendants)); ok {
+		if absolute, ok := ExternalizeDescendantEventForFlow(s.Path, raw, descendantLocalEventSets(descendants)); ok {
 			return absolute
 		}
 	}
-	return ResolvePattern(s.Path, localEventSet(s.LocalEvents), raw)
+	return ResolveEventPattern(s.Path, localEventSet(s.LocalEvents), raw)
 }
 
-func (s Scope) LocalizeInput(raw string) string {
-	return LocalizeForFlow(s.Path, s.InputEvents, raw)
+func (s EventScope) LocalizeInput(raw string) string {
+	return LocalizeEventForFlow(s.Path, s.InputEvents, raw)
 }
 
-func (s Scope) LocalizeOutput(raw string) string {
-	return LocalizeForFlow(s.Path, s.OutputEvents, raw)
+func (s EventScope) LocalizeOutput(raw string) string {
+	return LocalizeEventForFlow(s.Path, s.OutputEvents, raw)
 }
 
-func (s Scope) HasInput(raw string) bool {
-	local := Normalize(s.LocalizeInput(raw))
+func (s EventScope) HasInput(raw string) bool {
+	local := NormalizeEventName(s.LocalizeInput(raw))
 	if local == "" {
 		return false
 	}
-	for _, input := range NormalizeList(s.InputEvents) {
+	for _, input := range NormalizeEventNames(s.InputEvents) {
 		if input == local {
 			return true
 		}
@@ -218,12 +218,12 @@ func (s Scope) HasInput(raw string) bool {
 	return false
 }
 
-func (s Scope) HasOutput(raw string) bool {
-	local := Normalize(s.LocalizeOutput(raw))
+func (s EventScope) HasOutput(raw string) bool {
+	local := NormalizeEventName(s.LocalizeOutput(raw))
 	if local == "" {
 		return false
 	}
-	for _, output := range NormalizeList(s.OutputEvents) {
+	for _, output := range NormalizeEventNames(s.OutputEvents) {
 		if output == local {
 			return true
 		}
@@ -231,24 +231,24 @@ func (s Scope) HasOutput(raw string) bool {
 	return false
 }
 
-func (s Scope) Matches(subscription, eventName string, descendants []DescendantScope) bool {
-	subscription = Normalize(subscription)
-	eventName = Normalize(eventName)
+func (s EventScope) Matches(subscription, eventName string, descendants []DescendantEventScope) bool {
+	subscription = NormalizeEventName(subscription)
+	eventName = NormalizeEventName(eventName)
 	if subscription == "" || eventName == "" {
 		return false
 	}
 	if strings.Contains(subscription, "*") {
-		return MatchPattern(s.ResolveSubscriptionPattern(subscription, descendants), eventName)
+		return MatchEventPattern(s.ResolveSubscriptionPattern(subscription, descendants), eventName)
 	}
 	if eventName == subscription || eventName == s.ResolveEvent(subscription, descendants) {
 		return true
 	}
-	return Normalize(s.LocalizeInput(eventName)) == subscription
+	return NormalizeEventName(s.LocalizeInput(eventName)) == subscription
 }
 
-func ResolvePattern(basePath string, localEvents map[string]struct{}, raw string) string {
-	raw = Normalize(raw)
-	basePath = Normalize(basePath)
+func ResolveEventPattern(basePath string, localEvents map[string]struct{}, raw string) string {
+	raw = NormalizeEventName(raw)
+	basePath = NormalizeEventName(basePath)
 	switch {
 	case raw == "":
 		return ""
@@ -271,14 +271,14 @@ func ResolvePattern(basePath string, localEvents map[string]struct{}, raw string
 	}
 }
 
-func MatchPattern(pattern, eventName string) bool {
-	pattern = Normalize(pattern)
-	eventName = Normalize(eventName)
+func MatchEventPattern(pattern, eventName string) bool {
+	pattern = NormalizeEventName(pattern)
+	eventName = NormalizeEventName(eventName)
 	switch {
 	case pattern == "", pattern == "*":
 		return true
 	default:
-		return routeSegmentsMatch(SplitRouteSegments(pattern), SplitRouteSegments(eventName))
+		return routeSegmentsMatch(SplitEventRouteSegments(pattern), SplitEventRouteSegments(eventName))
 	}
 }
 
@@ -315,9 +315,9 @@ func routeSegmentsMatch(pattern, event []string) bool {
 	}
 }
 
-func LocalizeForFlow(flowPath string, inputEvents []string, eventName string) string {
-	flowPath = Normalize(flowPath)
-	eventName = Normalize(eventName)
+func LocalizeEventForFlow(flowPath string, inputEvents []string, eventName string) string {
+	flowPath = NormalizeEventName(flowPath)
+	eventName = NormalizeEventName(eventName)
 	if flowPath == "" || eventName == "" {
 		return eventName
 	}
@@ -325,7 +325,7 @@ func LocalizeForFlow(flowPath string, inputEvents []string, eventName string) st
 	if strings.HasPrefix(eventName, prefix) {
 		return strings.TrimPrefix(eventName, prefix)
 	}
-	for _, input := range NormalizeList(inputEvents) {
+	for _, input := range NormalizeEventNames(inputEvents) {
 		if eventName == input {
 			return input
 		}
@@ -333,16 +333,16 @@ func LocalizeForFlow(flowPath string, inputEvents []string, eventName string) st
 	return eventName
 }
 
-func ExternalizeForFlow(flowPath string, localEvents []string, eventName string) string {
-	flowPath = Normalize(flowPath)
-	eventName = Normalize(eventName)
+func ExternalizeEventForFlow(flowPath string, localEvents []string, eventName string) string {
+	flowPath = NormalizeEventName(flowPath)
+	eventName = NormalizeEventName(eventName)
 	if flowPath == "" || eventName == "" {
 		return eventName
 	}
 	if strings.Contains(eventName, "/") {
 		return eventName
 	}
-	for _, localEvent := range NormalizeList(localEvents) {
+	for _, localEvent := range NormalizeEventNames(localEvents) {
 		if eventName != localEvent {
 			continue
 		}
@@ -351,9 +351,9 @@ func ExternalizeForFlow(flowPath string, localEvents []string, eventName string)
 	return eventName
 }
 
-func ExternalizeDescendantForFlow(flowPath, eventName string, descendantLocalEvents map[string]map[string]struct{}) (string, bool) {
-	flowPath = Normalize(flowPath)
-	eventName = Normalize(eventName)
+func ExternalizeDescendantEventForFlow(flowPath, eventName string, descendantLocalEvents map[string]map[string]struct{}) (string, bool) {
+	flowPath = NormalizeEventName(flowPath)
+	eventName = NormalizeEventName(eventName)
 	if flowPath == "" || eventName == "" || len(descendantLocalEvents) == 0 {
 		return "", false
 	}
@@ -361,7 +361,7 @@ func ExternalizeDescendantForFlow(flowPath, eventName string, descendantLocalEve
 		return "", false
 	}
 	for descendantPath, localEvents := range descendantLocalEvents {
-		descendantPath = Normalize(descendantPath)
+		descendantPath = NormalizeEventName(descendantPath)
 		if descendantPath == "" || !strings.HasPrefix(descendantPath, flowPath+"/") {
 			continue
 		}
@@ -380,19 +380,19 @@ func ExternalizeDescendantForFlow(flowPath, eventName string, descendantLocalEve
 
 func localEventSet(values []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(values))
-	for _, value := range NormalizeList(values) {
+	for _, value := range NormalizeEventNames(values) {
 		out[value] = struct{}{}
 	}
 	return out
 }
 
-func descendantLocalEventSets(descendants []DescendantScope) map[string]map[string]struct{} {
+func descendantLocalEventSets(descendants []DescendantEventScope) map[string]map[string]struct{} {
 	if len(descendants) == 0 {
 		return nil
 	}
 	out := make(map[string]map[string]struct{}, len(descendants))
 	for _, descendant := range descendants {
-		path := Normalize(descendant.Path)
+		path := NormalizeEventName(descendant.Path)
 		if path == "" {
 			continue
 		}

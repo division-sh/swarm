@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -339,7 +338,7 @@ func validateNodeHandlerEventDeclaration(bundle *WorkflowContractBundle, record 
 	if _, reserved := systemNodeContractFields[event]; reserved {
 		return fmt.Errorf("%w: node %q in flow %q handler %q at %s is a node field, not an event; rename the event", ErrInvalidField, node.NodeID(), node.FlowPath(), event, location)
 	}
-	if !eventidentity.IsCanonicalName(event) && !eventidentity.IsCanonicalPattern(event) {
+	if !runtimeidentity.IsCanonicalEventName(event) && !runtimeidentity.IsCanonicalEventPattern(event) {
 		return fmt.Errorf("%w: node %q in flow %q handler %q at %s requires an exact event name or supported wildcard pattern", ErrInvalidField, node.NodeID(), node.FlowPath(), event, location)
 	}
 	if !bundle.executableNodeHandlerEventDeclared(node, event) {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -863,7 +863,7 @@ func targetedConcreteEventKeysForPlan(evt events.Event) []string {
 		if staticScope == "" {
 			continue
 		}
-		localEvent := eventidentity.LocalizeForFlow(staticScope, nil, eventType)
+		localEvent := runtimeidentity.LocalizeEventForFlow(staticScope, nil, eventType)
 		if localEvent == "" || strings.Contains(localEvent, "/") {
 			continue
 		}
@@ -1209,16 +1209,16 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 	}
 	out := []string{eventType}
 	for _, subscriber := range routed {
-		if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
+		if localized := runtimeidentity.NormalizeEventName(subscriber.LocalizedEvent); localized != "" {
 			out = append(out, localized)
-			if path := eventidentity.Normalize(subscriber.Path); path != "" {
+			if path := runtimeidentity.NormalizeEventName(subscriber.Path); path != "" {
 				out = append(out, path+"/"+localized)
 			}
 		}
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
-		localEvent := eventidentity.Normalize(subscriber.LocalizedEvent)
+		localEvent := runtimeidentity.NormalizeEventName(subscriber.LocalizedEvent)
 		if localEvent == "" {
 			// A wildcard match has no single declaration-local event. Localize
 			// only the exact, already routed execution prefix for its carrier.

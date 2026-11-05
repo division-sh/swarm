@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -270,7 +270,7 @@ func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness,
 	if input.EventID != inputID || input.RunID != runID || input.EventName != "evidence.requested" || len(input.Deliveries) != 1 || input.Deliveries[0].Target.FlowID != "worker" || input.Deliveries[0].Target.FlowInstance == "" {
 		t.Fatal("evidence input lost its exact constructed receiver")
 	}
-	eventName := eventidentity.ExternalizeForFlow(input.Deliveries[0].Target.FlowInstance, []string{"evidence.completed"}, "evidence.completed")
+	eventName := runtimeidentity.ExternalizeEventForFlow(input.Deliveries[0].Target.FlowInstance, []string{"evidence.completed"}, "evidence.completed")
 	deadline := time.Now().Add(15 * time.Second)
 	var last operatorread.OperatorEventListResult
 	observer := identitytest.RootNode(t, "observer").Key()

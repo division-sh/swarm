@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func (p FlowInputPins) EventTypes() []string {
@@ -79,7 +79,7 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 
 func validateAuthoredFlowInputPin(pin FlowInputEventPin) error {
 	event := pin.Event
-	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
+	if event == "" || event != strings.TrimSpace(event) || !runtimeidentity.IsValidEventName(event) || strings.ContainsAny(event, "/*") {
 		return eventNameAdmissionError(fmt.Errorf("input pin event %q is not an exact local canonical event identity", event), event)
 	}
 	return nil
@@ -100,7 +100,7 @@ func compiledPinEventName(flowPath, event string) string {
 	if flowPath == "." {
 		flowPath = ""
 	}
-	return eventidentity.ExternalizeForFlow(flowPath, []string{event}, event)
+	return runtimeidentity.ExternalizeEventForFlow(flowPath, []string{event}, event)
 }
 
 func (p CompiledFlowInputPin) EventType() string {
@@ -208,7 +208,7 @@ func CompileFlowOutputPin(context FlowPinCompilationContext, pin FlowOutputEvent
 
 func validateAuthoredFlowOutputPin(pin FlowOutputEventPin) error {
 	event := pin.Event
-	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
+	if event == "" || event != strings.TrimSpace(event) || !runtimeidentity.IsValidEventName(event) || strings.ContainsAny(event, "/*") {
 		return eventNameAdmissionError(fmt.Errorf("output pin event %q is not an exact local canonical event identity", event), event)
 	}
 	return nil

@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1283,11 +1282,11 @@ func (eb *EventBus) ResolveSubscribedRecipients(eventType string) []string {
 }
 
 func routeMatches(pattern, eventType string) bool {
-	return eventidentity.MatchPattern(pattern, eventType)
+	return runtimeidentity.MatchEventPattern(pattern, eventType)
 }
 
 func isValidEventTypeName(raw string) bool {
-	return eventidentity.IsValidName(raw)
+	return runtimeidentity.IsValidEventName(raw)
 }
 
 func appendUniqueEventType(in []events.EventType, v events.EventType) []events.EventType {

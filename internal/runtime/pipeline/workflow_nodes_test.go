@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -591,7 +591,7 @@ func TestWorkflowNodeConnectedInputHandlerUsesExactStampedReceiverPin(t *testing
 func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanticview.Source, handlerEvent, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
-		if plan.ReceiverLocalEvent() != events.EventType(eventidentity.Normalize(handlerEvent)) {
+		if plan.ReceiverLocalEvent() != events.EventType(runtimeidentity.NormalizeEventName(handlerEvent)) {
 			continue
 		}
 		receiver := plan.ReceiverEndpoint().Readback()

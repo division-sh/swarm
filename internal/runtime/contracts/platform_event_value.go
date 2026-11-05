@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -30,7 +30,7 @@ func admitPlatformEventCatalogValue(value, root yamlsource.Value) (map[string]Ev
 				return nil, err
 			}
 		}
-		key := eventidentity.Normalize(name)
+		key := runtimeidentity.NormalizeEventName(name)
 		if key == "" {
 			return nil, nodeValueError(v, fmt.Errorf("platform event identity is required"))
 		}

@@ -5546,7 +5546,7 @@ engine:
         implicit root_input_flow route. Delivery into a child flow requires root and child pins plus an exact nearest-LCA
         connect row under engine.cross_flow_routing; missing connection evidence is a verification error.'
     business_publication:
-      owner: runtime/core/eventidentity/publication.go
+      owner: runtime/core/identity/publication.go
       source_adapter: runtime/core/pinrouting/publication_identity.go
       rules:
       - The pure projection consumes a declaration identity separately from an already admitted execution RoutingSource.

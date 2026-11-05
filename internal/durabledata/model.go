@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
@@ -48,8 +47,8 @@ func ParseDeclarationRef(flowPath, eventName string) (DeclarationRef, error) {
 	if err != nil {
 		return DeclarationRef{}, err
 	}
-	canonicalEvent := eventidentity.Normalize(eventName)
-	if canonicalEvent != eventName || !eventidentity.IsValidName(canonicalEvent) {
+	canonicalEvent := runtimeidentity.NormalizeEventName(eventName)
+	if canonicalEvent != eventName || !runtimeidentity.IsValidEventName(canonicalEvent) {
 		return DeclarationRef{}, fmt.Errorf("event name %q must be one canonical qualified event name", eventName)
 	}
 	return DeclarationRef{FlowPath: flow.String(), EventName: canonicalEvent}, nil

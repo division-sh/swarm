@@ -23,12 +23,12 @@ func TestPublicationProjectionGuardRejectsAliasesAndExistingFileBypasses(t *test
 	overlay := map[string][]byte{}
 	for _, pkg := range []string{"engine", "pipeline", "manager", "bus", "tools"} {
 		overlay[filepath.Join(root, "internal/runtime", pkg, "publication_hostile.go")] = []byte(`package ` + pkg + `
-import disguised "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+import disguised "github.com/division-sh/swarm/internal/runtime/core/identity"
 func hostilePublicationName(path, event string) string {
-    alternate := disguised.ExternalizeForFlow
+    alternate := disguised.ExternalizeEventForFlow
     return alternate(path, []string{event}, event)
 }
-func hostileLeafAdmission(event string) string { return disguised.LeafName(event) }
+func hostileLeafAdmission(event string) string { return disguised.EventLeafName(event) }
 `)
 	}
 	existing := filepath.Join(root, "internal/runtime/tools/emit.go")
@@ -37,7 +37,7 @@ func hostileLeafAdmission(event string) string { return disguised.LeafName(event
 		t.Fatal(err)
 	}
 	overlay[existing] = append(data, []byte(`
-func hostileExistingEmitOwner(event string) string { return eventidentity.LeafName(event) }
+func hostileExistingEmitOwner(event string) string { return runtimeidentity.EventLeafName(event) }
 `)...)
 	findings := publicationProjectionFindings(t, overlay)
 	foundExisting := false
@@ -91,14 +91,14 @@ func publicationProjectionFindings(t *testing.T, overlay map[string][]byte) []st
 						return true
 					}
 					used, ok := pkg.TypesInfo.Uses[id].(*types.Func)
-					if !ok || used.Pkg() == nil || used.Pkg().Path() != "github.com/division-sh/swarm/internal/runtime/core/eventidentity" {
+					if !ok || used.Pkg() == nil || used.Pkg().Path() != "github.com/division-sh/swarm/internal/runtime/core/identity" {
 						return true
 					}
-					if used.Name() != "ExternalizeForFlow" && used.Name() != "LeafName" {
+					if used.Name() != "ExternalizeEventForFlow" && used.Name() != "EventLeafName" {
 						return true
 					}
 					// Tool spelling is a representation, never declaration/schema authority.
-					if used.Name() == "LeafName" && pkg.PkgPath == "github.com/division-sh/swarm/internal/runtime/tools" && pkg.TypesInfo.Defs[fn.Name] == pkg.Types.Scope().Lookup("localEmitEventType") {
+					if used.Name() == "EventLeafName" && pkg.PkgPath == "github.com/division-sh/swarm/internal/runtime/tools" && pkg.TypesInfo.Defs[fn.Name] == pkg.Types.Scope().Lookup("localEmitEventType") {
 						return true
 					}
 					findings = append(findings, pkg.PkgPath+"."+fn.Name.Name+":"+used.Name())
@@ -115,16 +115,16 @@ func TestPublicationProjectionGuardRejectsSameNamedReceiverMethod(t *testing.T) 
 	root := agentNameGuardRepoRoot(t)
 	overlay := map[string][]byte{
 		filepath.Join(root, "internal/runtime/tools/publication_hostile_receiver.go"): []byte(`package tools
-import disguise "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+import disguise "github.com/division-sh/swarm/internal/runtime/core/identity"
 type unrelatedPublicationReceiver struct{}
 func (unrelatedPublicationReceiver) localEmitEventType(event string) string {
-	return disguise.LeafName(event)
+	return disguise.EventLeafName(event)
 }
 `),
 	}
 	findings := publicationProjectionFindings(t, overlay)
 	for _, finding := range findings {
-		if strings.Contains(finding, ".localEmitEventType:LeafName") {
+		if strings.Contains(finding, ".localEmitEventType:EventLeafName") {
 			return
 		}
 	}

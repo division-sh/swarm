@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule/cadence"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -17,7 +17,7 @@ type FlowSchedule struct {
 }
 
 func (s FlowSchedule) Validate() error {
-	if !eventidentity.IsValidName(s.Emit) {
+	if !runtimeidentity.IsValidEventName(s.Emit) {
 		return fmt.Errorf("schedule emit must be an exact business event name")
 	}
 	if (s.Cron == "") == (s.Every == "") {

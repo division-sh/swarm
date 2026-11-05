@@ -17,7 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -2952,10 +2952,10 @@ func TestManagerHelpers_MatchingAndRedaction(t *testing.T) {
 	if normalizeJSONPayload([]byte(`{"b":1,"a":2}`)) == "" {
 		t.Fatal("expected normalized json")
 	}
-	if !eventidentity.MatchPattern("review.*", "review.chat") {
+	if !runtimeidentity.MatchEventPattern("review.*", "review.chat") {
 		t.Fatal("expected subscription match")
 	}
-	if eventidentity.MatchPattern("review.*", "budget.alert") {
+	if runtimeidentity.MatchEventPattern("review.*", "budget.alert") {
 		t.Fatal("unexpected match")
 	}
 	if nullable("", "x") != "x" {

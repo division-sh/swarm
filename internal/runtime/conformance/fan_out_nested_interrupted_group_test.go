@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -173,7 +173,7 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 	reader := nestedPublicReader(t, rt.selected)
 	for _, parent := range parents {
 		view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
-		name := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
+		name := runtimeidentity.ExternalizeEventForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
 		id := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, db, runID, name)
 		completion, err := reader.LoadOperatorEvent(ctx, id)
 		if err != nil || completion.Payload["account_id"] != parent.AccountID || completion.NoDelivery == nil || len(completion.Deliveries) != 0 {

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -445,12 +444,12 @@ func executablePayloadStructuralType(source semanticview.Source, node runtimeide
 }
 
 func executableWildcardPayloadStructuralType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) (*runtimecontracts.ResolvedCatalogType, error) {
-	eventType = runtimeeventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
 	seen := map[string]struct{}{}
 	var selected *runtimecontracts.ResolvedCatalogType
 	for _, match := range relations.Matches {
-		if !match.Consumer.Node.Equal(node) || runtimeeventidentity.Normalize(match.Consumer.HandlerEvent) != eventType {
+		if !match.Consumer.Node.Equal(node) || runtimeidentity.NormalizeEventName(match.Consumer.HandlerEvent) != eventType {
 			continue
 		}
 		key := strings.TrimSpace(match.Event.EventKey())

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -255,7 +254,7 @@ func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSourc
 // AdmitRuntimeControlEventType validates an event identity that was resolved at
 // the producer admission boundary. Durable consumers must preserve it exactly.
 func AdmitRuntimeControlEventType(eventType EventType, source RoutingSource) (EventType, error) {
-	canonical := eventidentity.Normalize(string(eventType))
+	canonical := runtimeidentity.NormalizeEventName(string(eventType))
 	if canonical == "" || canonical != string(eventType) {
 		return "", fmt.Errorf("runtime-control event type must be canonical")
 	}
@@ -263,7 +262,7 @@ func AdmitRuntimeControlEventType(eventType EventType, source RoutingSource) (Ev
 	case RoutingSourceRoot, RoutingSourcePlatformControl:
 		return EventType(canonical), nil
 	case RoutingSourceFlowOwnedControl:
-		if eventidentity.Normalize(source.Route().FlowID) == "" {
+		if runtimeidentity.NormalizeEventName(source.Route().FlowID) == "" {
 			return "", fmt.Errorf("flow-owned runtime-control event requires an exact source scope")
 		}
 		return EventType(canonical), nil
@@ -801,7 +800,7 @@ func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, rec
 	if recipient.Empty() {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires an admitted node or agent recipient")
 	}
-	handler := eventidentity.Normalize(string(handlerEvent))
+	handler := runtimeidentity.NormalizeEventName(string(handlerEvent))
 	if handler == "" || handler != string(handlerEvent) {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires a canonical handler event")
 	}
@@ -934,7 +933,7 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 	var pinDigest [sha256.Size]byte
 	copy(pinDigest[:], pinDecoded)
 	kind, ok := deliveryRecipientKindFromCode(encoded.RecipientKind)
-	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || eventidentity.Normalize(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
+	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || runtimeidentity.NormalizeEventName(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
 		return fmt.Errorf("connect execution claim recipient or handler event is invalid")
 	}
 	handlerNode := runtimeidentity.ExecutableNode{}

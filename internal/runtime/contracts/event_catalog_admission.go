@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -84,7 +84,7 @@ func admitEventCatalogDocument(document yamlsource.Document, catalogs ...TypeCat
 	admitted := make(map[string]yamlsource.Location, len(fields))
 	for _, declaration := range fields {
 		name := declaration.Name
-		if !eventidentity.IsCanonicalDeclaration(name) {
+		if !runtimeidentity.IsCanonicalEventDeclaration(name) {
 			return nil, eventNameAdmissionError(fmt.Errorf("event declaration name %q at %s must be an exact canonical event identity or supported wildcard pattern", name, declaration.KeyLocation), name)
 		}
 		if eventDeclarationClaimsInboundNamespace(name) {
@@ -104,7 +104,7 @@ func admitEventCatalogDocument(document yamlsource.Document, catalogs ...TypeCat
 }
 
 func eventDeclarationClaimsInboundNamespace(name string) bool {
-	leaf := eventidentity.LeafName(name)
+	leaf := runtimeidentity.EventLeafName(name)
 	first, _, _ := strings.Cut(leaf, ".")
 	// Canonical whole-token stars can consume dots and therefore claim a
 	// provider event even in a pattern such as *.completed.

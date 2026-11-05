@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -149,7 +148,7 @@ func EffectiveSystemNodeExecutionType(SystemNodeContract) string {
 }
 
 func IsIntrinsicWorkflowRuntimeEvent(eventType string) bool {
-	switch eventidentity.Normalize(eventType) {
+	switch runtimeidentity.NormalizeEventName(eventType) {
 	case "platform.join_timeout", "platform.join_complete":
 		return true
 	default:
@@ -161,7 +160,7 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(node.EventHandlers)+1)
 	appendSubscription := func(value string) {
-		value = eventidentity.Normalize(value)
+		value = runtimeidentity.NormalizeEventName(value)
 		if value == "" {
 			return
 		}

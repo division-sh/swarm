@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -61,7 +61,7 @@ func capturedReplyRequestEventMatches(event events.Event, record replycontext.Re
 	if record.RequesterFlowID == "." {
 		path = ""
 	}
-	name := eventidentity.ExternalizeForFlow(path, []string{record.RequestOutputPin}, record.RequestOutputPin)
+	name := runtimeidentity.ExternalizeEventForFlow(path, []string{record.RequestOutputPin}, record.RequestOutputPin)
 	return string(event.Type()) == name
 }
 

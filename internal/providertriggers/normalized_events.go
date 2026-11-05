@@ -12,7 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 )
@@ -123,7 +123,7 @@ func (m manifestDefinition) validateNormalizedEvents() error {
 		if !strings.HasPrefix(eventName, "inbound."+provider+".") {
 			return fmt.Errorf("%s normalized event %q must use inbound.%s.* namespace", provider, eventName, provider)
 		}
-		if !eventidentity.IsValidName(eventName) {
+		if !runtimeidentity.IsValidEventName(eventName) {
 			return fmt.Errorf("%s normalized event %q is not a valid canonical event name", provider, eventName)
 		}
 		if m.EventName.Accepts(eventName) {

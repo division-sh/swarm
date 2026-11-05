@@ -6,7 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -62,7 +62,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 	for _, key := range sortedSetKeysLocal(emitted) {
 		entry := emitted[key]
 		ref := entry.Event
-		if _, generated := generatedActivityEvents[eventidentity.Normalize(ref.Canonical)]; generated {
+		if _, generated := generatedActivityEvents[runtimeidentity.NormalizeEventName(ref.Canonical)]; generated {
 			// The generated schema and durable attempt journal own these results;
 			// authors neither declare their schemas nor need to subscribe to them.
 			continue
@@ -149,7 +149,7 @@ func generatedActivityResultEventNamesLocal(source semanticview.Source) map[stri
 				eventTypes = append(eventTypes, results.RevisionRequested, results.Rejected)
 			}
 			for _, eventType := range eventTypes {
-				if normalized := eventidentity.Normalize(eventType); normalized != "" {
+				if normalized := runtimeidentity.NormalizeEventName(eventType); normalized != "" {
 					out[normalized] = struct{}{}
 				}
 			}

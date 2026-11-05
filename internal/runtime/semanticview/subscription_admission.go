@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -110,7 +109,7 @@ func (a AuthoredSubscriptionAdmission) RoutePatternsAt(flowPath string) []string
 	if local == "" {
 		return nil
 	}
-	if path := eventidentity.Normalize(flowPath); path != "" && path != "." {
+	if path := runtimeidentity.NormalizeEventName(flowPath); path != "" && path != "." {
 		return []string{path + "/" + local}
 	}
 	return []string{local}
@@ -119,15 +118,15 @@ func (a AuthoredSubscriptionAdmission) RoutePatternsAt(flowPath string) []string
 // LocalEventAt projects an actual match through the same admitted execution
 // pattern. A concrete instance is never inferred from the publication name.
 func (a AuthoredSubscriptionAdmission) LocalEventAt(flowPath, eventType string) (string, bool) {
-	if !eventidentity.IsCanonicalName(eventType) {
+	if !runtimeidentity.IsCanonicalEventName(eventType) {
 		return "", false
 	}
 	for _, pattern := range a.RoutePatternsAt(flowPath) {
-		if !eventidentity.MatchPattern(pattern, eventType) {
+		if !runtimeidentity.MatchEventPattern(pattern, eventType) {
 			continue
 		}
 		local := eventType
-		if path := eventidentity.Normalize(flowPath); path != "" && path != "." {
+		if path := runtimeidentity.NormalizeEventName(flowPath); path != "" && path != "." {
 			var matched bool
 			local, matched = strings.CutPrefix(eventType, path+"/")
 			if !matched {
@@ -162,12 +161,12 @@ func (a AuthoredSubscriptionAdmission) Matches(eventType string) bool {
 	if !a.Admitted() {
 		return false
 	}
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if eventType == "" {
 		return false
 	}
 	for _, localized := range a.localizedEvents {
-		if eventidentity.Normalize(localized) == eventType {
+		if runtimeidentity.NormalizeEventName(localized) == eventType {
 			return true
 		}
 	}
@@ -176,12 +175,12 @@ func (a AuthoredSubscriptionAdmission) Matches(eventType string) bool {
 		candidates = append([]string{a.authored, a.localEvent}, candidates...)
 	}
 	for _, candidate := range candidates {
-		candidate = eventidentity.Normalize(candidate)
+		candidate = runtimeidentity.NormalizeEventName(candidate)
 		if candidate == "" {
 			continue
 		}
 		if a.Pattern() {
-			if eventidentity.MatchPattern(candidate, eventType) {
+			if runtimeidentity.MatchEventPattern(candidate, eventType) {
 				return true
 			}
 			continue
@@ -197,13 +196,13 @@ func (a AuthoredSubscriptionAdmission) MatchesReceiverInput(eventType, flowPath 
 	if !a.Admitted() {
 		return false
 	}
-	localized := eventidentity.LocalizeForFlow(flowPath, inputEvents, eventType)
+	localized := runtimeidentity.LocalizeEventForFlow(flowPath, inputEvents, eventType)
 	if localized == "" {
 		return false
 	}
 	declaredInput := false
 	for _, input := range inputEvents {
-		if eventidentity.Normalize(input) == localized {
+		if runtimeidentity.NormalizeEventName(input) == localized {
 			declaredInput = true
 			break
 		}
@@ -212,15 +211,15 @@ func (a AuthoredSubscriptionAdmission) MatchesReceiverInput(eventType, flowPath 
 		return false
 	}
 	if a.Pattern() {
-		return eventidentity.MatchPattern(a.authored, localized)
+		return runtimeidentity.MatchEventPattern(a.authored, localized)
 	}
 	return localized == a.localEvent
 }
 
 func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest) AuthoredSubscriptionAdmission {
 	req.ConsumerID = strings.TrimSpace(req.ConsumerID)
-	req.FlowPath = eventidentity.Normalize(req.FlowPath)
-	req.Authored = eventidentity.Normalize(req.Authored)
+	req.FlowPath = runtimeidentity.NormalizeEventName(req.FlowPath)
+	req.Authored = runtimeidentity.NormalizeEventName(req.Authored)
 	result := AuthoredSubscriptionAdmission{
 		consumerKind: req.ConsumerKind,
 		consumerID:   req.ConsumerID,
@@ -308,7 +307,7 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 }
 
 func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRequest, localEvent string) bool {
-	localEvent = eventidentity.Normalize(localEvent)
+	localEvent = runtimeidentity.NormalizeEventName(localEvent)
 	if localEvent == "" {
 		return false
 	}
@@ -324,12 +323,12 @@ func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRe
 	// Source-free grammar classification accepts the caller's declaration set.
 	// An admitted runtime source above never takes authority from these maps.
 	for eventType := range req.LocalEvents {
-		if eventidentity.Normalize(eventType) == localEvent {
+		if runtimeidentity.NormalizeEventName(eventType) == localEvent {
 			return true
 		}
 	}
 	for _, eventType := range req.InputEvents {
-		if eventidentity.Normalize(eventType) == localEvent {
+		if runtimeidentity.NormalizeEventName(eventType) == localEvent {
 			return true
 		}
 	}
@@ -477,7 +476,7 @@ func fillAuthoredSubscriptionScope(source Source, req *AuthoredSubscriptionReque
 		return
 	}
 	if req.FlowPath == "" && strings.TrimSpace(req.FlowID) != "." {
-		req.FlowPath = eventidentity.Normalize(source.FlowPath(req.FlowID))
+		req.FlowPath = runtimeidentity.NormalizeEventName(source.FlowPath(req.FlowID))
 	}
 }
 

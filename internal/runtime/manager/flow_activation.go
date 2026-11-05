@@ -17,9 +17,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -52,9 +51,9 @@ type flowInstancePersistence interface {
 	RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	RetireDynamicFlowRuntimeActivationAttempts(ctx context.Context, attempts []runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
-	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error
+	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
-	LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, identity.EntityID) (runtimepipeline.WorkflowInstance, bool, error)
+	LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
@@ -423,7 +422,7 @@ func (am *AgentManager) PrepareStandingFlowInstance(ctx context.Context, req run
 	if err != nil {
 		return false, nil, err
 	}
-	stored, found, err := am.workflowInstances.LoadConstructedFlowInstance(ctx, flowIdentity, identity.NormalizeEntityID(req.Instance.EntityID))
+	stored, found, err := am.workflowInstances.LoadConstructedFlowInstance(ctx, flowIdentity, runtimeidentity.NormalizeEntityID(req.Instance.EntityID))
 	if err != nil {
 		return false, nil, err
 	}
@@ -493,7 +492,7 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	if err != nil {
 		return false, err
 	}
-	stored, exists, err := am.workflowInstances.LoadConstructedFlowInstance(ctx, flowIdentity, identity.NormalizeEntityID(instance.EntityID))
+	stored, exists, err := am.workflowInstances.LoadConstructedFlowInstance(ctx, flowIdentity, runtimeidentity.NormalizeEntityID(instance.EntityID))
 	if err != nil {
 		return false, err
 	}
@@ -968,7 +967,7 @@ func (am *AgentManager) deactivateFlowInstanceOwned(lease *worklifetime.Lease, r
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	termination, err := owner.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
-		Route: instance.Route(), EntityID: identity.NormalizeEntityID(entityID), RunID: runID, TerminatedAt: time.Now().UTC(),
+		Route: instance.Route(), EntityID: runtimeidentity.NormalizeEntityID(entityID), RunID: runID, TerminatedAt: time.Now().UTC(),
 	})
 	if err != nil && termination.Instance.Status != "terminated" {
 		return fmt.Errorf("persist flow instance terminalization %s: %w", flowPath, err)
@@ -1352,7 +1351,7 @@ func declaredAgentEmitEvents(events []string, vars map[string]string, flowID str
 	}
 	out := make([]string, 0, len(rendered))
 	for _, eventType := range rendered {
-		declaration, err := eventidentity.AdmitPublicationDeclaration(flowID, eventType)
+		declaration, err := runtimeidentity.AdmitPublicationDeclaration(flowID, eventType)
 		if err != nil {
 			return nil, err
 		}

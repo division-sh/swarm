@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func TestAdmitFlowOwnedAgentSubscriptionsCanonicalizesSameScopeExactAndPattern(t *testing.T) {
@@ -64,7 +64,7 @@ func TestAgentSubscriptionRecoveryRetainsExactScope(t *testing.T) {
 					t.Fatalf("recovery changed admission: %+v -> %+v", initial, recovered)
 				}
 				for _, pattern := range recovered.RoutePatterns() {
-					if eventidentity.MatchPattern(pattern, "sibling/instance/task.ready") || eventidentity.MatchPattern(pattern, path+"/descendant/task.ready") {
+					if runtimeidentity.MatchEventPattern(pattern, "sibling/instance/task.ready") || runtimeidentity.MatchEventPattern(pattern, path+"/descendant/task.ready") {
 						t.Fatalf("route %q crosses its scope %q", pattern, path)
 					}
 				}

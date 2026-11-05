@@ -1,7 +1,7 @@
 package providertriggers
 
 import (
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -65,7 +65,7 @@ func qualifyTriggerBodyRawName(root yamlsource.Value, definition *manifestDefini
 }
 
 func qualifyTriggerBodyEvent(value yamlsource.Value, key, local string) (string, error) {
-	qualified, err := eventidentity.QualifyProviderEvent(key, local)
+	qualified, err := runtimeidentity.QualifyProviderEvent(key, local)
 	if err != nil {
 		return "", triggerSourceError(value, err.Error())
 	}

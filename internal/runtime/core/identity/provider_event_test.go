@@ -1,4 +1,4 @@
-package eventidentity
+package identity
 
 import (
 	"strings"
@@ -9,7 +9,7 @@ func TestS1ProviderEventProjectionRetainsExactLocalTokens(t *testing.T) {
 	for _, key := range []string{"team-bot", "team_bot", "9-team", strings.Repeat("a", 100)} {
 		for _, local := range []string{"raw", "text.received", "message_v2", "7"} {
 			name, err := QualifyProviderEvent(key, local)
-			if err != nil || name != "inbound."+key+"."+local || !IsCanonicalName(name) {
+			if err != nil || name != "inbound."+key+"."+local || !IsCanonicalEventName(name) {
 				t.Fatalf("exact projection %q/%q=%q: %v", key, local, name, err)
 			}
 		}

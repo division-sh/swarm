@@ -4,13 +4,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const PlatformEventRedeclarationMessage = "Event %s is platform-emitted and auto-registered; remove the local redeclaration."
 
 func PlatformEventCatalogEntry(platform PlatformSpecDocument, eventType string) (EventCatalogEntry, string, bool) {
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if eventType == "" {
 		return EventCatalogEntry{}, "", false
 	}
@@ -28,7 +28,7 @@ func PlatformEventCatalogContains(platform PlatformSpecDocument, eventType strin
 func PlatformEventCatalogNames(platform PlatformSpecDocument) []string {
 	names := make([]string, 0, len(platform.eventCatalog))
 	for name := range platform.eventCatalog {
-		name = eventidentity.Normalize(name)
+		name = runtimeidentity.NormalizeEventName(name)
 		if name != "" {
 			names = append(names, name)
 		}

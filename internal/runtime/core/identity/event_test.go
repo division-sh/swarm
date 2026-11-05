@@ -1,15 +1,15 @@
-package eventidentity
+package identity
 
 import "testing"
 
 func TestIsValidNameUsesCanonicalEventGrammar(t *testing.T) {
 	for _, name := range []string{"inbound.telegram.text_message", "flow/step.completed", "flow-instance/step.completed"} {
-		if !IsValidName(name) {
+		if !IsValidEventName(name) {
 			t.Fatalf("IsValidName(%q) = false, want true", name)
 		}
 	}
 	for _, name := range []string{"", "inbound.telegram.", "Inbound.telegram.event", "inbound.telegram.text-message", "flow//event", "flow/*"} {
-		if IsValidName(name) {
+		if IsValidEventName(name) {
 			t.Fatalf("IsValidName(%q) = true, want false", name)
 		}
 	}
@@ -24,7 +24,7 @@ func TestCanonicalEventDeclarationGrammar(t *testing.T) {
 		"*/order.completed",
 		"**/item.processed",
 	} {
-		if !IsCanonicalDeclaration(name) {
+		if !IsCanonicalEventDeclaration(name) {
 			t.Fatalf("IsCanonicalDeclaration(%q) = false, want true", name)
 		}
 	}
@@ -39,32 +39,32 @@ func TestCanonicalEventDeclarationGrammar(t *testing.T) {
 		"item.?",
 		"item.[ab]",
 	} {
-		if IsCanonicalDeclaration(name) {
+		if IsCanonicalEventDeclaration(name) {
 			t.Fatalf("IsCanonicalDeclaration(%q) = true, want false", name)
 		}
 	}
 }
 
 func TestLeafName_LocalizesScopedEvent(t *testing.T) {
-	if got := LeafName("scoring/vertical.shortlisted"); got != "vertical.shortlisted" {
+	if got := EventLeafName("scoring/vertical.shortlisted"); got != "vertical.shortlisted" {
 		t.Fatalf("LeafName = %q, want %q", got, "vertical.shortlisted")
 	}
 }
 
 func TestExternalizeForFlow_QualifiesDeclaredLocalEvent(t *testing.T) {
-	if got := ExternalizeForFlow("scoring", []string{"vertical.shortlisted"}, "vertical.shortlisted"); got != "scoring/vertical.shortlisted" {
+	if got := ExternalizeEventForFlow("scoring", []string{"vertical.shortlisted"}, "vertical.shortlisted"); got != "scoring/vertical.shortlisted" {
 		t.Fatalf("ExternalizeForFlow = %q, want %q", got, "scoring/vertical.shortlisted")
 	}
 }
 
 func TestExternalizeForFlow_LeavesNonLocalEventUnchanged(t *testing.T) {
-	if got := ExternalizeForFlow("scoring", []string{"vertical.shortlisted"}, "vertical.approved"); got != "vertical.approved" {
+	if got := ExternalizeEventForFlow("scoring", []string{"vertical.shortlisted"}, "vertical.approved"); got != "vertical.approved" {
 		t.Fatalf("ExternalizeForFlow = %q, want %q", got, "vertical.approved")
 	}
 }
 
 func TestExternalizeDescendantForFlow_QualifiesDescendantEventAgainstParent(t *testing.T) {
-	got, ok := ExternalizeDescendantForFlow("operating", "child/launch.ready", map[string]map[string]struct{}{
+	got, ok := ExternalizeDescendantEventForFlow("operating", "child/launch.ready", map[string]map[string]struct{}{
 		"operating/child": {"launch.ready": {}},
 	})
 	if !ok {
@@ -76,7 +76,7 @@ func TestExternalizeDescendantForFlow_QualifiesDescendantEventAgainstParent(t *t
 }
 
 func TestExternalizeDescendantForFlow_LeavesAlreadyQualifiedParentEventAlone(t *testing.T) {
-	if got, ok := ExternalizeDescendantForFlow("operating", "operating/child/launch.ready", map[string]map[string]struct{}{
+	if got, ok := ExternalizeDescendantEventForFlow("operating", "operating/child/launch.ready", map[string]map[string]struct{}{
 		"operating/child": {"launch.ready": {}},
 	}); ok || got != "" {
 		t.Fatalf("ExternalizeDescendantForFlow = (%q, %v), want (\"\", false)", got, ok)
@@ -84,39 +84,39 @@ func TestExternalizeDescendantForFlow_LeavesAlreadyQualifiedParentEventAlone(t *
 }
 
 func TestMatchPattern_Exact(t *testing.T) {
-	if !MatchPattern("scoring/vertical.shortlisted", "scoring/vertical.shortlisted") {
+	if !MatchEventPattern("scoring/vertical.shortlisted", "scoring/vertical.shortlisted") {
 		t.Fatal("expected exact pattern to match")
 	}
 }
 
 func TestMatchPattern_SingleSegmentWildcard(t *testing.T) {
-	if !MatchPattern("scoring/*", "scoring/vertical.shortlisted") {
+	if !MatchEventPattern("scoring/*", "scoring/vertical.shortlisted") {
 		t.Fatal("expected single wildcard pattern to match")
 	}
-	if MatchPattern("scoring/*", "scoring/a/b") {
+	if MatchEventPattern("scoring/*", "scoring/a/b") {
 		t.Fatal("did not expect single wildcard to span multiple segments")
 	}
 }
 
 func TestMatchPattern_MultiSegmentWildcard(t *testing.T) {
-	if !MatchPattern("operating/**/opco.launched", "operating/child/grandchild/opco.launched") {
+	if !MatchEventPattern("operating/**/opco.launched", "operating/child/grandchild/opco.launched") {
 		t.Fatal("expected recursive wildcard pattern to match")
 	}
 }
 
 func TestSplitRouteSegments_NormalizesInput(t *testing.T) {
-	got := SplitRouteSegments(" /scoring/vertical.shortlisted/ ")
+	got := SplitEventRouteSegments(" /scoring/vertical.shortlisted/ ")
 	if len(got) != 2 || got[0] != "scoring" || got[1] != "vertical.shortlisted" {
 		t.Fatalf("SplitRouteSegments = %#v", got)
 	}
 }
 
 func TestScopeResolveEvent_ExternalizesLocalAndDescendantEvents(t *testing.T) {
-	scope := Scope{
+	scope := EventScope{
 		Path:        "child",
 		LocalEvents: []string{"step.result"},
 	}
-	descendants := []DescendantScope{{
+	descendants := []DescendantEventScope{{
 		Path:        "child/grandchild",
 		LocalEvents: []string{"micro.done"},
 	}}
@@ -130,11 +130,11 @@ func TestScopeResolveEvent_ExternalizesLocalAndDescendantEvents(t *testing.T) {
 }
 
 func TestScopeResolveEvent_LeavesUndeclaredDescendantEventUnchanged(t *testing.T) {
-	scope := Scope{
+	scope := EventScope{
 		Path:        "child",
 		LocalEvents: []string{"step.result"},
 	}
-	descendants := []DescendantScope{{
+	descendants := []DescendantEventScope{{
 		Path:        "child/grandchild",
 		LocalEvents: []string{"micro.done"},
 	}}
@@ -148,7 +148,7 @@ func TestScopeResolveEvent_LeavesUndeclaredDescendantEventUnchanged(t *testing.T
 }
 
 func TestScopeMatches_TreatsLocalAndOwnFlowInputEventsAsEquivalent(t *testing.T) {
-	scope := Scope{
+	scope := EventScope{
 		Path:        "discovery",
 		InputEvents: []string{"scan.requested"},
 	}
@@ -165,7 +165,7 @@ func TestScopeMatches_TreatsLocalAndOwnFlowInputEventsAsEquivalent(t *testing.T)
 }
 
 func TestScopeLocalizeOutput_MapsScopedOutputBackToLocalName(t *testing.T) {
-	scope := Scope{
+	scope := EventScope{
 		Path:         "child",
 		OutputEvents: []string{"child.done"},
 	}

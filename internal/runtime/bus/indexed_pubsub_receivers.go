@@ -8,8 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -253,7 +253,7 @@ func (rt *RouteTable) matchPubsubDefinition(declaration routeFlowTemplate, subsc
 			bound := subscriber
 			bound.subscription = pattern.admission
 			bound.routeSource = subscriberRouteSourceSubscription
-			bound.LocalizedEvent = eventidentity.Normalize(pattern.admission.LocalEvent())
+			bound.LocalizedEvent = runtimeidentity.NormalizeEventName(pattern.admission.LocalEvent())
 			bound.MatchPattern = eventPattern
 			if bound.Recipient.IsNode() && bound.subscription.Admitted() && bound.subscription.Pattern() {
 				local, matched := bound.subscription.LocalEventAt(bound.Path, key)
@@ -299,7 +299,7 @@ func bindPubsubSubscriber(path string, route agentidentity.Route, definition rou
 
 func pubsubEventKeys(event events.Event, source ordinaryPublicationSource) []string {
 	keys := source.eventKeys(event)
-	if !source.declarationOnly && event.RoutingSource().Kind() == events.RoutingSourceRoot && eventidentity.IsCanonicalName(string(event.Type())) {
+	if !source.declarationOnly && event.RoutingSource().Kind() == events.RoutingSourceRoot && runtimeidentity.IsCanonicalEventName(string(event.Type())) {
 		keys = append(keys, event.RunID()+"/"+string(event.Type()))
 	}
 	return uniqueStrings(keys)

@@ -1,4 +1,4 @@
-package eventidentity
+package identity
 
 import "testing"
 

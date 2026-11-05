@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 )
 
@@ -37,7 +37,7 @@ func newNestedChildHandlerGateCount(t *testing.T, eventName string, count int) *
 }
 
 func (g *nestedChildHandlerGate) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
-	if signal.Kind != lifecycleprobe.HandlerStarted || eventidentity.LeafName(signal.EventType) != g.eventName {
+	if signal.Kind != lifecycleprobe.HandlerStarted || runtimeidentity.EventLeafName(signal.EventType) != g.eventName {
 		return
 	}
 	g.mu.Lock()

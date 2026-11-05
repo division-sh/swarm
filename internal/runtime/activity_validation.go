@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -160,7 +159,7 @@ func activityRevisionConsumerExists(source semanticview.Source, revisionEvent st
 	if source == nil {
 		return false
 	}
-	want := eventidentity.Normalize(revisionEvent)
+	want := runtimeidentity.NormalizeEventName(revisionEvent)
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
@@ -222,7 +221,7 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 }
 
 func admitActivityResultEventName(eventType, context string, authored, generated map[string]string) error {
-	normalized := eventidentity.Normalize(eventType)
+	normalized := runtimeidentity.NormalizeEventName(eventType)
 	if normalized == "" {
 		return nil
 	}

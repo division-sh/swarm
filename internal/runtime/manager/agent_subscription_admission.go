@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/cel-go/cel"
@@ -92,7 +92,7 @@ func prepareAgentContent(source semanticview.Source, cfg *runtimeactors.AgentCon
 		if err != nil {
 			return fmt.Errorf("agent %s content for %s: %w", cfg.ID, key, err)
 		}
-		local := eventidentity.LocalizeForFlow(cfg.CanonicalFlowPath(), keys, key)
+		local := runtimeidentity.LocalizeEventForFlow(cfg.CanonicalFlowPath(), keys, key)
 		programs[local] = program
 	}
 	if len(programs) == 0 {

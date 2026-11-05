@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
@@ -109,7 +108,7 @@ func (b *WorkflowContractBundle) compileArrivalJoinPlan(plan WorkflowJoinPlan, e
 			return WorkflowJoinPlan{}, fmt.Errorf("join.until requires a catalog-declared event")
 		}
 		plan.UntilEvent = b.ResolveExecutableNodeEventReference(node, spec.Until)
-		if eventidentity.MatchPattern(b.ResolveExecutableNodeEventPattern(node, eventType), plan.UntilEvent) {
+		if runtimeidentity.MatchEventPattern(b.ResolveExecutableNodeEventPattern(node, eventType), plan.UntilEvent) {
 			return WorkflowJoinPlan{}, fmt.Errorf("join.until must be distinct from the member-arrival event")
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
@@ -91,12 +90,12 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 		ownerFlowPath:         normalizedConnectOwnerFlowPath(connect.OwnerFlowPath),
 		producerEndpoint:      strings.TrimSpace(connect.From),
 		producerFlowID:        producerFlowID,
-		producerEvent:         eventidentity.Normalize(producerEvent),
+		producerEvent:         runtimeidentity.NormalizeEventName(producerEvent),
 		producerName:          producerName,
 		producer:              producer,
 		receiverEndpoint:      strings.TrimSpace(connect.To),
 		receiverFlowID:        receiverFlowID,
-		receiverEvent:         eventidentity.Normalize(receiverEvent),
+		receiverEvent:         runtimeidentity.NormalizeEventName(receiverEvent),
 		receiverQualifiedName: compiledPinEventName(bundle.FlowPath(receiverFlowID), receiverEvent),
 		receiverName:          receiverName,
 		receiver:              receiver,
@@ -217,7 +216,7 @@ func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle)
 }
 
 func eventSchemaReceiverOwnerKey(row eventSchemaOwnershipRow) string {
-	receiverEvent := eventidentity.Normalize(row.receiverEvent)
+	receiverEvent := runtimeidentity.NormalizeEventName(row.receiverEvent)
 	if receiverEvent == "" {
 		return ""
 	}
@@ -225,7 +224,7 @@ func eventSchemaReceiverOwnerKey(row eventSchemaOwnershipRow) string {
 }
 
 func eventSchemaProducerOwnerKey(row eventSchemaOwnershipRow) string {
-	producerName := eventidentity.Normalize(row.producerName)
+	producerName := runtimeidentity.NormalizeEventName(row.producerName)
 	if producerName == "" {
 		return ""
 	}
@@ -239,7 +238,7 @@ func sameEventSchemaProducerOwner(left, right eventSchemaOwnershipRow) bool {
 
 func connectEndpointEventDeclaration(bundle *WorkflowContractBundle, flowID, eventName string, input bool) (EventCatalogEntry, string, bool) {
 	flowID = strings.TrimSpace(flowID)
-	eventName = eventidentity.Normalize(eventName)
+	eventName = runtimeidentity.NormalizeEventName(eventName)
 	if bundle == nil || eventName == "" {
 		return EventCatalogEntry{}, "", false
 	}
@@ -273,11 +272,11 @@ func connectEndpointFlowID(owner, endpoint string) string {
 
 func packageEndpointLocalEvent(bundle *WorkflowContractBundle, endpoint, eventName string, input bool) string {
 	endpoint = strings.TrimSpace(endpoint)
-	eventName = eventidentity.Normalize(eventName)
+	eventName = runtimeidentity.NormalizeEventName(eventName)
 	if bundle == nil || endpoint == "." || endpoint == "" {
 		return eventName
 	}
-	scope := eventidentity.Scope{Path: bundle.FlowPath(endpoint)}
+	scope := runtimeidentity.EventScope{Path: bundle.FlowPath(endpoint)}
 	if input {
 		scope.InputEvents = bundle.FlowInputEvents(endpoint)
 		return scope.LocalizeInput(eventName)
@@ -339,12 +338,12 @@ func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle
 }
 
 func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {
-	requested := eventidentity.Normalize(eventType)
+	requested := runtimeidentity.NormalizeEventName(eventType)
 	if local, owned := b.connectionInputs.ReceiverEvent(flowID, requested); owned {
 		return b.FlowInputEventPin(flowID, local)
 	}
 	for _, pin := range b.FlowInputEventPins(flowID) {
-		local := eventidentity.Normalize(pin.EventType())
+		local := runtimeidentity.NormalizeEventName(pin.EventType())
 		resolved := pin.QualifiedEventName()
 		if requested == local || requested == resolved {
 			return pin, true
@@ -360,9 +359,9 @@ func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, ev
 	var selected eventSchemaOwnershipRow
 	found := false
 	for _, row := range eventSchemaOwnershipRowsForReceiver(bundle, flowID) {
-		localEvent := eventidentity.Normalize(row.receiverEvent)
+		localEvent := runtimeidentity.NormalizeEventName(row.receiverEvent)
 		resolvedEvent := row.receiverQualifiedName
-		requestedEvent := eventidentity.Normalize(eventType)
+		requestedEvent := runtimeidentity.NormalizeEventName(eventType)
 		if localEvent != requestedEvent && resolvedEvent != requestedEvent {
 			continue
 		}
@@ -418,7 +417,7 @@ func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimei
 				return true
 			}
 			for _, row := range eventSchemaOwnershipRowsForReceiver(b, ref.FlowPath()) {
-				if !eventidentity.MatchPattern(eventType, row.receiverEvent) || !b.FlowHasInputEvent(ref.FlowPath(), row.receiverEvent) {
+				if !runtimeidentity.MatchEventPattern(eventType, row.receiverEvent) || !b.FlowHasInputEvent(ref.FlowPath(), row.receiverEvent) {
 					continue
 				}
 				ownerInput := row.producerEndpoint == "." && row.producerFlowID == row.ownerFlowPath && b.FlowHasInputEvent(row.producerFlowID, row.producerEvent)
@@ -434,7 +433,7 @@ func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimei
 	pattern := b.ResolveExecutableNodeEventPattern(ref, eventType)
 	if flow, ok := b.FlowViewByID(ref.FlowPath()); ok {
 		for _, imported := range flow.Schema.Imports.ProviderTriggerEvents {
-			if eventidentity.MatchPattern(eventType, imported.Event) {
+			if runtimeidentity.MatchEventPattern(eventType, imported.Event) {
 				return true
 			}
 		}
@@ -449,17 +448,17 @@ func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimei
 			if ref.FlowPath() != "." {
 				localName = strings.TrimPrefix(name, ref.FlowPath()+"/")
 			}
-			if eventidentity.MatchPattern(eventType, localName) || eventidentity.MatchPattern(pattern, name) {
+			if runtimeidentity.MatchEventPattern(eventType, localName) || runtimeidentity.MatchEventPattern(pattern, name) {
 				return true
 			}
 		}
 	}
-	if !eventidentity.IsCanonicalPattern(eventType) {
+	if !runtimeidentity.IsCanonicalEventPattern(eventType) {
 		return false
 	}
 	matches := func(bindings compiledFlowEventSchemas) bool {
 		for name := range bindings.bindings {
-			if eventidentity.MatchPattern(pattern, b.ResolveExecutableNodeEventReference(ref, name)) {
+			if runtimeidentity.MatchEventPattern(pattern, b.ResolveExecutableNodeEventReference(ref, name)) {
 				return true
 			}
 		}
@@ -472,7 +471,7 @@ func (b *WorkflowContractBundle) executableNodeHandlerEventDeclared(ref runtimei
 		return true
 	}
 	for _, name := range PlatformEventCatalogNames(b.Platform) {
-		if eventidentity.MatchPattern(pattern, name) {
+		if runtimeidentity.MatchEventPattern(pattern, name) {
 			return true
 		}
 	}

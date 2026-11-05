@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -80,10 +79,10 @@ func legacyEndpointHandlerProof(source Source, node runtimeidentity.ExecutableNo
 	if source == nil || !node.Valid() {
 		return "", false
 	}
-	authored := eventidentity.Normalize(eventType)
+	authored := runtimeidentity.NormalizeEventName(eventType)
 	if admission := ClassifyExecutableNodeSubscription(source, node, authored); admission.Admitted() {
 		for key := range source.ExecutableNodeEventHandlers(node) {
-			if eventidentity.Normalize(key) == authored {
+			if runtimeidentity.NormalizeEventName(key) == authored {
 				return authored, true
 			}
 		}

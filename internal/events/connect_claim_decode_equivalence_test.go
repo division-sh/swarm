@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
@@ -61,7 +60,7 @@ func originalConnectClaimDecode(c *ConnectExecutionClaim, raw []byte) error {
 	var pinDigest [sha256.Size]byte
 	copy(pinDigest[:], pinDecoded)
 	kind, ok := deliveryRecipientKindFromCode(encoded.RecipientKind)
-	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || eventidentity.Normalize(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
+	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || runtimeidentity.NormalizeEventName(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
 		return fmt.Errorf("connect execution claim recipient or handler event is invalid")
 	}
 	handlerNode := runtimeidentity.ExecutableNode{}
