@@ -238,6 +238,7 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	wrongLife := false
+	var lifeStart any = "2026-05-20T01:02:00Z"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Errorf("Authorization = %q, want bearer token", got)
@@ -252,6 +253,8 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 				life = float64(1)
 			}
 			result["entity"].(map[string]any)["life"] = life
+			result["entity"].(map[string]any)["entered_state_at"] = "2026-05-20T01:04:00Z"
+			result["bookkeeping"].(map[string]any)["instance_life_started_at"] = lifeStart
 		}
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
@@ -295,6 +298,18 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	if code != 0 || !reflect.DeepEqual(captured.Params, map[string]any{"entity_id": "entity-1", "run_id": "run-1", "iter": float64(2)}) {
 		t.Fatalf("explicit-life view lost exact entity/run/iter: code=%d params=%#v stderr=%s", code, captured.Params, stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "started over on 2026-05-20T01:02:00Z") || strings.Contains(stdout.String(), "started over on 2026-05-20T01:00:00Z") || strings.Contains(stdout.String(), "started over on 2026-05-20T01:04:00Z") {
+		t.Fatalf("life view inferred its restart date from another clock: %s", stdout.String())
+	}
+	for _, invalid := range []any{nil, "not-a-time"} {
+		lifeStart = invalid
+		stdout.Reset()
+		stderr.Reset()
+		if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code == 0 {
+			t.Fatal("life view manufactured a missing or malformed retained restart date")
+		}
+	}
+	lifeStart = "2026-05-20T01:02:00Z"
 	wrongLife = true
 	stdout.Reset()
 	stderr.Reset()

@@ -151,6 +151,7 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 						t.Fatal("current-life trace exposed the preceding life's event")
 					}
 				}
+				requireInstanceLifeViewPresentation(t, h, runID, current.EntityID)
 			}
 			h.stop(t)
 			h.start(t)

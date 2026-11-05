@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,27 @@ func TestInstanceLifeResetPublicJourneyBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			runProviderEvidenceJourney(t, backend, "instance_life", false)
 		})
+	}
+}
+
+func requireInstanceLifeViewPresentation(t *testing.T, h *channelOnboardingE2EHarness, runID, entityID string) {
+	t.Helper()
+	args := []string{"entity", "view", entityID, "--run-id", runID}
+	raw, stderr, code := runServedCLICommand(t, h.endpoint, append(args, "--json"))
+	var current struct {
+		Entity      instanceLifeJourneyReadback `json:"entity"`
+		Bookkeeping map[string]any              `json:"bookkeeping"`
+	}
+	if code != 0 || json.Unmarshal([]byte(raw), &current) != nil || current.Entity.Life == nil || *current.Entity.Life != 2 {
+		t.Fatalf("current-life status lost its public read: exit=%d stderr=%s", code, stderr)
+	}
+	started, found := current.Bookkeeping["instance_life_started_at"].(string)
+	if _, err := time.Parse(time.RFC3339Nano, started); !found || err != nil {
+		t.Fatal("current-life status lost its retained restart date")
+	}
+	text, stderr, code := runServedCLICommand(t, h.endpoint, args)
+	if code != 0 || !strings.Contains(text, "started over on "+started) {
+		t.Fatalf("current-life status did not render its exact retained restart date: exit=%d text=%s stderr=%s", code, text, stderr)
 	}
 }
 
