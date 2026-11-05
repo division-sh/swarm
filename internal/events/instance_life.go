@@ -30,7 +30,7 @@ func (s RoutingSource) WithInstanceLife(runID string, life InstanceLife) (Routin
 	}
 	path := s.Route().FlowInstance
 	if s.Kind() == RoutingSourceRoot {
-		path = s.Route().EntityID
+		path = runID
 	}
 	if life.RunID != runID || life.FlowInstance != path {
 		return RoutingSource{}, fmt.Errorf("routing source life crosses its exact execution coordinate")
