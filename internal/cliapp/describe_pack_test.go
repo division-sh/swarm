@@ -322,12 +322,28 @@ func TestDescribePackProjectKeepsTargetSpecificCredentialFacts(t *testing.T) {
 
 func TestDescribePackImplicitSourceMatchesDotWithoutConfig(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	t.Setenv("SWARM_CREDENTIALS_FILE", t.TempDir())
+	telegram := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	manifestOnly := t.TempDir()
+	writeDescribeTestFile(t, filepath.Join(manifestOnly, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if _, err := packartifact.ImportEmbeddedPack(manifestOnly, "notion", packfixture.EmbeddedBase(t)); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []struct{ name, root, provider string }{
+		{"schema", telegram, "telegram"}, {"manifest_only", manifestOnly, "notion"},
+	} {
+		t.Run(source.name, func(t *testing.T) {
+			requireDescribePackImplicitSourceMatchesDot(t, source.root, source.provider)
+		})
+	}
+}
+
+func requireDescribePackImplicitSourceMatchesDot(t *testing.T, root, provider string) {
+	t.Helper()
 	var projections []any
 	for _, args := range [][]string{
-		{"describe", "pack", "telegram", "--json"},
-		{"describe", "pack", "telegram", ".", "--json"},
+		{"describe", "pack", provider, "--json"},
+		{"describe", "pack", provider, ".", "--json"},
 	} {
 		code, out, diagnostic := runPacksCommand(t, root, args...)
 		if code != 0 || diagnostic != "" {
