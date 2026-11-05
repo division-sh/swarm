@@ -18,7 +18,7 @@ type AuthorityRequest struct {
 type authorityInspectionPort interface {
 	InspectSnapshot(context.Context, func(context.Context) error) error
 	InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error)
-	InspectStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error)
+	InspectStartupRecovery(context.Context, time.Time, bool) (effects.StartupRecoveryCounts, error)
 	ProbePossession(context.Context) (runtimestartupownership.PossessionObservation, error)
 }
 
@@ -51,14 +51,18 @@ func (s *AuthorityInspection) InspectStartupStatus(ctx context.Context) (runtime
 	if s == nil || s.store == nil {
 		return runtimestartupownership.AuthorityInspection{}, errors.New("authority inspection store is required")
 	}
+	observation, err := s.observePossession(ctx)
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
 	var inspection runtimestartupownership.AuthorityInspection
-	err := s.store.InspectSnapshot(ctx, func(ctx context.Context) error {
+	err = s.store.InspectSnapshot(ctx, func(ctx context.Context) error {
 		var err error
 		inspection, err = s.store.InspectAuthority(ctx)
 		if err != nil || inspection.Authority == nil {
 			return err
 		}
-		counts, err := s.store.InspectStartupRecovery(ctx, time.Now().UTC())
+		counts, err := s.store.InspectStartupRecovery(ctx, time.Now().UTC(), observation.Available)
 		if err == nil {
 			inspection.Interrupted = &counts
 		}
@@ -67,18 +71,24 @@ func (s *AuthorityInspection) InspectStartupStatus(ctx context.Context) (runtime
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	return s.inspectPossession(ctx, inspection)
+	inspection.Possession = &observation
+	return inspection, inspection.Validate()
 }
 
 func (s *AuthorityInspection) inspectPossession(ctx context.Context, inspection runtimestartupownership.AuthorityInspection) (runtimestartupownership.AuthorityInspection, error) {
-	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	observation, err := s.store.ProbePossession(bounded)
+	observation, err := s.observePossession(ctx)
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
 	inspection.Possession = &observation
 	return inspection, inspection.Validate()
+}
+
+func (s *AuthorityInspection) observePossession(ctx context.Context) (runtimestartupownership.PossessionObservation, error) {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	observation, err := s.store.ProbePossession(bounded)
+	return observation, err
 }
 
 func (s *AuthorityInspection) Close() error {

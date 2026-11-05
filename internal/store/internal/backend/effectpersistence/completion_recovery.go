@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -102,6 +103,49 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
+func prospectiveAgentGenerations(ctx context.Context, tx *sql.Tx, mode []recoveryReadMode) (string, error) {
+	if recoveryLocks(mode) {
+		return "[]", nil
+	}
+	query := `SELECT CAST(run_id AS TEXT), agent_id, agent_name_owner, agent_name_source,
+		agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, lifecycle_generation FROM agents`
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return "", fmt.Errorf("read prospective agent generations: %w", err)
+	}
+	defer rows.Close()
+	type nextAgent struct {
+		RunID         string `json:"run_id"`
+		AgentID       string `json:"agent_id"`
+		NameOwner     string `json:"name_owner"`
+		NameSource    string `json:"name_source"`
+		RoutePresence string `json:"route_presence"`
+		ScopeKey      string `json:"scope_key"`
+		InstanceID    string `json:"instance_id"`
+		InstancePath  string `json:"instance_path"`
+		Generation    int64  `json:"generation"`
+	}
+	agents := make([]nextAgent, 0)
+	for rows.Next() {
+		var agent nextAgent
+		var generation int64
+		if err := rows.Scan(&agent.RunID, &agent.AgentID, &agent.NameOwner, &agent.NameSource,
+			&agent.RoutePresence, &agent.ScopeKey, &agent.InstanceID, &agent.InstancePath, &generation); err != nil {
+			return "", err
+		}
+		if generation < 0 || generation == math.MaxInt64 {
+			return "", fmt.Errorf("invalid retained agent lifecycle generation %d", generation)
+		}
+		agent.Generation = int64(runtimemanager.NextLifecycleGeneration(uint64(generation)))
+		agents = append(agents, agent)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(agents)
+	return string(encoded), err
+}
+
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
 	attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, selectedExecutionID, nil)
 	if err != nil {
@@ -116,7 +160,11 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 	if err != nil {
 		return nil, err
 	}
-	args = append([]any{now, selectedExecutionID}, args...)
+	prospective, err := prospectiveAgentGenerations(ctx, tx, mode)
+	if err != nil {
+		return nil, err
+	}
+	args = append([]any{now, selectedExecutionID, prospective, recoveryAvailable(mode)}, args...)
 	query := postgresCompletionRecoverySelect + storeagent.CompletionRecoveryAgentJoinSQL() + `
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
@@ -127,13 +175,23 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 		    (o.authority_kind='normal_agent' AND (
 		      ` + storeagent.CompletionRecoveryAgentStaleSQL(false) + `
 		    )) OR
+		    (o.authority_kind='normal_agent' AND EXISTS (
+		      SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS next_agent(
+		        run_id text, agent_id text, name_owner text, name_source text, route_presence text,
+		        scope_key text, instance_id text, instance_path text, generation bigint)
+		      WHERE next_agent.run_id=o.agent_run_id::text AND next_agent.agent_id=o.agent_id
+		        AND next_agent.name_owner=o.agent_name_owner AND next_agent.name_source=o.agent_name_source
+		        AND next_agent.route_presence=o.agent_route_presence AND next_agent.scope_key=o.flow_scope_key
+		        AND next_agent.instance_id=o.flow_instance_id AND next_agent.instance_path=o.flow_instance
+		        AND next_agent.generation IS DISTINCT FROM o.generation
+		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
 		      WHERE run.run_id=COALESCE(NULLIF(o.lineage->>'run_id',''),NULLIF(o.authority_evidence #>> '{usage_target,run_id}',''))::uuid
 		        AND run.status IN (` + runLifecycleActiveStateSQLValues + `)
 		    ))
 		  )
-		  ))
+		  )) AND $4::boolean
 		` + predicate + ` ORDER BY a.authorized_at,a.attempt_id
 	`
 	if recoveryLocks(mode) {
@@ -155,12 +213,16 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now)
 }
 
-func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity) ([]completionRecoveryAttempt, error) {
+func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, false)
 	if err != nil {
 		return nil, err
 	}
-	args = append([]any{selectedExecutionID, selectedExecutionID, now}, args...)
+	prospective, err := prospectiveAgentGenerations(ctx, tx, mode)
+	if err != nil {
+		return nil, err
+	}
+	args = append([]any{selectedExecutionID, selectedExecutionID, now, prospective, recoveryAvailable(mode)}, args...)
 	rows, err := tx.QueryContext(ctx, sqliteCompletionRecoverySelect+storeagent.CompletionRecoveryAgentJoinSQL()+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
@@ -171,13 +233,25 @@ func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now t
 		    (o.authority_kind='normal_agent' AND (
 		      `+storeagent.CompletionRecoveryAgentStaleSQL(true)+`
 		    )) OR
+		    (o.authority_kind='normal_agent' AND EXISTS (
+		      SELECT 1 FROM json_each(?) next_agent
+		      WHERE json_extract(next_agent.value,'$.run_id')=o.agent_run_id
+		        AND json_extract(next_agent.value,'$.agent_id')=o.agent_id
+		        AND json_extract(next_agent.value,'$.name_owner')=o.agent_name_owner
+		        AND json_extract(next_agent.value,'$.name_source')=o.agent_name_source
+		        AND json_extract(next_agent.value,'$.route_presence')=o.agent_route_presence
+		        AND json_extract(next_agent.value,'$.scope_key')=o.flow_scope_key
+		        AND json_extract(next_agent.value,'$.instance_id')=o.flow_instance_id
+		        AND json_extract(next_agent.value,'$.instance_path')=o.flow_instance
+		        AND json_extract(next_agent.value,'$.generation') IS NOT o.generation
+		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
 		      WHERE run.run_id=COALESCE(NULLIF(json_extract(o.lineage,'$.run_id'),''),NULLIF(json_extract(o.authority_evidence,'$.usage_target.run_id'),''))
 		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		    ))
 		  )
-		  ))
+		  )) AND ?
 		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
 	`, args...)
 	if err != nil {
@@ -198,9 +272,9 @@ func startupCompletionRecoveryFilter(identity *agentidentity.Identity, postgres 
 		AND o.agent_name_owner=? AND o.agent_name_source=? AND o.agent_route_presence=?
 		AND o.flow_scope_key=? AND o.flow_instance_id=? AND o.flow_instance=?`
 	if postgres {
-		predicate = ` AND o.authority_kind='normal_agent' AND o.agent_run_id=$3::uuid AND o.agent_id=$4
-			AND o.agent_name_owner=$5 AND o.agent_name_source=$6 AND o.agent_route_presence=$7
-			AND o.flow_scope_key=$8 AND o.flow_instance_id=$9 AND o.flow_instance=$10`
+		predicate = ` AND o.authority_kind='normal_agent' AND o.agent_run_id=$5::uuid AND o.agent_id=$6
+			AND o.agent_name_owner=$7 AND o.agent_name_source=$8 AND o.agent_route_presence=$9
+			AND o.flow_scope_key=$10 AND o.flow_instance_id=$11 AND o.flow_instance=$12`
 	}
 	return predicate, []any{fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}, nil

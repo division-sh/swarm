@@ -14,28 +14,29 @@ func recoveryPostlaunch(state string) bool {
 	return state == string(effects.StateLaunched) || state == string(effects.StateResponseObserved)
 }
 
-func (s *EffectPostgresOwner) InspectStartupRecovery(ctx context.Context, now time.Time) (result effects.StartupRecoveryCounts, err error) {
+func (s *EffectPostgresOwner) InspectStartupRecovery(ctx context.Context, now time.Time, available bool) (result effects.StartupRecoveryCounts, err error) {
 	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		result, err = inspectStartupRecovery(ctx, tx, true, s.delivery, now)
+		result, err = inspectStartupRecovery(ctx, tx, true, s.delivery, now, available)
 		return err
 	})
 	return result, err
 }
 
-func (s *EffectSQLiteOwner) InspectStartupRecovery(ctx context.Context, now time.Time) (result effects.StartupRecoveryCounts, err error) {
+func (s *EffectSQLiteOwner) InspectStartupRecovery(ctx context.Context, now time.Time, available bool) (result effects.StartupRecoveryCounts, err error) {
 	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		result, err = inspectStartupRecovery(ctx, tx, false, s.delivery, now)
+		result, err = inspectStartupRecovery(ctx, tx, false, s.delivery, now, available)
 		return err
 	})
 	return result, err
 }
 
-func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, now time.Time) (effects.StartupRecoveryCounts, error) {
+func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, now time.Time, available bool) (effects.StartupRecoveryCounts, error) {
 	var result effects.StartupRecoveryCounts
 	if now.IsZero() || delivery == nil {
 		return result, fmt.Errorf("startup recovery inspection requires its time and delivery reader")
 	}
-	candidates, err := loadExternalEffectRecoveryCandidates(ctx, tx, postgres, "", recoveryInspection)
+	mode := recoveryReadMode{inspection: true, available: available}
+	candidates, err := loadExternalEffectRecoveryCandidates(ctx, tx, postgres, "", mode)
 	if err != nil {
 		return result, err
 	}
@@ -49,9 +50,9 @@ func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, deli
 	}
 	var attempts []completionRecoveryAttempt
 	if postgres {
-		attempts, err = loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, "", nil, recoveryInspection)
+		attempts, err = loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, "", nil, mode)
 	} else {
-		attempts, err = loadCompletionRecoveryAttemptsSQLite(ctx, tx, now, "", nil)
+		attempts, err = loadCompletionRecoveryAttemptsSQLite(ctx, tx, now, "", nil, mode)
 	}
 	if err != nil {
 		return effects.StartupRecoveryCounts{}, err
