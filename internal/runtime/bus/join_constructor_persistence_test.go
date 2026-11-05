@@ -38,7 +38,7 @@ func TestJoinReceiverReadConsumesHeaderAndOptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC()
-	header := pipeline.WorkflowInstancePersistenceRecord{EntityID: constructed.EntityID, FlowInstance: constructed.InstancePath,
+	header := pipeline.WorkflowInstancePersistenceRecord{Life: 1, EntityID: constructed.EntityID, FlowInstance: constructed.InstancePath,
 		WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "template", Status: "active", Config: raw, StageDefined: true,
 		CurrentState: "ready", Revision: 1, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
 		Bookkeeping: json.RawMessage(`{}`), Accumulator: json.RawMessage(`{}`)}
