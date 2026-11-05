@@ -8,9 +8,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/google/uuid"
 )
 

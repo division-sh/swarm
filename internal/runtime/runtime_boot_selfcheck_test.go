@@ -9,9 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 )
 
 type bootSelfCheckDescriptorStore struct {
