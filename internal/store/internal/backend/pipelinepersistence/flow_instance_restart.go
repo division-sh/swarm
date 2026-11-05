@@ -55,21 +55,7 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return false, empty, nil, fmt.Errorf("instance restart requires its retained header")
 	}
 	if header.Life != life.Life {
-		if header.Life == record.State.Life {
-			equal, err := committedInstanceLifeRestartEqual(ctx, tx, record)
-			if err != nil {
-				return false, empty, nil, err
-			}
-			if equal {
-				restarted, err := rotateInstanceLifeActorsTx(ctx, attempt, store.instanceLifeLifecycleOwner(), plan, actors, true)
-				if err != nil {
-					return false, empty, nil, err
-				}
-				lifecycle, err := recoverInstanceRestartLifecycleTx(ctx, tx, attempt, store, postgres, plan.Lifecycle)
-				return err == nil, lifecycle, restarted, err
-			}
-		}
-		return false, empty, nil, pipeline.InstanceRestarted(record.Identity, life.Life, header.Life)
+		return replayCommittedInstanceLifeRestart(ctx, tx, attempt, store, postgres, plan, record, actors, header.Life)
 	}
 	if header.Revision != plan.Restart.Revision || header.Stage != plan.Restart.FinalStage.ID() {
 		return false, empty, nil, workflowEngineStateRevisionConflict(record.State)
@@ -106,6 +92,25 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return false, empty, nil, err
 	}
 	return true, lifecycle, restarted, nil
+}
+
+func replayCommittedInstanceLifeRestart(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, plan pipeline.FlowInstanceActivationPlan, record pipeline.FlowInstanceActivationRecord, actors []manager.AgentLifecycleState, currentLife int64) (bool, pipeline.CommittedWorkflowLifecycleMutation, []pipeline.InstanceRestartedAgent, error) {
+	var empty pipeline.CommittedWorkflowLifecycleMutation
+	if currentLife == record.State.Life {
+		equal, err := committedInstanceLifeRestartEqual(ctx, tx, record)
+		if err != nil {
+			return false, empty, nil, err
+		}
+		if equal {
+			restarted, err := rotateInstanceLifeActorsTx(ctx, attempt, store.instanceLifeLifecycleOwner(), plan, actors, true)
+			if err != nil {
+				return false, empty, nil, err
+			}
+			lifecycle, err := recoverInstanceRestartLifecycleTx(ctx, tx, attempt, store, postgres, plan.Lifecycle)
+			return err == nil, lifecycle, restarted, err
+		}
+	}
+	return false, empty, nil, pipeline.InstanceRestarted(record.Identity, plan.Restart.Life, currentLife)
 }
 
 func committedInstanceLifeRestartEqual(ctx context.Context, tx *sql.Tx, record pipeline.FlowInstanceActivationRecord) (bool, error) {

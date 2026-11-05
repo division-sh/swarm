@@ -121,37 +121,7 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 			return FlowInstanceSelection{}, err
 		}
 		if stage.IsFinal() {
-			if planner == nil || instance.Life <= 0 || instance.Life == math.MaxInt64 {
-				return FlowInstanceSelection{}, fmt.Errorf("finished receiver requires its constructor and incrementable life")
-			}
-			constructor := request.Constructor
-			constructor.Instance = observation.Identity()
-			constructor.Restart = &FlowInstanceRestart{Life: instance.Life, Revision: instance.Revision, FinalStage: stage}
-			plan, err := planner.PrepareFlowInstanceActivation(ctx, constructor)
-			if err != nil {
-				return FlowInstanceSelection{}, err
-			}
-			if plan.Identity != observation.Identity() || plan.Restart == nil ||
-				plan.Restart.Life != constructor.Restart.Life || plan.Restart.Revision != constructor.Restart.Revision ||
-				plan.Restart.FinalStage != constructor.Restart.FinalStage || plan.Instance.Life != instance.Life+1 {
-				return FlowInstanceSelection{}, fmt.Errorf("instance restart changed its observed identity or prepared life")
-			}
-			readiness, present := observation.Readiness()
-			if !present {
-				return FlowInstanceSelection{}, fmt.Errorf("instance restart requires its original attachment owner")
-			}
-			// Restart is another life of this physical instance, not another
-			// birth or another construction of its existing descendants.
-			plan.Instance.CreatedAt = instance.CreatedAt
-			plan.Instance.TemplateVersion = instance.TemplateVersion
-			plan.Instance.Status = instance.Status
-			plan.Instance.TransitionHistory = append([]WorkflowTransitionRecord(nil), instance.TransitionHistory...)
-			plan.Readiness = readiness.Plan
-			plan.Children = nil
-			if err := plan.Validate(); err != nil {
-				return FlowInstanceSelection{}, err
-			}
-			return FlowInstanceSelection{Activation: &plan}, nil
+			return prepareRestartedFlowInstance(ctx, planner, request, observation, instance, stage)
 		}
 	}
 	if request.Mode == contracts.FlowInputResolutionModeCreate {
@@ -172,6 +142,39 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 		return FlowInstanceSelection{}, err
 	}
 	return FlowInstanceSelection{Observation: observation}, nil
+}
+
+func prepareRestartedFlowInstance(ctx context.Context, planner FlowInstanceActivationPlanner, request FlowInstanceSelectionRequest, observation FlowInstanceObservation, instance WorkflowInstance, stage contracts.StoredStageRef) (FlowInstanceSelection, error) {
+	if planner == nil || instance.Life <= 0 || instance.Life == math.MaxInt64 {
+		return FlowInstanceSelection{}, fmt.Errorf("finished receiver requires its constructor and incrementable life")
+	}
+	constructor := request.Constructor
+	constructor.Instance = observation.Identity()
+	constructor.Restart = &FlowInstanceRestart{Life: instance.Life, Revision: instance.Revision, FinalStage: stage}
+	plan, err := planner.PrepareFlowInstanceActivation(ctx, constructor)
+	if err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	if plan.Identity != observation.Identity() || plan.Restart == nil ||
+		plan.Restart.Life != constructor.Restart.Life || plan.Restart.Revision != constructor.Restart.Revision ||
+		plan.Restart.FinalStage != constructor.Restart.FinalStage || plan.Instance.Life != instance.Life+1 {
+		return FlowInstanceSelection{}, fmt.Errorf("instance restart changed its observed identity or prepared life")
+	}
+	readiness, present := observation.Readiness()
+	if !present {
+		return FlowInstanceSelection{}, fmt.Errorf("instance restart requires its original attachment owner")
+	}
+	// Restart is another life of this physical instance, not another birth or
+	// another construction of its existing descendants.
+	plan.Instance.CreatedAt = instance.CreatedAt
+	plan.Instance.TemplateVersion = instance.TemplateVersion
+	plan.Instance.Status = instance.Status
+	plan.Instance.TransitionHistory = append([]WorkflowTransitionRecord(nil), instance.TransitionHistory...)
+	plan.Readiness, plan.Children = readiness.Plan, nil
+	if err := plan.Validate(); err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	return FlowInstanceSelection{Activation: &plan}, nil
 }
 
 func selectPreparedFlowInstance(request FlowInstanceSelectionRequest) (*FlowInstanceActivationPlan, bool, error) {

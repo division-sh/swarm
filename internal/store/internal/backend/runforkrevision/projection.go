@@ -321,6 +321,21 @@ func typedColumns(kinds map[string]valueKind, names ...string) []projectionColum
 	return out
 }
 
+func buildEventRoutingSource(values map[string]any) map[string]any {
+	source := map[string]any{
+		"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
+	}
+	if route, ok := values["source_route"].(map[string]any); ok {
+		source["life"] = route["life"]
+		delete(route, "life")
+	}
+	values["routing_source"] = source
+	delete(values, "routing_source_kind")
+	delete(values, "source_route")
+	delete(values, "routing_source_authority")
+	return values
+}
+
 func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 	var spec projectionSpec
 	switch family {
@@ -341,20 +356,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
 			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id", "inherited_fan_out_origin", "payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class", "operator_reference_event_id", "selected_fork_source_run_id", "selected_fork_source_event_id", "selected_fork_authority_stamp", "selected_fork_lineage_owners"),
-			build: func(values map[string]any) map[string]any {
-				source := map[string]any{
-					"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
-				}
-				if route, ok := values["source_route"].(map[string]any); ok {
-					source["life"] = route["life"]
-					delete(route, "life")
-				}
-				values["routing_source"] = source
-				delete(values, "routing_source_kind")
-				delete(values, "source_route")
-				delete(values, "routing_source_authority")
-				return values
-			},
+			build: buildEventRoutingSource,
 		}
 	case FamilyEntityMutations:
 		spec = projectionSpec{

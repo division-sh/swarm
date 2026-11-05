@@ -171,6 +171,27 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 	if len(a.RestartedAgents) != 0 && !a.StartedOver {
 		return fmt.Errorf("only a committed instance restart can change actor generations")
 	}
+	if err := a.validateRestartedAgents(); err != nil {
+		return err
+	}
+	if !a.Created && !a.StartedOver && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
+		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
+	}
+	if len(a.Children) != len(a.Plan.Children) {
+		return fmt.Errorf("committed construction omitted descendant evidence")
+	}
+	for index, child := range a.Children {
+		if child.Plan.Identity != a.Plan.Children[index].Identity || (!a.Created && child.Created) {
+			return fmt.Errorf("committed construction changed descendant identity or repeated construction")
+		}
+		if err := child.Validate(); err != nil {
+			return fmt.Errorf("committed construction descendant %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+func (a CommittedFlowInstanceActivation) validateRestartedAgents() error {
 	for index, restarted := range a.RestartedAgents {
 		identity := restarted.Token.Identity
 		if !restarted.Token.Valid() {
@@ -193,20 +214,6 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 			if identity == previous.Token.Identity {
 				return fmt.Errorf("instance restart repeated an actor identity")
 			}
-		}
-	}
-	if !a.Created && !a.StartedOver && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
-		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
-	}
-	if len(a.Children) != len(a.Plan.Children) {
-		return fmt.Errorf("committed construction omitted descendant evidence")
-	}
-	for index, child := range a.Children {
-		if child.Plan.Identity != a.Plan.Children[index].Identity || (!a.Created && child.Created) {
-			return fmt.Errorf("committed construction changed descendant identity or repeated construction")
-		}
-		if err := child.Validate(); err != nil {
-			return fmt.Errorf("committed construction descendant %d: %w", index, err)
 		}
 	}
 	return nil
@@ -422,21 +429,8 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if err != nil {
 		return err
 	}
-	if p.Restart != nil {
-		if err := p.Restart.Validate(p.Instance); err != nil {
-			return err
-		}
-		if err := p.Restart.ProcessBinding.Validate(); err != nil {
-			return fmt.Errorf("instance restart process owner: %w", err)
-		}
-		if err := p.Restart.DiagnosticOrigin.Validate(); err != nil {
-			return err
-		}
-		if len(p.Children) != 0 {
-			return fmt.Errorf("instance restart cannot reconstruct existing descendants")
-		}
-	} else if p.Instance.Life != 1 {
-		return fmt.Errorf("ordinary construction requires first life")
+	if err := p.validateLifeConstruction(); err != nil {
+		return err
 	}
 	if !p.Identity.Route().Valid() || p.Instance.StorageRef == "" || p.Instance.InstanceID == "" {
 		return fmt.Errorf("flow instance activation plan requires exact instance identity")
@@ -456,6 +450,30 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if p.Lifecycle.RequestCompletionCandidate {
 		return fmt.Errorf("flow instance activation cannot request run completion")
 	}
+	return p.validateConstructionChildren()
+}
+
+func (p FlowInstanceActivationPlan) validateLifeConstruction() error {
+	if p.Restart != nil {
+		if err := p.Restart.Validate(p.Instance); err != nil {
+			return err
+		}
+		if err := p.Restart.ProcessBinding.Validate(); err != nil {
+			return fmt.Errorf("instance restart process owner: %w", err)
+		}
+		if err := p.Restart.DiagnosticOrigin.Validate(); err != nil {
+			return err
+		}
+		if len(p.Children) != 0 {
+			return fmt.Errorf("instance restart cannot reconstruct existing descendants")
+		}
+	} else if p.Instance.Life != 1 {
+		return fmt.Errorf("ordinary construction requires first life")
+	}
+	return nil
+}
+
+func (p FlowInstanceActivationPlan) validateConstructionChildren() error {
 	seen := map[string]bool{p.Identity.InstancePath: true}
 	for index, child := range p.Children {
 		localScope := strings.TrimPrefix(child.Identity.ScopeKey, p.Identity.ScopeKey+"/")

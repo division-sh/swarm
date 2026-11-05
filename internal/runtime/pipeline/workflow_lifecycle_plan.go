@@ -510,6 +510,22 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	default:
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
+	if err := storePreparedStageEntry(owner, instance, effect, prepared); err != nil {
+		return err
+	}
+	if err := pc.planWorkflowTimerEffect(ctx, owner.RunID, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
+		return err
+	}
+	if err := pc.planWorkflowJoinEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect.ExecutionMode(), effect.OccurredAt(), &prepared.Commit); err != nil {
+		return err
+	}
+	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect, prepared); err != nil {
+		return err
+	}
+	return nil
+}
+
+func storePreparedStageEntry(owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
 	entry, enters, err := effect.StageEntry(owner)
 	if err != nil {
 		return fmt.Errorf("admit lifecycle stage entry: %w", err)
@@ -522,15 +538,6 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 			return err
 		}
 		prepared.Commit.StageEntry = &entry
-	}
-	if err := pc.planWorkflowTimerEffect(ctx, owner.RunID, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
-		return err
-	}
-	if err := pc.planWorkflowJoinEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect.ExecutionMode(), effect.OccurredAt(), &prepared.Commit); err != nil {
-		return err
-	}
-	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect, prepared); err != nil {
-		return err
 	}
 	return nil
 }
