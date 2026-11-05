@@ -81,6 +81,16 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, work.Done()) }()
+	var op channelonboarding.Operation
+	if c.operation.DeploymentRegistration {
+		op, err = c.currentOperation(work.Context())
+		if err != nil {
+			return err
+		}
+		if !op.AccountConfirmed {
+			return errIncomingAdmissionPending
+		}
+	}
 	account, err := c.AdmitSessionAccount(work.Context(), c.sessionAccount())
 	if err != nil {
 		return err
@@ -95,13 +105,6 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	}
 	incoming := c.incoming
 	if c.operation.DeploymentRegistration {
-		op, err := c.currentOperation(work.Context())
-		if err != nil {
-			return err
-		}
-		if !op.AccountConfirmed {
-			return errIncomingAdmissionPending
-		}
 		claim, err := incoming.pendingOperatorClaim(work.Context(), op, message)
 		if err != nil {
 			return err

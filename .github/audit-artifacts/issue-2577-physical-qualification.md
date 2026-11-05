@@ -10,13 +10,20 @@ repeats remain deferred under
 [6517309283](https://github.com/division-sh/swarm/issues/2577#issuecomment-6517309283):
 no deployment-HITL Inbox, group confirmation, or channel notice/ACK credit.
 
-[Current automated evidence](https://github.com/division-sh/swarm/issues/2577#issuecomment-6641724024)
+[Historical automated evidence](https://github.com/division-sh/swarm/issues/2577#issuecomment-6641724024)
 is pinned to clean master `5ca103d649d672ae76fea75f69d50c20d18bb954`,
 Go 1.26.8 linux/amd64 and WhatsApp fork `740de549008b`. On server2, all 47
 retained roots passed: 453 roots / 2,536 terminal leaves overall, zero failed,
 skipped or incomplete. The current emitted plan maps all 47 roots; this does
 not claim the complete units, all master tests, or any physical acceptance.
 Older failures and receipts retain their original source and scope.
+
+The November 5 sitting stopped at an incoming callback during the unapproved
+linked-account preview; see the
+[source/stop record](https://github.com/division-sh/swarm/issues/2577#issuecomment-6667466070).
+No operator/business/reset/next-day physical credit follows from the linked
+preview. Read the [transition coverage map](issue-2577-sitting-transition-coverage.md)
+with its exact-head qualification packet; a green root count alone is not READY.
 
 The current-source binary passed CLI help, portable verification of the existing
 authored-reply fixture, and public scaffold generation without starting a QR
@@ -43,10 +50,11 @@ user types no Swarm commands or IDs. No live debugging is allowed in the sitting
   selected, deployment `channels.hitl.account`. Record the exact source bundle,
   holder/interface and operation revisions from public readback, never a first
   account or guessed target. Rehearse the complete private command sequence.
-- Separate deployment account registration from operator identity and activation.
-  `channel connect whatsapp` registers the account; it does not bind the
-  independent operator to a role. The scoped runtime onboarding/confirmation
-  sequence must be prepared separately. Pairing alone grants no operator role.
+- Separate pairing, operator identity and business activation. With the exact
+  configured deployment HITL account, `channel connect whatsapp` itself owns the
+  account preview/approval, operator challenge and claimant confirmation. Do not
+  insert an obsolete second runtime enrollment. Serve then adopts the registered
+  account for the prepared authored source; pairing alone grants no operator role.
 - Complete the sender observation below before claiming ceremony conformance.
   A synthetic peer or successful QR scan cannot establish that fact.
 - Check the quiet-host envelope, exact owned PID/socket, safe stop/join and
@@ -104,13 +112,8 @@ a distinct intended idempotency key; no mutable or guessed selector is allowed.
 "$BIN" --config "$CONFIG" --swarm-dir "$STATE" channel list --json
 "$BIN" --config "$CONFIG" --swarm-dir "$STATE" channel status whatsapp "$ACCOUNT" --json
 
-# Separate runtime operator enrollment, using the exact prepared source scope.
-p_rpc channel.onboarding_start "$START_REQUEST_JSON"
+# Read back the exact operation retained by deployment connect when needed.
 p_rpc channel.onboarding_get "$OPERATION_REQUEST_JSON"
-# Normal prepared continuation/confirmation cuts, not investigative retries.
-p_rpc channel.onboarding_retry "$OPERATION_REQUEST_JSON"
-p_rpc channel.confirm "$CONFIRM_REQUEST_JSON"
-p_rpc channel.onboarding_retry "$OPERATION_REQUEST_JSON"
 
 # Exact public readbacks and the separately consented unbind/reset/logout cuts.
 p_rpc run.list "$EXACT_BUNDLE_FILTER_JSON"
