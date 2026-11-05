@@ -1,6 +1,7 @@
 package events
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +235,22 @@ func TestRunScopedRuntimeControlPreservesExactRootRoutingSource(t *testing.T) {
 	}
 	if event.SourceRoute() != (RouteIdentity{EntityID: "entity-root"}) {
 		t.Fatalf("envelope source = %#v, want exact root entity", event.SourceRoute())
+	}
+	first, err := IntegrityProjection(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.RoutingSource, err = source.WithLife(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := IntegrityProjection(later)
+	if err != nil || reflect.DeepEqual(first, projection) {
+		t.Fatalf("integrity discarded source life: %v", err)
 	}
 
 	facts.Envelope.Source = RouteIdentity{EntityID: "entity-other"}
