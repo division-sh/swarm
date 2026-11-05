@@ -85,6 +85,7 @@ func foldFanOutIntentTerminalDispositions(
 	db pipelineQueryer,
 	postgres bool,
 	key fanoutobligation.IntentKey,
+	timingOptions ...*fanOutFoldTiming,
 ) (fanoutbarrier.Fold, error) {
 	if err := key.Validate(); err != nil {
 		return fanoutbarrier.Fold{}, err
@@ -97,6 +98,9 @@ func foldFanOutIntentTerminalDispositions(
 		query = fanOutFoldJoinedDeploymentQuery
 		args = []any{key.RunID, key.DeploymentFeedID}
 	}
+	timing := fanOutFoldTimingOption(timingOptions)
+	joinedRead := timing.begin(fanOutTimingJoined, 0)
+	defer joinedRead.finish(false, 0)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fanoutbarrier.Fold{}, err
@@ -108,6 +112,7 @@ func foldFanOutIntentTerminalDispositions(
 		}
 		return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s is missing", key.String())
 	}
+	joinedRead.row()
 	// Validate the header before converting any outcome, as in the two-query
 	// owner. Presence uses a joined key, never a nullable/corrupt ordinal.
 	var present bool
@@ -149,6 +154,7 @@ func foldFanOutIntentTerminalDispositions(
 		if !rows.Next() {
 			break
 		}
+		joinedRead.row()
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -160,6 +166,7 @@ func foldFanOutIntentTerminalDispositions(
 	if len(facts) != cursor {
 		return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s has %d ordinal outcomes, want contiguous cursor %d", key.String(), len(facts), cursor)
 	}
+	joinedRead.finish(true, len(facts))
 	adapter := sqliteDeliveryAdapter
 	if postgres {
 		adapter = postgresDeliveryAdapter
@@ -176,11 +183,13 @@ func foldFanOutIntentTerminalDispositions(
 			}
 		}
 		var admitted []eventrecord.AdmittedRecord
+		eventRead := timing.begin(fanOutTimingEvents, len(eventIDs))
 		if postgres {
 			admitted, err = eventrecordpostgres.LoadAdmittedMany(ctx, db, eventIDs)
 		} else {
 			admitted, err = eventrecordsqlite.LoadAdmittedMany(ctx, db, eventIDs)
 		}
+		eventRead.finish(err == nil, len(admitted))
 		if err != nil {
 			var corrupt *eventrecord.CorruptError
 			if errors.As(err, &corrupt) {
@@ -199,7 +208,9 @@ func foldFanOutIntentTerminalDispositions(
 			}
 			settlements[eventIDs[i]] = record
 		}
+		deliveryRead := timing.begin(fanOutTimingDeliveries, len(eventIDs))
 		deliveriesByEvent, err := adapter.SnapshotsForEvents(ctx, db, eventIDs)
+		deliveryRead.finish(err == nil, len(deliveriesByEvent))
 		if err != nil {
 			return fanoutbarrier.Fold{}, fmt.Errorf("load fan-out delivery batch: %w", err)
 		}
