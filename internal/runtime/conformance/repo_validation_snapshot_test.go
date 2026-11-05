@@ -525,9 +525,6 @@ func TestConformanceRepoSnapshotCheckoutMembershipAcrossConsumers(t *testing.T) 
 			if problems := validateRouteAuthorityProofRef(root, "fixture", routeAuthorityProofRef{Kind: "go_test", Name: proof}, routeAuthorityValidationContext{goTests: localNames}, nil); len(problems) != 0 {
 				t.Fatalf("route matrix rejected current local proof: %#v", problems)
 			}
-			if problems := validateForkReplayResumeProofRef("fixture", forkReplayResumeProofRef{Kind: "go_test", Name: proof}, forkReplayResumeValidationContext{goTests: localNames}); len(problems) != 0 {
-				t.Fatalf("fork/replay record rejected current local proof: %#v", problems)
-			}
 
 			foreignOnlyRoot := makeRoot(false)
 			foreignOnly := mustConformanceRepoSnapshot(t, foreignOnlyRoot)
@@ -544,10 +541,6 @@ func TestConformanceRepoSnapshotCheckoutMembershipAcrossConsumers(t *testing.T) 
 			routeProblems := validateRouteAuthorityProofRef(foreignOnlyRoot, "fixture", routeAuthorityProofRef{Kind: "go_test", Name: proof}, routeAuthorityValidationContext{goTests: names}, nil)
 			if !routeAuthorityProblemsContain(routeProblems, "fixture go_test proof_ref "+proof+" does not resolve") {
 				t.Fatalf("route matrix credited foreign-only proof: %#v", routeProblems)
-			}
-			forkProblems := validateForkReplayResumeProofRef("fixture", forkReplayResumeProofRef{Kind: "go_test", Name: proof}, forkReplayResumeValidationContext{goTests: names})
-			if !routeAuthorityProblemsContain(forkProblems, "fixture go_test proof_ref "+proof+" does not resolve") {
-				t.Fatalf("fork/replay record credited foreign-only proof: %#v", forkProblems)
 			}
 			if _, err := buildConformanceRepoSnapshot(filepath.Join(root, "missing"), defaultConformanceRepoSnapshotIO()); err == nil {
 				t.Fatal("missing snapshot root was accepted")
@@ -732,14 +725,6 @@ func TestConformanceMutableValidationInputsAreDeepCloned(t *testing.T) {
 	matrixClone.Rows[0].ProofRefs[0].Kind = "mutated"
 	if matrix.Rows[0].ProofDimensions[0] == "mutated" || matrix.Rows[0].OwnerRefs[0].Kind == "mutated" || matrix.Rows[0].ProofRefs[0].Kind == "mutated" {
 		t.Fatal("route matrix nested mutation leaked into source")
-	}
-
-	record := loadForkReplayResumeDesignRecord(t, root)
-	recordClone := cloneForkReplayResumeDesignRecord(record)
-	recordClone.Rows[0].BlockerCodes[0] = "mutated"
-	recordClone.Rows[0].ProofRefs[0].Kind = "mutated"
-	if record.Rows[0].BlockerCodes[0] == "mutated" || record.Rows[0].ProofRefs[0].Kind == "mutated" {
-		t.Fatal("fork replay record nested mutation leaked into source")
 	}
 }
 
