@@ -11,6 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
@@ -81,12 +82,19 @@ func (s *PipelinePostgresOwner) LockWorkflowPublicationTx(ctx context.Context, t
 }
 
 func (s *PipelineSQLiteOwner) LockWorkflowPublicationTx(ctx context.Context, tx *sql.Tx, command runtimebus.PublicationCommand) error {
-	return nil
+	return lockWorkflowPublicationFootprintTx(ctx, tx, false, nil, []runtimebus.PublicationCommand{command})
 }
 
 // The prepared plans name locks, not accepted state. Semantic checks and receipt
 // writes stay at their commit sites after this complete native acquisition prefix.
 func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgres bool, owners []flowidentity.RunScopedFlowInstance, publications []runtimebus.PublicationCommand) error {
+	for _, publication := range publications {
+		for _, plan := range publication.Activations {
+			if err := lockRestartActorsTx(ctx, tx, postgres, plan); err != nil {
+				return err
+			}
+		}
+	}
 	if !postgres {
 		return nil
 	}
@@ -95,6 +103,22 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 		return err
 	}
 	return acquireWorkflowPublicationFootprintTx(ctx, tx, footprint)
+}
+
+func lockRestartActorsTx(ctx context.Context, tx *sql.Tx, postgres bool, plan pipeline.FlowInstanceActivationPlan) error {
+	if plan.Restart != nil {
+		if _, err := agentpersistence.LockInstanceLifeActorsTx(ctx, tx, events.InstanceLife{
+			RunID: plan.Readiness.RunID, FlowInstance: plan.Identity.InstancePath, Life: plan.Restart.Life,
+		}, plan.Restart.ProcessBinding, !postgres); err != nil {
+			return err
+		}
+	}
+	for _, child := range plan.Children {
+		if err := lockRestartActorsTx(ctx, tx, postgres, child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type preparedWorkflowPublicationFootprint struct {

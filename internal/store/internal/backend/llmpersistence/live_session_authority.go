@@ -91,7 +91,7 @@ func requireSessionInstanceLife(ctx context.Context, tx *sql.Tx, life events.Ins
 
 // This census is an observation within the caller's native instance mutation,
 // not permission to reset or a substitute for acquiring the actor lifecycle set.
-func readActiveInstanceLifeSessionLeasesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife, now time.Time) (int, error) {
+func ReadActiveInstanceLifeSessionLeasesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife, now time.Time) (int, error) {
 	if tx == nil || now.IsZero() {
 		return 0, fmt.Errorf("instance session census requires its transaction and observation time")
 	}
@@ -137,9 +137,9 @@ func readActiveInstanceLifeSessionLeasesTx(ctx context.Context, tx *sql.Tx, life
 }
 
 func (s *LLMPostgresOwner) ReadActiveInstanceLifeSessionLeasesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife, now time.Time) (int, error) {
-	return readActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
+	return ReadActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
 }
 
 func (s *LLMSQLiteOwner) ReadActiveInstanceLifeSessionLeasesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife, now time.Time) (int, error) {
-	return readActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
+	return ReadActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
 }

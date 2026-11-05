@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -43,9 +44,9 @@ func commitFlowInstanceActivations(
 					return err
 				}
 			}
-			if err := lockWorkflowPublicationFootprintTx(ctx, tx, true, nil, []runtimebus.PublicationCommand{{Activations: plans}}); err != nil {
-				return err
-			}
+		}
+		if err := lockWorkflowPublicationFootprintTx(ctx, tx, postgres, nil, []runtimebus.PublicationCommand{{Activations: plans}}); err != nil {
+			return err
 		}
 		for index, plan := range plans {
 			result, err := commitFlowInstanceActivationPlan(ctx, tx, attempt, store, postgres, plan, index, seen, occurrence)
@@ -105,7 +106,14 @@ func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutati
 			return runtimepipeline.CommittedFlowInstanceActivation{}, errors.Join(err, fmt.Errorf("construction replay has missing or conflicting descendant %s", record.Identity.Route.InstancePath))
 		}
 	}
-	created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record, occurrence)
+	var created bool
+	var lifecycle runtimepipeline.CommittedWorkflowLifecycleMutation
+	var restarted []agentidentity.Identity
+	if plan.Restart != nil {
+		created, lifecycle, restarted, err = commitFlowInstanceRestart(ctx, tx, attempt, store, postgres, plan, record)
+	} else {
+		created, lifecycle, err = commitFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record, occurrence)
+	}
 	if err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
@@ -115,6 +123,11 @@ func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutati
 	}
 	result := runtimepipeline.CommittedFlowInstanceActivation{
 		Plan: plan, Created: created, Lifecycle: lifecycle, ReadinessAttemptOrdinal: readiness.AttemptOrdinal,
+	}
+	if plan.Restart != nil {
+		result.Created = false
+		result.StartedOver = created
+		result.RestartedAgents = restarted
 	}
 	for _, child := range plan.Children {
 		committed, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, child, created, seen, occurrence)
