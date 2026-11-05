@@ -76,6 +76,9 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	} else if executionSource.Kind() != events.RoutingSourceRoot {
 		routingSource, err = events.NewFlowOwnedControlRoutingSource(executionSource.Route())
 	}
+	if err == nil {
+		routingSource, err = routingSource.WithLife(executionSource.Life())
+	}
 	if err != nil {
 		return nil, fmt.Errorf("admit schedule control source: %w", err)
 	}
