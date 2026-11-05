@@ -184,13 +184,17 @@ func rotateInstanceLifeActorsTx(ctx context.Context, attempt *mutationprotocol.A
 		}
 		digest := sha256.Sum256(raw)
 		operationID := uuid.NewSHA1(uuid.NameSpaceOID, digest[:]).String()
+		targetPhase, runMode := manager.AgentLifecycleRegistered, manager.AgentRunModeStopped
+		if actor.Phase == manager.AgentLifecycleRunning {
+			targetPhase, runMode = actor.Phase, actor.RunMode
+		}
 		_, err = owner.CommitAgentLifecycleTransitionTx(ctx, attempt, manager.AgentLifecycleTransition{
 			DiagnosticOrigin: plan.Restart.DiagnosticOrigin, OperationID: operationID,
 			OperationKind: "restart", RequestHash: hex.EncodeToString(digest[:]), Identity: actor.Identity,
 			AgentID: actor.AgentID, Trigger: "instance_restart", ExpectedEpoch: actor.RuntimeEpoch,
 			ExpectedGeneration: actor.Generation, ExpectedPhase: actor.Phase, TargetEpoch: actor.RuntimeEpoch + 1,
-			TargetGeneration: actor.Generation + 1, TargetPhase: manager.AgentLifecycleRegistered,
-			ConfigRevision: actor.ConfigRevision, RunMode: manager.AgentRunModeStopped, Topology: actor.Topology,
+			TargetGeneration: actor.Generation + 1, TargetPhase: targetPhase,
+			ConfigRevision: actor.ConfigRevision, RunMode: runMode, Topology: actor.Topology,
 			ProcessBinding: plan.Restart.ProcessBinding, Now: plan.OccurredAt,
 			Subordinate: sessions.LifecycleMutationPlan{Action: sessions.LifecycleMutationRotateCurrentSet,
 				TerminationReason: sessions.TerminationReasonNormal, TerminationDetail: "instance_restarted"},
