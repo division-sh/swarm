@@ -145,6 +145,7 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 			plan.Instance.CreatedAt = instance.CreatedAt
 			plan.Instance.TemplateVersion = instance.TemplateVersion
 			plan.Instance.Status = instance.Status
+			plan.Instance.TransitionHistory = append([]WorkflowTransitionRecord(nil), instance.TransitionHistory...)
 			plan.Readiness = readiness.Plan
 			plan.Children = nil
 			if err := plan.Validate(); err != nil {
