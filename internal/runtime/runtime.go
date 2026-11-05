@@ -2370,6 +2370,11 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", err))
 		}
 	}
+	if rt.ToolExecutor != nil {
+		if err := rt.ToolExecutor.Close(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("external MCP shutdown: %w", err), rt.ToolExecutor.Close(context.Background()))
+		}
+	}
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
 	grant := rt.startupGrant
