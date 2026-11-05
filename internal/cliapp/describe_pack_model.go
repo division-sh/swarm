@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
 
@@ -158,7 +158,7 @@ func packDescriptionComponent(provider packartifact.AdmittedProvider, source str
 		applicability = "captured declaration"
 	}
 	return PackComponentDescription{Scope: provider.DeclaringFlow(), Applicability: applicability, Directory: provider.Directory(), Source: source,
-		Version: provider.Metadata().Version, ManifestHash: manifesthash.FromBytes(provider.ManifestBody()).String(), HasChannel: hasChannel, Tools: []PackToolDescription{}}
+		Version: provider.Metadata().Version, ManifestHash: runtimeidentity.ManifestHashFromBytes(provider.ManifestBody()).String(), HasChannel: hasChannel, Tools: []PackToolDescription{}}
 }
 
 func appendCapturedPackComponents(result *PackDescription, bundle *runtimecontracts.WorkflowContractBundle) error {
