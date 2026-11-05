@@ -5,6 +5,7 @@ package sessionprovider
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -221,6 +223,37 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				}
 				if _, err := f.connection.AdmitSessionAccount(ctx, checkpoint.SessionAccount); err == nil {
 					t.Fatal("unconfirmed account granted operator authority")
+				}
+				// pairedBootstrapStateFixture supplies retained SDK state, not a
+				// phone handshake. Exercise the actual callback before approval.
+				occurrence := f.connection.state.currentOccurrence()
+				guard := occurrence.callbacks
+				sender := types.NewJID("15550100124", types.DefaultUserServer)
+				message := &events.Message{
+					Info: types.MessageInfo{
+						MessageSource: types.MessageSource{Chat: sender, Sender: sender},
+						ID:            uuid.NewString(), Timestamp: time.Now().UTC(),
+					},
+					Message: &waE2E.Message{Conversation: proto.String("message before account approval")},
+				}
+				if guard.receive(message) {
+					t.Fatal("unapproved account acknowledged an incoming message")
+				}
+				guard.mu.Lock()
+				fenced := guard.fenced
+				guard.mu.Unlock()
+				if failure := guard.currentFailure(); failure != nil || fenced {
+					t.Fatal("preapproval callback fatally fenced the paired connection", failure, fenced)
+				}
+				if pending, err := f.connection.captures.pending(ctx); err != nil || len(pending) != 0 {
+					t.Fatal("preapproval callback captured input", len(pending), err)
+				}
+				unchanged, err := operations.GetChannelOnboarding(ctx, checkpoint.OperationID)
+				if err != nil || !reflect.DeepEqual(unchanged, preview.Operation) {
+					t.Fatal("preapproval callback changed its onboarding operation", err)
+				}
+				if f.connection.state.currentOccurrence() != occurrence {
+					t.Fatal("preapproval callback replaced its SDK occurrence")
 				}
 				logout := func(op channelonboarding.Operation) channelonboarding.Result {
 					t.Helper()
