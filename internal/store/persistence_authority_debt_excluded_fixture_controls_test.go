@@ -90,6 +90,8 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 				case "old-body":
 					if provider {
 						source = strings.Replace(source, `"idempotency_key": "future-provider-start-cut"`, `"allow_source_freeze": true, "idempotency_key": "future-provider-start-cut"`, 1)
+						want--
+						uncertain = 1
 					}
 					if darwin {
 						source = strings.Replace(source, "return startWatched(command, owner)", "return command.Start()", 1)
@@ -196,6 +198,43 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 			})
 		}
 	}
+	t.Run("portable-context-body-pairs", func(t *testing.T) {
+		const oldContext = "bf98ca60306a0fa727206f73aecb6d27e6a9a366183114a0fe7cd8bbfd62c02e"
+		const newContext = "6632b5256bfc7f4f796dee46748546cad0f83930df4a23794fcd179e971e8f37"
+		const oldBody = "declaration:931af522b4f0b9379a9842b13e9a28e01e907202547ed55a48a510783d324121"
+		const body = "declaration:a93689c088d0eac109b63733b72f50d2c90bacd48405c1eff84a8b6105cf1d5b"
+		const helperBody = "declaration:69bf4b7d588cc2455f6ce5c20aea5e8968aba3e962c8d66a45d2190e8e18f9bf"
+		const entry = "TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores"
+		const helper = "issue642WaitFutureProviderCompletion"
+		for _, test := range []struct {
+			declaration, body, context string
+			accept                     bool
+		}{
+			{entry, oldBody, oldContext, true},
+			{entry, body, oldContext, true},
+			{entry, body, newContext, true},
+			{entry, oldBody, newContext, false},
+			{entry, body, strings.Repeat("a", 64), false},
+			{entry, helperBody, newContext, false},
+			{helper, helperBody, oldContext, true},
+			{helper, helperBody, newContext, true},
+			{helper, body, newContext, false},
+			{helper, helperBody, strings.Repeat("a", 64), false},
+		} {
+			finding := authorityFinding{Kind: "unresolved-excluded-source", File: "internal/serveapp/issue642_future_provider_test.go", Enclosing: test.declaration, Member: test.body, Resolved: "unresolved|source-context:" + test.context}
+			classified := debtClassifyReviewedExcludedFixtures(t, []authorityFinding{finding})
+			if (classified[0].Kind == "reviewed-excluded-source") != test.accept {
+				t.Fatalf("body/context pair accept=%v: %+v", test.accept, classified)
+			}
+			if got := debtClassifyReviewedExcludedFixtures(t, []authorityFinding{finding, finding}); got[0] != finding || got[1] != finding {
+				t.Fatal("duplicate body/context pair admitted")
+			}
+			finding.RawSQL = true
+			if got := debtClassifyReviewedExcludedFixtures(t, []authorityFinding{finding}); got[0] != finding {
+				t.Fatal("body/context pair suppressed raw authority")
+			}
+		}
+	})
 	row := authorityFinding{Kind: "raw-operation", File: "internal/serveapp/lifecycle_template_race_enabled_test.go", Enclosing: "package", Member: "call:Exec"}
 	if got := debtClassifyReviewedExcludedFixtures(t, []authorityFinding{row}); !slices.Equal(got, []authorityFinding{row}) {
 		t.Fatal("independent raw authority finding was suppressed")

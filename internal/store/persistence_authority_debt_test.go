@@ -305,6 +305,8 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	pairs = append(pairs, debtDeploymentHandlerSignatureTransition(), debtSelectedBindingRootArgumentTransition())
 	pairs = append(append(pairs, selectedFixtures[:]...), w1Fixtures[:]...)
 	pairs = append(pairs, rollbackFixtures[:]...)
+	portableFixtures := debtPortableRuntimeSignatureTransitions()
+	pairs = append(pairs, portableFixtures[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -349,6 +351,57 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 		source = debtForwardQuiescenceUncertainty(source, old, current)
 	}
 	return head, base, source, nil
+}
+
+// #2409/6652034819: five exact counted signatures retain their existing owners.
+func debtPortableRuntimeSignatureTransitions() [5][2]authorityDebtSite {
+	var pairs [5][2]authorityDebtSite
+	old := authorityDebtSite{
+		Kind: "raw-operation", File: "internal/serveapp/fork_receiver_acquisition_effect_only_test.go", Declaration: "TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores",
+		Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireSupplementalForkAcquisitionSettlement",
+		Resolved:  "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, eventID string, policy github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy) github.com/division-sh/swarm/internal/events.DeliveryRoute|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy|results=(github.com/division-sh/swarm/internal/events.DeliveryRoute)",
+		Family:    "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 2,
+	}
+	current := old
+	current.Resolved = "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, eventID string, policy github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy) github.com/division-sh/swarm/internal/events.DeliveryRoute|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy|results=(github.com/division-sh/swarm/internal/events.DeliveryRoute)"
+	pairs[0] = [2]authorityDebtSite{old, current}
+	old = authorityDebtSite{
+		Kind: "callback-type", File: "internal/serveapp/fork_receiver_ownership_test.go", Declaration: "forkReceiverJourneyOptions",
+		Operation: "field:afterSource",
+		Resolved:  "func(*testing.T, github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, *github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner, string, string, string, []github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiver)",
+		Family:    "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1,
+	}
+	current = old
+	current.Resolved = "func(*testing.T, github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, *github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner, string, string, string, []github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiver)"
+	pairs[1] = [2]authorityDebtSite{old, current}
+	old = authorityDebtSite{
+		Kind: "raw-operation", File: "internal/serveapp/fork_receiver_ownership_test.go", Declaration: "runForkReceiverOwnershipJourney",
+		Operation: "call:github.com/division-sh/swarm/internal/serveapp.afterSource",
+		Resolved:  "func=func(*testing.T, github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, *github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner, string, string, string, []github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiver)|recv=github.com/division-sh/swarm/internal/serveapp.forkReceiverJourneyOptions|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=*github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner|arg=string|arg=string|arg=string|arg=[]github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiver|results=()",
+		Family:    "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1,
+	}
+	current = old
+	current.Resolved = "func=func(*testing.T, github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, *github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner, string, string, string, []github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiver)|recv=github.com/division-sh/swarm/internal/serveapp.forkReceiverJourneyOptions|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=*github.com/division-sh/swarm/internal/serveapp.selectedStoreOwner|arg=string|arg=string|arg=string|arg=[]github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiver|results=()"
+	pairs[2] = [2]authorityDebtSite{old, current}
+	old = authorityDebtSite{
+		Kind: "raw-operation", File: "internal/serveapp/fork_receiver_ownership_test.go", Declaration: "runForkReceiverOwnershipJourney",
+		Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireForkReceiverExecution",
+		Resolved:  "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, sourceEvent string, path string, label string, kind string, entityID string, policy github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy) github.com/division-sh/swarm/internal/events.DeliveryRoute|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy|results=(github.com/division-sh/swarm/internal/events.DeliveryRoute)",
+		Family:    "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 1,
+	}
+	current = old
+	current.Resolved = "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, sourceEvent string, path string, label string, kind string, entityID string, policy github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy) github.com/division-sh/swarm/internal/events.DeliveryRoute|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=string|arg=string|arg=string|arg=string|arg=github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiverPolicy|results=(github.com/division-sh/swarm/internal/events.DeliveryRoute)"
+	pairs[3] = [2]authorityDebtSite{old, current}
+	old = authorityDebtSite{
+		Kind: "raw-operation", File: "internal/serveapp/fork_receiver_ownership_test.go", Declaration: "runForkReceiverOwnershipJourney",
+		Operation: "call:github.com/division-sh/swarm/internal/serveapp.requireForkReceiverMutationOwners",
+		Resolved:  "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, eventID string, prefix string, receivers []github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiver)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=string|arg=[]github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting.ForkReceiver|results=()",
+		Family:    "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: 2,
+	}
+	current = old
+	current.Resolved = "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, eventID string, prefix string, receivers []github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiver)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|arg=string|arg=[]github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting.ForkReceiver|results=()"
+	pairs[4] = [2]authorityDebtSite{old, current}
+	return pairs
 }
 
 // #2881/6567159073: five existing fixture calls retain their native owner.
