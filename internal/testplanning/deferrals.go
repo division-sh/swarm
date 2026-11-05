@@ -23,7 +23,7 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestSelectedWorkspacePreparationRealDockerBothStores": "opt-in real Docker proof",
 		"TestSelectedForkCrashProcessHelper":                   "subprocess entry point, not a standalone proof",
 	},
-	"internal/runtime/testfixtures/canonicalrouting": {
+	"tests/support/runtime/testfixtures/canonicalrouting": {
 		"TestCanonicalRoutingTrackedSplitsRemainOpen": "separately provisioned remote tracker check",
 	},
 	"internal/runtime/workspace": {

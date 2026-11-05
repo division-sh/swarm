@@ -40,7 +40,7 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 	} {
 		put(path+"/main.go", []byte("package "+name+"\n"))
 	}
-	put("cmd/swarm-test/main.go", []byte("package main\nimport _ \"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting\"\n"))
+	put("cmd/swarm-test/main.go", []byte("package main\nimport _ \"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting\"\n"))
 	accountingGuardFixtureFiles(t, root, put)
 	put("go.mod", []byte("module github.com/division-sh/swarm\n\ngo 1.26.8\n"))
 	put("go.sum", nil)

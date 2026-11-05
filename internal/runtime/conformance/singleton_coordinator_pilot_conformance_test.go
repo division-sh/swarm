@@ -9,7 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/singletoncoordinatorpilot"
 )
 
 func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwners(t *testing.T) {

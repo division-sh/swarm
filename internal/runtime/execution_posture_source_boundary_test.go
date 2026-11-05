@@ -36,7 +36,7 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 	seenSessionSites := map[string]int{}
 	skippedPrefixes := []string{
 		"internal/events/eventtest/",
-		"internal/runtime/effects/effecttest/",
+		"tests/support/runtime/effects/effecttest/",
 		"internal/store/eventfixture/",
 	}
 	var violations []string

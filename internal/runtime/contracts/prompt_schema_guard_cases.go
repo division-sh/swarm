@@ -5,13 +5,11 @@ import (
 )
 
 type PromptSchemaGuardCase struct {
-	IntentSource     string
-	IntentContent    string
-	FlowID           string
-	EventType        string
-	EmitTool         string
-	RequiredTopLevel []string
-	ForbiddenTokens  []string
+	IntentSource  string
+	IntentContent string
+	FlowID        string
+	EventType     string
+	EmitTool      string
 }
 
 func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuardCase {
@@ -48,12 +46,11 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 			}
 			seen[key] = struct{}{}
 			cases = append(cases, PromptSchemaGuardCase{
-				IntentSource:     entry.ResolvedIntent.Coordinate,
-				IntentContent:    entry.ResolvedIntent.Content,
-				FlowID:           record.OwnerFlowID,
-				EventType:        emitEvent,
-				EmitTool:         "emit_" + strings.ReplaceAll(emitEvent, ".", "_"),
-				RequiredTopLevel: required,
+				IntentSource:  entry.ResolvedIntent.Coordinate,
+				IntentContent: entry.ResolvedIntent.Content,
+				FlowID:        record.OwnerFlowID,
+				EventType:     emitEvent,
+				EmitTool:      "emit_" + strings.ReplaceAll(emitEvent, ".", "_"),
 			})
 		}
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
-	Prove(t, ArtifactID("internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution"))
+	Prove(t, ArtifactID("tests/support/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution"))
 	for _, tc := range []struct {
 		name string
 		copy func(testing.TB) string
