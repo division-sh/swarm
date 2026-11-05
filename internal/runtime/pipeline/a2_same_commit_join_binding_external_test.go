@@ -122,6 +122,7 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
 			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
+				Life:       1,
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: "dispatching", EntityType: "state", Fields: map[string]any{"expected": []any{"a", "b"}},
 			}, now)

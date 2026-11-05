@@ -177,7 +177,7 @@ func (c Capsule) Validate() error {
 		return errors.New("fan-out capsule requires route, producer source, and nonnegative chain depth")
 	}
 	if life := c.Context.Life; life != nil {
-		if life.RunID != c.Lineage.RunID || life.FlowInstance != c.Route.InstancePath || life.Life != c.ProducerSource.Life() {
+		if life.FlowInstance != c.Route.InstancePath || life.Life != c.ProducerSource.Life() {
 			return errors.New("fan-out continuation life contradicts its captured execution owner")
 		}
 		if c.Receiver != nil && life.Life != c.Receiver.Target.Life() {
@@ -398,6 +398,10 @@ func (r IntentRequest) Validate() error {
 	}
 	if err := r.ValidateSourceProjection(); err != nil {
 		return err
+	}
+	// Trigger lineage may be ancestral; the intent key owns execution.
+	if life := r.Capsule.Context.Life; life != nil && life.RunID != r.Key.RunID {
+		return errors.New("fan-out continuation life crosses its execution intent")
 	}
 	return r.Capsule.Validate()
 }
