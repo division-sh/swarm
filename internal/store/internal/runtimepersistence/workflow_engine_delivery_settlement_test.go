@@ -408,6 +408,33 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 			assertFanOutIntentCount(t, ctx, db, backend, runID, 1)
 			assertFanOutBarrierCount(t, ctx, db, runID, 1)
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			var census interface {
+				ReadPendingInstanceLifeFanOutTx(context.Context, *sql.Tx, events.InstanceLife) (int, error)
+			}
+			switch selected := fixture.store.(type) {
+			case *PostgresStore:
+				census = selected.pipelinePostgresOwner
+			case *SQLiteRuntimeStore:
+				census = selected.pipelineSQLiteOwner
+			}
+			for _, life := range []int64{1, 2} {
+				want := 0
+				if life == 1 {
+					want = 4 // Three owed ordinals and their armed barrier.
+				}
+				count, err := census.ReadPendingInstanceLifeFanOutTx(ctx, tx, events.InstanceLife{RunID: runID, FlowInstance: instancePath, Life: life})
+				if err != nil || count != want {
+					t.Fatalf("native fan-out life=%d pending=%d want=%d err=%v", life, count, want, err)
+				}
+			}
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
 			var capsuleRaw []byte
 			if err := db.QueryRowContext(ctx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2`, runID, claimed.Claim.DeliveryID()).Scan(&capsuleRaw); err != nil {
 				t.Fatalf("load committed fan-out capsule: %v", err)

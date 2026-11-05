@@ -195,6 +195,16 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 			}
 			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
 			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, lease.ExpiresAt, 0)
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=NULL WHERE session_id=$1`, lease.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readInstanceLifeSessionCensus(f.store, f.db, ctx, captured, time.Now().UTC()); err == nil {
+				t.Fatal("session census treated partial lease authority as quiescent")
+			}
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=$2 WHERE session_id=$1`, lease.SessionID, lease.GrantID); err != nil {
+				t.Fatal(err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
 			selectedChild, err := pipeline.PrepareFlowInstanceSelection(f.ctx, f.store.(pipeline.FlowInstanceIndexReader), f.manager, request)
 			if err != nil || selectedChild.Activation == nil {
 				t.Fatalf("prepare session census sibling: %+v %v", selectedChild, err)
