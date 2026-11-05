@@ -18,6 +18,14 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 		setup = "# Import into the receiving source directory before using these fragments:\n# swarm import " + provider + " .\n"
 	}
 	fragments := []PackConsumptionFragment{{Scope: component.Scope, File: "provider setup", Purpose: "selected provider provenance", YAML: setup}}
+	if component.HasChannel {
+		policy, err := consumptionYAML(map[string]any{"operator_account": "REPLACE_OPERATOR_ACCOUNT"})
+		if err != nil {
+			return nil, err
+		}
+		fragments = append(fragments, PackConsumptionFragment{Scope: component.Scope, File: "policy.yaml", Purpose: "author-selected holder account",
+			RequiresSubstitution: true, YAML: "# Set the exact account selected by your deployment; no account is inferred or linked here.\n" + policy})
+	}
 	events := consumptionEvents(component.Receive)
 	if len(events) == 0 {
 		return append(fragments, PackConsumptionFragment{Scope: component.Scope, File: "schema.yaml", Purpose: "author-selected input",

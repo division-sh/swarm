@@ -77,6 +77,7 @@ func TestDescribePackExactSelectorsAndFlagRefusals(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := t.TempDir()
 	for _, args := range [][]string{
+		{"describe", "pack", ""},
 		{"describe", "pack", "--consume"}, {"describe", "pack", "--tool", "telegram.send_message"},
 		{"describe", "pack", "telegram", "--tool", ""}, {"describe", "pack", "telegram", "--tool", "send_message"},
 		{"describe", "pack", "telegram", "--tool", "telegram.send_message", "--consume"},
@@ -177,6 +178,7 @@ func TestDescribePackChatConsumptionCompilesConcreteSubstitution(t *testing.T) {
 		}
 		body := strings.ReplaceAll(fragment.YAML, "REPLACE_CHAT_ID", "12345")
 		body = strings.ReplaceAll(body, "REPLACE_TEXT", "synthetic reply")
+		body = strings.ReplaceAll(body, "REPLACE_OPERATOR_ACCOUNT", "420079")
 		if strings.Contains(body, "resolution.instance_key") || strings.Contains(body, "connector_packs:") || strings.Contains(body, "pins:") {
 			t.Fatal("generated retired authoring grammar")
 		}
@@ -192,7 +194,11 @@ func TestDescribePackChatConsumptionCompilesConcreteSubstitution(t *testing.T) {
 	if site := bundle.ActivitySites()[0]; site.Spec.Tool != "telegram.send_message" {
 		t.Fatal("example switched canonical tools")
 	}
-	if len(model.Fragments) == 0 || !strings.Contains(model.Fragments[1].YAML, "instance: conversation_reference") {
+	chatInstance := false
+	for _, fragment := range model.Fragments {
+		chatInstance = chatInstance || strings.HasSuffix(fragment.File, "/schema.yaml") && strings.Contains(fragment.YAML, "instance: conversation_reference")
+	}
+	if !chatInstance {
 		t.Fatal("declared chat subject not used as the receiver instance")
 	}
 }
@@ -257,12 +263,13 @@ func TestDescribePackProjectKeepsTargetSpecificCredentialFacts(t *testing.T) {
 		directory := filepath.Join(root, child)
 		writeDescribeTestFile(t, filepath.Join(directory, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeDescribeTestFile(t, filepath.Join(directory, "schema.yaml"), "stages: []\ninputs: [inbound.telegram.text_message]\n")
+		writeDescribeTestFile(t, filepath.Join(directory, "policy.yaml"), "operator_account: '420079'\n")
 		if _, err := packartifact.ImportEmbeddedPack(directory, "telegram", base); err != nil {
 			t.Fatal(err)
 		}
 	}
 	config := filepath.Join(root, ".swarm", "swarm.yaml")
-	writeRuntimeConfigText(t, config, "runtime:\n  recovery_on_startup: false\n")
+	writeDescribeTestFile(t, config, "runtime:\n  recovery_on_startup: false\n")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	store, err := CredentialFileStore()
