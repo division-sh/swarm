@@ -2,8 +2,8 @@ package contracts
 
 import (
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 	"strings"
 )

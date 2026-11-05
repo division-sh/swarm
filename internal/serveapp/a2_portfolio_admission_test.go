@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestA2PortfolioPublicTypedIngressRefusesBeforeMutationBothStores(t *testing.T) {

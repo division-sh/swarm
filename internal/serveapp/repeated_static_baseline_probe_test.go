@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
