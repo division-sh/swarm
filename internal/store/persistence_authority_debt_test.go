@@ -1185,6 +1185,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtPortableRuntimeRoleCollectorTo && trusted.Collector == base &&
+		current == debtPortableGlobalRoleCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2409/6671395779: exact portable global homes; baseline sites are unchanged.
+	}
 	if base == debtR83FixtureCollectorTo && trusted.Collector == base &&
 		current == debtPortableRuntimeRoleCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
@@ -1440,7 +1445,8 @@ func debtSelectedBoundarySource(path string, file *ast.File) []authorityFinding 
 	insideStore := strings.HasPrefix(path, "internal/store/")
 	insideServe := strings.HasPrefix(path, "internal/serveapp/")
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
-	insideInfrastructure := strings.HasPrefix(path, "internal/testpostgres/") || filepath.ToSlash(filepath.Dir(path)) == "internal/testutil"
+	insideInfrastructure := strings.HasPrefix(path, "internal/testpostgres/") || filepath.ToSlash(filepath.Dir(path)) == "internal/testutil" ||
+		strings.HasPrefix(path, "tests/support/testpostgres/") || filepath.ToSlash(filepath.Dir(path)) == "tests/support/testutil"
 	selectedConsumer := insideSelected || insideServe || strings.HasPrefix(path, "internal/cliapp/")
 	constructionConsumer := insideSelected || filepath.ToSlash(filepath.Dir(path)) == "internal/store" || strings.HasPrefix(path, "internal/store/construction/") || strings.HasPrefix(path, "internal/store/internal/")
 	imports := map[string]string{}

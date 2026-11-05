@@ -977,7 +977,9 @@ func debtOwnedNativeFixtureConstruction(path string, node ast.Node, info *types.
 	// Private constructors are legitimate only within their construction role.
 	// Ordinary tests may consume the exact public native factories, not arbitrary
 	// same-DB reconstruction. Raw-input constructors are never exempted here.
-	if strings.HasPrefix(path, "internal/store/internal/") || strings.HasPrefix(path, "internal/store/construction/") || strings.HasPrefix(path, "internal/store/selected/") || strings.HasPrefix(path, "internal/testpostgres/") || filepath.ToSlash(filepath.Dir(path)) == "internal/testutil" {
+	if strings.HasPrefix(path, "internal/store/internal/") || strings.HasPrefix(path, "internal/store/construction/") || strings.HasPrefix(path, "internal/store/selected/") ||
+		strings.HasPrefix(path, "internal/testpostgres/") || filepath.ToSlash(filepath.Dir(path)) == "internal/testutil" ||
+		strings.HasPrefix(path, "tests/support/testpostgres/") || filepath.ToSlash(filepath.Dir(path)) == "tests/support/testutil" {
 		return true
 	}
 	call, ok := node.(*ast.CallExpr)
@@ -1561,7 +1563,9 @@ func debtRawSQLDispositionAllowed(finding authorityFinding, disposition string) 
 		strings.HasPrefix(path, "internal/store/selected/") ||
 		strings.HasPrefix(path, "internal/store/platformschema/")
 	insideInfrastructure := strings.HasPrefix(path, "internal/testpostgres/") ||
-		filepath.ToSlash(filepath.Dir(path)) == "internal/testutil"
+		filepath.ToSlash(filepath.Dir(path)) == "internal/testutil" ||
+		strings.HasPrefix(path, "tests/support/testpostgres/") ||
+		filepath.ToSlash(filepath.Dir(path)) == "tests/support/testutil"
 	if !insidePrivate && !insideConstruction && !insideInfrastructure {
 		return false
 	}
