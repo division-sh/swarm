@@ -6,8 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
-	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/userfacing"
 )
@@ -664,15 +663,15 @@ func normalizeTriggerPackIdentity(subject *Subject) error {
 			return fmt.Errorf("effective verified-pack trigger subject %q requires trigger_pack_binding source and pack identity", subject.ID)
 		}
 		pack := admission.Pack
-		id, err := packidentity.ParseID(pack.ID)
+		id, err := runtimeidentity.ParsePackID(pack.ID)
 		if err != nil {
 			return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 		}
-		version, err := packidentity.ParseVersion(pack.Version)
+		version, err := runtimeidentity.ParsePackVersion(pack.Version)
 		if err != nil {
 			return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 		}
-		hash, err := manifesthash.Parse(pack.ManifestHash)
+		hash, err := runtimeidentity.ParseManifestHash(pack.ManifestHash)
 		if err != nil {
 			return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 		}

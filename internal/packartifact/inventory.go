@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -75,7 +75,9 @@ func (e Entry) Directory() string          { return e.directory }
 func (e Entry) Source() string             { return e.selection }
 func (e Entry) Provider() AdmittedProvider { return e.provider }
 func (e Entry) ManifestBody() []byte       { return e.provider.ManifestBody() }
-func (e Entry) ManifestHash() string       { return manifesthash.FromBytes(e.ManifestBody()).String() }
+func (e Entry) ManifestHash() string {
+	return runtimeidentity.ManifestHashFromBytes(e.ManifestBody()).String()
+}
 
 type PlatformPackInventory struct {
 	source                 yamlsource.Value

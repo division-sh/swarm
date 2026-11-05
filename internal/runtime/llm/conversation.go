@@ -12,10 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -991,7 +991,7 @@ func toolRelayMessageLimit(calls []ToolCall) int {
 }
 
 func toolIsLargeRelayFileRead(name string) bool {
-	return toolidentity.CanonicalName(name) == "read_file"
+	return runtimeidentity.CanonicalToolName(name) == "read_file"
 }
 
 func toolInputTargetsRuntimeRelayPath(input any) bool {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
@@ -206,7 +206,7 @@ func normalizeRunForkSelectedContractSelection(selection runfork.RunForkContract
 		if selection.BundleHash == "" {
 			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode requires bundle_hash")
 		}
-		if !bundleidentity.IsCanonicalHash(selection.BundleHash) {
+		if !runtimeidentity.IsCanonicalBundleHash(selection.BundleHash) {
 			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash must be bundle-v2:sha256:<64 lowercase hex>")
 		}
 	default:

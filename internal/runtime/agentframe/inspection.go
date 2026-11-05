@@ -6,7 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type InspectionScope string
@@ -83,7 +83,7 @@ type PreviewSeed struct {
 }
 
 func InspectStatic(selector InspectionSelector, seed PreviewSeed) (Inspection, error) {
-	if bundleidentity.ValidateCanonicalHash(selector.BundleHash) != nil || !exactInspectionPath(selector.Flow) || !exactInspectionScalar(selector.AgentID) || selector.Root || selector.FlowInstance != "" {
+	if runtimeidentity.ValidateCanonicalBundleHash(selector.BundleHash) != nil || !exactInspectionPath(selector.Flow) || !exactInspectionScalar(selector.AgentID) || selector.Root || selector.FlowInstance != "" {
 		return Inspection{}, fmt.Errorf("static frame inspection requires exact bundle_hash, flow, and agent_id only")
 	}
 	seed.BundleHash = selector.BundleHash
@@ -126,7 +126,7 @@ func exactInspectionScalar(value string) bool {
 }
 
 func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSeed) (Inspection, error) {
-	if err := bundleidentity.ValidateCanonicalHash(seed.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(seed.BundleHash); err != nil {
 		return Inspection{}, err
 	}
 	if err := seed.Intent.Validate(); err != nil {

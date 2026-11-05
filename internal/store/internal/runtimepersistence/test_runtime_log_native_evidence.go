@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
@@ -37,7 +37,7 @@ func RemoveRuntimeLogFixtureSourceArtifactForTest(ctx context.Context, selected 
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(hash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(hash); err != nil {
 		return 0, err
 	}
 	var removed int64

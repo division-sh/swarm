@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -46,7 +46,7 @@ func (a Admission) Validate() error {
 	if strings.TrimSpace(a.ExecutionAuthorityID) == "" || a.Generation == 0 || strings.TrimSpace(a.ActorCensusFingerprint) == "" || strings.TrimSpace(a.BundleHash) == "" || a.IssuedAt.IsZero() {
 		return fmt.Errorf("managed execution admission identity is incomplete")
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(a.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(a.BundleHash); err != nil {
 		return fmt.Errorf("managed execution admission bundle_hash is invalid: %w", err)
 	}
 	switch a.Kind {

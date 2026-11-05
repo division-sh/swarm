@@ -3,8 +3,8 @@ package toolresultpolicy
 import (
 	"strings"
 
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -31,7 +31,7 @@ func IsRoleScopedTypedReadCapability(cap toolcapabilities.Capability) bool {
 }
 
 func IsRoleScopedTypedReadName(name string) bool {
-	name = toolidentity.CanonicalName(name)
+	name = runtimeidentity.CanonicalToolName(name)
 	if name == "" || name == "read_file" {
 		return false
 	}

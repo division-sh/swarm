@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 var payloadSchemaDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -125,7 +125,7 @@ func RestorePayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchema
 }
 
 func (b PayloadSchemaBinding) Validate() error {
-	if err := runtimebundleidentity.ValidateCanonicalHash(b.bundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(b.bundleHash); err != nil {
 		return fmt.Errorf("payload schema bundle: %w", err)
 	}
 	if b.eventKey == "" {

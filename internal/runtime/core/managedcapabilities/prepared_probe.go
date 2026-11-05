@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -51,7 +51,7 @@ func (p SelectedForkPreparationCoordinates) Validate() error {
 	if p.ProcessOwnerID == "" || strings.TrimSpace(p.ProcessOwnerID) != p.ProcessOwnerID {
 		return fmt.Errorf("prepared selected-fork probe process owner is required and must be canonical")
 	}
-	if err := bundleidentity.ValidateCanonicalHash(p.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(p.BundleHash); err != nil {
 		return fmt.Errorf("prepared selected-fork probe bundle hash: %w", err)
 	}
 	for _, fingerprint := range []struct{ name, value string }{

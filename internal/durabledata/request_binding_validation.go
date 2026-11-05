@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -13,7 +13,7 @@ func (b RunCreationRequestBinding) validateIdentity() error {
 	if parsed, err := uuid.Parse(b.RunID); err != nil || parsed == uuid.Nil || parsed.String() != b.RunID {
 		return fmt.Errorf("request binding has invalid run_id")
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(b.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(b.BundleHash); err != nil {
 		return err
 	}
 	if b.EventID != "" {

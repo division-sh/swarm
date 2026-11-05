@@ -13,7 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -47,7 +47,7 @@ func loadMessageRetirementScope(t *testing.T, scope, agents, policy, tool string
 
 func requireMessageRetirement(t *testing.T, source semanticview.Source, token string) {
 	t.Helper()
-	token = toolidentity.CanonicalName(token)
+	token = runtimeidentity.CanonicalToolName(token)
 	errs := tools.ValidateHITLIdentityLifecycleReferences(source)
 	if len(errs) == 0 || !strings.Contains(fmt.Sprint(errs), token) || !strings.Contains(fmt.Sprint(errs), "is unsupported") {
 		t.Fatalf("retirement admission errors = %v", errs)

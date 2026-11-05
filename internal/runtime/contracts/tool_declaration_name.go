@@ -5,13 +5,13 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 // Declaration IDs belong to the binding, not the keyless tool value.
 func (e ToolSchemaEntry) ValidateDeclarationName(name string) error {
-	if !e.AgentExposable() && (name == "" || toolidentity.CanonicalName(name) != name || toolidentity.IsEmitToolName(name)) {
+	if !e.AgentExposable() && (name == "" || runtimeidentity.CanonicalToolName(name) != name || runtimeidentity.IsEmitToolName(name)) {
 		return fmt.Errorf("private tool declaration %q must use a canonical, non-emit ID; choose a stable private ID instead of an alias, runtime-tools wrapper or reserved emit route", name)
 	}
 	return nil

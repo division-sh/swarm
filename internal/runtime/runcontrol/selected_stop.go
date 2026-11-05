@@ -3,7 +3,7 @@ package runcontrol
 import (
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -40,7 +40,7 @@ func (r SelectedStopRequest) Validate() error {
 			return fmt.Errorf("selected-contract selection cannot carry a replacement hash")
 		}
 	case runfork.RunForkContractSelectionModeBundleHash:
-		if err := bundleidentity.ValidateCanonicalHash(r.Binding.ContractSelection.BundleHash); err != nil {
+		if err := runtimeidentity.ValidateCanonicalBundleHash(r.Binding.ContractSelection.BundleHash); err != nil {
 			return err
 		}
 	default:

@@ -8,7 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -445,7 +445,7 @@ func privateToolRoutingError(source semanticview.Source, actor models.AgentConfi
 	}
 	projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
 	declarations := source.ToolEntries()
-	for _, candidate := range toolidentity.DeclarationNames(name) {
+	for _, candidate := range runtimeidentity.ToolDeclarationNames(name) {
 		entry, found := declarations[candidate]
 		if projected {
 			entry, found = projection.ToolEntry(candidate)

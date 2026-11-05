@@ -9,8 +9,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
@@ -411,7 +411,7 @@ func (p *SourceSetPlan) validateRootedAgentMembership() error {
 }
 
 func validateSourceCoordinate(bundleHash string) error {
-	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(bundleHash)); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(strings.TrimSpace(bundleHash)); err != nil {
 		return fmt.Errorf("agent topology bundle_hash is invalid: %w", err)
 	}
 	return nil

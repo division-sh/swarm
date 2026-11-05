@@ -9,7 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -533,7 +533,7 @@ func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string
 		}
 		return "", sql.NullString{}, fmt.Errorf("load run execution binding: %w", err)
 	}
-	if err := bundleidentity.ValidateCanonicalHash(hash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(hash); err != nil {
 		return "", sql.NullString{}, err
 	}
 	if bindingID.Valid {

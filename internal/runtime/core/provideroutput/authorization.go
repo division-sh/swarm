@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
-	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -23,9 +22,9 @@ const (
 type Authorization struct {
 	provider     string
 	event        string
-	packID       packidentity.ID
-	packVersion  packidentity.Version
-	manifestHash manifesthash.Hash
+	packID       runtimeidentity.PackID
+	packVersion  runtimeidentity.PackVersion
+	manifestHash runtimeidentity.ManifestHash
 	generation   triggergeneration.Generation
 	valid        bool
 }
@@ -38,15 +37,15 @@ func NewAuthorization(provider, event, packID, packVersion, manifestHash string,
 	if event == "" {
 		return Authorization{}, fmt.Errorf("provider output authorization fields are required")
 	}
-	admittedPackID, err := packidentity.ParseID(packID)
+	admittedPackID, err := runtimeidentity.ParsePackID(packID)
 	if err != nil {
 		return Authorization{}, fmt.Errorf("provider output authorization %w", err)
 	}
-	admittedPackVersion, err := packidentity.ParseVersion(packVersion)
+	admittedPackVersion, err := runtimeidentity.ParsePackVersion(packVersion)
 	if err != nil {
 		return Authorization{}, fmt.Errorf("provider output authorization %w", err)
 	}
-	admittedManifestHash, err := manifesthash.Parse(manifestHash)
+	admittedManifestHash, err := runtimeidentity.ParseManifestHash(manifestHash)
 	if err != nil {
 		return Authorization{}, fmt.Errorf("provider output authorization %w", err)
 	}

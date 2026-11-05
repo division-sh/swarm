@@ -7,8 +7,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
@@ -113,7 +113,7 @@ func validatePlannedWorkspaceMCPDefinitions(surface managedcapabilities.Surface,
 func validateWorkspaceMCPDefinitions(tools []ToolDefinition, definitions []toolgateway.ListedDefinition) error {
 	expected := make(map[string]string, len(tools))
 	for _, tool := range tools {
-		expected[toolidentity.CanonicalName(tool.Name)] = ToolDefinitionIdentity(tool)
+		expected[runtimeidentity.CanonicalToolName(tool.Name)] = ToolDefinitionIdentity(tool)
 	}
 	return compareWorkspaceMCPDefinitions(expected, definitions)
 }
@@ -121,7 +121,7 @@ func validateWorkspaceMCPDefinitions(tools []ToolDefinition, definitions []toolg
 func compareWorkspaceMCPDefinitions(expected map[string]string, definitions []toolgateway.ListedDefinition) error {
 	seen := make(map[string]bool, len(definitions))
 	for _, definition := range definitions {
-		name := toolidentity.CanonicalName(definition.Name)
+		name := runtimeidentity.CanonicalToolName(definition.Name)
 		var schema map[string]any
 		if name == "" || name != definition.Name || seen[name] || canonicaljson.DecodePreservingNumberLexemes(definition.InputSchema, &schema) != nil || schema == nil {
 			return workspaceMCPDefinitionMismatch(name, "malformed_or_duplicate_definition")

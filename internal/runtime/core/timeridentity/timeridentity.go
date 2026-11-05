@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
@@ -643,7 +642,7 @@ func (r JoinRef) FanOutDelivery() (FanOutDeliveryRef, bool) {
 func (r FanOutDeliveryRef) Valid() bool {
 	r = r.Normalize()
 	return r.declaration.Valid() && r.declaration.Family() == "fan_out" &&
-		bundleidentity.IsCanonicalHash(r.bundleHash) && semanticDigestPattern.MatchString(r.semanticDigest)
+		runtimeidentity.IsCanonicalBundleHash(r.bundleHash) && semanticDigestPattern.MatchString(r.semanticDigest)
 }
 
 func (r FanOutDeliveryRef) Normalize() FanOutDeliveryRef {

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/google/uuid"
 )
 
@@ -408,7 +408,7 @@ func normalizePlannedTools(plannedTools []PlannedTool) ([]Tool, error) {
 	var tools []Tool
 	seen := make(map[string]struct{}, len(plannedTools))
 	for _, planned := range plannedTools {
-		name := toolidentity.CanonicalName(planned.Name)
+		name := runtimeidentity.CanonicalToolName(planned.Name)
 		if name == "" {
 			return nil, fmt.Errorf("managed capability planned tool name is required")
 		}
@@ -466,7 +466,7 @@ func (s Surface) Validate() error {
 	seen := make(map[string]struct{}, len(s.Tools))
 	previousToolName := ""
 	for _, tool := range s.Tools {
-		if tool.Name == "" || tool.Name != toolidentity.CanonicalName(tool.Name) || tool.DefinitionHash == "" || tool.Capability.Name != tool.Name {
+		if tool.Name == "" || tool.Name != runtimeidentity.CanonicalToolName(tool.Name) || tool.DefinitionHash == "" || tool.Capability.Name != tool.Name {
 			return fmt.Errorf("managed capability tool identity is incomplete")
 		}
 		if _, duplicate := seen[tool.Name]; duplicate {
@@ -690,7 +690,7 @@ func (s Surface) HasMismatch() bool {
 }
 
 func (s Surface) Capability(name string) (toolcapabilities.Capability, bool) {
-	name = toolidentity.CanonicalName(name)
+	name = runtimeidentity.CanonicalToolName(name)
 	for _, tool := range s.Tools {
 		if tool.Name != name {
 			continue

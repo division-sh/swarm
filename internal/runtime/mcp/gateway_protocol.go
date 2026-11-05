@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
@@ -186,7 +186,7 @@ func ParseToolListHeader(raw string) map[string]struct{} {
 	}
 	out := map[string]struct{}{}
 	for _, p := range strings.Split(raw, ",") {
-		name := toolidentity.CanonicalName(p)
+		name := runtimeidentity.CanonicalToolName(p)
 		if name == "" {
 			continue
 		}

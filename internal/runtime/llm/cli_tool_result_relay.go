@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -41,7 +41,7 @@ func relayWorkspacePath(target *workspace.Target, session *Session, toolName str
 	if session != nil && strings.TrimSpace(session.ID) != "" {
 		sessionID = sanitizeRelayPathComponent(session.ID)
 	}
-	name := sanitizeRelayPathComponent(toolidentity.CanonicalName(toolName))
+	name := sanitizeRelayPathComponent(runtimeidentity.CanonicalToolName(toolName))
 	if name == "" {
 		name = "tool"
 	}

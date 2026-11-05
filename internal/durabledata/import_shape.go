@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const MaxImportShapeFields = 1024
@@ -68,7 +68,7 @@ type ImportShapeCatalog struct {
 }
 
 func (c ImportShapeCatalog) Validate() error {
-	if err := runtimebundleidentity.ValidateCanonicalHash(c.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(c.BundleHash); err != nil {
 		return err
 	}
 	if len(c.Shapes) > MaxDataDeclarationsPerBundle {
@@ -91,7 +91,7 @@ func (c ImportShapeCatalog) Validate() error {
 }
 
 func (s ImportShape) Validate() error {
-	if err := runtimebundleidentity.ValidateCanonicalHash(s.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(s.BundleHash); err != nil {
 		return err
 	}
 	if err := s.Declaration.Validate(); err != nil {

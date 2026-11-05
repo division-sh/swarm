@@ -12,10 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
@@ -303,7 +303,7 @@ func (r completionAttributionRow) addEvidence(delivery privatedelivery.RunOperat
 				out.GrantedEmitTools = append(out.GrantedEmitTools, tool.Name)
 			}
 			if r.adapter == "claude_cli" {
-				nativeCLI[toolidentity.CanonicalName(tool.Name)] = true
+				nativeCLI[runtimeidentity.CanonicalToolName(tool.Name)] = true
 			}
 		}
 	}
@@ -329,7 +329,7 @@ func (r completionAttributionRow) addEvidence(delivery privatedelivery.RunOperat
 		return false, err
 	}
 	for _, output := range outputs {
-		candidates[output.EventID] = toolidentity.CanonicalName(output.ToolName)
+		candidates[output.EventID] = runtimeidentity.CanonicalToolName(output.ToolName)
 	}
 	return closed, nil
 }

@@ -12,10 +12,10 @@ import (
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -277,7 +277,7 @@ func CompileManagedCapabilityAdmission(actor models.AgentConfig, contract Provid
 	planned := make([]managedcapabilities.PlannedTool, 0, len(tools)+4)
 	seen := map[string]struct{}{}
 	for _, def := range tools {
-		name := toolidentity.CanonicalName(def.Name)
+		name := runtimeidentity.CanonicalToolName(def.Name)
 		if name == "" {
 			continue
 		}
@@ -342,7 +342,7 @@ func ConcreteManagedToolDefinitions(runtime Runtime, actor models.AgentConfig, d
 	}
 	concrete := make([]ToolDefinition, 0, len(definitions))
 	for _, definition := range definitions {
-		if _, providerOwned := providerNative[toolidentity.CanonicalName(definition.Name)]; providerOwned {
+		if _, providerOwned := providerNative[runtimeidentity.CanonicalToolName(definition.Name)]; providerOwned {
 			continue
 		}
 		concrete = append(concrete, definition)
@@ -365,11 +365,11 @@ func managedProviderNativeNames(contract ProviderContract, nativeNames []string)
 }
 
 func managedConcreteCapabilityBindings(contract ProviderContract, name string) []managedcapabilities.DeliveryBinding {
-	name = toolidentity.CanonicalName(name)
+	name = runtimeidentity.CanonicalToolName(name)
 	if contract.Transport == ProviderTransportAPI {
 		return []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: providerToolWireName(name), RequiredEvidenceKind: evidenceAPIRequestDelivered}}
 	}
-	exactName := toolidentity.RuntimeToolsMCPPrefix + name
+	exactName := runtimeidentity.RuntimeToolsMCPPrefix + name
 	return []managedcapabilities.DeliveryBinding{
 		{Kind: managedcapabilities.BindingMCPTool, ExactName: exactName, RequiredEvidenceKind: evidenceMCPListed},
 		{Kind: managedcapabilities.BindingMCPProvider, ExactName: exactName, RequiredEvidenceKind: evidenceMCPVisible},
@@ -390,7 +390,7 @@ func managedProviderNativeBindings(actor models.AgentConfig, name string) []mana
 }
 
 func providerNativeCapabilitySupported(capabilities NativeToolCapabilities, name string) bool {
-	switch toolidentity.CanonicalName(name) {
+	switch runtimeidentity.CanonicalToolName(name) {
 	case "bash":
 		return capabilities.Bash
 	case "web_search":
@@ -403,7 +403,7 @@ func providerNativeCapabilitySupported(capabilities NativeToolCapabilities, name
 }
 
 func providerBuiltinNamesForCanonical(actor models.AgentConfig, name string) []string {
-	switch toolidentity.CanonicalName(name) {
+	switch runtimeidentity.CanonicalToolName(name) {
 	case "bash":
 		if actor.NativeTools.Bash {
 			return []string{"Bash"}
@@ -619,7 +619,7 @@ func exactCLIProviderVisibleTools(response *Response) ([]string, error) {
 	var out []string
 	for _, name := range response.ProviderVisibleTools {
 		name = strings.TrimSpace(name)
-		if name == "" || isCLIControlToolName(name) || strings.HasPrefix(name, toolidentity.RuntimeToolsMCPPrefix) {
+		if name == "" || isCLIControlToolName(name) || strings.HasPrefix(name, runtimeidentity.RuntimeToolsMCPPrefix) {
 			continue
 		}
 		out = append(out, name)
@@ -635,7 +635,7 @@ func exactMCPVisibleTools(response *Response) []string {
 	var out []string
 	for _, name := range response.MCPVisibleTools {
 		name = strings.TrimSpace(name)
-		if strings.HasPrefix(name, toolidentity.RuntimeToolsMCPPrefix) {
+		if strings.HasPrefix(name, runtimeidentity.RuntimeToolsMCPPrefix) {
 			out = append(out, name)
 		}
 	}
@@ -677,7 +677,7 @@ func ToolDefinitionIdentity(def ToolDefinition) string {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Schema      any    `json:"schema,omitempty"`
-	}{toolidentity.CanonicalName(def.Name), DeliveredToolDescription(def), schema})
+	}{runtimeidentity.CanonicalToolName(def.Name), DeliveredToolDescription(def), schema})
 }
 
 func hashJSON(value any) string {

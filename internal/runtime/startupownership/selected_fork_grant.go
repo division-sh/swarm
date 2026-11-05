@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +61,7 @@ func (r SelectedForkGrantRequest) Validate() error {
 	if err := r.Binding.Validate(); err != nil {
 		return err
 	}
-	if err := bundleidentity.ValidateCanonicalHash(r.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(r.BundleHash); err != nil {
 		return err
 	}
 	id, err := uuid.Parse(r.RuntimeInstanceID)

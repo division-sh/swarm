@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -487,7 +487,7 @@ func (s Snapshot) Validate() error {
 	if err := s.Origin.Validate(); err != nil {
 		return fmt.Errorf("run lifecycle snapshot origin: %w", err)
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(s.BundleHash)); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(strings.TrimSpace(s.BundleHash)); err != nil {
 		return fmt.Errorf("run lifecycle snapshot bundle_hash: %w", err)
 	}
 	if err := s.RootReference.Validate(); err != nil {

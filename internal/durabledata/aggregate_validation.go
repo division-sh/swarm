@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -79,7 +79,7 @@ func validateSourceOperationResult(r SourceOperationResult) error {
 	if err := validateCanonicalUUID(r.SourceInvocationID, "source_invocation_id"); err != nil {
 		return err
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(r.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(r.BundleHash); err != nil {
 		return err
 	}
 	if err := r.SchemaDigest.Validate(); err != nil {
@@ -278,7 +278,7 @@ func (e FusedChildEvaluation) Validate() error {
 	if err := validateCanonicalUUID(e.SourceInvocationID, "source_invocation_id"); err != nil {
 		return err
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(e.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(e.BundleHash); err != nil {
 		return err
 	}
 	if err := e.SchemaDigest.Validate(); err != nil {
@@ -410,7 +410,7 @@ func (s RunCreationOperationSummary) Validate() error {
 	if err := validateCanonicalUUID(s.RunID, "run_id"); err != nil {
 		return err
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(s.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(s.BundleHash); err != nil {
 		return err
 	}
 	if s.PinCount < 0 || s.PinCount > MaxDataDeclarationsPerBundle || s.ImportCount < 0 || s.ImportCount > MaxDataDeclarationsPerBundle {

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func nativeFallbackExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
@@ -70,7 +70,7 @@ func nativeToolCapabilityEnabledForActor(actor models.AgentConfig, capability st
 }
 
 func normalizeNativeToolName(name string) string {
-	return toolidentity.CanonicalName(name)
+	return runtimeidentity.CanonicalToolName(name)
 }
 
 func nativeToolNameForCapability(capability string) []string {
