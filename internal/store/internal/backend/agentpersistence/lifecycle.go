@@ -398,11 +398,7 @@ func (s *AgentSQLiteOwner) commitAgentLifecycleTransitionTx(ctx context.Context,
 }
 
 func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator, instanceRebind bool) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	fingerprint, err := req.Identity.Fingerprint()
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+fingerprint); err != nil {
+	if err := lockLifecycleIdentityTx(ctx, tx, req.Identity, false); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	previous, _, exists, err := loadAgentLifecycleState(ctx, tx, req.Identity, false, true)

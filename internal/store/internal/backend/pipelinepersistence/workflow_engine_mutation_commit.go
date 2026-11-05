@@ -86,6 +86,8 @@ func decideWorkflowEngineState(transition runtimepipeline.WorkflowEngineStateTra
 		return workflowEngineStateDecision{createState: true, historyStep: "create"}, nil
 	case runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion:
 		return workflowEngineStateDecision{historyStep: "mutate"}, nil
+	case runtimepipeline.WorkflowEngineStateTransitionRestartStateAndCompanion:
+		return workflowEngineStateDecision{historyStep: "restart"}, nil
 	case runtimepipeline.WorkflowEngineStateTransitionPreserveStateAndCompanion:
 		return workflowEngineStateDecision{}, nil
 	default:

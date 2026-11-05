@@ -7,7 +7,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 const instanceLifeStartedAtKey = "instance_life_started_at"
@@ -56,9 +58,11 @@ func retainInstanceLifeStart(instance *WorkflowInstance, started time.Time) erro
 // FlowInstanceRestart captures the finished life observed by selection. It is
 // a compare-and-write precondition, not permission to skip native admission.
 type FlowInstanceRestart struct {
-	Life       int64
-	Revision   int64
-	FinalStage contracts.StoredStageRef
+	Life             int64
+	Revision         int64
+	FinalStage       contracts.StoredStageRef
+	ProcessBinding   processbinding.Binding
+	DiagnosticOrigin runfork.LifecycleDiagnosticOrigin
 }
 
 func (r FlowInstanceRestart) Validate(next WorkflowInstance) error {

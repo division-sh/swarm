@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -107,6 +108,7 @@ type CommittedFlowInstanceActivation struct {
 	Plan                    FlowInstanceActivationPlan
 	Created                 bool
 	StartedOver             bool
+	RestartedAgents         []agentidentity.Identity
 	Lifecycle               CommittedWorkflowLifecycleMutation
 	ReadinessAttemptOrdinal uint64
 	Children                []CommittedFlowInstanceActivation
@@ -159,6 +161,19 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 	}
 	if a.Created && a.StartedOver || a.StartedOver && a.Plan.Restart == nil {
 		return fmt.Errorf("committed instance restart cannot be a physical construction")
+	}
+	if len(a.RestartedAgents) != 0 && !a.StartedOver {
+		return fmt.Errorf("only a committed instance restart can change actor generations")
+	}
+	for index, identity := range a.RestartedAgents {
+		if err := identity.Validate(); err != nil || identity.RunID != a.Plan.Readiness.RunID {
+			return fmt.Errorf("instance restart requires exact acquired actor identities")
+		}
+		for _, previous := range a.RestartedAgents[:index] {
+			if identity == previous {
+				return fmt.Errorf("instance restart repeated an actor identity")
+			}
+		}
 	}
 	if !a.Created && !a.StartedOver && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
 		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
@@ -389,6 +404,12 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	}
 	if p.Restart != nil {
 		if err := p.Restart.Validate(p.Instance); err != nil {
+			return err
+		}
+		if err := p.Restart.ProcessBinding.Validate(); err != nil {
+			return fmt.Errorf("instance restart process owner: %w", err)
+		}
+		if err := p.Restart.DiagnosticOrigin.Validate(); err != nil {
 			return err
 		}
 		if len(p.Children) != 0 {

@@ -161,9 +161,19 @@ func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 		return descendantsErr
 	}
 	plan := committed.Plan
-	if committed.Created {
+	if committed.Created || committed.StartedOver {
 		if err := am.workflowInstances.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
 			return fmt.Errorf("finalize flow instance initial lifecycle: %w", err)
+		}
+	}
+	for _, identity := range committed.RestartedAgents {
+		cell, err := am.lifecycle.lockIdentityOperationMode(identity, true, false)
+		if err != nil {
+			return fmt.Errorf("refresh restarted actor: %w", err)
+		}
+		cell.opMu.Unlock()
+		if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
+			return fmt.Errorf("materialize restarted actor: %w", err)
 		}
 	}
 	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, committed.ReadinessAttemptOrdinal, am.semanticReadinessSource.source)
@@ -330,6 +340,17 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		if err := req.Restart.Validate(plan.Instance); err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 		}
+		restart := *req.Restart
+		restart.ProcessBinding, err = registrationProcessBinding(am.lifecycle.persistence())
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		origin, err := am.lifecycle.lifecycleTransitionWithDiagnostic(ctx, AgentLifecycleTransition{})
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		restart.DiagnosticOrigin = origin.DiagnosticOrigin
+		plan.Restart = &restart
 	}
 	if seed := req.ScenarioSeed; seed != nil {
 		primary, err := bundle.ResolveTestSetupPrimaryEntity(templateID, seed.EntityType)
