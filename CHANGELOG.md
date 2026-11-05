@@ -83,6 +83,11 @@ release approval or a promise of old-store migration.
 
 ### Fixed
 
+- Ordinary WhatsApp traffic during an unapproved linked-account preview no
+  longer fences enrollment. Cancelling account or operator confirmation aborts
+  without approving, rejecting or logging out the paired account; EOF retains
+  the existing default-no behavior. Physical sitting qualification remains open.
+  (#2577)
 - WhatsApp first login works in both serve orders. Inbound replies retain the
   holder's exact source/root, restored replies drain before readiness, and resume
   waits for confirmed login. Boot output reports actual account readiness; early

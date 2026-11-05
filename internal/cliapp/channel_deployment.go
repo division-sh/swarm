@@ -507,7 +507,7 @@ func (c *DeploymentChannelControl) connectAccount(ctx context.Context, out, errO
 			return begun, false, returnCLIValidationError(errOut, err)
 		}
 		c.expectedAccount = ref.Account
-		operation, err := selectDeploymentAccount(accounts, ref.Account, opts.apiOptions.input, errOut, false)
+		operation, err := selectDeploymentAccount(ctx, accounts, ref.Account, opts.apiOptions.input, errOut, false)
 		if err != nil {
 			return begun, false, returnCLIValidationError(errOut, err)
 		}
@@ -522,7 +522,7 @@ func (c *DeploymentChannelControl) connectAccount(ctx context.Context, out, errO
 		for _, account := range accounts {
 			fmt.Fprintf(out, "Account: %s.\n", account.Operation.DeploymentAccount())
 		}
-		approved, err := confirmChannelAccount(opts.apiOptions.input, errOut, "Link another? [y/N] ")
+		approved, err := confirmChannelAccount(ctx, opts.apiOptions.input, errOut, "Link another? [y/N] ")
 		if err != nil || !approved {
 			return begun, false, err
 		}
@@ -596,7 +596,7 @@ func runDeploymentChannelStatus(ctx context.Context, out, errOut io.Writer, prov
 		if err != nil {
 			return returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
-		op, err := selectDeploymentAccount(rows, account, opts.input, errOut, false)
+		op, err := selectDeploymentAccount(ctx, rows, account, opts.input, errOut, false)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -658,7 +658,7 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 		}
 		return runChannelLogout(ctx, out, errOut, provider, "", opts, output)
 	}
-	selected, err := selectDeploymentAccount(rows, account, opts.input, errOut, !output.asJSON && !output.asYAML && !output.quiet && controlStdinIsTerminal(opts))
+	selected, err := selectDeploymentAccount(ctx, rows, account, opts.input, errOut, !output.asJSON && !output.asYAML && !output.quiet && controlStdinIsTerminal(opts))
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -677,7 +677,7 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	}, func() ([]string, error) { return []string{selected.AccountReference}, nil })
 }
 
-func selectDeploymentAccount(rows []channelonboarding.Result, account string, input io.Reader, out io.Writer, interactive bool) (selected channelonboarding.Operation, resultErr error) {
+func selectDeploymentAccount(ctx context.Context, rows []channelonboarding.Result, account string, input io.Reader, out io.Writer, interactive bool) (selected channelonboarding.Operation, resultErr error) {
 	if account == "" && len(rows) > 1 {
 		if !interactive {
 			return selected, errors.New("more than one account matches; use swarm channel logout <provider> <account>")
@@ -689,7 +689,7 @@ func selectDeploymentAccount(rows []channelonboarding.Result, account string, in
 			input = bufio.NewReader(input)
 		}
 		for _, row := range rows {
-			approved, err := confirmChannelAccount(input, out, "Log out "+row.Operation.DeploymentAccount()+"? [y/N] ")
+			approved, err := confirmChannelAccount(ctx, input, out, "Log out "+row.Operation.DeploymentAccount()+"? [y/N] ")
 			if err != nil {
 				return selected, err
 			}
