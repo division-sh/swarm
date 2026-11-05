@@ -48,6 +48,19 @@ type sittingWait struct {
 	resume      chan struct{}
 }
 
+type sittingConnectionObserver struct {
+	firstConnectPairingObserver
+	preview func(channelonboarding.Operation, channelonboarding.SessionConnectionReadback) error
+}
+
+func (s sittingConnectionObserver) ReadSessionConnection(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error) {
+	view, err := s.ChannelRegistrationSession.ReadSessionConnection(ctx, op)
+	if err == nil {
+		err = s.preview(op, view)
+	}
+	return view, err
+}
+
 type sittingCLIWriter struct {
 	io.Writer
 	qr         sync.Once
@@ -135,7 +148,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 					return nil, err
 				}
 				native, operations = session.(*deploymentChannelSession), options.Operations
-				return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal,
+				return sittingConnectionObserver{firstConnectPairingObserver: firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal,
 					observe: func(result channelonboarding.Result, _ bool) {
 						if view := result.Pairing; view != nil && view.Code != "" {
 							select {
@@ -146,12 +159,13 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 					},
 					afterRead: func(_ context.Context, op channelonboarding.Operation, view channelonboarding.PairingReadback, readErr error) {
 						operationID = op.OperationID
-						if readErr == nil && view.Paired && view.Connected && !op.AccountConfirmed && op.Phase == channelonboarding.PhaseAwaitingExternalIdentity && preview.CompareAndSwap(false, true) {
-							if err := pause("preview", ""); err != nil {
-								t.Errorf("preview hold: %v", err)
-							}
-						}
-					}}, nil
+					}}, preview: func(op channelonboarding.Operation, view channelonboarding.SessionConnectionReadback) error {
+					operationID = op.OperationID
+					if view.Linked && view.State == "connected" && !op.AccountConfirmed && op.Phase == channelonboarding.PhaseAwaitingExternalIdentity && preview.CompareAndSwap(false, true) {
+						return pause("preview", "")
+					}
+					return nil
+				}}, nil
 			}
 			out, errOut := &lockedBuffer{}, &lockedBuffer{}
 			writer := &sittingCLIWriter{Writer: out, qrRendered: make(chan struct{}), pause: pause}
