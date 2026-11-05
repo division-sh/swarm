@@ -232,6 +232,25 @@ func TestDescribePackConnectorAndRawOnlyEmptyStates(t *testing.T) {
 			t.Fatalf("%s empty/transport state: %d %s %s", provider, code, out, diagnostic)
 		}
 	}
+	code, out, diagnostic := runPacksCommand(t, root, "describe", "pack", "whatsapp", "--consume")
+	if code != 0 || diagnostic != "" || !strings.Contains(out, "whatsapp.send_text activity example withheld") ||
+		!strings.Contains(out, "account: policy.operator_account") || !strings.Contains(out, "activity's owning flow") ||
+		strings.Contains(out, "tool: whatsapp.send_text") {
+		t.Fatalf("invalid WhatsApp session activity example was emitted or lacked remediation: %d %s %s", code, out, diagnostic)
+	}
+	code, out, diagnostic = runPacksCommand(t, root, "describe", "pack", "whatsapp", "--json")
+	var description PackDescription
+	if code != 0 || diagnostic != "" || json.Unmarshal([]byte(out), &description) != nil {
+		t.Fatalf("WhatsApp JSON description: %d %s %s", code, out, diagnostic)
+	}
+	if len(description.Components) != 1 || len(description.Components[0].Tools) == 0 {
+		t.Fatal("withheld activity erased the described WhatsApp tool")
+	}
+	for _, fragment := range description.Fragments {
+		if fragment.Purpose == "tool example: whatsapp.send_text" || strings.Contains(fragment.YAML, "tool: whatsapp.send_text") {
+			t.Fatalf("JSON fragments emitted invalid WhatsApp activity: %+v", fragment)
+		}
+	}
 }
 
 func TestDescribePackSignatureReadbackIsDefensive(t *testing.T) {

@@ -63,6 +63,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm forkchat view":     {Constructor: "newForkChatViewCommand", Runner: "runForkChatViewCommand"},
 	"swarm forkchat delete":   {Constructor: "newForkChatDeleteCommand", Runner: "runForkChatDeleteCommand"},
 	"swarm describe":          {Constructor: "newDescribeCommand", Runner: "runDescribeCommandWithOutput"},
+	"swarm describe pack":     {Constructor: "newDescribePackCommand", Runner: "newDescribePackCommand"},
 	"swarm describe routes":   {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
 	"swarm entity list":       {Constructor: "newEntitiesListCommand", Runner: "runEntitiesListCommand"},
 	"swarm entity view":       {Constructor: "newEntityViewCommand", Runner: "runEntityViewCommand"},
