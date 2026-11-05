@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -138,7 +138,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 			t.Fatalf("held actual child public disposition=%+v err=%v", view, err)
 		}
 		assertNestedPredecessorsSettledWhileChildHeld(t, ctx, db, nestedPublicReader(t, rt.selected), parents, signal.EventID)
-		effectName := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
+		effectName := runtimeidentity.ExternalizeEventForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
 		if ids := nestedEventIDs(t, ctx, db, runID, effectName, signal.EventID); len(ids) != 0 {
 			t.Fatalf("held child published business effects early: %v", ids)
 		}
@@ -191,7 +191,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	var childCompletions []string
 	for _, parent := range parents {
 		view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
-		name := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
+		name := runtimeidentity.ExternalizeEventForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
 		completionRows, err := db.QueryContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, runID, name)
 		if err != nil {
 			t.Fatal(err)

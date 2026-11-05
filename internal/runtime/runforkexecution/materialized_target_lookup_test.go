@@ -10,10 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -108,7 +107,7 @@ func proveMaterializedTargetLookup(t *testing.T, ctx context.Context, selected m
 				target = leaf
 			}
 		}
-		node, err = identity.AdmitExecutableNodeDeclaration("parent/middle/leaf", "receiver")
+		node, err = runtimeidentity.AdmitExecutableNodeDeclaration("parent/middle/leaf", "receiver")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +166,7 @@ func proveMaterializedTargetLookup(t *testing.T, ctx context.Context, selected m
 	}
 	eventType := loaded.Source.ResolveFlowEventReference(target.TemplateID, localEvent)
 	if topology != "root" {
-		eventType = eventidentity.ExternalizeForFlow(target.InstancePath, []string{localEvent}, localEvent)
+		eventType = runtimeidentity.ExternalizeEventForFlow(target.InstancePath, []string{localEvent}, localEvent)
 	}
 	event, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType(eventType),

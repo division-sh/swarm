@@ -1,4 +1,4 @@
-package eventidentity
+package identity
 
 import (
 	"strconv"
@@ -17,20 +17,20 @@ func TestS1ProviderDirectoryKeyPreservesEventIdentity(t *testing.T) {
 			for _, local := range []string{"message", "raw.pull_request"} {
 				name := "inbound." + key + "." + local
 				for _, reference := range []string{name, "child/" + name} {
-					if !IsValidName(reference) || !IsCanonicalName(reference) || !IsCanonicalDeclaration(reference) {
+					if !IsValidEventName(reference) || !IsCanonicalEventName(reference) || !IsCanonicalEventDeclaration(reference) {
 						t.Errorf("valid directory key cannot be referenced exactly: %q", reference)
 					}
-					if Normalize(reference) != reference || LeafName(reference) != name {
+					if NormalizeEventName(reference) != reference || EventLeafName(reference) != name {
 						t.Errorf("provider directory key was normalized: %q", reference)
 					}
 				}
 				for _, pattern := range []string{"inbound." + key + ".*", "**/inbound." + key + ".*"} {
-					if !IsCanonicalPattern(pattern) || !MatchPattern(pattern, name) {
+					if !IsCanonicalEventPattern(pattern) || !MatchEventPattern(pattern, name) {
 						t.Errorf("fixed provider-key pattern rejected or mismatched: %q -> %q", pattern, name)
 					}
 				}
 			}
-			if MatchPattern("inbound."+key+".*", "inbound."+strings.ReplaceAll(key, "-", "_")+".message") && strings.Contains(key, "-") {
+			if MatchEventPattern("inbound."+key+".*", "inbound."+strings.ReplaceAll(key, "-", "_")+".message") && strings.Contains(key, "-") {
 				t.Fatal("hyphen and underscore provider keys were merged")
 			}
 		})
@@ -44,12 +44,12 @@ func TestS1ProviderKeyDoesNotBroadenOrdinaryEventTokens(t *testing.T) {
 		"inbound. team-bot.message", "inbound.provider.team-bot.message", "inbound.team-bot",
 		"inbound." + strings.Repeat("a", 99) + "-b.message",
 	} {
-		if IsCanonicalName(name) || IsCanonicalDeclaration(name) {
+		if IsCanonicalEventName(name) || IsCanonicalEventDeclaration(name) {
 			t.Errorf("invalid provider or ordinary event token accepted: %q", name)
 		}
 	}
 	for _, pattern := range []string{"business.team-bot.*", "inbound.team-bot.text-*", "*.team-bot.message", "inbound.-team.*", "inbound.TEAM-BOT.*"} {
-		if IsCanonicalPattern(pattern) || IsCanonicalDeclaration(pattern) {
+		if IsCanonicalEventPattern(pattern) || IsCanonicalEventDeclaration(pattern) {
 			t.Errorf("provider exception leaked to ordinary wildcard tokens: %q", pattern)
 		}
 	}
@@ -90,35 +90,35 @@ func TestS1EveryConcreteProviderKeyUsesPortableDirectoryOwner(t *testing.T) {
 			}
 			for _, prefix := range []string{"", "child/", "child/deep/"} {
 				name := prefix + "inbound." + tc.key + ".message"
-				if IsValidName(name) != tc.valid || IsCanonicalName(name) != tc.valid || IsCanonicalDeclaration(name) != tc.valid {
+				if IsValidEventName(name) != tc.valid || IsCanonicalEventName(name) != tc.valid || IsCanonicalEventDeclaration(name) != tc.valid {
 					t.Errorf("concrete reference disagrees with directory owner: %q want valid=%v", name, tc.valid)
 				}
 				pattern := prefix + "inbound." + tc.key + ".*"
-				if IsCanonicalPattern(pattern) != tc.valid || IsCanonicalDeclaration(pattern) != tc.valid {
+				if IsCanonicalEventPattern(pattern) != tc.valid || IsCanonicalEventDeclaration(pattern) != tc.valid {
 					t.Errorf("fixed-key pattern disagrees with directory owner: %q want valid=%v", pattern, tc.valid)
 				}
-				if err := ProviderKeyError(name); (err == nil) != tc.valid {
+				if err := ProviderEventKeyError(name); (err == nil) != tc.valid {
 					t.Errorf("directory diagnostic disagrees with validation: %q %v", name, err)
 				} else if err != nil && !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
 					t.Errorf("directory diagnostic lost the new form: %v", err)
 				}
 			}
 			pattern := "**/inbound." + tc.key + ".*"
-			if IsCanonicalPattern(pattern) != tc.valid {
+			if IsCanonicalEventPattern(pattern) != tc.valid {
 				t.Errorf("recursive fixed-key pattern disagrees with directory owner: %q", pattern)
 			}
 		})
 	}
 	for _, pattern := range []string{"inbound.*.message", "inbound.*.*", "**/inbound.*.message"} {
-		if !IsCanonicalPattern(pattern) || ProviderKeyError(pattern) != nil {
+		if !IsCanonicalEventPattern(pattern) || ProviderEventKeyError(pattern) != nil {
 			t.Errorf("whole-token provider wildcard refused: %q", pattern)
 		}
 	}
-	if IsCanonicalPattern("inbound.**.message") || IsCanonicalName("inbound.*.message") {
+	if IsCanonicalEventPattern("inbound.**.message") || IsCanonicalEventName("inbound.*.message") {
 		t.Fatal("provider wildcard became concrete or partial globstar became valid")
 	}
 	for _, ordinary := range []string{"business._team.message", "business.con.message", "business." + strings.Repeat("a", 101) + ".message", "inbound.team." + strings.Repeat("a", 101)} {
-		if !IsCanonicalName(ordinary) {
+		if !IsCanonicalEventName(ordinary) {
 			t.Errorf("provider-key constraint changed an ordinary event token: %q", ordinary)
 		}
 	}

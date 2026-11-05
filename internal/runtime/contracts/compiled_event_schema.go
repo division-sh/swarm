@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -311,7 +310,7 @@ func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventTyp
 // resolveEventName is shared by admitted producer and receiver bindings. A
 // concrete occurrence cannot borrow an event from a descendant declaration.
 func (bindings compiledFlowEventSchemas) resolveEventName(eventType string) (string, bool) {
-	name := eventidentity.Normalize(eventType)
+	name := runtimeidentity.NormalizeEventName(eventType)
 	if _, ok := bindings.bindings[name]; ok {
 		return name, true
 	}
@@ -325,7 +324,7 @@ func (bindings compiledFlowEventSchemas) resolveEventName(eventType string) (str
 		// Concrete template spellings are readback projections of this
 		// declaration, never another declaration or receiver authority.
 		if strings.Contains(remainder, "/") {
-			local := eventidentity.LeafName(remainder)
+			local := runtimeidentity.EventLeafName(remainder)
 			_, ok := bindings.bindings[local]
 			return local, ok
 		}
@@ -359,7 +358,7 @@ func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
 	for i, record := range records {
 		compiled, ok, err := b.compileCurrentEventDeclaration(record.flowPath, record.layer, record.sourceFile,
 			record.localName, record.qualifiedName, record.entry, record.types)
-		if eventidentity.IsCanonicalPattern(record.localName) {
+		if runtimeidentity.IsCanonicalEventPattern(record.localName) {
 			compiled, err = newCompiledEventSchema(record.flowPath, record.qualifiedName, record.entry, record.types, "",
 				CompiledEventSchemaSource{FlowPath: record.flowPath, Layer: record.layer, File: record.sourceFile})
 			ok = err == nil
@@ -496,13 +495,13 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 	entry EventCatalogEntry,
 	types TypeCatalogDocument,
 ) (CompiledEventSchema, bool, error) {
-	if eventidentity.IsCanonicalPattern(localName) {
+	if runtimeidentity.IsCanonicalEventPattern(localName) {
 		return CompiledEventSchema{}, false, nil
 	}
-	if !eventidentity.IsCanonicalName(localName) {
+	if !runtimeidentity.IsCanonicalEventName(localName) {
 		return CompiledEventSchema{}, false, eventNameAdmissionError(fmt.Errorf("compiled event declaration %q is not an exact canonical event identity", localName), localName)
 	}
-	if !eventidentity.IsCanonicalName(qualifiedName) {
+	if !runtimeidentity.IsCanonicalEventName(qualifiedName) {
 		return CompiledEventSchema{}, false, eventNameAdmissionError(fmt.Errorf("compiled event declaration %q resolves to noncanonical identity %q", localName, qualifiedName), qualifiedName)
 	}
 	admittedFlow, err := runtimeidentity.AdmitFlowIdentity(flowPath)
@@ -527,7 +526,7 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 // once so late-bound provider catalogs can supply immutable pin evidence
 // without exposing a reader-side EventCatalogEntry fallback.
 func CompileImportedEventSchema(flowPath, eventName string, entry EventCatalogEntry, source CompiledEventSchemaSource) (CompiledEventSchema, error) {
-	if !eventidentity.IsCanonicalName(eventName) {
+	if !runtimeidentity.IsCanonicalEventName(eventName) {
 		return CompiledEventSchema{}, eventNameAdmissionError(fmt.Errorf("imported event declaration %q is not an exact canonical event identity", eventName), eventName)
 	}
 	admittedFlow, err := runtimeidentity.AdmitFlowIdentity(flowPath)

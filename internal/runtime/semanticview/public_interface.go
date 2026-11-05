@@ -2,13 +2,13 @@ package semanticview
 
 import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // SelectedRootInputPin is public write eligibility, not general schema lookup.
 // Choosing another source root changes the compiled interface; child pins do not.
 func SelectedRootInputPin(source Source, event string) (runtimecontracts.CompiledFlowInputPin, bool) {
-	if source == nil || !eventidentity.IsValidName(event) {
+	if source == nil || !runtimeidentity.IsValidEventName(event) {
 		return runtimecontracts.CompiledFlowInputPin{}, false
 	}
 	pin, ok := source.FlowInputEventPin(".", event)

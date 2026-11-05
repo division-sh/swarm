@@ -18,7 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -181,7 +181,7 @@ func actionRetirementAuthoredFields(raw []byte) ([]string, error) {
 			case "timers", "state_table", "state_schema", "gate_state":
 				continue
 			}
-			if !eventidentity.IsCanonicalName(key) && !eventidentity.IsCanonicalPattern(key) {
+			if !runtimeidentity.IsCanonicalEventName(key) && !runtimeidentity.IsCanonicalEventPattern(key) {
 				continue
 			}
 			handler(node.Content[j+1])

@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -55,7 +55,7 @@ func testAgentSubscriptionAdmissionForFlow(t *testing.T, agentID, flowPath strin
 	for _, eventType := range eventTypes {
 		value := string(eventType)
 		values = append(values, value)
-		if local := eventidentity.LeafName(value); local != "" && !strings.Contains(local, "*") {
+		if local := runtimeidentity.EventLeafName(value); local != "" && !strings.Contains(local, "*") {
 			localEvents[local] = struct{}{}
 		}
 	}

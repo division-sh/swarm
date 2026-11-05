@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // InstancePublicationEventInput carries an ordinary, parentless publication
@@ -30,22 +30,22 @@ func validateInstancePublication(event Event) error {
 	if event.Producer().ID() != route.FlowID {
 		return fmt.Errorf("instance publication producer does not match its source declaration")
 	}
-	declaration, err := eventidentity.AdmitPublicationDeclaration(route.FlowID, string(event.Type()))
+	declaration, err := runtimeidentity.AdmitPublicationDeclaration(route.FlowID, string(event.Type()))
 	if err != nil {
 		return err
 	}
 	if strings.HasPrefix(declaration.Local(), "platform.") {
 		return fmt.Errorf("instance publication cannot emit platform-control events")
 	}
-	scope := eventidentity.PublicationStatic
+	scope := runtimeidentity.PublicationStatic
 	instance := route.FlowInstance
 	if route.FlowID == "." {
 		if instance != event.RunID() {
 			return fmt.Errorf("root instance publication source must match its run")
 		}
-		scope, instance = eventidentity.PublicationRoot, ""
+		scope, instance = runtimeidentity.PublicationRoot, ""
 	}
-	name, err := eventidentity.ProjectPublication(declaration, scope, route.FlowID, instance)
+	name, err := runtimeidentity.ProjectPublication(declaration, scope, route.FlowID, instance)
 	if err != nil {
 		return err
 	}

@@ -13,8 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type authorityKind uint8
@@ -31,7 +30,7 @@ type Evidence struct {
 	Path      string
 	AgentPlan agentidentity.Plan
 
-	handlerNode  identity.ExecutableNode
+	handlerNode  runtimeidentity.ExecutableNode
 	handlerEvent events.EventType
 	authority    authorityKind
 	connectPlan  events.ConnectPlanIdentity
@@ -45,7 +44,7 @@ type Input struct {
 	Recipient    events.DeliveryRecipient
 	Path         string
 	AgentPlan    agentidentity.Plan
-	HandlerNode  identity.ExecutableNode
+	HandlerNode  runtimeidentity.ExecutableNode
 	HandlerEvent events.EventType
 	RouteSource  string
 }
@@ -85,7 +84,7 @@ func (e Evidence) Validate() error {
 	if strings.ContainsAny(e.Path, "\x00\r\n") {
 		return fmt.Errorf("selected recipient path contains control characters")
 	}
-	if !eventidentity.IsCanonicalName(string(e.handlerEvent)) {
+	if !runtimeidentity.IsCanonicalEventName(string(e.handlerEvent)) {
 		return fmt.Errorf("selected recipient requires an exact handler event")
 	}
 	switch {
@@ -125,9 +124,9 @@ func (e Evidence) Validate() error {
 	return nil
 }
 
-func (e Evidence) RouteSourceCode() string              { return e.routeSource }
-func (e Evidence) HandlerNode() identity.ExecutableNode { return e.handlerNode }
-func (e Evidence) HandlerEvent() events.EventType       { return e.handlerEvent }
+func (e Evidence) RouteSourceCode() string                     { return e.routeSource }
+func (e Evidence) HandlerNode() runtimeidentity.ExecutableNode { return e.handlerNode }
+func (e Evidence) HandlerEvent() events.EventType              { return e.handlerEvent }
 func (e Evidence) Connect() (events.ConnectPlanIdentity, events.ConnectReceiverIdentity, bool) {
 	return e.connectPlan, e.receiverPin, e.authority == authorityConnect
 }
@@ -138,7 +137,7 @@ type Key struct {
 	recipient    events.DeliveryRecipient
 	path         string
 	agentPlan    agentidentity.Plan
-	handlerNode  identity.ExecutableNode
+	handlerNode  runtimeidentity.ExecutableNode
 	handlerEvent events.EventType
 	authority    authorityKind
 	connectPlan  events.ConnectPlanIdentity

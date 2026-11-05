@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
@@ -17,7 +17,7 @@ func EmitToolName(eventType string) string {
 }
 
 func localEmitEventType(eventType string) string {
-	return eventidentity.LeafName(eventType)
+	return runtimeidentity.EventLeafName(eventType)
 }
 
 func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any) error {

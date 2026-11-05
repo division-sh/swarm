@@ -19,7 +19,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -349,7 +349,7 @@ func registryProofBusinessResults(t *testing.T, endpoint, runID string, outputEv
 			t.Fatalf("registry business result differs: entity=%+v fields=%+v expected=%+v", entity, detail.Fields, want[slug])
 		}
 		entityIDs[slug] = entity.EntityID
-		statusEvent := eventidentity.ExternalizeForFlow(entity.FlowInstance, outputEvents, "company.status")
+		statusEvent := runtimeidentity.ExternalizeEventForFlow(entity.FlowInstance, outputEvents, "company.status")
 		var events operatorread.OperatorEventListResult
 		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": statusEvent}, "limit": 10}, &events)
 		if len(events.Events) != 1 || events.NextCursor != "" {

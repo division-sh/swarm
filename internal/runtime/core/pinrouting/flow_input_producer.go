@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -51,7 +51,7 @@ func ResolveFlowInputProducer(source semanticview.Source, flowID, eventType stri
 }
 
 func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if source == nil || eventType == "" {
 		return semanticview.ResolveNonConnectFlowInputProducerWithOptions(source, flowID, eventType, opts)
 	}
@@ -61,7 +61,7 @@ func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eve
 }
 
 func (r FlowInputProducerResolver) ResolveWithOptions(flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if r.preparation == nil {
 		return r.resolveInputProducer(flowID, eventType, opts)
 	}

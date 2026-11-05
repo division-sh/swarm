@@ -6,7 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -106,7 +106,7 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 			continue
 		}
 		for eventName, entry := range scope.Events {
-			canonical := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventName))
+			canonical := runtimeidentity.NormalizeEventName(source.ResolveFlowEventReference(flowID, eventName))
 			if canonical == "" {
 				continue
 			}
@@ -178,7 +178,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 
 func deadEventTypedConsumerMatches(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, decl deadEventDeclaration) []semanticview.TypedPubSubConsumerMatch {
 	producer := semanticview.AuthoredEventEndpoint{
-		ID:        "dead-event-schema:" + strings.TrimSpace(decl.FlowID) + ":" + eventidentity.Normalize(decl.Canonical),
+		ID:        "dead-event-schema:" + strings.TrimSpace(decl.FlowID) + ":" + runtimeidentity.NormalizeEventName(decl.Canonical),
 		Direction: semanticview.EventEndpointProducer,
 		FlowID:    strings.TrimSpace(decl.FlowID),
 	}
@@ -192,7 +192,7 @@ func deadEventSameScope(a, b string) bool {
 }
 
 func endpointMatchesDeadEventDeclaration(endpoint semanticview.AuthoredEventEndpoint, decl deadEventDeclaration) bool {
-	return eventidentity.Normalize(endpoint.Event.Canonical) == eventidentity.Normalize(decl.Canonical) &&
+	return runtimeidentity.NormalizeEventName(endpoint.Event.Canonical) == runtimeidentity.NormalizeEventName(decl.Canonical) &&
 		deadEventSameScope(decl.FlowID, endpoint.FlowID)
 }
 

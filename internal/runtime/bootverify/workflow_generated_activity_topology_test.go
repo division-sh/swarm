@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -54,7 +54,7 @@ func TestRunAcceptsNestedFlowGeneratedActivityResultOwnership(t *testing.T) {
 		}
 		routed := false
 		for _, endpoint := range census.MatchingConsumers("child", proof.EventKey()) {
-			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == "observer-node" && endpoint.HandlerEvent == eventidentity.LeafName(eventType) {
+			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == "observer-node" && endpoint.HandlerEvent == runtimeidentity.EventLeafName(eventType) {
 				routed = true
 				break
 			}
@@ -91,7 +91,7 @@ func TestGeneratedActivityResultNamesCoverHandlerAndRuleSites(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, eventType := range []string{results.SuccessEvent, results.FailureEvent} {
-			if _, ok := names[eventidentity.Normalize(eventType)]; !ok {
+			if _, ok := names[runtimeidentity.NormalizeEventName(eventType)]; !ok {
 				t.Fatalf("generated names = %#v, missing %s", names, eventType)
 			}
 		}

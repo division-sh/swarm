@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -116,13 +115,13 @@ func ActivityResultEventsForSite(site ActivitySite) (ActivityResultEvents, error
 	if flowID != "" && flowID != "." && !strings.HasPrefix(base, flowID+"/") {
 		base = flowID + "/" + base
 	}
-	base = eventidentity.Normalize(base)
+	base = runtimeidentity.NormalizeEventName(base)
 	return ActivityResultEvents{
 		ActivityID:        activityID,
-		SuccessEvent:      eventidentity.Normalize(base + "." + ActivityResultStatusSucceeded),
-		FailureEvent:      eventidentity.Normalize(base + "." + ActivityResultStatusFailed),
-		RevisionRequested: eventidentity.Normalize(base + ".revision_requested"),
-		Rejected:          eventidentity.Normalize(base + ".rejected"),
+		SuccessEvent:      runtimeidentity.NormalizeEventName(base + "." + ActivityResultStatusSucceeded),
+		FailureEvent:      runtimeidentity.NormalizeEventName(base + "." + ActivityResultStatusFailed),
+		RevisionRequested: runtimeidentity.NormalizeEventName(base + ".revision_requested"),
+		Rejected:          runtimeidentity.NormalizeEventName(base + ".rejected"),
 	}, nil
 }
 
@@ -293,7 +292,7 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]curren
 			}
 			out = append(out, currentEventDeclarationRecord{
 				flowPath: site.Node.FlowPath(), layer: "generated_activity", sourceFile: file,
-				localName: eventidentity.LeafName(name), qualifiedName: name, entry: entry,
+				localName: runtimeidentity.EventLeafName(name), qualifiedName: name, entry: entry,
 			})
 		}
 	}

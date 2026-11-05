@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -62,7 +62,7 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 				if !found {
 					t.Fatalf("cold constructor omitted %s", path)
 				}
-				name := eventidentity.ExternalizeForFlow(instance.InstancePath, []string{"work.finish"}, "work.finish")
+				name := runtimeidentity.ExternalizeEventForFlow(instance.InstancePath, []string{"work.finish"}, "work.finish")
 				outputs := rt.events(t, seed.RunID, name)
 				if len(outputs) != 1 || outputs[0].ProducerType != events.EventProducerAgent || outputs[0].Source == "" ||
 					len(outputs[0].Deliveries) != 1 || outputs[0].Deliveries[0].Status != "delivered" || !outputs[0].Deliveries[0].Terminal {
@@ -79,7 +79,7 @@ func TestServedColdStaticAgentConstructionBothStores(t *testing.T) {
 				}
 			}
 			for _, path := range []string{"templ/child", "templ/audit"} {
-				name := eventidentity.ExternalizeForFlow(instances[path].InstancePath, []string{"work.ready"}, "work.ready")
+				name := runtimeidentity.ExternalizeEventForFlow(instances[path].InstancePath, []string{"work.ready"}, "work.ready")
 				inputs := rt.events(t, seed.RunID, name)
 				if len(inputs) != 1 || len(inputs[0].Deliveries) != 2 {
 					t.Fatalf("local-plus-connected input cardinality in %s: %+v", path, inputs)

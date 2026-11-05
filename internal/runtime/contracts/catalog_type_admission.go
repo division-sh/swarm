@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -68,7 +67,7 @@ func validateEventCatalogReferences(bundle *WorkflowContractBundle) error {
 			flow = ""
 		}
 		name := identity.SemanticPath()
-		event := eventidentity.ExternalizeForFlow(flow, []string{name}, name)
+		event := runtimeidentity.ExternalizeEventForFlow(flow, []string{name}, name)
 		types := bundle.RootTypeCatalog()
 		if source.FlowPath != "" && source.FlowPath != "." {
 			types = bundle.ResolvedTypeCatalogForFlow(source.FlowPath)

@@ -9,8 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -38,7 +37,7 @@ func renderManagedMessage(frame agentframe.Frame, seed agentframe.SessionSeed, e
 		context["at"] = event.CreatedAt().UTC().Truncate(time.Second).Format(time.RFC3339)
 	}
 	if event.ProducerType() == events.EventProducerNode {
-		node, err := identity.ParseExecutableNodeKey(event.Producer().ID())
+		node, err := runtimeidentity.ParseExecutableNodeKey(event.Producer().ID())
 		if err != nil {
 			return Message{}, fmt.Errorf("agent content requires the exact producing node name: %w", err)
 		}
@@ -49,7 +48,7 @@ func renderManagedMessage(frame agentframe.Frame, seed agentframe.SessionSeed, e
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	local := eventidentity.LocalizeForFlow(seed.AgentIdentity.FlowInstance(), keys, string(event.Type()))
+	local := runtimeidentity.LocalizeEventForFlow(seed.AgentIdentity.FlowInstance(), keys, string(event.Type()))
 	program := seed.ContentPrograms[local]
 	if program == nil {
 		return Message{}, fmt.Errorf("agent content requires the exact admitted input program for %s", event.Type())

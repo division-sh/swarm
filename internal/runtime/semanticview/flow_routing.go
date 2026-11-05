@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -26,7 +25,7 @@ func RuntimeEventOwners(source Source, eventType string) []runtimeidentity.Execu
 	if source == nil {
 		return nil
 	}
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if eventType == "" {
 		return nil
 	}
@@ -43,7 +42,7 @@ func RuntimeEventOwners(source Source, eventType string) []runtimeidentity.Execu
 		}
 		canonical := eventType
 		if !strings.Contains(eventType, "/") {
-			canonical = eventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, eventType))
+			canonical = runtimeidentity.NormalizeEventName(source.ResolveExecutableNodeEventReference(node, eventType))
 		}
 		if canonical == "" {
 			continue

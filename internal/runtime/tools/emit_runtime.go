@@ -8,7 +8,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -127,13 +127,13 @@ func (r *EmitRegistry) admitActorEventSchema(actor models.AgentConfig, eventType
 	if !ok {
 		return EmitSchema{}, fmt.Errorf("agent %s has no exact declaration", actor.ID)
 	}
-	declaration, err := eventidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, eventType)
+	declaration, err := runtimeidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, eventType)
 	if err != nil {
 		return EmitSchema{}, err
 	}
 	allowed := false
 	for _, configured := range projection.Declaration.Entry.EmitEvents {
-		permitted, err := eventidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, configured)
+		permitted, err := runtimeidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, configured)
 		if err == nil && permitted == declaration {
 			allowed = true
 		}

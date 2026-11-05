@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -213,7 +213,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				assertNestedExactBarrier(t, ctx, db, receipt.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 				view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 2)
 				flow := view.Deliveries[0].Target.FlowInstance
-				name := eventidentity.ExternalizeForFlow(flow, []string{"account.notification.completed"}, "account.notification.completed")
+				name := runtimeidentity.ExternalizeEventForFlow(flow, []string{"account.notification.completed"}, "account.notification.completed")
 				ids := nestedEventIDs(t, ctx, db, runID, name, parent.ID)
 				if len(ids) != 1 {
 					t.Fatalf("exact agent nested effect %s for %s: %v", name, parent.ID, ids)
@@ -222,7 +222,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				if err != nil || effect.NoDelivery == nil || len(effect.Deliveries) != 0 {
 					t.Fatalf("nested agent effect did not settle: %+v err=%v", effect, err)
 				}
-				taskName := eventidentity.ExternalizeForFlow(flow, []string{"account.task.requested"}, "account.task.requested")
+				taskName := runtimeidentity.ExternalizeEventForFlow(flow, []string{"account.task.requested"}, "account.task.requested")
 				tasks := nestedEventIDs(t, ctx, db, runID, taskName, parent.ID)
 				if len(tasks) != 2 {
 					t.Fatalf("exact child range for %s: %v", parent.ID, tasks)
@@ -235,7 +235,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 						t.Fatalf("incorrect nested business identity: %+v", task)
 					}
 					seen[value] = true
-					name := eventidentity.ExternalizeForFlow(task.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
+					name := runtimeidentity.ExternalizeEventForFlow(task.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
 					effects := nestedEventIDs(t, ctx, db, runID, name, id)
 					if len(effects) != 1 {
 						t.Fatalf("task %s effects=%v", id, effects)
@@ -332,7 +332,7 @@ type b17NestedBoundary struct {
 }
 
 func (p *b17NestedBoundary) Intercept(ctx context.Context, event events.Event) (bool, []events.Event, pipelineobligation.ExecutionOutcome, error) {
-	if eventidentity.LeafName(string(event.Type())) != "account.task.completed" || event.ParentEventID() != p.current {
+	if runtimeidentity.EventLeafName(string(event.Type())) != "account.task.completed" || event.ParentEventID() != p.current {
 		return true, nil, pipelineobligation.Continue(), nil
 	}
 	if p.calls.Add(1) != 1 {

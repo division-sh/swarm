@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -163,7 +163,7 @@ func (c *checkerContext) validateJoinPaths(location, flowID, nodeID, eventType s
 		untilProof := semanticview.ResolveFlowEventProof(c.source, flowID, spec.Until)
 		if !untilProof.HasSchema {
 			out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.until requires a catalog-declared event"))
-		} else if eventidentity.MatchPattern(c.source.ResolveFlowEventPattern(flowID, eventType), untilProof.Canonical) {
+		} else if runtimeidentity.MatchEventPattern(c.source.ResolveFlowEventPattern(flowID, eventType), untilProof.Canonical) {
 			out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.until must be distinct from the member-arrival event"))
 		}
 	}

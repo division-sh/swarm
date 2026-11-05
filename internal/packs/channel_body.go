@@ -2,7 +2,7 @@ package packs
 
 import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -33,7 +33,7 @@ func qualifyChannelBodyReferences(root yamlsource.Value, manifest *ChannelManife
 			return err
 		}
 		binding := manifest.Events[name]
-		binding.Event, err = eventidentity.QualifyProviderEvent(manifest.Provider, binding.Event)
+		binding.Event, err = runtimeidentity.QualifyProviderEvent(manifest.Provider, binding.Event)
 		if err != nil {
 			return channelError(field.Value, err.Error())
 		}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -32,7 +32,7 @@ func TestS1ReservedInboundDeclarationDiskAndRetainedSource(t *testing.T) {
 		{"**/*.completed", "child/inbound.telegram.completed"},
 	} {
 		t.Run(tc.declaration, func(t *testing.T) {
-			if !eventidentity.IsCanonicalDeclaration(tc.declaration) || !eventidentity.MatchPattern(tc.declaration, tc.matched) {
+			if !runtimeidentity.IsCanonicalEventDeclaration(tc.declaration) || !runtimeidentity.MatchEventPattern(tc.declaration, tc.matched) {
 				t.Fatal("control is not a canonical declaration matching the provider namespace")
 			}
 			root := t.TempDir()

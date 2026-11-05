@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -81,7 +81,7 @@ func SubscribeForRun(t TestingT, eventBus *runtimebus.EventBus, runID, agentID s
 	for _, eventType := range eventTypes {
 		subscription := string(eventType)
 		subscriptions = append(subscriptions, subscription)
-		if local := eventidentity.LeafName(subscription); local != "" && !strings.Contains(local, "*") {
+		if local := runtimeidentity.EventLeafName(subscription); local != "" && !strings.Contains(local, "*") {
 			localEvents[local] = struct{}{}
 		}
 	}

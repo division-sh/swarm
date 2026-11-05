@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -21,12 +20,12 @@ type FlowEventProof struct {
 }
 
 func ResolveExecutableNodeEventProof(source Source, node runtimeidentity.ExecutableNode, eventType string) FlowEventProof {
-	authored := runtimeeventidentity.Normalize(eventType)
+	authored := runtimeidentity.NormalizeEventName(eventType)
 	proof := FlowEventProof{Node: node, FlowID: node.FlowPath(), Authored: authored, Local: authored, Canonical: authored}
 	if source == nil || !node.Valid() || authored == "" {
 		return proof
 	}
-	if canonical := runtimeeventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, authored)); canonical != "" {
+	if canonical := runtimeidentity.NormalizeEventName(source.ResolveExecutableNodeEventReference(node, authored)); canonical != "" {
 		proof.Canonical = canonical
 	}
 	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
@@ -58,7 +57,7 @@ func ResolveExecutableNodeEventProof(source Source, node runtimeidentity.Executa
 }
 
 func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventProof {
-	authored := runtimeeventidentity.Normalize(eventType)
+	authored := runtimeidentity.NormalizeEventName(eventType)
 	proof := FlowEventProof{
 		FlowID:    flowID,
 		Authored:  authored,
@@ -75,7 +74,7 @@ func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventPro
 		return proof
 	}
 
-	if canonical := runtimeeventidentity.Normalize(source.ResolveFlowEventReference(flowID, authored)); canonical != "" {
+	if canonical := runtimeidentity.NormalizeEventName(source.ResolveFlowEventReference(flowID, authored)); canonical != "" {
 		proof.Canonical = canonical
 	}
 
@@ -139,7 +138,7 @@ func (p FlowEventProof) IsAuthored(source Source) bool {
 	if source == nil || !p.HasSchema {
 		return false
 	}
-	canonical := runtimeeventidentity.Normalize(p.Canonical)
+	canonical := runtimeidentity.NormalizeEventName(p.Canonical)
 	if canonical == "" {
 		return false
 	}
@@ -149,17 +148,17 @@ func (p FlowEventProof) IsAuthored(source Source) bool {
 	}
 	for _, scope := range source.FlowScopes() {
 		for eventType := range scope.Events {
-			if _, ok := authored[runtimeeventidentity.Normalize(eventType)]; !ok {
+			if _, ok := authored[runtimeidentity.NormalizeEventName(eventType)]; !ok {
 				continue
 			}
-			declared := runtimeeventidentity.Normalize(source.ResolveFlowEventReference(scope.ID, eventType))
+			declared := runtimeidentity.NormalizeEventName(source.ResolveFlowEventReference(scope.ID, eventType))
 			if declared == canonical {
 				return true
 			}
 		}
 	}
 	for eventType := range authored {
-		if runtimeeventidentity.Normalize(eventType) == canonical {
+		if runtimeidentity.NormalizeEventName(eventType) == canonical {
 			return true
 		}
 	}
@@ -189,7 +188,7 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if source == nil {
 		return ""
 	}
-	canonical = runtimeeventidentity.Normalize(canonical)
+	canonical = runtimeidentity.NormalizeEventName(canonical)
 	if canonical == "" {
 		return ""
 	}
@@ -205,11 +204,11 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical); local != "" {
 		return local
 	}
-	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
+	return runtimeidentity.LocalizeEventForFlow(scope.Path, localNames, canonical)
 }
 
 func localizeExecutableNodeEventForProof(source Source, scope FlowScope, canonical string) string {
-	canonical = runtimeeventidentity.Normalize(canonical)
+	canonical = runtimeidentity.NormalizeEventName(canonical)
 	if canonical == "" {
 		return ""
 	}
@@ -217,13 +216,13 @@ func localizeExecutableNodeEventForProof(source Source, scope FlowScope, canonic
 	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical); local != "" {
 		return local
 	}
-	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
+	return runtimeidentity.LocalizeEventForFlow(scope.Path, localNames, canonical)
 }
 
 func flowScopeEventNamesForProof(source Source, scope FlowScope) []string {
 	localNames := make([]string, 0, len(scope.Events))
 	for name := range scope.Events {
-		name = runtimeeventidentity.Normalize(name)
+		name = runtimeidentity.NormalizeEventName(name)
 		if name == "" {
 			continue
 		}
@@ -252,8 +251,8 @@ func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, 
 	if scope.Mode != "template" {
 		return ""
 	}
-	scopePath := runtimeeventidentity.Normalize(scope.Path)
-	canonical = runtimeeventidentity.Normalize(canonical)
+	scopePath := runtimeidentity.NormalizeEventName(scope.Path)
+	canonical = runtimeidentity.NormalizeEventName(canonical)
 	if scopePath == "" || !strings.HasPrefix(canonical, scopePath+"/") {
 		return ""
 	}
@@ -268,8 +267,8 @@ func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, 
 	if err != nil || !ok {
 		return ""
 	}
-	local := runtimeeventidentity.LeafName(canonical)
-	if compiled.FlowPath() == scope.ID && runtimeeventidentity.LeafName(compiled.EventName()) == local {
+	local := runtimeidentity.EventLeafName(canonical)
+	if compiled.FlowPath() == scope.ID && runtimeidentity.EventLeafName(compiled.EventName()) == local {
 		return local
 	}
 	return ""
@@ -277,7 +276,7 @@ func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, 
 
 func eventProofRemainderTargetsDescendantScope(source Source, scopePath, remainder string) bool {
 	for _, descendant := range source.FlowScopes() {
-		descendantPath := runtimeeventidentity.Normalize(descendant.Path)
+		descendantPath := runtimeidentity.NormalizeEventName(descendant.Path)
 		if descendantPath == scopePath || !strings.HasPrefix(descendantPath, scopePath+"/") {
 			continue
 		}
@@ -293,7 +292,7 @@ func uniqueNormalizedProofCandidates(values ...string) []string {
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		value = runtimeeventidentity.Normalize(value)
+		value = runtimeidentity.NormalizeEventName(value)
 		if value == "" {
 			continue
 		}

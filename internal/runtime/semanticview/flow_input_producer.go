@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func ResolveNonConnectFlowInputProducer(source Source, flowID, eventType string) runtimecontracts.FlowInputProducerResolution {
@@ -26,14 +26,14 @@ func (census AuthoredEventEndpointCensus) ResolveNonConnectFlowInputProducer(flo
 }
 
 func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, censusForSource func() AuthoredEventEndpointCensus) runtimecontracts.FlowInputProducerResolution {
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	out := runtimecontracts.FlowInputProducerResolution{FlowID: flowID, EventType: eventType}
 	appendEvidence := func(evidence runtimecontracts.FlowInputProducerEvidence) {
 		evidence.Kind = strings.TrimSpace(evidence.Kind)
 		evidence.FlowID = strings.TrimSpace(evidence.FlowID)
-		evidence.EventType = eventidentity.Normalize(evidence.EventType)
+		evidence.EventType = runtimeidentity.NormalizeEventName(evidence.EventType)
 		evidence.Pin = strings.TrimSpace(evidence.Pin)
-		evidence.Pattern = eventidentity.Normalize(evidence.Pattern)
+		evidence.Pattern = runtimeidentity.NormalizeEventName(evidence.Pattern)
 		evidence.Detail = strings.TrimSpace(evidence.Detail)
 		if evidence.Kind == "" {
 			return
@@ -187,7 +187,7 @@ func (endpoint AuthoredEventEndpoint) ProducerDescription() string {
 func uniqueFlowInputProducerEvents(values ...string) []string {
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		value = eventidentity.Normalize(value)
+		value = runtimeidentity.NormalizeEventName(value)
 		if value != "" {
 			seen[value] = struct{}{}
 		}

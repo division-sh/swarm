@@ -18,8 +18,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -997,7 +997,7 @@ func eventPublicationHasKeyedConstructor(source semanticview.Source, eventName s
 	if source == nil {
 		return false
 	}
-	eventName = runtimeeventidentity.Normalize(eventName)
+	eventName = runtimeidentity.NormalizeEventName(eventName)
 	target = target.Normalized()
 	if target.Empty() || target.FlowID == "." && target.FlowInstance == runID {
 		if pin, found := semanticview.SelectedRootInputPin(source, eventName); found {

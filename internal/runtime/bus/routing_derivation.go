@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -170,7 +169,7 @@ func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph
 			if pattern.admission.Pattern() {
 				eventsForPattern = nil
 				for _, input := range scope.InputEvents {
-					if eventidentity.MatchPattern(pattern.raw, input) {
+					if runtimeidentity.MatchEventPattern(pattern.raw, input) {
 						eventsForPattern = append(eventsForPattern, input)
 					}
 				}
@@ -418,11 +417,11 @@ type resolvedSubscriberRoleIdentity struct {
 func resolvedSubscriberRoleKey(subscriber Subscriber) resolvedSubscriberRoleIdentity {
 	return resolvedSubscriberRoleIdentity{
 		recipient:      subscriber.Recipient,
-		path:           eventidentity.Normalize(subscriber.Path),
+		path:           runtimeidentity.NormalizeEventName(subscriber.Path),
 		agentPlan:      subscriber.AgentPlan.Normalize(),
 		agentLifecycle: subscriber.agentLifecycle,
 		routeSource:    subscriber.routeSource,
-		localizedEvent: eventidentity.Normalize(subscriber.LocalizedEvent),
+		localizedEvent: runtimeidentity.NormalizeEventName(subscriber.LocalizedEvent),
 		handlerNode:    subscriber.handlerNode,
 		connectHandler: subscriber.connectHandler,
 		targetHandler:  subscriber.targetHandler,
@@ -430,8 +429,8 @@ func resolvedSubscriberRoleKey(subscriber Subscriber) resolvedSubscriberRoleIden
 }
 
 func strongestSubscriberMatchEvidence(left, right string) string {
-	left = eventidentity.Normalize(left)
-	right = eventidentity.Normalize(right)
+	left = runtimeidentity.NormalizeEventName(left)
+	right = runtimeidentity.NormalizeEventName(right)
 	leftRank := subscriberMatchEvidenceRank(left)
 	rightRank := subscriberMatchEvidenceRank(right)
 	switch {

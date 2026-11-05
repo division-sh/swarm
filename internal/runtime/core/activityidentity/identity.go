@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
@@ -126,7 +125,7 @@ func ResultEventID(fact Fact, eventType string) string {
 	parts := []string{
 		fact.RunID, fact.SourceEventID, fact.ParentEventID, fact.EntityID,
 		fact.ExecutionFlowID, fact.Owner.Key(), fact.HandlerEventKey, fact.ActivityID,
-		fact.Tool, eventidentity.Normalize(eventType), fact.RevisionID,
+		fact.Tool, runtimeidentity.NormalizeEventName(eventType), fact.RevisionID,
 	}
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-result:"+strings.Join(parts, "\x00"))).String()
 }

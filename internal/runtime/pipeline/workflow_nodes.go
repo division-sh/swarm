@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -65,7 +64,7 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 	if executionFlowID == "" {
 		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
-	rawEventType := eventidentity.Normalize(string(evt.Type()))
+	rawEventType := runtimeidentity.NormalizeEventName(string(evt.Type()))
 	if rawEventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -125,7 +124,7 @@ func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nod
 	if executionFlowID == "" {
 		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if target.FlowID != executionFlowID {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -137,7 +136,7 @@ func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nod
 			Matched:         true,
 		}
 	}
-	prefix := eventidentity.Normalize(target.FlowInstance) + "/"
+	prefix := runtimeidentity.NormalizeEventName(target.FlowInstance) + "/"
 	if prefix == "/" || !strings.HasPrefix(eventType, prefix) {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -157,7 +156,7 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 	if source == nil {
 		return workflowNodeEventHandlerResolution{}
 	}
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if eventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -182,7 +181,7 @@ func workflowNodeHandlerEventKeyForExecution(ctx context.Context, source semanti
 	if resolved.Matched {
 		return resolved.HandlerEventKey
 	}
-	return eventidentity.Normalize(string(evt.Type()))
+	return runtimeidentity.NormalizeEventName(string(evt.Type()))
 }
 
 func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
@@ -235,7 +234,7 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 }
 
 func workflowNodeSubscriptionAliases(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) ([]string, error) {
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if !node.Valid() || eventType == "" || source == nil {
 		if eventType == "" {
 			return nil, nil
@@ -287,7 +286,7 @@ func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []str
 
 func workflowNodeExternalEventType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) string {
 	if source == nil {
-		return eventidentity.Normalize(eventType)
+		return runtimeidentity.NormalizeEventName(eventType)
 	}
 	return source.ResolveExecutableNodeEventReference(node, eventType)
 }

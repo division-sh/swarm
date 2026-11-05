@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -361,7 +360,7 @@ func (e *EndpointAssociationError) Error() string {
 }
 
 func (c AuthoredEventEndpointCensus) ResolveDeclaredInputEndpoint(flowID, identity string) EndpointAssociationResult {
-	identity = eventidentity.Normalize(identity)
+	identity = runtimeidentity.NormalizeEventName(identity)
 	if _, found := FlowScopeByID(c.source, flowID); !found {
 		return endpointAssociationResult(flowID, identity, "", nil)
 	}
@@ -392,7 +391,7 @@ func endpointAssociationResult(flowID, identity, nodeID string, candidates []Aut
 	return EndpointAssociationResult{
 		Status:     status,
 		FlowID:     flowID,
-		Identity:   eventidentity.Normalize(identity),
+		Identity:   runtimeidentity.NormalizeEventName(identity),
 		NodeID:     strings.TrimSpace(nodeID),
 		Candidates: cloneEventEndpoints(candidates),
 	}
@@ -680,7 +679,7 @@ func (b *endpointCensusBuilder) endpointSourceLine(endpoint AuthoredEventEndpoin
 	if !root.Valid() {
 		return 0
 	}
-	eventType := eventidentity.Normalize(endpoint.Event.Authored)
+	eventType := runtimeidentity.NormalizeEventName(endpoint.Event.Authored)
 	switch endpoint.Kind {
 	case EventEndpointNodeHandler, EventEndpointNodeGenerated:
 		return yamlActorEventLine(root, endpoint.NodeID, nil, eventType)
@@ -729,7 +728,7 @@ func yamlActorEventLine(root yamlsource.Node, actorID string, fields []string, e
 	if fields == nil {
 		for i := 0; i+1 < actor.Len(); i += 2 {
 			key, _ := actor.Child(i)
-			if eventidentity.Normalize(key.Value()) == eventType {
+			if runtimeidentity.NormalizeEventName(key.Value()) == eventType {
 				return key.Line()
 			}
 		}
@@ -744,14 +743,14 @@ func yamlActorEventLine(root yamlsource.Node, actorID string, fields []string, e
 		case yamlsource.MappingNode:
 			for i := 0; i+1 < value.Len(); i += 2 {
 				item, _ := value.Child(i)
-				if eventidentity.Normalize(item.Value()) == eventType {
+				if runtimeidentity.NormalizeEventName(item.Value()) == eventType {
 					return item.Line()
 				}
 			}
 		case yamlsource.SequenceNode:
 			for i := 0; i < value.Len(); i++ {
 				item, _ := value.Child(i)
-				if eventidentity.Normalize(item.Value()) == eventType {
+				if runtimeidentity.NormalizeEventName(item.Value()) == eventType {
 					return item.Line()
 				}
 			}
@@ -814,15 +813,15 @@ func endpointMatchesProof(source Source, endpoint AuthoredEventEndpoint, proof F
 		if admission.Matches(proof.EventKey()) {
 			return true
 		}
-		flowPath := eventidentity.Normalize(endpoint.FlowPath)
+		flowPath := runtimeidentity.NormalizeEventName(endpoint.FlowPath)
 		if flowPath == "" {
-			flowPath = eventidentity.Normalize(source.FlowPath(endpoint.FlowID))
+			flowPath = runtimeidentity.NormalizeEventName(source.FlowPath(endpoint.FlowID))
 		}
 		inputEvents := authoredSubscriptionInputEvents(source, endpoint.FlowID)
 		return admission.MatchesReceiverInput(proof.EventKey(), flowPath, inputEvents)
 	}
 	return flowEventMatchesWithoutTopology(source, endpoint.FlowID, endpoint.Event.Authored, proof.EventKey()) ||
-		eventidentity.Normalize(endpoint.Event.Canonical) == eventidentity.Normalize(proof.Canonical)
+		runtimeidentity.NormalizeEventName(endpoint.Event.Canonical) == runtimeidentity.NormalizeEventName(proof.Canonical)
 }
 
 func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint) (AuthoredSubscriptionAdmission, bool) {
@@ -844,9 +843,9 @@ func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint
 	default:
 		return AuthoredSubscriptionAdmission{}, false
 	}
-	flowPath := eventidentity.Normalize(sourceFlowPath(source, endpoint.FlowID))
+	flowPath := runtimeidentity.NormalizeEventName(sourceFlowPath(source, endpoint.FlowID))
 	if flowPath == "" && strings.TrimSpace(endpoint.FlowID) != "." {
-		flowPath = eventidentity.Normalize(endpoint.FlowPath)
+		flowPath = runtimeidentity.NormalizeEventName(endpoint.FlowPath)
 	}
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
 		ConsumerKind: consumerKind,
@@ -858,7 +857,7 @@ func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint
 }
 
 func declaredInputIdentityMatches(source Source, endpoint AuthoredEventEndpoint, identity string) bool {
-	identity = eventidentity.Normalize(identity)
+	identity = runtimeidentity.NormalizeEventName(identity)
 	if identity == "" {
 		return false
 	}
@@ -869,7 +868,7 @@ func declaredInputIdentityMatches(source Source, endpoint AuthoredEventEndpoint,
 		endpoint.Event.Canonical,
 	}
 	for _, candidate := range candidates {
-		if eventidentity.Normalize(candidate) == identity {
+		if runtimeidentity.NormalizeEventName(candidate) == identity {
 			return true
 		}
 	}
@@ -894,10 +893,10 @@ func resolveNodeHandlerProof(source Source, node runtimeidentity.ExecutableNode,
 	if source == nil || !node.Valid() {
 		return "", false
 	}
-	authored := eventidentity.Normalize(eventType)
+	authored := runtimeidentity.NormalizeEventName(eventType)
 	if admission := ClassifyExecutableNodeSubscription(source, node, authored); admission.Admitted() {
 		for key := range handlers {
-			if eventidentity.Normalize(key) == authored {
+			if runtimeidentity.NormalizeEventName(key) == authored {
 				return authored, true
 			}
 		}
@@ -940,7 +939,7 @@ func eventEndpointID(endpoint AuthoredEventEndpoint) string {
 }
 
 func nodeEventKey(nodeID, eventType string) string {
-	return strings.TrimSpace(nodeID) + "\x00" + eventidentity.Normalize(eventType)
+	return strings.TrimSpace(nodeID) + "\x00" + runtimeidentity.NormalizeEventName(eventType)
 }
 
 func cloneEventEndpoints(in []AuthoredEventEndpoint) []AuthoredEventEndpoint {
@@ -977,7 +976,7 @@ func sortedMapKeys[T any](values map[string]T) []string {
 func normalizedSortedStrings(values []string) []string {
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		if value = eventidentity.Normalize(value); value != "" {
+		if value = runtimeidentity.NormalizeEventName(value); value != "" {
 			seen[value] = struct{}{}
 		}
 	}

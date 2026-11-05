@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -33,7 +32,7 @@ type nestedCancellationHandlers struct {
 }
 
 func (p *nestedCancellationHandlers) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
-	if signal.Kind == lifecycleprobe.HandlerStarted && eventidentity.LeafName(signal.EventType) == p.gate.eventName {
+	if signal.Kind == lifecycleprobe.HandlerStarted && runtimeidentity.EventLeafName(signal.EventType) == p.gate.eventName {
 		p.mu.Lock()
 		p.ids = append(p.ids, signal.EventID)
 		p.mu.Unlock()
@@ -149,11 +148,11 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("held child conservation requires its original target reader")
 			}
-			before, err := stateReader.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			before, err := stateReader.LoadWorkflowTargetPersistence(ctx, owner, runtimeidentity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
 			if err != nil {
 				t.Fatal(err)
 			}
-			beforeInstance, err := before.DecodeComplete(owner.Route, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			beforeInstance, err := before.DecodeComplete(owner.Route, runtimeidentity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -231,11 +230,11 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("production run-control cancellation=%+v err=%v", result, err)
 			}
 			gate.open()
-			after, err := stateReader.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			after, err := stateReader.LoadWorkflowTargetPersistence(ctx, owner, runtimeidentity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
 			if err != nil {
 				t.Fatal(err)
 			}
-			afterInstance, err := after.DecodeComplete(owner.Route, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			afterInstance, err := after.DecodeComplete(owner.Route, runtimeidentity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -248,7 +247,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				if err != nil || len(post.Deliveries) != 1 || !post.Deliveries[0].Terminal || post.Deliveries[0].Status != string(deliverylifecycle.StatusDeadLetter) || post.Deliveries[0].ReasonCode != "run_stopped" {
 					t.Fatalf("canceled child %s public terminal disposition=%+v err=%v", id, post, err)
 				}
-				effectName := eventidentity.ExternalizeForFlow(post.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
+				effectName := runtimeidentity.ExternalizeEventForFlow(post.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
 				if ids := nestedEventIDs(t, ctx, db, runID, effectName, id); len(ids) != 0 {
 					t.Fatalf("canceled held child %s emitted business effects: %v", id, ids)
 				}

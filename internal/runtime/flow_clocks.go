@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -92,15 +92,15 @@ func flowClockCommand(source semanticview.Source, activation StandingActivation,
 	if instance != activation.Construction {
 		return genericschedule.AdmissionCommand{}, fmt.Errorf("clock requires the acknowledged constructed instance")
 	}
-	declaration, err := eventidentity.AdmitPublicationDeclaration(schedule.FlowID, schedule.Declaration.Emit)
+	declaration, err := runtimeidentity.AdmitPublicationDeclaration(schedule.FlowID, schedule.Declaration.Emit)
 	if err != nil {
 		return genericschedule.AdmissionCommand{}, err
 	}
-	scope, publicationInstance := eventidentity.PublicationStatic, instance.InstancePath
+	scope, publicationInstance := runtimeidentity.PublicationStatic, instance.InstancePath
 	if schedule.FlowID == "." {
-		scope, publicationInstance = eventidentity.PublicationRoot, ""
+		scope, publicationInstance = runtimeidentity.PublicationRoot, ""
 	}
-	eventName, err := eventidentity.ProjectPublication(declaration, scope, schedule.FlowID, publicationInstance)
+	eventName, err := runtimeidentity.ProjectPublication(declaration, scope, schedule.FlowID, publicationInstance)
 	if err != nil {
 		return genericschedule.AdmissionCommand{}, err
 	}

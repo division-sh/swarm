@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -92,7 +92,7 @@ func assertNestedSiblingTaskEffects(t *testing.T, ctx context.Context, selected 
 	seenEvents := make(map[string]bool, 4*len(parents))
 	for _, parent := range parents {
 		parentView := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
-		taskName := eventidentity.ExternalizeForFlow(parentView.Deliveries[0].Target.FlowInstance, []string{taskEvent}, taskEvent)
+		taskName := runtimeidentity.ExternalizeEventForFlow(parentView.Deliveries[0].Target.FlowInstance, []string{taskEvent}, taskEvent)
 		ids := nestedEventIDs(t, ctx, db, runID, taskName, parent.ID)
 		if len(ids) != 2 {
 			t.Fatalf("nested sibling %s direct task count=%d, want 2", parent.AccountID, len(ids))
@@ -109,7 +109,7 @@ func assertNestedSiblingTaskEffects(t *testing.T, ctx context.Context, selected 
 				t.Fatalf("nested sibling %s task payload=%+v repeated=%v", parent.AccountID, view.Payload, seenTasks[task])
 			}
 			seenTasks[task] = true
-			effectName := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{effectEvent}, effectEvent)
+			effectName := runtimeidentity.ExternalizeEventForFlow(view.Deliveries[0].Target.FlowInstance, []string{effectEvent}, effectEvent)
 			effectIDs := nestedEventIDs(t, ctx, db, runID, effectName, id)
 			if len(effectIDs) != 1 || seenEvents[effectIDs[0]] {
 				t.Fatalf("nested task %s exact recipient effect IDs=%v", id, effectIDs)

@@ -15,9 +15,9 @@ import (
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -2615,14 +2615,14 @@ func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscr
 	if !subscriber.Recipient.IsNode() {
 		return ""
 	}
-	if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
+	if localized := runtimeidentity.NormalizeEventName(subscriber.LocalizedEvent); localized != "" {
 		return localized
 	}
 	if eb == nil || eb.semanticSource == nil {
 		return ""
 	}
 	node, _ := subscriber.Recipient.Node()
-	localized := eventidentity.LocalizeForFlow(subscriber.Path, nil, eventType)
+	localized := runtimeidentity.LocalizeEventForFlow(subscriber.Path, nil, eventType)
 	if resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(eb.semanticSource, node, localized); resolved.Matched {
 		return localized
 	}

@@ -1,4 +1,4 @@
-package eventidentity
+package identity
 
 import (
 	"fmt"
@@ -30,7 +30,7 @@ func AdmitPublicationDeclaration(flow, reference string) (PublicationDeclaration
 	if flow != "." && strings.HasPrefix(reference, flow+"/") {
 		local = strings.TrimPrefix(reference, flow+"/")
 	}
-	if !IsCanonicalName(local) || strings.ContainsAny(local, "/ \t\r\n") {
+	if !IsCanonicalEventName(local) || strings.ContainsAny(local, "/ \t\r\n") {
 		return PublicationDeclaration{}, fmt.Errorf("event %q does not identify a local declaration in flow %q", reference, flow)
 	}
 	return PublicationDeclaration{flow: flow, local: local}, nil
@@ -72,5 +72,5 @@ func ProjectPublication(d PublicationDeclaration, scope PublicationScope, source
 }
 
 func canonicalPublicationPath(value string) bool {
-	return IsCanonicalName(value) && !strings.ContainsAny(value, " \t\r\n")
+	return IsCanonicalEventName(value) && !strings.ContainsAny(value, " \t\r\n")
 }

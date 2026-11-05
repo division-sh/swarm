@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -513,8 +512,8 @@ func newConnectRoutePlanEndpoint(direction ConnectEndpointRoleKind, root bool, f
 		flowID:        connectFlowID{value: strings.TrimSpace(flowID)},
 		flowPath:      connectFlowPath{value: strings.Trim(strings.TrimSpace(flowPath), "/")},
 		pin:           connectPinID{direction: direction, value: strings.TrimSpace(pin)},
-		event:         connectLocalEvent{value: events.EventType(eventidentity.Normalize(event))},
-		resolvedEvent: connectResolvedEvent{value: events.EventType(eventidentity.Normalize(resolvedEvent))},
+		event:         connectLocalEvent{value: events.EventType(runtimeidentity.NormalizeEventName(event))},
+		resolvedEvent: connectResolvedEvent{value: events.EventType(runtimeidentity.NormalizeEventName(resolvedEvent))},
 	}
 }
 
@@ -607,7 +606,7 @@ func NewConnectNodeRecipient(node runtimeidentity.ExecutableNode, path string) (
 	if err != nil {
 		return ConnectRecipient{}, err
 	}
-	return ConnectRecipient{kind: ConnectRecipientNode, path: eventidentity.Normalize(path), handler: handler}, nil
+	return ConnectRecipient{kind: ConnectRecipientNode, path: runtimeidentity.NormalizeEventName(path), handler: handler}, nil
 }
 
 func NewConnectAgentRecipient(id, path string, plan agentidentity.Plan) (ConnectRecipient, error) {
@@ -619,7 +618,7 @@ func NewConnectAgentRecipient(id, path string, plan agentidentity.Plan) (Connect
 	if err := plan.Validate(); err != nil || plan.AgentID() != id {
 		return ConnectRecipient{}, fmt.Errorf("connect agent recipient requires its exact declaration route plan")
 	}
-	return ConnectRecipient{kind: ConnectRecipientAgent, agentID: id, path: eventidentity.Normalize(path), agentPlan: plan}, nil
+	return ConnectRecipient{kind: ConnectRecipientAgent, agentID: id, path: runtimeidentity.NormalizeEventName(path), agentPlan: plan}, nil
 }
 
 func (r ConnectRecipient) ID() string {
@@ -1172,7 +1171,7 @@ func newConnectRoutePlan(spec connectRoutePlanSpec) (ConnectRoutePlan, error) {
 func validateConnectRoutePlanEndpoint(endpoint ConnectRoutePlanEndpoint, role ConnectEndpointRoleKind) error {
 	if endpoint.kind < connectEndpointRoot || endpoint.kind >= connectEndpointKindCount || endpoint.pin.direction != role ||
 		strings.TrimSpace(endpoint.pin.value) == "" ||
-		eventidentity.Normalize(string(endpoint.event.value)) == "" || eventidentity.Normalize(string(endpoint.resolvedEvent.value)) == "" {
+		runtimeidentity.NormalizeEventName(string(endpoint.event.value)) == "" || runtimeidentity.NormalizeEventName(string(endpoint.resolvedEvent.value)) == "" {
 		return fmt.Errorf("compiled endpoint evidence is incomplete")
 	}
 	if endpoint.local {
@@ -1614,7 +1613,7 @@ type ConnectEdgeEvidence struct {
 
 func (g CompiledConnectGraph) AdmitReceiverRecipient(flowID string, eventType events.EventType, recipient ConnectRecipient) []ConnectRecipientRegistration {
 	flowID = strings.TrimSpace(flowID)
-	eventType = events.EventType(eventidentity.Normalize(string(eventType)))
+	eventType = events.EventType(runtimeidentity.NormalizeEventName(string(eventType)))
 	if eventType == "" || recipient.ID() == "" || recipient.kind == 0 {
 		return nil
 	}
@@ -1916,7 +1915,7 @@ type SourceEvent struct {
 }
 
 func AdmitSourceEvent(eventType events.EventType, source events.RoutingSource) (SourceEvent, error) {
-	canonical := eventidentity.Normalize(string(eventType))
+	canonical := runtimeidentity.NormalizeEventName(string(eventType))
 	if canonical == "" || canonical != string(eventType) {
 		return SourceEvent{}, fmt.Errorf("connect source event identity is not canonical")
 	}
@@ -1976,13 +1975,13 @@ func AdmitRuntimeControlSourceEvent(source semanticview.Source, flowID string, e
 	default:
 		return "", fmt.Errorf("runtime-control source event requires root or flow-owned provenance")
 	}
-	authored := eventidentity.Normalize(string(eventType))
+	authored := runtimeidentity.NormalizeEventName(string(eventType))
 	if authored == "" || authored != string(eventType) {
 		return "", fmt.Errorf("runtime-control authored event identity is not canonical")
 	}
-	resolved := events.EventType(eventidentity.Normalize(source.ResolveFlowEventReference(flowID, authored)))
+	resolved := events.EventType(runtimeidentity.NormalizeEventName(source.ResolveFlowEventReference(flowID, authored)))
 	if routingSource.Kind() == events.RoutingSourceFlowOwnedControl {
-		scope := eventidentity.Normalize(source.FlowPath(flowID))
+		scope := runtimeidentity.NormalizeEventName(source.FlowPath(flowID))
 		if scope != "" && !strings.HasPrefix(string(resolved), "platform.") &&
 			string(resolved) != scope && !strings.HasPrefix(string(resolved), scope+"/") {
 			return "", fmt.Errorf("runtime-control event %q is outside declared flow path %q", resolved, scope)
@@ -2342,7 +2341,7 @@ func resolveCompositionConnectSource(source semanticview.Source, connect runtime
 	sourcePins := source.FlowOutputEventPins(from.FlowID)
 	sourceCandidates := make([]runtimecontracts.CompiledFlowOutputPin, 0, len(sourcePins))
 	for _, pin := range sourcePins {
-		if eventidentity.Normalize(pin.EventType()) == eventidentity.Normalize(connect.Event) {
+		if runtimeidentity.NormalizeEventName(pin.EventType()) == runtimeidentity.NormalizeEventName(connect.Event) {
 			sourceCandidates = append(sourceCandidates, pin)
 		}
 	}
@@ -2373,7 +2372,7 @@ func resolveCompositionConnectReceiver(source semanticview.Source, connect runti
 	receiverPins := source.FlowInputEventPins(to.FlowID)
 	receiverCandidates := make([]runtimecontracts.CompiledFlowInputPin, 0, len(receiverPins))
 	for _, pin := range receiverPins {
-		if eventidentity.Normalize(pin.EventType()) == eventidentity.Normalize(receiverEvent) {
+		if runtimeidentity.NormalizeEventName(pin.EventType()) == runtimeidentity.NormalizeEventName(receiverEvent) {
 			receiverCandidates = append(receiverCandidates, pin)
 		}
 	}
@@ -2469,7 +2468,7 @@ func compositionConnectCandidateIssue(connect runtimecontracts.FlowConnect, prod
 		Connect: connect,
 		Failure: failure,
 		Detail: fmt.Sprintf("schema owner %q %s endpoint %q event %q matched %d pins; candidate pins: %s",
-			connectOwnerFlowPath(connect), role, strings.TrimSpace(endpoint), eventidentity.Normalize(event), matches, strings.Join(pins, ", ")),
+			connectOwnerFlowPath(connect), role, strings.TrimSpace(endpoint), runtimeidentity.NormalizeEventName(event), matches, strings.Join(pins, ", ")),
 	}
 }
 

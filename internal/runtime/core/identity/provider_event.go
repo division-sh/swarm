@@ -1,4 +1,4 @@
-package eventidentity
+package identity
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ func QualifyProviderEvent(key, local string) (string, error) {
 		return "", fmt.Errorf("provider event requires an exact portable directory key: %w", err)
 	}
 	qualified := "inbound." + key + "." + local
-	if strings.HasPrefix(local, "inbound.") || strings.Contains(local, "/") || !IsCanonicalName(qualified) {
+	if strings.HasPrefix(local, "inbound.") || strings.Contains(local, "/") || !IsCanonicalEventName(qualified) {
 		return "", fmt.Errorf("event %q must use a short local name such as text_message; the provider directory supplies inbound.%s.", local, key)
 	}
 	for _, token := range strings.Split(local, ".") {

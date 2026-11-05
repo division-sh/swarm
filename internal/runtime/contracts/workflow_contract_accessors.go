@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
@@ -254,7 +253,7 @@ func (b *WorkflowContractBundle) ExecutableNode(ref runtimeidentity.ExecutableNo
 	return ScopedNodeRecord{}, false
 }
 
-func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode, semanticScope ExecutableNodeSemanticScope) eventidentity.Scope {
+func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode, semanticScope ExecutableNodeSemanticScope) runtimeidentity.EventScope {
 	if ref.FlowPath() == "." {
 		localEvents := b.rootLocalEvents()
 		if declaration, ok := semanticScope.DeclarationView(); ok {
@@ -262,7 +261,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 				localEvents = append(localEvents, strings.TrimSpace(eventType))
 			}
 		}
-		return eventidentity.Scope{
+		return runtimeidentity.EventScope{
 			LocalEvents:  normalizedStrings(localEvents),
 			InputEvents:  b.FlowInputEvents("."),
 			OutputEvents: b.FlowOutputEvents("."),
@@ -270,7 +269,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 	}
 	view, ok := semanticScope.OwningFlow()
 	if !ok {
-		return eventidentity.Scope{}
+		return runtimeidentity.EventScope{}
 	}
 	inputEvents := b.FlowInputEvents(view.Paths.FlowPath)
 	outputEvents := b.FlowOutputEvents(view.Paths.FlowPath)
@@ -288,7 +287,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 	if eventType := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); eventType != "" {
 		localEvents = append(localEvents, eventType)
 	}
-	return eventidentity.Scope{
+	return runtimeidentity.EventScope{
 		Path:         strings.Trim(strings.TrimSpace(view.Path), "/"),
 		LocalEvents:  normalizedStrings(localEvents),
 		InputEvents:  inputEvents,
@@ -296,21 +295,21 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 	}
 }
 
-func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope ExecutableNodeSemanticScope) []eventidentity.DescendantScope {
+func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope ExecutableNodeSemanticScope) []runtimeidentity.DescendantEventScope {
 	view, ok := semanticScope.OwningFlow()
 	if !ok {
 		return nil
 	}
-	parentPath := eventidentity.Normalize(view.Path)
+	parentPath := runtimeidentity.NormalizeEventName(view.Path)
 	if parentPath == "" {
 		return nil
 	}
-	out := make([]eventidentity.DescendantScope, 0)
+	out := make([]runtimeidentity.DescendantEventScope, 0)
 	var walk func([]FlowContractView)
 	walk = func(children []FlowContractView) {
 		for index := range children {
 			candidate := children[index]
-			candidatePath := eventidentity.Normalize(candidate.Path)
+			candidatePath := runtimeidentity.NormalizeEventName(candidate.Path)
 			if candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
 				inputEvents := b.FlowInputEvents(candidate.Paths.FlowPath)
 				outputEvents := b.FlowOutputEvents(candidate.Paths.FlowPath)
@@ -321,7 +320,7 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope Ex
 				localEvents = append(localEvents, inputEvents...)
 				localEvents = append(localEvents, outputEvents...)
 				if len(localEvents) != 0 {
-					out = append(out, eventidentity.DescendantScope{Path: candidatePath, LocalEvents: normalizedStrings(localEvents)})
+					out = append(out, runtimeidentity.DescendantEventScope{Path: candidatePath, LocalEvents: normalizedStrings(localEvents)})
 				}
 			}
 			walk(candidate.Children)
@@ -333,8 +332,8 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope Ex
 
 type executableNodeEventResolution struct {
 	semanticScope ExecutableNodeSemanticScope
-	eventScope    eventidentity.Scope
-	descendants   []eventidentity.DescendantScope
+	eventScope    runtimeidentity.EventScope
+	descendants   []runtimeidentity.DescendantEventScope
 }
 
 func (b *WorkflowContractBundle) resolveExecutableNodeEvents(ref runtimeidentity.ExecutableNode) (executableNodeEventResolution, bool) {
@@ -359,7 +358,7 @@ func (r executableNodeEventResolution) resolveEvent(eventType string) string {
 func (b *WorkflowContractBundle) ResolveExecutableNodeEventReference(ref runtimeidentity.ExecutableNode, eventType string) string {
 	resolution, ok := b.resolveExecutableNodeEvents(ref)
 	if !ok {
-		return eventidentity.Normalize(eventType)
+		return runtimeidentity.NormalizeEventName(eventType)
 	}
 	return resolution.resolveEvent(eventType)
 }
@@ -373,9 +372,9 @@ func (b *WorkflowContractBundle) resolveAuthoredExecutableNodeEventCatalogEntry(
 
 func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeidentity.ExecutableNode, pattern string) string {
 	if b == nil || !ref.Valid() {
-		return eventidentity.Normalize(pattern)
+		return runtimeidentity.NormalizeEventName(pattern)
 	}
-	pattern = eventidentity.Normalize(pattern)
+	pattern = runtimeidentity.NormalizeEventName(pattern)
 	resolution, ok := b.resolveExecutableNodeEvents(ref)
 	if !ok {
 		return pattern
@@ -384,12 +383,12 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeid
 	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
 		return resolved
 	}
-	path := eventidentity.Normalize(resolution.eventScope.Path)
+	path := runtimeidentity.NormalizeEventName(resolution.eventScope.Path)
 	if path == "" {
 		return resolved
 	}
 	for _, localEvent := range resolution.eventScope.LocalEvents {
-		if eventidentity.MatchPattern(pattern, localEvent) {
+		if runtimeidentity.MatchEventPattern(pattern, localEvent) {
 			return path + "/" + pattern
 		}
 	}
@@ -403,7 +402,7 @@ func (b *WorkflowContractBundle) ExternalizeExecutableNodeHandler(ref runtimeide
 		if resolved {
 			spec.Event = resolution.resolveEvent(spec.Event)
 		} else {
-			spec.Event = eventidentity.Normalize(spec.Event)
+			spec.Event = runtimeidentity.NormalizeEventName(spec.Event)
 		}
 		return spec
 	}
@@ -841,7 +840,7 @@ func (b *WorkflowContractBundle) FlowHasOutputEvent(flowID, eventType string) bo
 	return b.flowEventScope(flowID).HasOutput(eventType)
 }
 func (b *WorkflowContractBundle) ResolveFlowInputAutoWire(targetFlowID, eventType string) FlowInputAutoWireResolution {
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	return FlowInputAutoWireResolution{EventType: eventType}
 }
 func (b *WorkflowContractBundle) FlowInputProducerPatterns(targetFlowID, eventType string) []string {
@@ -857,7 +856,7 @@ func (b *WorkflowContractBundle) ResolveFlowEventReference(flowID, eventType str
 
 func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, eventType string) (string, bool) {
 	flowID = strings.TrimSpace(flowID)
-	eventType = eventidentity.Normalize(eventType)
+	eventType = runtimeidentity.NormalizeEventName(eventType)
 	if b == nil || strings.Contains(eventType, "/") {
 		return "", false
 	}
@@ -870,7 +869,7 @@ func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, 
 	}
 	local := false
 	if _, local = view.Events[eventType]; !local {
-		local = slices.Contains(eventidentity.NormalizeList(b.FlowOutputEvents(flowID)), eventType)
+		local = slices.Contains(runtimeidentity.NormalizeEventNames(b.FlowOutputEvents(flowID)), eventType)
 	}
 	if !local {
 		for _, row := range eventSchemaOwnershipRowsForReceiver(b, flowID) {
@@ -881,12 +880,12 @@ func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, 
 		}
 	}
 	if !local {
-		local = eventidentity.Normalize(view.Schema.AutoEmitOnCreate.Event) == eventType
+		local = runtimeidentity.NormalizeEventName(view.Schema.AutoEmitOnCreate.Event) == eventType
 	}
 	if !local {
 		return "", false
 	}
-	return eventidentity.ExternalizeForFlow(b.FlowPath(flowID), []string{eventType}, eventType), true
+	return runtimeidentity.ExternalizeEventForFlow(b.FlowPath(flowID), []string{eventType}, eventType), true
 }
 func (b *WorkflowContractBundle) ResolveFlowEventPattern(flowID, pattern string) string {
 	scope := b.flowEventScope(flowID)
@@ -1013,26 +1012,26 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 			continue
 		}
 		out = append(out,
-			eventidentity.LeafName(result.SuccessEvent),
-			eventidentity.LeafName(result.FailureEvent),
+			runtimeidentity.EventLeafName(result.SuccessEvent),
+			runtimeidentity.EventLeafName(result.FailureEvent),
 		)
 		if site.Spec.Approval != nil {
 			out = append(out,
-				eventidentity.LeafName(result.RevisionRequested),
-				eventidentity.LeafName(result.Rejected),
+				runtimeidentity.EventLeafName(result.RevisionRequested),
+				runtimeidentity.EventLeafName(result.Rejected),
 			)
 		}
 	}
 	return uniqueOrderedStrings(out)
 }
 
-func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Scope {
+func (b *WorkflowContractBundle) flowEventScope(flowID string) runtimeidentity.EventScope {
 	flowID = strings.TrimSpace(flowID)
 	if b == nil {
-		return eventidentity.Scope{}
+		return runtimeidentity.EventScope{}
 	}
 	if flowID == "." {
-		return eventidentity.Scope{
+		return runtimeidentity.EventScope{
 			Path:         "",
 			LocalEvents:  b.rootLocalEvents(),
 			InputEvents:  b.FlowInputEvents("."),
@@ -1041,9 +1040,9 @@ func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Sco
 	}
 	view, ok := b.FlowViewByID(flowID)
 	if !ok || view == nil {
-		return eventidentity.Scope{Path: b.FlowPath(flowID)}
+		return runtimeidentity.EventScope{Path: b.FlowPath(flowID)}
 	}
-	return eventidentity.Scope{
+	return runtimeidentity.EventScope{
 		Path:         strings.Trim(strings.TrimSpace(view.Path), "/"),
 		LocalEvents:  b.flowLocalEvents(flowID),
 		InputEvents:  b.FlowInputEvents(flowID),
@@ -1088,23 +1087,23 @@ func (b *WorkflowContractBundle) rootLocalEvents() []string {
 	return out
 }
 
-func (b *WorkflowContractBundle) flowEventDescendants(flowID string) []eventidentity.DescendantScope {
+func (b *WorkflowContractBundle) flowEventDescendants(flowID string) []runtimeidentity.DescendantEventScope {
 	flowID = strings.TrimSpace(flowID)
 	if b == nil || flowID == "" {
 		return nil
 	}
 	scope := b.flowEventScope(flowID)
-	parentPath := eventidentity.Normalize(scope.Path)
+	parentPath := runtimeidentity.NormalizeEventName(scope.Path)
 	if parentPath == "" {
 		return nil
 	}
-	out := make([]eventidentity.DescendantScope, 0)
+	out := make([]runtimeidentity.DescendantEventScope, 0)
 	for _, view := range b.FlowViews() {
 		descendantFlowID := strings.TrimSpace(view.Paths.FlowPath)
 		if descendantFlowID == "" || descendantFlowID == flowID {
 			continue
 		}
-		descendantPath := eventidentity.Normalize(view.Path)
+		descendantPath := runtimeidentity.NormalizeEventName(view.Path)
 		if descendantPath == "" || !strings.HasPrefix(descendantPath, parentPath+"/") {
 			continue
 		}
@@ -1112,7 +1111,7 @@ func (b *WorkflowContractBundle) flowEventDescendants(flowID string) []eventiden
 		if len(localEvents) == 0 {
 			continue
 		}
-		out = append(out, eventidentity.DescendantScope{
+		out = append(out, runtimeidentity.DescendantEventScope{
 			Path:        descendantPath,
 			LocalEvents: localEvents,
 		})

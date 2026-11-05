@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -36,10 +36,10 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 		}, true); err != nil {
 			return nil, err
 		}
-		if !eventidentity.IsValidName(row.Event) || row.Rename != "" && !eventidentity.IsValidName(row.Rename) {
+		if !runtimeidentity.IsValidEventName(row.Event) || row.Rename != "" && !runtimeidentity.IsValidEventName(row.Rename) {
 			return nil, nodeValueError(item, eventNameAdmissionError(fmt.Errorf("connect event/rename must be an exact canonical event identity"), row.Event, row.Rename))
 		}
-		if row.Rename != "" && eventidentity.Normalize(row.Rename) == eventidentity.Normalize(row.Event) {
+		if row.Rename != "" && runtimeidentity.NormalizeEventName(row.Rename) == runtimeidentity.NormalizeEventName(row.Event) {
 			return nil, nodeValueError(item, fmt.Errorf("connect.rename is redundant with event"))
 		}
 		if err := projectSchemaConnectResolutionValue(fields, &row); err != nil {
@@ -89,7 +89,7 @@ func validateAuthoredConnectReply(row FlowConnect) error {
 		}
 		return nil
 	}
-	if !eventidentity.IsValidName(row.RepliesTo) || strings.ContainsAny(row.RepliesTo, "/*") {
+	if !runtimeidentity.IsValidEventName(row.RepliesTo) || strings.ContainsAny(row.RepliesTo, "/*") {
 		return eventNameAdmissionError(fmt.Errorf("connect.replies_to must be an exact local event identity"), row.RepliesTo)
 	}
 	if row.Resolution != FlowInputResolutionModeNone || row.KeyFrom != "" {
@@ -141,7 +141,7 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 	if err != nil {
 		return input, output, nodeValueError(value, err)
 	}
-	if !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
+	if !runtimeidentity.IsValidEventName(event) || strings.ContainsAny(event, "/*") {
 		return input, output, nodeValueError(value, eventNameAdmissionError(fmt.Errorf("pin event %q must be an exact local canonical event identity", event), event))
 	}
 	input.Event, output.Event = event, event

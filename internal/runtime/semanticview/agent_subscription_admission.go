@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // FlowOwnedAgentSubscriptionRequest is the complete semantic context needed to
@@ -60,7 +60,7 @@ func (a FlowOwnedAgentSubscriptionAdmission) CarrierOnly() FlowOwnedAgentSubscri
 // flow and its filesystem descendants.
 func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscriptionRequest) (FlowOwnedAgentSubscriptionAdmission, error) {
 	req.AgentID = strings.TrimSpace(req.AgentID)
-	req.FlowPath = eventidentity.Normalize(req.FlowPath)
+	req.FlowPath = runtimeidentity.NormalizeEventName(req.FlowPath)
 	if req.AgentID == "" {
 		return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent subscription admission requires agent id")
 	}
@@ -74,9 +74,9 @@ func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscript
 	if source != nil && req.FlowID != "" {
 		if scope, ok := source.FlowScopeByID(req.FlowID); ok {
 			if req.FlowPath == "" && req.FlowID != "." {
-				req.FlowPath = eventidentity.Normalize(scope.Path)
+				req.FlowPath = runtimeidentity.NormalizeEventName(scope.Path)
 				if req.FlowPath == "" {
-					req.FlowPath = eventidentity.Normalize(source.FlowPath(req.FlowID))
+					req.FlowPath = runtimeidentity.NormalizeEventName(source.FlowPath(req.FlowID))
 				}
 			}
 			if len(localEvents) == 0 {
@@ -128,26 +128,26 @@ func cloneSubscriptionEventSet(in map[string]struct{}) map[string]struct{} {
 func agentSubscriptionLocalEvents(scope FlowScope) map[string]struct{} {
 	out := make(map[string]struct{}, len(scope.Events)+len(scope.InputEvents)+len(scope.OutputEvents)+1)
 	for eventType := range scope.Events {
-		if eventType = eventidentity.Normalize(eventType); eventType != "" {
+		if eventType = runtimeidentity.NormalizeEventName(eventType); eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
 	for _, values := range [][]string{scope.InputEvents, scope.OutputEvents} {
 		for _, eventType := range values {
-			if eventType = eventidentity.Normalize(eventType); eventType != "" {
+			if eventType = runtimeidentity.NormalizeEventName(eventType); eventType != "" {
 				out[eventType] = struct{}{}
 			}
 		}
 	}
-	if eventType := eventidentity.Normalize(scope.AutoEmitEvent); eventType != "" {
+	if eventType := runtimeidentity.NormalizeEventName(scope.AutoEmitEvent); eventType != "" {
 		out[eventType] = struct{}{}
 	}
 	return out
 }
 
 func admitSameScopeAgentExact(flowPath, raw string) (string, error) {
-	flowPath = eventidentity.Normalize(flowPath)
-	raw = eventidentity.Normalize(raw)
+	flowPath = runtimeidentity.NormalizeEventName(flowPath)
+	raw = runtimeidentity.NormalizeEventName(raw)
 	if raw == "" {
 		return "", nil
 	}
@@ -168,8 +168,8 @@ func admitSameScopeAgentExact(flowPath, raw string) (string, error) {
 }
 
 func admitNonImportAgentPattern(flowPath, raw string) (string, error) {
-	flowPath = eventidentity.Normalize(flowPath)
-	raw = eventidentity.Normalize(raw)
+	flowPath = runtimeidentity.NormalizeEventName(flowPath)
+	raw = runtimeidentity.NormalizeEventName(raw)
 	if raw == "" {
 		return "", nil
 	}
@@ -185,7 +185,7 @@ func admitNonImportAgentPattern(flowPath, raw string) (string, error) {
 func normalizedAgentSubscriptionValues(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		if value = eventidentity.Normalize(value); value != "" {
+		if value = runtimeidentity.NormalizeEventName(value); value != "" {
 			seen[value] = struct{}{}
 		}
 	}
