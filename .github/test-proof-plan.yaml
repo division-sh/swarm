@@ -759,7 +759,7 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^CDGS].*|CatalogTypeAdmissionPublicRestartBothStores|CatalogTypeAdmissionTemplateRoutingBothStores|CatalogTypeNamespacePublicAdmissionBothStores|CatalogTypeDetachmentPublicRestartBothStores|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDGS].*|CatalogTypeAdmissionPublicRestartBothStores|CatalogTypeAdmissionTemplateRoutingBothStores|CatalogTypeNamespacePublicAdmissionBothStores|CatalogTypeDetachmentPublicRestartBothStores|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DescribePackPublicReadOnlyJourney|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
     required_children:
       TestCatalogTypeAdmissionPublicRestartBothStores: [sqlite, postgres]
       TestCatalogTypeAdmissionTemplateRoutingBothStores: [sqlite, postgres]
