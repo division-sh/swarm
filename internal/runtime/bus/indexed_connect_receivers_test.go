@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -304,6 +305,42 @@ func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t 
 			t.Fatalf("explicit receiver failure became a terminal diagnostic: terminal=%t err=%v want=%v", terminal, err, failure)
 		}
 	}
+	t.Run("captured_origin_life", func(t *testing.T) {
+		source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyRootReplyBoundary(t, true, true))
+		plans, issues := compiledConnectPlans(source)
+		if len(issues) != 0 {
+			t.Fatal(issues)
+		}
+		var reply pinrouting.ConnectRoutePlan
+		for _, plan := range plans {
+			if plan.ReplyRole() == pinrouting.ConnectReplyRoleResponse {
+				reply = plan
+			}
+		}
+		if reply.ReplyRole() != pinrouting.ConnectReplyRoleResponse {
+			t.Fatal("fixture requires its compiled reply return")
+		}
+		identity := ConstructedFlowInstanceIdentityFixture(source, reply.ReceiverEndpoint().Readback().FlowID, "", event.RunID())
+		current, err := admitConstructionIndexTestObservation(source, event.RunID(), identity, "", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader := &publicationDecisionTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{current}}}
+		resolver := connectRoutePlanResolver{lifecycle: connectInstanceSelector{source: source, index: reader}}
+		target := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
+		for _, captured := range []int64{1, 2} {
+			life := events.InstanceLife{RunID: event.RunID(), FlowInstance: target.FlowInstance, Life: captured}
+			bounded := events.WithDeliveryContext(constructionIndexContext(t, source), events.DeliveryContext{Life: &life})
+			available, err := resolver.replyOriginAvailable(bounded, event.RunID(), reply, target)
+			if captured == 2 {
+				if !available || err != nil {
+					t.Fatalf("exact reply origin life refused: available=%t err=%v", available, err)
+				}
+			} else if envelope, typed := failures.EnvelopeFromError(err); available || !typed || envelope.Class != failures.ClassStaleArrival || envelope.Detail.Code != "instance_restarted" {
+				t.Fatalf("old reply adopted the restarted origin: available=%t err=%v", available, err)
+			}
+		}
+	})
 }
 
 func TestTerminalTargetDiagnosticPreservesCreateAndReplyAdmission(t *testing.T) {

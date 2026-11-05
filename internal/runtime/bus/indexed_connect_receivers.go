@@ -77,6 +77,9 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 	if target.EntityID != "" && instance.EntityID != target.EntityID {
 		return false, fmt.Errorf("reply origin crosses its target entity")
 	}
+	if life := events.DeliveryContextFromContext(ctx).Life; life != nil && life.RunID == runID && life.FlowInstance == target.FlowInstance && life.Life != instance.Life {
+		return false, pipeline.InstanceRestarted(owner, life.Life, instance.Life)
+	}
 	if instance.Status == "terminated" {
 		return false, nil
 	}

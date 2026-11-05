@@ -547,6 +547,9 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	if err := life.Validate(); err != nil {
 		return nil, nil, nil, 0, nil, err
 	}
+	returnContext := events.DeliveryContextFromContext(ctx)
+	returnContext.Life = &life
+	ctx = events.WithDeliveryContext(ctx, returnContext)
 	subscribers, err := r.resolveSelectedReceiverCarriers(ctx, evt.RunID(), plan, target)
 	if err != nil {
 		return nil, nil, nil, 0, nil, err
