@@ -24,9 +24,9 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 const memoryConsumedProcessEnv = "SWARM_TEST_MEMORY_CONSUMED_PROCESS"

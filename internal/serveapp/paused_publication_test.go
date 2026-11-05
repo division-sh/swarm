@@ -9,8 +9,8 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestPausedAcceptedTimerAndDecisionPublicBothStores(t *testing.T) {

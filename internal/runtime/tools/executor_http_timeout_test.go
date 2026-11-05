@@ -13,10 +13,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
 
 func authoredHTTPTimeoutExecutor(t *testing.T, url string, seconds int) *Executor {

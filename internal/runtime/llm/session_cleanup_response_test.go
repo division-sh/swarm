@@ -11,8 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
 
 type sessionCleanupRecoveryProbe struct {

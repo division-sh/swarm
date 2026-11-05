@@ -18,8 +18,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
