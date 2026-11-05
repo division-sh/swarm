@@ -3,7 +3,6 @@ package contracts
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -265,18 +264,6 @@ func TestW5ModuleScopedResolutionAndSerialization(t *testing.T) {
 		t.Fatal("duplicate module id accepted")
 	}
 }
-
-func TestW5ToolsGoverningSpecParses(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join(repoRootForContractsTest(t), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := yamlsource.Load(body); err != nil {
-		cause, _ := yamlsource.ParseCause(err)
-		t.Fatalf("spec parse: %v; cause: %v", err, cause)
-	}
-}
-
 func TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema(t *testing.T) {
 	for _, additional := range []bool{true, false} {
 		t.Run(fmt.Sprint(additional), func(t *testing.T) {

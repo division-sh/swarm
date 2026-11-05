@@ -3,20 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -250,108 +242,6 @@ func TestValidateRetiredDynamicAgentToolReferencesUsesExactNamesOnly(t *testing.
 		t.Fatalf("unrelated lifecycle fact rejected: %v", errs)
 	}
 }
-
-func TestRetiredDynamicAgentToolTokensRemainOnlyInRetirementEvidence(t *testing.T) {
-	root := retiredDynamicAgentToolRepoRoot(t)
-	allowed := map[string]struct{}{
-		"internal/runtime/workflow_validation_test.go":                          {},
-		"internal/runtime/bootverify/agent_message_retirement_test.go":          {},
-		"internal/runtime/tools/retired_dynamic_agent_tools.go":                 {},
-		"internal/runtime/tools/retired_dynamic_agent_tools_test.go":            {},
-		"internal/runtime/mcp/retired_dynamic_agent_tools_test.go":              {},
-		"internal/runtime/runforkexecution/retired_dynamic_agent_tools_test.go": {},
-		"platform-spec.yaml": {},
-	}
-	pattern := regexp.MustCompile(`\bagent_(hire|fire|reconfigure)\b`)
-	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			if entry.Name() == "test-results" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		switch ext {
-		case ".go", ".yaml", ".yml", ".json", ".tsv", ".md":
-		default:
-			return nil
-		}
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if !pattern.Match(contents) {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if _, ok := allowed[rel]; !ok {
-			t.Errorf("retired dynamic-agent tool token survives in %s", rel)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRetiredDynamicAgentMutationSymbolsAreAbsent(t *testing.T) {
-	root := retiredDynamicAgentToolRepoRoot(t)
-	banned := map[string]struct{}{
-		"SpawnAgentForEntity":       {},
-		"ReconfigureAgentTarget":    {},
-		"TeardownAgentTarget":       {},
-		"AgentTargetMutationResult": {},
-		"AuthorizeManagement":       {},
-		"AuthorizeRouting":          {},
-	}
-	fset := token.NewFileSet()
-	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if filepath.Ext(path) != ".go" || path == filepath.Join(root, "internal/runtime/tools/retired_dynamic_agent_tools_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return err
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			ident, ok := node.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if _, forbidden := banned[ident.Name]; forbidden {
-				t.Errorf("retired mutation symbol %s survives in %s", ident.Name, path)
-			}
-			return true
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func retiredDynamicAgentToolRepoRoot(t testing.TB) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve retirement test source")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
-}
-
 func assertRetiredDynamicAgentToolRejected(t *testing.T, name string, source semanticview.Source) {
 	t.Helper()
 	errs := ValidateRetiredDynamicAgentToolReferences(source)

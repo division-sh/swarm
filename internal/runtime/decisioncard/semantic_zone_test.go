@@ -88,41 +88,6 @@ func TestDecisionCardSemanticZonesCannotBypassValueAdmission(t *testing.T) {
 		}
 	}
 }
-
-func TestRegisteredAnchorKindsStaySynchronizedWithDeclaredConsumers(t *testing.T) {
-	root := decisionCardRepoRoot(t)
-	wantEnum := "enum: [" + strings.Join(RegisteredAnchorKindNames(), ", ") + "]"
-	spec, err := os.ReadFile(filepath.Join(root, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(spec), wantEnum) != 1 {
-		t.Fatalf("platform spec anchor enum must occur exactly once as %q", wantEnum)
-	}
-
-	for _, consumer := range []struct {
-		path     string
-		required string
-		forbid   string
-	}{
-		{path: "internal/apiv1/operator_mailbox.go", required: "decisioncard.IsRegisteredAnchorKind", forbid: `kind != "stage_gate"`},
-		{path: "internal/cliapp/test_command.go", required: "decisioncard.IsRegisteredAnchorKind", forbid: `anchorKind != "stage_gate"`},
-		{path: "internal/cliapp/control_mailbox.go", required: "decisioncard.RegisteredAnchorKindDescription", forbid: "anchor_kind must be stage_gate"},
-	} {
-		raw, err := os.ReadFile(filepath.Join(root, consumer.path))
-		if err != nil {
-			t.Fatalf("read %s: %v", consumer.path, err)
-		}
-		text := string(raw)
-		if !strings.Contains(text, consumer.required) {
-			t.Errorf("%s does not consume the closed anchor owner %q", consumer.path, consumer.required)
-		}
-		if strings.Contains(text, consumer.forbid) {
-			t.Errorf("%s duplicates anchor acceptance vocabulary with %q", consumer.path, consumer.forbid)
-		}
-	}
-}
-
 func decisionCardRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

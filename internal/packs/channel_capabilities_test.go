@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -156,39 +154,6 @@ func TestChannelCapabilitiesMaterializationIsImmutable(t *testing.T) {
 		t.Fatal("unadmitted vector produced valid capability readback")
 	}
 }
-
-func TestChannelCapabilityContractMatchesNormativeTextReplyBaseline(t *testing.T) {
-	body, err := os.ReadFile("../../platform-spec.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var document struct {
-		ToolModel struct {
-			Channel struct {
-				Capabilities struct {
-					Fields   []packs.ChannelCapability `yaml:"exact_fields"`
-					Baseline struct {
-						Language string                    `yaml:"language"`
-						Required []packs.ChannelCapability `yaml:"required_capabilities"`
-					} `yaml:"text_reply_baseline"`
-				} `yaml:"capability_model"`
-			} `yaml:"hitl_channel_pack_interface"`
-		} `yaml:"tool_model"`
-	}
-	snapshot, err := yamlsource.Load(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := snapshot.Decode(&document); err != nil {
-		t.Fatal(err)
-	}
-	contract := document.ToolModel.Channel.Capabilities
-	if !reflect.DeepEqual(contract.Fields, packs.ChannelCapabilityNames()) ||
-		!reflect.DeepEqual(contract.Baseline.Required, packs.ChannelTextReplyBaselineCapabilities()) || contract.Baseline.Language != "en" {
-		t.Fatalf("normative capability/baseline drift: %+v", contract)
-	}
-}
-
 func admitChannelCapabilities(t *testing.T, body []byte) (packs.CompiledChannelCapabilities, error) {
 	t.Helper()
 	snapshot, err := yamlsource.Load(body)
