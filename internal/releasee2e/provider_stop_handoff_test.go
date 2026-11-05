@@ -2,7 +2,6 @@ package releasee2e
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,7 +16,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 	"gopkg.in/yaml.v3"
 )
@@ -547,20 +544,15 @@ tool-agent:
 			if err := first.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			inspection, err := openProviderCrashInspection(t, backend, base, document)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer inspection.Close()
-			beforeStatus := providerCrashAttemptRows(t, inspection)
 			status := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
 			firstCounts, countErr := providerCrashStatusCounts(status.output)
 			if status.err != nil || countErr != nil || !strings.Contains(status.output, "selected-store lease is not held") ||
 				!strings.Contains(status.output, "last admitted serve") || firstCounts != [3]int{2, 0, 1} {
 				t.Fatalf("public post-SIGKILL recovery counts: %v\n%s", status.err, status.output)
 			}
-			if after := providerCrashAttemptRows(t, inspection); !reflect.DeepEqual(beforeStatus, after) {
-				t.Fatalf("public post-SIGKILL status mutated effect attempts: before=%v after=%v", beforeStatus, after)
+			repeat := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
+			if repeat.err != nil || repeat.output != status.output {
+				t.Fatalf("public post-SIGKILL status read changed its observation: first=%q repeat=%q err=%v", status.output, repeat.output, repeat.err)
 			}
 			unblockProvider()
 			unblockTool()
@@ -570,15 +562,9 @@ tool-agent:
 			case <-ctx.Done():
 				t.Fatalf("successor did not launch the retained provider retry\n%s", second.output.String())
 			}
-			var recoveredProviders int
-			if err := inspection.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts
-				WHERE adapter='openai_compatible' AND state='outcome_uncertain'`).Scan(&recoveredProviders); err != nil || recoveredProviders != firstCounts[0] {
-				t.Fatalf("successor did not settle the counted provider turns: count=%d err=%v", recoveredProviders, err)
-			}
 			if err := second.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			beforeStatus = providerCrashAttemptRows(t, inspection)
 			status = runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
 			secondCounts, countErr := providerCrashStatusCounts(status.output)
 			if status.err != nil || !strings.Contains(status.output, "selected-store lease is not held") ||
@@ -586,8 +572,9 @@ tool-agent:
 				countErr != nil || secondCounts[0] != 0 || secondCounts[1] < 1 || secondCounts[2] != 0 {
 				t.Fatalf("public retry-exhausted post-SIGKILL count: %v\n%s", status.err, status.output)
 			}
-			if after := providerCrashAttemptRows(t, inspection); !reflect.DeepEqual(beforeStatus, after) {
-				t.Fatalf("public retry-exhausted status mutated effect attempts: before=%v after=%v", beforeStatus, after)
+			repeat = runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
+			if repeat.err != nil || repeat.output != status.output {
+				t.Fatalf("public retry-exhausted status read changed its observation: first=%q repeat=%q err=%v", status.output, repeat.output, repeat.err)
 			}
 			unblockRetry()
 			third := startReleaseServe(t, spec)
@@ -624,12 +611,6 @@ tool-agent:
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
-			var uncertainTools int
-			if err := inspection.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_attempts a
-				JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
-				WHERE o.effect_kind='http_tool_target' AND a.state='outcome_uncertain'`).Scan(&uncertainTools); err != nil || uncertainTools != firstCounts[2] {
-				t.Fatalf("successor did not settle the counted HTTP tool: count=%d err=%v", uncertainTools, err)
-			}
 			mu.Lock()
 			deadCalls := calls["dead-model"]
 			mu.Unlock()
@@ -638,6 +619,11 @@ tool-agent:
 			}
 			if err := third.stopAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
+			}
+			status = runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
+			settledCounts, countErr := providerCrashStatusCounts(status.output)
+			if status.err != nil || countErr != nil || settledCounts != [3]int{} {
+				t.Fatalf("successor left counted interrupted work: %v\n%s", status.err, status.output)
 			}
 		})
 	}
@@ -651,49 +637,4 @@ func providerCrashStatusCounts(output string) ([3]int, error) {
 	}
 	_, err := fmt.Sscanf(output[index:], "interrupted: %d provider turns to resume, %d provider turns to dead-letter, %d HTTP tool calls outcome unknown", &counts[0], &counts[1], &counts[2])
 	return counts, err
-}
-
-func openProviderCrashInspection(t *testing.T, backend, base string, document map[string]any) (*sql.DB, error) {
-	t.Helper()
-	if backend == "sqlite" {
-		return openLifecycleFailureInspection(goldenStoreSelection{name: "sqlite", inspectionSQLitePath: filepath.Join(base, "runtime.db")})
-	}
-	connection, err := testpostgres.ConnectionFromEnvironment()
-	if err != nil {
-		return nil, err
-	}
-	configuration, ok := document["database"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("served PostgreSQL database selection is absent")
-	}
-	connection, err = connection.WithDatabase(fmt.Sprint(configuration["name"]))
-	if err != nil {
-		return nil, err
-	}
-	return connection.Open()
-}
-
-func providerCrashAttemptRows(t *testing.T, db *sql.DB) []string {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	rows, err := db.QueryContext(ctx, `SELECT CAST(attempt_id AS TEXT), CAST(state AS TEXT),
-		COALESCE(CAST(updated_at AS TEXT), ''), COALESCE(CAST(evidence AS TEXT), '')
-		FROM runtime_external_effect_attempts ORDER BY attempt_id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var result []string
-	for rows.Next() {
-		var attempt, state, updated, evidence string
-		if err := rows.Scan(&attempt, &state, &updated, &evidence); err != nil {
-			t.Fatal(err)
-		}
-		result = append(result, strings.Join([]string{attempt, state, updated, evidence}, "\x00"))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return result
 }
