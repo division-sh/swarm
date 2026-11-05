@@ -27,12 +27,12 @@ func requireSQLiteLiveSessionAuthority(ctx context.Context, tx *sql.Tx, identity
 func requireLiveSessionAuthority(ctx context.Context, tx *sql.Tx, identity runtimeagentidentity.Identity, operation string, permitStaleEvidence, sqlite bool) (bool, error) {
 	identity = identity.Normalize()
 	operation = strings.TrimSpace(operation)
-	if err := requireLiveSessionInstanceLife(ctx, tx, identity, sqlite); err != nil {
-		return false, err
-	}
 	token, hasToken := runtimeeffects.LifecycleTokenFromContext(ctx)
 	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, identity, token, sqlite)
 	if err != nil {
+		return false, err
+	}
+	if err := requireLiveSessionInstanceLife(ctx, tx, identity); err != nil {
 		return false, err
 	}
 	if !observation.Found {
@@ -53,7 +53,7 @@ func requireLiveSessionAuthority(ctx context.Context, tx *sql.Tx, identity runti
 	})
 }
 
-func requireLiveSessionInstanceLife(ctx context.Context, tx *sql.Tx, identity runtimeagentidentity.Identity, sqlite bool) error {
+func requireLiveSessionInstanceLife(ctx context.Context, tx *sql.Tx, identity runtimeagentidentity.Identity) error {
 	life := events.DeliveryContextFromContext(ctx).Life
 	if life == nil {
 		return nil
@@ -68,9 +68,9 @@ func requireLiveSessionInstanceLife(ctx context.Context, tx *sql.Tx, identity ru
 	if life.RunID != identity.RunID || life.FlowInstance != path {
 		return fmt.Errorf("session captured life differs from its exact actor instance")
 	}
-	// Take the existing header lock before the actor/session locks, as the reset
-	// transaction does. A read followed by a later lease write is not a fence.
-	header, found, err := workflowheader.LoadForMutation(ctx, tx, !sqlite, life.RunID, "", life.FlowInstance)
+	// The existing lifecycle lock precedes this observation and all session
+	// writes. Do not take a late header lock inside completion settlement.
+	header, found, err := workflowheader.LoadForRead(ctx, tx, life.RunID, "", life.FlowInstance)
 	if err != nil {
 		return err
 	}
