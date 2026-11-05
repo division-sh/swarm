@@ -1548,7 +1548,6 @@ seam_families:
     classification: canonical_owner
     paths:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-      - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
       - internal/runtime/conformance/canonical_forms_registry_test.go
       - internal/runtime/testfixtures/canonicalrouting/artifact_registry.yaml
@@ -1784,12 +1783,6 @@ guardrail_proposals:
       - deleting required search dimensions from the exhaustive inventory
       - letting required route-authority file families disappear from the audit
       - treating a package-local audit as #1364 closure
-  - id: route_authority_matrix_active_tracker_guard
-    implementation_state: ready_for_followup
-    target: internal/runtime/conformance/route_authority_matrix_test.go
-    prevents:
-      - marking parent route-authority closure while #1364-class drift inventory remains open
-      - covering rows without a matrix or inventory proof reference
   - id: negative_authority_static_scan
     implementation_state: implemented_in_this_pr
     target: internal/runtime/conformance/route_authority_drift_inventory_test.go

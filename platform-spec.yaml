@@ -2498,7 +2498,6 @@ contract_formats:
             - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
             - internal/runtime/conformance/route_authority_drift_inventory_test.go
             - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-            - internal/runtime/conformance/route_authority_matrix_test.go
             rule: |
               Route-authority conformance guardrails MUST extend the existing
               route_authority_drift_inventory and route_authority_matrix owners
