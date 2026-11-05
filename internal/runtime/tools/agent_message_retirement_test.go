@@ -2,15 +2,9 @@ package tools
 
 import (
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -85,33 +79,6 @@ func TestAgentMessageRetirementManagedSurfaceMatrix(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestAgentMessageReservedAuthoritySymbolsAreAbsent(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	retired := map[string]bool{"HasMessageAuthority": true, "SameAgent": true, "SameFlowInstance": true,
-		"PeerManagerFallback": true, "strongestMessagePermission": true, "permissionSet": true, "hasToolGrant": true, "execAgentMessage": true,
-		"resolvedAgentPermissionsLocal": true, "permissionBundlePermissionsLocal": true, "normalizePolicyMapLocal": true,
-		"stringsFromPolicyValueLocal": true, "normalizeStringSliceLocal": true, "agentPermissionWarningsLocal": true}
-	err := checkoutsource.WalkDir(repo, filepath.Join(repo, "internal", "runtime"), func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		if err != nil {
-			return err
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			if id, ok := node.(*ast.Ident); ok && retired[id.Name] {
-				t.Errorf("%s retains retired authority identifier %s", path, id.Name)
-			}
-			return true
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 

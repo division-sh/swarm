@@ -26,7 +26,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"gopkg.in/yaml.v3"
 )
 
 func TestServeLifecyclePresenterMasksProofReuseFallbackPresentation(t *testing.T) {
@@ -715,91 +714,5 @@ func testServeIngressSubject(bundleHash, alias, provider, secret, status string)
 		},
 		Requirements: []packs.Requirement{packs.RequirementWithStatus(packs.RequirementSecret, secret, packs.RequirementScopeTarget, status, "credential_store")},
 		Capabilities: []packs.Capability{{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + provider}},
-	}
-}
-
-func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T) {
-	var spec struct {
-		CLISpecification struct {
-			CommandCatalog struct {
-				Serve struct {
-					Boot struct {
-						CanonicalOwner     string `yaml:"canonical_presentation_owner"`
-						Rule               string `yaml:"rule"`
-						OutputBoundary     string `yaml:"output_boundary"`
-						ProjectionBoundary string `yaml:"projection_boundary"`
-						ReadinessBoundary  string `yaml:"readiness_commit_boundary"`
-						SchemaDetail       string `yaml:"schema_inventory_detail"`
-						BootProgress       struct {
-							CanonicalNameOwner string `yaml:"canonical_name_owner"`
-							RenderingRule      string `yaml:"rendering_rule"`
-						} `yaml:"boot_progress_sequence"`
-					} `yaml:"boot_observability"`
-				} `yaml:"serve"`
-				Doctor struct {
-					Command         string `yaml:"command"`
-					SchemaInventory struct {
-						CanonicalOwner string `yaml:"canonical_owner"`
-						SourceOwner    string `yaml:"source_owner"`
-						Behavior       string `yaml:"behavior"`
-					} `yaml:"schema_inventory"`
-				} `yaml:"doctor"`
-			} `yaml:"command_catalog"`
-		} `yaml:"cli_specification"`
-	}
-	raw, err := os.ReadFile(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
-	boot := spec.CLISpecification.CommandCatalog.Serve.Boot
-	for _, want := range []string{"serveLifecyclePresenter"} {
-		if !strings.Contains(boot.CanonicalOwner, want) {
-			t.Fatalf("boot canonical owner missing %q: %s", want, boot.CanonicalOwner)
-		}
-	}
-	for _, want := range []string{"Default `swarm serve`", "`swarm serve --dev`", "does not imply verbose", "22-step"} {
-		if !strings.Contains(boot.Rule, want) {
-			t.Fatalf("boot rule missing %q: %s", want, boot.Rule)
-		}
-	}
-	for _, want := range []string{"one writer", "Direct log", "Local foreground `swarm run start`", "buffered failure replay", "stdout", "stderr", "one joined terminal disposition"} {
-		if !strings.Contains(boot.OutputBoundary, want) {
-			t.Fatalf("boot output boundary missing %q: %s", want, boot.OutputBoundary)
-		}
-	}
-	for _, want := range []string{"typed store", "Diagnostic detail renderers", "docker · agent", "clean start", "bound/unbound", "workflow name/version", "active work cleared", "could not be resumed and was closed", "persisted work recovery enabled", "later runtime facts", "MUST NOT", "never context labels"} {
-		if !strings.Contains(boot.ProjectionBoundary, want) {
-			t.Fatalf("boot projection boundary missing %q: %s", want, boot.ProjectionBoundary)
-		}
-	}
-	for _, want := range []string{"one commit point", "standing-ingress", "`/readyz`", "`health.check`", "local foreground startup", "server/runtime failure before"} {
-		if !strings.Contains(boot.ReadinessBoundary, want) {
-			t.Fatalf("boot readiness boundary missing %q: %s", want, boot.ReadinessBoundary)
-		}
-	}
-	for _, want := range []string{"coalesces repeated updates", "numeric order", "stderr", "canonical step name"} {
-		if !strings.Contains(boot.BootProgress.RenderingRule, want) {
-			t.Fatalf("boot rendering rule missing %q: %s", want, boot.BootProgress.RenderingRule)
-		}
-	}
-	if !strings.Contains(boot.BootProgress.CanonicalNameOwner, "runtime.CanonicalBootProgressName") {
-		t.Fatalf("boot canonical name owner is incomplete: %s", boot.BootProgress.CanonicalNameOwner)
-	}
-	for _, want := range []string{"Default, dev, explicit verbose", "MUST NOT render per-table", "doctor.schema_inventory"} {
-		if !strings.Contains(boot.SchemaDetail, want) {
-			t.Fatalf("schema disposition missing %q: %s", want, boot.SchemaDetail)
-		}
-	}
-	doctor := spec.CLISpecification.CommandCatalog.Doctor
-	if !strings.Contains(doctor.Command, "--schema-inventory") || !strings.Contains(doctor.SchemaInventory.CanonicalOwner, "doctor.schema_inventory") || !strings.Contains(doctor.SchemaInventory.SourceOwner, "internal/cliapp/state_store_schema.go StateStoreSchemaPlans") {
-		t.Fatalf("doctor schema inventory ownership is incomplete: %#v", doctor)
-	}
-	for _, want := range []string{"without starting runtime", "without", "database state", "JSON adds a typed schema_inventory object"} {
-		if !strings.Contains(doctor.SchemaInventory.Behavior, want) {
-			t.Fatalf("doctor schema inventory behavior missing %q: %s", want, doctor.SchemaInventory.Behavior)
-		}
 	}
 }

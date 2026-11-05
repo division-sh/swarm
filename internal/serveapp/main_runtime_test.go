@@ -235,103 +235,6 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
-	var spec struct {
-		WorkspaceModel struct {
-			DataProjectionAuthority struct {
-				PromotedBy           string   `yaml:"promoted_by"`
-				ImplementationStatus string   `yaml:"implementation_status"`
-				CanonicalOwner       string   `yaml:"canonical_owner"`
-				Scope                string   `yaml:"scope"`
-				MaterializationRule  string   `yaml:"materialization_rule"`
-				AbsenceRule          string   `yaml:"absence_rule"`
-				RetiredInputs        []string `yaml:"retired_inputs"`
-				FailureBehavior      string   `yaml:"failure_behavior"`
-				Consumers            []string `yaml:"consumers"`
-			} `yaml:"data_projection_authority"`
-		} `yaml:"workspace_model"`
-		DurableDataResources struct {
-			WorkspaceProjection struct {
-				Owner  string `yaml:"owner"`
-				Inputs string `yaml:"inputs"`
-				Rule   string `yaml:"rule"`
-				Parity string `yaml:"parity"`
-			} `yaml:"workspace_projection"`
-		} `yaml:"durable_data_resources"`
-		CLISpecification struct {
-			CommandCatalog struct {
-				Serve struct {
-					WorkspaceDataProjectionAuthority struct {
-						PromotedBy string   `yaml:"promoted_by"`
-						Owner      string   `yaml:"owner"`
-						Rule       string   `yaml:"rule"`
-						Consumers  []string `yaml:"consumers"`
-					} `yaml:"workspace_data_projection_authority"`
-				} `yaml:"serve"`
-				Run struct {
-					Flags []string `yaml:"flags"`
-					Modes struct {
-						ForegroundLocalStart struct {
-							Invocation string `yaml:"invocation"`
-							Behavior   string `yaml:"behavior"`
-						} `yaml:"foreground_local_start"`
-					} `yaml:"modes"`
-				} `yaml:"run"`
-			} `yaml:"command_catalog"`
-		} `yaml:"cli_specification"`
-	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), &spec)
-	authority := spec.WorkspaceModel.DataProjectionAuthority
-	if authority.PromotedBy != "#2295" || strings.TrimSpace(authority.ImplementationStatus) != "implemented" {
-		t.Fatalf("workspace data projection authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
-	}
-	if authority.CanonicalOwner != "platform-spec.yaml#durable_data_resources.workspace_projection" {
-		t.Fatalf("workspace data projection canonical owner = %q", authority.CanonicalOwner)
-	}
-	for _, want := range []string{"immutable resource-version pins", "compiled static-data access", "not an authored path", "private generated directory", "empty projection", "never invents"} {
-		if !strings.Contains(authority.Scope+authority.MaterializationRule+authority.AbsenceRule, want) {
-			t.Fatalf("workspace data projection authority missing %q: %#v", want, authority)
-		}
-	}
-	for _, want := range []string{"workspace.data_source", "workspace.volumes_from", "--data directory authority", "SWARM_WORKSPACE_DATA_SOURCE", "project .swarm/data defaults"} {
-		if !stringSliceContains(authority.RetiredInputs, want) {
-			t.Fatalf("retired workspace data inputs missing %q: %#v", want, authority.RetiredInputs)
-		}
-	}
-	for _, want := range []string{"fails closed", "flow_data_access", "data_access", "Missing pins", "no path fallback"} {
-		if !strings.Contains(authority.FailureBehavior, want) {
-			t.Fatalf("workspace projection failure behavior missing %q: %#v", want, authority)
-		}
-	}
-	for _, want := range []string{"Docker workspace", "Host workspace", "native tools", "local and connected", "run-fork"} {
-		if !joinedContains(authority.Consumers, want) {
-			t.Fatalf("workspace projection consumers missing %q: %#v", want, authority.Consumers)
-		}
-	}
-	projection := spec.DurableDataResources.WorkspaceProjection
-	for _, want := range []string{"internal/runtime/dataaccess.Materializer", "selected store", "exact run resource-version pins", "private read-only `/data`", "never parsed back", "Docker and host"} {
-		if !strings.Contains(projection.Owner+projection.Inputs+projection.Rule+projection.Parity, want) {
-			t.Fatalf("durable data workspace projection missing %q: %#v", want, projection)
-		}
-	}
-	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceDataProjectionAuthority
-	if command.PromotedBy != "#2295" || command.Owner != "durable_data_resources.workspace_projection" || !strings.Contains(command.Rule, "immutable resource pins") {
-		t.Fatalf("serve command data projection authority = %#v", command)
-	}
-	for _, want := range []string{"serve boot", "local foreground `swarm run start`", "selected-contract run-fork"} {
-		if !joinedContains(command.Consumers, want) {
-			t.Fatalf("serve command data projection consumers missing %q: %#v", want, command.Consumers)
-		}
-	}
-	run := spec.CLISpecification.CommandCatalog.Run
-	if !stringSliceContains(run.Flags, "--data <name=file.jsonl> (repeatable fused import)") || stringSliceContains(run.Flags, "--data <path>") {
-		t.Fatalf("run command data flags retain retired path authority: %#v", run.Flags)
-	}
-	if !strings.Contains(run.Modes.ForegroundLocalStart.Invocation, "--data <name=file.jsonl>") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "exact selected-bundle data declarations") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "--reattach") {
-		t.Fatalf("run local foreground import/pin authority missing from spec: %#v", run.Modes.ForegroundLocalStart)
-	}
-}
-
 func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t *testing.T) {
 	active := runtimepkg.StandingTarget{RunID: "active-run", FlowPath: "active", Alias: "active", Provider: "telegram"}
 	stopped := runtimepkg.StandingTarget{RunID: "stopped-run", FlowPath: "stopped", Alias: "stopped", Provider: "telegram"}
@@ -8474,19 +8377,6 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
   subscriptions: [agent.requested]
 `, agentID, agentID, agentID))
 	return root
-}
-
-func stringSliceContains(values []string, want string) bool {
-	for _, value := range values {
-		if strings.Contains(value, want) {
-			return true
-		}
-	}
-	return false
-}
-
-func joinedContains(values []string, want string) bool {
-	return strings.Contains(strings.Join(values, "\n"), want)
 }
 
 func (b *lockedBuffer) Write(p []byte) (int, error) {

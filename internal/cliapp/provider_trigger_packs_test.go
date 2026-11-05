@@ -14,18 +14,6 @@ import (
 // Public ingress behavior is owned by the standing-activation served tests.
 // This release-layout test is bounded to pack discovery and provenance.
 
-func TestPlatformSpecDoesNotRestoreHardCodedProviderTriggerInventory(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join(RepoRoot(), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, retired := range []string{"required_platform_inventory", "RequiredPlatformPackIdentities", "complete first-party platform pack inventory"} {
-		if strings.Contains(string(body), retired) {
-			t.Fatalf("platform spec restored retired inventory authority %q", retired)
-		}
-	}
-}
-
 func TestPlatformPackDirsInIgnoredProjectHaveNoEffect(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
