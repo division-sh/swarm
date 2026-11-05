@@ -18,6 +18,7 @@ import (
 // constructor eligibility or parent-driven eager construction.
 func commitA2FixtureConstruction(t *testing.T, coordinator *pipeline.PipelineCoordinator, selected any, ctx context.Context, owner flowidentity.RunScopedFlowInstance, initial pipeline.WorkflowInstance, at time.Time) pipeline.FlowInstanceActivationPlan {
 	t.Helper()
+	initial.Life = 1
 	source := coordinator.SemanticSource()
 	schema, found := source.FlowSchemaByID(initial.WorkflowName)
 	if !found {
