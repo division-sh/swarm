@@ -2989,7 +2989,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 	settled := false
 	defer func() {
 		if !settled {
-			logNotifyAllChildrenDrainCounts(t, runtime.db, runID)
+			logNotifyAllChildrenDrainCounts(t, runtime.selected, runID)
 		}
 	}()
 	ticker := time.NewTicker(10 * time.Millisecond)
