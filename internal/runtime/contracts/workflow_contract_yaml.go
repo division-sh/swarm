@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
@@ -42,17 +41,4 @@ func decodeStringListValue(value yamlsource.Value) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("string list at %s is %s, want scalar or sequence", value.Location(), value.Presence())
 	}
-}
-
-func decodeScalarStringNode(node *yaml.Node) (string, error) {
-	if node == nil || node.Kind == 0 {
-		return "", nil
-	}
-	if node.Kind != yaml.ScalarNode {
-		return "", fmt.Errorf("unsupported scalar string yaml node kind %d", node.Kind)
-	}
-	if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		return "", nil
-	}
-	return strings.TrimSpace(node.Value), nil
 }

@@ -807,23 +807,6 @@ func sliceFromAny(value any) []any {
 	}
 }
 
-func stringSliceFromAny(raw any) []string {
-	switch typed := raw.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if v := strings.TrimSpace(asString(item)); v != "" {
-				out = append(out, v)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
 func normalizeStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}

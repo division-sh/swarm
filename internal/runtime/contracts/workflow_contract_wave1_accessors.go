@@ -272,18 +272,6 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 	return nil
 }
 
-func sortedFlowSchemaIDs(schemas map[string]FlowSchemaDocument) []string {
-	ids := make([]string, 0, len(schemas))
-	for id := range schemas {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	return ids
-}
-
 type errString string
 
 func (e errString) Error() string { return string(e) }

@@ -393,15 +393,6 @@ func catalogValueSchema(schema map[string]any) map[string]any {
 	return out
 }
 
-func asSchemaString(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	default:
-		return strings.TrimSpace(fmt.Sprint(value))
-	}
-}
-
 func isEventListType(typeRef string) bool {
 	typeRef = strings.TrimSpace(typeRef)
 	return strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
