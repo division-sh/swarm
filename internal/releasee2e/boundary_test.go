@@ -108,7 +108,8 @@ func releaseE2EImportAllowed(file, name, alias string) bool {
 		return true
 	}
 	if file == "provider_stop_handoff_test.go" && alias == "" &&
-		(name == "github.com/division-sh/swarm/internal/testutil/llmapi" || name == "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting") {
+		(name == "github.com/division-sh/swarm/internal/testutil/llmapi" || name == "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting" ||
+			name == "github.com/division-sh/swarm/internal/store/storetest") {
 		return true
 	}
 	if name == "github.com/division-sh/swarm/internal/testpostgres" && alias == "" &&
@@ -173,6 +174,9 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		{"other_test.go", "github.com/division-sh/swarm/internal/testutil/mcpapi", "", false},
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", "", true},
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting", "", true},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/store/storetest", "", true},
+		{"other_test.go", "github.com/division-sh/swarm/internal/store/storetest", "", false},
+		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/store/storetest", "fixture", false},
 		{"other_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", "", false},
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/operatorread", "", false},
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/testutil/llmapi", ".", false},
