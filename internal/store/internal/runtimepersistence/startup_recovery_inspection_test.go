@@ -22,7 +22,7 @@ import (
 )
 
 type startupRecoveryInspector interface {
-	InspectStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error)
+	InspectStartupRecovery(context.Context, time.Time, bool) (effects.StartupRecoveryCounts, error)
 	InspectSnapshot(context.Context, func(context.Context) error) error
 }
 
@@ -34,7 +34,7 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		reader := fixture.store.(startupRecoveryInspector)
 		now := time.Now().UTC()
-		zero, err := reader.InspectStartupRecovery(context.Background(), now)
+		zero, err := reader.InspectStartupRecovery(context.Background(), now, true)
 		if err != nil || zero != (effects.StartupRecoveryCounts{}) {
 			t.Fatalf("empty recovery selection: %+v %v", zero, err)
 		}
@@ -64,6 +64,9 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 		setCompletionAttemptLease(t, exhausted, exhaustedCall.Attempt().AttemptID, now.Add(-time.Minute))
 		neutral := newNeutralEffectParityFixture(t, fixture.store, fixture.db, fixture.sqlite)
 		httpCall := beginNeutralRecoveryAttempt(t, neutral, "authored_http_tool", "inspection", true, false)
+		for _, attemptID := range []string{resume.Attempt().AttemptID, deadCall.Attempt().AttemptID, exhaustedCall.Attempt().AttemptID} {
+			setCompletionAttemptLease(t, fixture, attemptID, now.Add(time.Minute))
+		}
 		want := effects.StartupRecoveryCounts{ProviderTurnsToResume: 1, ProviderTurnsToDeadLetter: 2, HTTPToolCallsUnknown: 1}
 		before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
 		requireStartupRecoveryCLI(t, fixture, binary)
@@ -79,7 +82,7 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			bounded, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			got, err := reader.InspectStartupRecovery(bounded, now)
+			got, err := reader.InspectStartupRecovery(bounded, now, true)
 			cancel()
 			if err != nil || got != want {
 				t.Fatalf("inspection waited for recovery row lock: %+v %v", got, err)
@@ -91,23 +94,26 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 		var expired context.Context
 		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
 			expired = ctx
-			got, err := reader.InspectStartupRecovery(ctx, now)
+			got, err := reader.InspectStartupRecovery(ctx, now, true)
 			if err != nil || got != want {
 				t.Fatalf("seeded recovery selection: %+v %v, want %+v", got, err, want)
 			}
 			canceled, cancel := context.WithCancel(ctx)
 			cancel()
-			if _, err := reader.InspectStartupRecovery(canceled, now); !errors.Is(err, context.Canceled) {
+			if _, err := reader.InspectStartupRecovery(canceled, now, true); !errors.Is(err, context.Canceled) {
 				t.Fatalf("inspection lost cancellation: %v", err)
 			}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reader.InspectStartupRecovery(expired, now); err == nil {
+		if _, err := reader.InspectStartupRecovery(expired, now, true); err == nil {
 			t.Fatal("inspection retained an expired snapshot")
 		}
 		historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+		for _, attemptID := range []string{resume.Attempt().AttemptID, deadCall.Attempt().AttemptID, exhaustedCall.Attempt().AttemptID} {
+			setCompletionAttemptLease(t, fixture, attemptID, now.Add(-time.Minute))
+		}
 		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 		if err != nil || summary.OutcomeUncertain != 4 || summary.PrelaunchTerminal != 0 {
 			t.Fatalf("same-row native recovery: %+v %v", summary, err)
@@ -116,7 +122,7 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 		requireOriginDeliveryOutcome(t, dead, "dead_letter", "effect_recovery_outcome_unconfirmed")
 		requireOriginDeliveryOutcome(t, exhausted, "dead_letter", "retry_exhausted")
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, httpCall.Attempt().AttemptID, effects.StateOutcomeUncertain)
-		zero, err = reader.InspectStartupRecovery(context.Background(), now)
+		zero, err = reader.InspectStartupRecovery(context.Background(), now, true)
 		if err != nil || zero != (effects.StartupRecoveryCounts{}) {
 			t.Fatalf("settled rows still counted: %+v %v", zero, err)
 		}
@@ -163,7 +169,7 @@ func requireStartupRecoveryCLI(t *testing.T, fixture completionSettlementFixture
 	command := exec.CommandContext(ctx, binary, "store", "status", "--config", config, "--store", backend)
 	command.Dir, command.Env = pipeline.WorkflowRepoRoot(), env
 	output, err := command.CombinedOutput()
-	want := fmt.Sprintf("Project owner: selected-store lease is held; last admitted serve %s (generation %d); interrupted: 1 provider turns to resume, 2 provider turns to dead-letter, 1 HTTP tool calls outcome unknown\n", stamp.RuntimeInstanceID, stamp.AuthorityGeneration)
+	want := fmt.Sprintf("Project owner: selected-store lease is held; last admitted serve %s (generation %d); interrupted: 0 provider turns to resume, 0 provider turns to dead-letter, 0 HTTP tool calls outcome unknown\n", stamp.RuntimeInstanceID, stamp.AuthorityGeneration)
 	if err != nil || string(output) != want {
 		t.Fatalf("public held-store count read: %v\ngot=%s\nwant=%s", err, output, want)
 	}
@@ -184,7 +190,7 @@ func TestStartupRecoveryInspectionRejectsCanceledCurrentOriginBothStores(t *test
 		now := time.Now().UTC()
 		setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Minute))
 		before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
-		_, inspectionErr := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(context.Background(), now)
+		_, inspectionErr := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(context.Background(), now, true)
 		_, recoveryErr := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 		for _, err := range []error{inspectionErr, recoveryErr} {
 			if err == nil || !strings.Contains(err.Error(), "authored cancellation requires canceled-origin settlement") {
