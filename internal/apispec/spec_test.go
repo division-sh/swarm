@@ -790,17 +790,6 @@ func assertScalarContains(t *testing.T, node *yaml.Node, want string) {
 	}
 }
 
-func assertMethodDescriptionContains(t *testing.T, api *APISpecification, methodName, want string) {
-	t.Helper()
-	method, ok := api.MethodCatalog[methodName]
-	if !ok {
-		t.Fatalf("method %s missing from catalog", methodName)
-	}
-	if !strings.Contains(method.Description, want) {
-		t.Fatalf("method %s description = %q, want substring %q", methodName, method.Description, want)
-	}
-}
-
 func assertOpenRPCParamDescriptionContains(t *testing.T, methodName string, params map[string]ContentDescriptor, paramName string, wants ...string) {
 	t.Helper()
 	param, ok := params[paramName]
