@@ -71,6 +71,10 @@ release approval or a promise of old-store migration.
 
 ### Fixed
 
+- Load the two retired account members in private rc.1 version-2 operator-channel
+  proof files without rewriting them on read. Unknown, duplicate, ambiguous and
+  malformed members still refuse; new proof writes use only current names.
+  This is not a public API alias or a general old-store migration. (#2942)
 - WhatsApp first login works in both serve orders. Inbound replies retain the
   holder's exact source/root, restored replies drain before readiness, and resume
   waits for confirmed login. Boot output reports actual account readiness; early

@@ -230,9 +230,8 @@ func (s *FileProofStore) loadLocked() (proofDocument, error) {
 	if header.Version != proofDocumentVersion {
 		return proofDocument{}, fmt.Errorf("operator channel proof store %s has unsupported format version %d", s.path, header.Version)
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&doc); err != nil {
+	doc, err = decodeProofDocumentV2(raw)
+	if err != nil {
 		return proofDocument{}, fmt.Errorf("parse operator channel proof store %s: %w", s.path, err)
 	}
 	if doc.Version != proofDocumentVersion || doc.Entries == nil {
