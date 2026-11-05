@@ -107,7 +107,7 @@ func consumptionEvents(receive *PackReceiveDescription) []PackEventDescription {
 	}
 	var normalized, raw []PackEventDescription
 	for _, event := range receive.Events {
-		if !runtimeidentity.IsCanonicalName(event.Event) {
+		if !runtimeidentity.IsCanonicalEventName(event.Event) {
 			continue
 		}
 		if event.Kind == "normalized" {
