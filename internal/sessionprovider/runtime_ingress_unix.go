@@ -83,12 +83,9 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	defer func() { err = errors.Join(err, work.Done()) }()
 	var op channelonboarding.Operation
 	if c.operation.DeploymentRegistration {
-		op, err = c.currentOperation(work.Context())
+		op, err = c.currentApprovedDeploymentOperation(work.Context())
 		if err != nil {
 			return err
-		}
-		if !op.AccountConfirmed {
-			return errIncomingAdmissionPending
 		}
 	}
 	account, err := c.AdmitSessionAccount(work.Context(), c.sessionAccount())
@@ -139,6 +136,17 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	// Local capture, selected-store publication and the SDK receipt remain
 	// distinct. Failure preserves capture and returns non-success to the SDK.
 	return incoming.drain(ctx)
+}
+
+func (c *RuntimeConnection) currentApprovedDeploymentOperation(ctx context.Context) (channelonboarding.Operation, error) {
+	op, err := c.currentOperation(ctx)
+	if err != nil {
+		return op, err
+	}
+	if !op.AccountConfirmed {
+		return op, errIncomingAdmissionPending
+	}
+	return op, nil
 }
 
 // The SDK owns linked-device echoes, not customer ingress.
