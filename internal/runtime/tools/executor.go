@@ -139,6 +139,19 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 	return exec
 }
 
+func (e *Executor) Close(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	client := e.mcpClient
+	e.mu.RUnlock()
+	if client == nil {
+		return nil
+	}
+	return client.Close(ctx)
+}
+
 // SetModelRuntimes updates the actor-scoped provider contract owner used by
 // native-tool admission.
 func (e *Executor) SetModelRuntimes(runtimes llm.AgentRuntimeResolver) {
