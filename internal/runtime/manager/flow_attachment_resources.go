@@ -11,6 +11,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"sort"
 	"strings"
@@ -361,7 +362,7 @@ func flowReadinessMatchesAgentIdentity(flowIdentity runtimeflowidentity.RunScope
 
 func (am *AgentManager) flowReadinessOwnedAgentRecords(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, source semanticview.Source, records []PersistedAgent) ([]PersistedAgent, bool, error) {
 	origin := am.lifecycle.diagnosticOrigin
-	if origin.Owner != LifecycleDiagnosticSelectedFork || origin.SelectedFork.ForkRunID != plan.RunID ||
+	if origin.Owner != runfork.LifecycleDiagnosticSelectedFork || origin.SelectedFork.ForkRunID != plan.RunID ||
 		plan.Identity.TemplateID != semanticview.RootExecutionFlowID(source) {
 		return records, false, nil
 	}

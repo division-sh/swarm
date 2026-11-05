@@ -34826,10 +34826,11 @@ api_specification:
       DecisionCardRoutingSource:
         type: object
         additionalProperties: false
-        required: [kind, route]
+        required: [kind, route, life]
         properties:
           kind: {type: string, enum: [root, static_flow, concrete_template_instance]}
           route: {$ref: '#/components/schemas/DecisionCardRoutingSourceRoute'}
+          life: {type: integer, minimum: 1}
       StageGateDecisionCardAnchor:
         type: object
         additionalProperties: false

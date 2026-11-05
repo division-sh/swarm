@@ -24,6 +24,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -350,7 +351,7 @@ func (l *agentExecutionLease) Release() {
 }
 
 type agentLifecycleCoordinator struct {
-	diagnosticOrigin    LifecycleDiagnosticOrigin
+	diagnosticOrigin    runfork.LifecycleDiagnosticOrigin
 	mu                  sync.Mutex
 	storeMu             sync.RWMutex
 	workMu              sync.Mutex
@@ -564,7 +565,7 @@ func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, routes AgentR
 		cells:  map[runtimeagentidentity.Identity]*agentLifecycleCell{},
 		routes: routes, stateReader: stateReader, effectsStore: effectsStore,
 		outcomeReader:    outcomeReader,
-		diagnosticOrigin: LifecycleDiagnosticOrigin{Owner: LifecycleDiagnosticNormal, Causality: LifecycleDiagnosticObservation},
+		diagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 	}
 	return coordinator
 }

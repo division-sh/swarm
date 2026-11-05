@@ -3275,8 +3275,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	record := runtimemanager.PersistedAgent{Config: targetConfig, Topology: topology, Status: "active", HiredBy: "test", StartedAt: now}
 	if _, err := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Trigger: "competition-proof",
-		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
-			Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{
+			Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 			SelectedFork: authority.SelectedFork, SourceRunID: admission.SourceRunID,
 			ForkPoint: admission.ForkPoint, ForkEventID: admission.ForkEventID,
 		},

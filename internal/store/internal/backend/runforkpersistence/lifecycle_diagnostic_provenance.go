@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -33,7 +34,7 @@ func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1)`, result.Identity.RunID).Scan(&hasBinding); err != nil {
 		return "", err
 	}
-	if origin.Owner == runtimemanager.LifecycleDiagnosticNormal {
+	if origin.Owner == runfork.LifecycleDiagnosticNormal {
 		if hasBinding {
 			return "", validateOrdinaryLifecycleHandoffTx(ctx, tx, result, historical, sqlite, operationKind)
 		}
@@ -80,7 +81,7 @@ func validateLifecycleDiagnosticOriginTx(ctx context.Context, tx *sql.Tx, result
 			return "", errors.New("lifecycle diagnostic selected execution is no longer admitted")
 		}
 	}
-	if origin.Causality == runtimemanager.LifecycleDiagnosticAcceptedEvent {
+	if origin.Causality == runfork.LifecycleDiagnosticAcceptedEvent {
 		var belongs bool
 		if err := tx.QueryRowContext(ctx, `WITH RECURSIVE ancestors AS (
 			SELECT event_id,source_event_id FROM events WHERE run_id=$1 AND event_id=$2

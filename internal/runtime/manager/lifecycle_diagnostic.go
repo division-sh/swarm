@@ -9,22 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-type LifecycleDiagnosticOwner = runfork.LifecycleDiagnosticOwner
-type LifecycleDiagnosticCausality = runfork.LifecycleDiagnosticCausality
-type LifecycleDiagnosticOrigin = runfork.LifecycleDiagnosticOrigin
-type LifecycleDiagnosticProvenance = runfork.LifecycleDiagnosticProvenance
-
-const (
-	LifecycleDiagnosticNormal        = runfork.LifecycleDiagnosticNormal
-	LifecycleDiagnosticSelectedFork  = runfork.LifecycleDiagnosticSelectedFork
-	LifecycleDiagnosticObservation   = runfork.LifecycleDiagnosticObservation
-	LifecycleDiagnosticAcceptedEvent = runfork.LifecycleDiagnosticAcceptedEvent
-)
-
 func (c *agentLifecycleCoordinator) lifecycleTransitionWithDiagnostic(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransition, error) {
 	origin := c.diagnosticOrigin
 	if event, ok := runtimebus.InboundEventFromContext(ctx); ok {
-		origin.Causality, origin.ParentEventID = LifecycleDiagnosticAcceptedEvent, event.ID()
+		origin.Causality, origin.ParentEventID = runfork.LifecycleDiagnosticAcceptedEvent, event.ID()
 	}
 	if err := origin.Validate(); err != nil {
 		return AgentLifecycleTransition{}, err

@@ -116,7 +116,7 @@ func TestSelectedGrantLifecycleDiagnosticCausalLineageBothStores(t *testing.T) {
 	}
 }
 
-func selectedDiagnosticOriginForTest(t *testing.T, ctx context.Context, selected any, grant startupownership.GenerationGrant) manager.LifecycleDiagnosticOrigin {
+func selectedDiagnosticOriginForTest(t *testing.T, ctx context.Context, selected any, grant startupownership.GenerationGrant) runfork.LifecycleDiagnosticOrigin {
 	t.Helper()
 	evidence, err := grant.Evidence()
 	if err != nil || evidence.SelectedFork == nil {
@@ -133,8 +133,8 @@ func selectedDiagnosticOriginForTest(t *testing.T, ctx context.Context, selected
 	if err != nil {
 		t.Fatal(err)
 	}
-	origin := manager.LifecycleDiagnosticOrigin{
-		Owner: manager.LifecycleDiagnosticSelectedFork, Causality: manager.LifecycleDiagnosticObservation,
+	origin := runfork.LifecycleDiagnosticOrigin{
+		Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 		SourceRunID: binding.SourceRunID, ForkPoint: binding.ForkPoint, ForkEventID: binding.ForkEventID,
 		SelectedFork: effects.SelectedContractForkAuthority{
 			ExecutionID: fork.ExecutionID, ForkRunID: fork.ForkRunID, Generation: fork.ExecutionGeneration,
