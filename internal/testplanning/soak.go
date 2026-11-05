@@ -46,9 +46,7 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 	if isServedReporterSelection(packages, run, skip, timeout, count, budget) {
 		return nil
 	}
-	if timeout == ServeappOtherGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage &&
-		run == "^Test([ABD-H].*|ContextCompactionPreservesMemoryAcrossRestartBothStores|2376.*)$" &&
-		skip == "" && count == "count-1" && budget == "full" {
+	if isServeappOtherSelection(packages, run, skip, timeout, count, budget) {
 		return nil
 	}
 	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$" && skip == "" && count == "count-1" && budget == "broad" {
@@ -74,6 +72,12 @@ func isServedReporterSelection(packages []string, run, skip, timeout, count, bud
 	return timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage &&
 		(run == ServedReporterRun || run == ServedReporterStressRun) && skip == "" &&
 		count == "count-1" && budget == "full"
+}
+
+func isServeappOtherSelection(packages []string, run, skip, timeout, count, budget string) bool {
+	return timeout == ServeappOtherGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage &&
+		run == "^Test([ABD-H].*|ContextCompactionPreservesMemoryAcrossRestartBothStores|2376.*)$" &&
+		skip == "" && count == "count-1" && budget == "full"
 }
 
 // The complementary pipeline owner excludes only its two separately executed
