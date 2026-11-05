@@ -71,16 +71,19 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		schemaOwner:            schemaOwner,
 	}
 	store.timerObligationPostgresReader = timerObligations
+	store.timerObligationReaderMethods = timerObligations
 	apiIdempotency, err := storeapiidempotency.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.postgresOwner = apiIdempotency
+	store.apiIdempotencyMethods = apiIdempotency
 	operatorChannels, err := storeoperatorchannel.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorChannelPostgresOwner = operatorChannels
+	store.operatorChannelOwnerMethods = operatorChannels
 	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -89,6 +92,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.channelOnboardingPostgresOwner = channelOnboarding
+	store.channelOnboardingOwnerMethods = channelOnboarding
 	if err := channelOnboarding.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -107,31 +111,37 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorObservabilityPostgres = operatorObservability
+	store.operatorObservabilityMethods = operatorObservability
 	operatorConversation, err := storeoperatorsurface.NewConversationPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorConversationPostgres = operatorConversation
+	store.operatorConversationMethods = operatorConversation
 	operatorEntity, err := storeoperatorsurface.NewEntityPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorEntityPostgres = operatorEntity
+	store.operatorEntityMethods = operatorEntity
 	replyContexts, err := storereplycontext.NewPostgres(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.replyPostgresOwner = replyContexts
+	store.replyOwnerMethods = replyContexts
 	managedCapabilities, err := storemanagedcapability.NewPostgres(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.managedCapabilityPostgresOwner = managedCapabilities
+	store.managedCapabilityOwnerMethods = managedCapabilities
 	mailbox, err := storemailbox.NewPostgres(backend, store.requireCurrentSchema, apiIdempotency)
 	if err != nil {
 		return nil, err
 	}
 	store.mailboxPostgresOwner = mailbox
+	store.mailboxOwnerMethods = mailbox
 	if err := mailbox.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -140,6 +150,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.destructiveResetPostgresOwner = destructiveResetOwner
+	store.destructiveResetOwnerMethods = destructiveResetOwner
 	if err := destructiveResetOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -148,6 +159,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.activityPostgresOwner = activityJournal
+	store.activityOwnerMethods = activityJournal
 	if err := activityJournal.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -156,21 +168,25 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.activityResultPostgresOwner = activityResult
+	store.activityResultOwnerMethods = activityResult
 	budgetSpend, err := storebudgetspend.NewPostgres(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.budgetPostgresOwner = budgetSpend
+	store.budgetOwnerMethods = budgetSpend
 	agentOwner, err := storeagent.NewPostgres(backend, store.requireCurrentSchema, store)
 	if err != nil {
 		return nil, err
 	}
 	store.agentPostgresOwner = agentOwner
+	store.agentOwnerMethods = agentOwner
 	entityOwner, err := storeentity.NewPostgres(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.entityPostgresOwner = entityOwner
+	store.entityOwnerMethods = entityOwner
 	deadLetterOwner, err := storedelivery.NewDeadLetterPostgresOwner(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -180,6 +196,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorAgentPostgres = operatorAgent
+	store.operatorAgentMethods = operatorAgent
 	runLifecycle, err := storerunlifecycle.NewPostgres(backend, store.requireCurrentSchema, candidates)
 	if err != nil {
 		return nil, err
@@ -189,11 +206,13 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.lLMPostgresOwner = llmOwner
+	store.llmMethods = llmOwner
 	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
 	if err != nil {
 		return nil, err
 	}
 	store.effectPostgresOwner = effectOwner
+	store.effectOwnerMethods = effectOwner
 	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -249,19 +268,24 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.deliveryPostgresOwner = deliveryOwner
+	store.deliveryOwnerMethods = deliveryOwner
 	store.pipelinePostgresOwner = pipelineOwner
+	store.pipelineOwnerMethods = pipelineOwner
 	if err := pipelineOwner.BindWorkflowTurnTermination(effectOwner); err != nil {
 		return nil, err
 	}
 	store.eventPostgresOwner = eventOwner
+	store.eventOwnerMethods = eventOwner
 	if err := eventOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
 	store.decisionPostgresOwner = decisionOwner
+	store.decisionOwnerMethods = decisionOwner
 	if err := decisionOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
 	store.runLifecyclePostgresOwner = runLifecycle
+	store.runLifecycleOwnerMethods = runLifecycle
 	if err := runLifecycle.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -270,6 +294,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorRunPostgres = operatorRun
+	store.operatorRunMethods = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
 		return nil, err
 	}
@@ -290,6 +315,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runForkPostgresOwner = runForkOwner
+	store.runForkOwnerMethods = runForkOwner
 	if err := runForkOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -316,6 +342,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.startupPostgresOwner = startupOwner
+	store.startupOwnerMethods = startupOwner
 	if err := effectOwner.BindPreparedProcessOwner(startupOwner); err != nil {
 		return nil, err
 	}
@@ -330,6 +357,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runtimeIngressPostgresOwner = ingressOwner
+	store.runtimeIngressOwnerMethods = ingressOwner
 	return store, nil
 }
 
@@ -381,21 +409,25 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		nowFn:                  time.Now,
 	}
 	store.timerObligationSQLiteReader = timerObligations
+	store.timerObligationReaderMethods = timerObligations
 	destructiveReset, err := storeadmin.NewDestructiveResetSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.destructiveResetSQLiteOwner = destructiveReset
+	store.destructiveResetSQLiteOwnerMethods = destructiveReset
 	apiIdempotency, err := storeapiidempotency.NewSQLite(backend, schema.Path(), store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.sQLiteOwner = apiIdempotency
+	store.apiIdempotencyMethods = apiIdempotency
 	operatorChannels, err := storeoperatorchannel.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorChannelSQLiteOwner = operatorChannels
+	store.operatorChannelOwnerMethods = operatorChannels
 	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -404,6 +436,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.channelOnboardingSQLiteOwner = channelOnboarding
+	store.channelOnboardingOwnerMethods = channelOnboarding
 	if err := channelOnboarding.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -422,21 +455,25 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.operatorObservabilitySQLite = operatorObservability
+	store.operatorObservabilityMethods = operatorObservability
 	operatorConversation, err := storeoperatorsurface.NewConversationSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorConversationSQLite = operatorConversation
+	store.operatorConversationMethods = operatorConversation
 	operatorEntity, err := storeoperatorsurface.NewEntitySQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorEntitySQLite = operatorEntity
+	store.operatorEntityMethods = operatorEntity
 	activityJournal, err := storeactivityjournal.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.activitySQLiteOwner = activityJournal
+	store.activityOwnerMethods = activityJournal
 	if err := activityJournal.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -445,21 +482,25 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.activityResultSQLiteOwner = activityResult
+	store.activityResultOwnerMethods = activityResult
 	replyContexts, err := storereplycontext.NewSQLite(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.replySQLiteOwner = replyContexts
+	store.replyOwnerMethods = replyContexts
 	managedCapabilities, err := storemanagedcapability.NewSQLite(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.managedCapabilitySQLiteOwner = managedCapabilities
+	store.managedCapabilityOwnerMethods = managedCapabilities
 	mailbox, err := storemailbox.NewSQLite(backend, store.requireCurrentSchema, apiIdempotency)
 	if err != nil {
 		return nil, err
 	}
 	store.mailboxSQLiteOwner = mailbox
+	store.mailboxOwnerMethods = mailbox
 	if err := mailbox.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -468,16 +509,19 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.budgetSQLiteOwner = budgetSpend
+	store.budgetOwnerMethods = budgetSpend
 	agentOwner, err := storeagent.NewSQLite(backend, store.requireCurrentSchema, store)
 	if err != nil {
 		return nil, err
 	}
 	store.agentSQLiteOwner = agentOwner
+	store.agentSQLiteOwnerMethods = agentOwner
 	entityOwner, err := storeentity.NewSQLite(backend)
 	if err != nil {
 		return nil, err
 	}
 	store.entitySQLiteOwner = entityOwner
+	store.entityOwnerMethods = entityOwner
 	deadLetterOwner, err := storedelivery.NewDeadLetterSQLiteOwner(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -487,6 +531,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.operatorAgentSQLite = operatorAgent
+	store.operatorAgentSQLiteMethods = operatorAgent
 	runLifecycle, err := storerunlifecycle.NewSQLite(backend, store.requireCurrentSchema, candidates, store.now)
 	if err != nil {
 		return nil, err
@@ -496,11 +541,13 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.lLMSQLiteOwner = llmOwner
+	store.llmMethods = llmOwner
 	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
 	if err != nil {
 		return nil, err
 	}
 	store.effectSQLiteOwner = effectOwner
+	store.effectOwnerMethods = effectOwner
 	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -548,6 +595,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.startupSQLiteOwner = startupOwner
+	store.startupOwnerMethods = startupOwner
 	if err := startupOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -570,19 +618,24 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.deliverySQLiteOwner = deliveryOwner
+	store.deliveryOwnerMethods = deliveryOwner
 	store.pipelineSQLiteOwner = pipelineOwner
+	store.pipelineOwnerMethods = pipelineOwner
 	if err := pipelineOwner.BindWorkflowTurnTermination(effectOwner); err != nil {
 		return nil, err
 	}
 	store.eventSQLiteOwner = eventOwner
+	store.eventSQLiteOwnerMethods = eventOwner
 	if err := eventOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
 	store.decisionSQLiteOwner = decisionOwner
+	store.decisionOwnerMethods = decisionOwner
 	if err := decisionOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
 	store.runLifecycleSQLiteOwner = runLifecycle
+	store.runLifecycleSQLiteOwnerMethods = runLifecycle
 	if err := runLifecycle.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -591,6 +644,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.operatorRunSQLite = operatorRun
+	store.operatorRunSQLiteMethods = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
 		return nil, err
 	}
@@ -611,6 +665,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runForkSQLiteOwner = runForkOwner
+	store.runForkOwnerMethods = runForkOwner
 	if err := effectOwner.BindPreparedProcessOwner(startupOwner); err != nil {
 		return nil, err
 	}
@@ -637,6 +692,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runtimeIngressSQLiteOwner = ingressOwner
+	store.runtimeIngressOwnerMethods = ingressOwner
 	return store, nil
 }
 
