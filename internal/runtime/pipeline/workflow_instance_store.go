@@ -1248,8 +1248,11 @@ func (c WorkflowInstanceRecordedHeader) ParentRoute() runtimeflowidentity.Parent
 
 // Status is owned by the authoritative header column. Its optional redundant
 // config spelling may be absent on the original construction record.
-func (c WorkflowInstanceRecordedHeader) SameRestartControl(other WorkflowInstanceRecordedHeader) bool {
+func (c WorkflowInstanceRecordedHeader) SameRestartControl(other WorkflowInstanceRecordedHeader, status string) bool {
 	left, right := c.projection.Control, other.projection.Control
+	if (left.Status != "" && left.Status != status) || (right.Status != "" && right.Status != status) {
+		return false
+	}
 	left.Status, right.Status = "", ""
 	return reflect.DeepEqual(left, right)
 }

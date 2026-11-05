@@ -101,7 +101,7 @@ func TestOutcomeConstructedMutationRetainsExactRecordedHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	statusHeader, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, withStatus)
-	if err != nil || !header.SameRestartControl(statusHeader) {
+	if err != nil || !header.SameRestartControl(statusHeader, "active") {
 		t.Fatalf("redundant status changed physical control: %v", err)
 	}
 	controls["workflow_version"] = "foreign"
@@ -110,8 +110,11 @@ func TestOutcomeConstructedMutationRetainsExactRecordedHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreignHeader, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, foreign)
-	if err != nil || header.SameRestartControl(foreignHeader) {
+	if err != nil || header.SameRestartControl(foreignHeader, "active") {
 		t.Fatalf("restart control accepted changed workflow version: %v", err)
+	}
+	if header.SameRestartControl(statusHeader, "terminated") {
+		t.Fatal("restart control accepted status different from its authoritative header")
 	}
 	invalid := command
 	invalid.State.Config = json.RawMessage(`{}`)
