@@ -32,10 +32,14 @@ func readDiagnosticTraceInstance(ctx context.Context, client *cliAPIClient, para
 		return nil, err
 	}
 	entity := result.Entity
-	if entity.RunID != runID || entity.EntityID != entities[0] || entity.Life == nil || *entity.Life <= 0 {
-		return nil, fmt.Errorf("run.trace presentation requires its exact run, entity and positive instance life")
+	if entity.RunID != runID || entity.EntityID != entities[0] {
+		return nil, fmt.Errorf("run.trace presentation requires its exact run and entity")
 	}
-	if iter, present := filter["iter"]; present && iter != *entity.Life {
+	var life int64
+	if entity.Life != nil {
+		life = *entity.Life
+	}
+	if iter, present := filter["iter"]; present && iter != life {
 		return nil, fmt.Errorf("run.trace entity.get returned a different selected instance life")
 	}
 	started, err := entityLifeStartedAt(result)
@@ -43,7 +47,7 @@ func readDiagnosticTraceInstance(ctx context.Context, client *cliAPIClient, para
 		return nil, err
 	}
 	return &diagnosticTraceInstance{runID: runID, entityID: entity.EntityID, instance: entity.FlowInstance,
-		life: *entity.Life, startedAt: started}, nil
+		life: life, startedAt: started}, nil
 }
 
 func validateDiagnosticTraceInstance(ctx context.Context, client *cliAPIClient, params map[string]any, before *diagnosticTraceInstance) error {
@@ -63,7 +67,7 @@ func validateDiagnosticTraceInstance(ctx context.Context, client *cliAPIClient, 
 }
 
 func writeDiagnosticTraceInstance(out io.Writer, instance *diagnosticTraceInstance) {
-	if out == nil || instance == nil {
+	if out == nil || instance == nil || instance.life == 0 {
 		return
 	}
 	fmt.Fprintf(out, "instance %s life %d", cliSanitizeOneLineValue(instance.instance), instance.life)

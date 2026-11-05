@@ -31071,7 +31071,9 @@ cli_specification:
           A finite single-entity snapshot/summary composes entity.get for life/start-date presentation, with
           the same exact run/entity and unchanged explicit iter. With iter omitted, current metadata reads
           bracket the entire finite fetch including every summary page; the exact run/entity/instance, positive
-          life and retained start date must still agree before any output. Changed or unreadable metadata
+          life and retained start date must still agree before any output. Data-only entities preserve their
+          validated lifecycle absence without an instance sentence; construction during the read also refuses.
+          Changed or unreadable metadata
           fails read validation, without retry, hidden iter, inferred date or a new response field. This does
           not apply a stream-wide currentness promise to follow mode.
         proof_expectations:
@@ -32134,10 +32136,15 @@ cli_specification:
         required: false
         api_param: run_id
         validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
+      - name: iter
+        flag: --iter <n>
+        required: false
+        api_param: iter
+        validation: Positive instance life; omitted selects the current life. Prior-life status reads use retained rows.
       output:
         default_text:
           heading: Entity <entity-id>
-          identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
+          identity_rows: Labeled run, flow, type, state, life, revision, created, updated, slug, and name rows; lifecycle rows are absent for data-only entities. A restarted instance adds `started over on <date>` from its exact retained life-start fact, never stage-entry or event time. Omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
           sections: Labeled Fields rows plus an Accumulated presence count and `Bookkeeping <N> facts (--verbose to expand)` or `Bookkeeping none`; empty sections render explicitly as `none`.
           field_projection: Fields contains authored values only. Bookkeeping is a required independent API projection and is never inferred from field names.
         verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and an expanded Bookkeeping section.

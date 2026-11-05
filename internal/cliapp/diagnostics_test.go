@@ -740,7 +740,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 				t.Fatalf("selected-life trace accepted foreign metadata or retried: exit=%d calls=%d out=%s", code, len(*calls), out.String())
 			}
 		})
-		for _, scenario := range []string{"stable", "reset", "start_changed", "wrong_run", "wrong_entity", "wrong_instance", "missing_start", "before_error", "after_error"} {
+		for _, scenario := range []string{"stable", "data_only", "constructed_during_read", "reset", "start_changed", "wrong_run", "wrong_entity", "wrong_instance", "missing_start", "before_error", "after_error"} {
 			t.Run("current_"+mode+"/"+scenario, func(t *testing.T) {
 				metadataReads, traceReads := 0, 0
 				selected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -782,6 +782,14 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 							}
 						}
 						result["bookkeeping"].(map[string]any)["instance_life_started_at"] = start
+						if scenario == "data_only" || scenario == "constructed_during_read" && metadataReads == 1 {
+							for _, key := range []string{"stage_defined", "life", "revision", "current_state", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+								entity[key] = nil
+							}
+							for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
+								result[key] = nil
+							}
+						}
 						writeJSONRPCResult(t, w, req.ID, result)
 						return
 					}
@@ -813,7 +821,11 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 				if metadataReads != 2 || traceReads != wantTrace {
 					t.Fatalf("finite trace did not bracket all pages exactly once: metadata=%d trace=%d", metadataReads, traceReads)
 				}
-				if scenario == "stable" {
+				if scenario == "data_only" {
+					if code != 0 || out.Len() == 0 || strings.Contains(out.String(), "instance review life") || strings.Contains(out.String(), "started over on") {
+						t.Fatalf("data-only trace invented an instance or lost its default read: exit=%d out=%s stderr=%s", code, out.String(), warning.String())
+					}
+				} else if scenario == "stable" {
 					if code != 0 || !strings.Contains(out.String(), "instance review life 2 started over on 2026-05-20T01:02:00Z") {
 						t.Fatalf("stable current-life presentation failed: exit=%d out=%s stderr=%s", code, out.String(), warning.String())
 					}
