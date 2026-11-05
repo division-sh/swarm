@@ -23,7 +23,7 @@ func TestInstanceLifeResetPublicJourneyBothStores(t *testing.T) {
 	}
 }
 
-func requireInstanceLifeViewPresentation(t *testing.T, h *channelOnboardingE2EHarness, runID, entityID string) {
+func requireInstanceLifeReadPresentation(t *testing.T, h *channelOnboardingE2EHarness, runID, entityID string) {
 	t.Helper()
 	args := []string{"entity", "view", entityID, "--run-id", runID}
 	raw, stderr, code := runServedCLICommand(t, h.endpoint, append(args, "--json"))
@@ -41,6 +41,20 @@ func requireInstanceLifeViewPresentation(t *testing.T, h *channelOnboardingE2EHa
 	text, stderr, code := runServedCLICommand(t, h.endpoint, args)
 	if code != 0 || !strings.Contains(text, "started over on "+started) {
 		t.Fatalf("current-life status did not render its exact retained restart date: exit=%d text=%s stderr=%s", code, text, stderr)
+	}
+	for _, summary := range []bool{false, true} {
+		args := []string{"run", "trace", runID, "--entity-id", entityID}
+		if summary {
+			args = append(args, "--delivery-summary")
+		}
+		text, stderr, code := runServedCLICommand(t, h.endpoint, args)
+		if code != 0 || !strings.Contains(text, "life 2 started over on "+started) {
+			t.Fatalf("current-life trace lost exact restart presentation (summary=%t): exit=%d text=%s stderr=%s", summary, code, text, stderr)
+		}
+		text, stderr, code = runServedCLICommand(t, h.endpoint, append(args, "--iter", "1"))
+		if code != 0 || !strings.Contains(text, "life 1") || strings.Contains(text, "started over on") {
+			t.Fatalf("prior-life trace substituted the current life/date (summary=%t): exit=%d text=%s stderr=%s", summary, code, text, stderr)
+		}
 	}
 }
 
