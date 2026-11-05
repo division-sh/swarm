@@ -1,9 +1,16 @@
 package effectpersistence
 
-type recoveryReadMode bool
+type recoveryReadMode struct {
+	inspection bool
+	available  bool
+}
 
-const recoveryInspection recoveryReadMode = true
+var recoveryInspection = recoveryReadMode{inspection: true, available: true}
 
 func recoveryLocks(mode []recoveryReadMode) bool {
-	return len(mode) == 0 || !bool(mode[0])
+	return len(mode) == 0 || !mode[0].inspection
+}
+
+func recoveryAvailable(mode []recoveryReadMode) bool {
+	return len(mode) == 0 || mode[0].available
 }

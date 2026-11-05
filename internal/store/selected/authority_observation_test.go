@@ -18,7 +18,7 @@ func (s authorityObservationFixture) InspectSnapshot(ctx context.Context, inspec
 	return inspect(ctx)
 }
 
-func (s authorityObservationFixture) InspectStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error) {
+func (s authorityObservationFixture) InspectStartupRecovery(context.Context, time.Time, bool) (effects.StartupRecoveryCounts, error) {
 	return effects.StartupRecoveryCounts{}, nil
 }
 

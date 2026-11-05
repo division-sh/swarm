@@ -481,12 +481,12 @@ func (s *PostgresStore) InspectSelectedMaterializationReplay(ctx context.Context
 	return s.runForkPostgresOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
-func (s *PostgresStore) InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error {
-	return s.effectPostgresOwner.InstallContextCompaction(ctx, lease, result)
+func (s *PostgresStore) InspectStartupRecovery(ctx context.Context, now time.Time, available bool) (effects.StartupRecoveryCounts, error) {
+	return s.effectPostgresOwner.InspectStartupRecovery(ctx, now, available)
 }
 
-func (s *PostgresStore) InspectStartupRecovery(ctx context.Context, now time.Time) (effects.StartupRecoveryCounts, error) {
-	return s.effectPostgresOwner.InspectStartupRecovery(ctx, now)
+func (s *PostgresStore) InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error {
+	return s.effectPostgresOwner.InstallContextCompaction(ctx, lease, result)
 }
 
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
@@ -1741,12 +1741,12 @@ func (s *SQLiteRuntimeStore) InspectSelectedMaterializationReplay(ctx context.Co
 	return s.runForkSQLiteOwner.InspectSelectedMaterializationReplay(ctx, plan)
 }
 
-func (s *SQLiteRuntimeStore) InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error {
-	return s.effectSQLiteOwner.InstallContextCompaction(ctx, lease, result)
+func (s *SQLiteRuntimeStore) InspectStartupRecovery(ctx context.Context, now time.Time, available bool) (effects.StartupRecoveryCounts, error) {
+	return s.effectSQLiteOwner.InspectStartupRecovery(ctx, now, available)
 }
 
-func (s *SQLiteRuntimeStore) InspectStartupRecovery(ctx context.Context, now time.Time) (effects.StartupRecoveryCounts, error) {
-	return s.effectSQLiteOwner.InspectStartupRecovery(ctx, now)
+func (s *SQLiteRuntimeStore) InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error {
+	return s.effectSQLiteOwner.InstallContextCompaction(ctx, lease, result)
 }
 
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {

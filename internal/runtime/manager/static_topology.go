@@ -1183,7 +1183,7 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 	if targetEpoch <= 0 {
 		targetEpoch = 1
 	}
-	targetGeneration := expectedGeneration + 1
+	targetGeneration := NextLifecycleGeneration(expectedGeneration)
 	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
 		"agent-static-topology-reconcile-v1", admission.Authority.Static.SourceSetRevision, operationKind,
 		identity.Description(), fmt.Sprint(expectedEpoch), fmt.Sprint(expectedGeneration), string(expectedPhase),
@@ -1199,4 +1199,8 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		Subordinate: plan, Topology: admission, Now: time.Now().UTC(),
 	})
 	return err
+}
+
+func NextLifecycleGeneration(current uint64) uint64 {
+	return current + 1
 }

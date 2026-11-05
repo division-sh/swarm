@@ -255,7 +255,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 					t.Fatalf("captured tail missing: %+v", transition)
 				}
 				beforeInspection := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
-				counts, err := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(context.Background(), time.Now().UTC())
+				counts, err := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(context.Background(), time.Now().UTC(), true)
 				if err != nil || counts != (runtimeeffects.StartupRecoveryCounts{}) {
 					t.Fatalf("cancellation counted as resume/dead-letter: %+v err=%v", counts, err)
 				}
