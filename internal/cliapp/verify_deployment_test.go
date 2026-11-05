@@ -17,9 +17,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {

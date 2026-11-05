@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -26,12 +25,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateselectexisting"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateselectorcreate"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *testing.T) {

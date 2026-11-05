@@ -16,9 +16,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/google/uuid"
 )
 

@@ -31,12 +31,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/startuphandoff"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/startuphandoff"
 	"github.com/google/uuid"
 )
 

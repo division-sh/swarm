@@ -25,12 +25,12 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/requiredagentsparentconnect"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/requiredagentsparentconnect"
 )
 
 func chdirForTest(t *testing.T, dir string) {

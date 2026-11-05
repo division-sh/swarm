@@ -13,8 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 // Required R7 ancestry proof: equal leaf keys must retain their structural parent.

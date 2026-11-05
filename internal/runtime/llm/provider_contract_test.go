@@ -9,11 +9,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
 
 func TestProviderContractsValidateShippedRuntimes(t *testing.T) {
