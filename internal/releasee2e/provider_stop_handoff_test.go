@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +19,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/llmapi"
 	"gopkg.in/yaml.v3"
 )
@@ -544,15 +548,27 @@ tool-agent:
 			if err := first.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
+			inspection, err := openProviderCrashInspection(t, backend, base, document, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer inspection.Close()
+			beforeStatus := providerCrashFullRows(t, inspection)
 			status := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
 			firstCounts, countErr := providerCrashStatusCounts(status.output)
 			if status.err != nil || countErr != nil || !strings.Contains(status.output, "selected-store lease is not held") ||
 				!strings.Contains(status.output, "last admitted serve") || firstCounts != [3]int{2, 0, 1} {
 				t.Fatalf("public post-SIGKILL recovery counts: %v\n%s", status.err, status.output)
 			}
+			if !reflect.DeepEqual(beforeStatus, providerCrashFullRows(t, inspection)) {
+				t.Fatal("public post-SIGKILL status changed persisted rows")
+			}
 			repeat := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
 			if repeat.err != nil || repeat.output != status.output {
 				t.Fatalf("public post-SIGKILL status read changed its observation: first=%q repeat=%q err=%v", status.output, repeat.output, repeat.err)
+			}
+			if !reflect.DeepEqual(beforeStatus, providerCrashFullRows(t, inspection)) {
+				t.Fatal("repeated post-SIGKILL status changed persisted rows")
 			}
 			unblockProvider()
 			unblockTool()
@@ -562,9 +578,35 @@ tool-agent:
 			case <-ctx.Done():
 				t.Fatalf("successor did not launch the retained provider retry\n%s", second.output.String())
 			}
+			for {
+				var recovered goldenEvent
+				if err := second.rpc.call(ctx, "event.get", map[string]any{"event_id": business.EventID}, &recovered); err != nil {
+					t.Fatal(err)
+				}
+				settled := map[string]goldenEventDelivery{}
+				for _, delivery := range recovered.Deliveries {
+					if delivery.SubscriberType == "agent" {
+						settled[delivery.SubscriberID] = delivery
+					}
+				}
+				resume := settled["resume-agent"]
+				tool := settled["tool-agent"]
+				if resume.Status == "delivered" && resume.Terminal && tool.Status == "dead_letter" && tool.Terminal {
+					if tool.ReasonCode != "effect_recovery_outcome_unconfirmed" {
+						t.Fatalf("counted HTTP unknown settled to wrong class: %+v", tool)
+					}
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatalf("counted resume/HTTP recovery did not settle: %+v", recovered.Deliveries)
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
 			if err := second.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
+			beforeStatus = providerCrashFullRows(t, inspection)
 			status = runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
 			secondCounts, countErr := providerCrashStatusCounts(status.output)
 			if status.err != nil || !strings.Contains(status.output, "selected-store lease is not held") ||
@@ -572,9 +614,15 @@ tool-agent:
 				countErr != nil || secondCounts[0] != 0 || secondCounts[1] < 1 || secondCounts[2] != 0 {
 				t.Fatalf("public retry-exhausted post-SIGKILL count: %v\n%s", status.err, status.output)
 			}
+			if !reflect.DeepEqual(beforeStatus, providerCrashFullRows(t, inspection)) {
+				t.Fatal("retry-exhausted post-SIGKILL status changed persisted rows")
+			}
 			repeat = runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "store", "status", "--config", config, "--store", backend)
 			if repeat.err != nil || repeat.output != status.output {
 				t.Fatalf("public retry-exhausted status read changed its observation: first=%q repeat=%q err=%v", status.output, repeat.output, repeat.err)
+			}
+			if !reflect.DeepEqual(beforeStatus, providerCrashFullRows(t, inspection)) {
+				t.Fatal("repeated retry-exhausted status changed persisted rows")
 			}
 			unblockRetry()
 			third := startReleaseServe(t, spec)
@@ -637,4 +685,45 @@ func providerCrashStatusCounts(output string) ([3]int, error) {
 	}
 	_, err := fmt.Sscanf(output[index:], "interrupted: %d provider turns to resume, %d provider turns to dead-letter, %d HTTP tool calls outcome unknown", &counts[0], &counts[1], &counts[2])
 	return counts, err
+}
+
+func openProviderCrashInspection(t *testing.T, backend, base string, document map[string]any, env []string) (storetest.ReleaseProcessReadOnlyInspection, error) {
+	t.Helper()
+	location := filepath.Join(base, "runtime.db")
+	if backend == "postgres" {
+		configuration, ok := document["database"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("served PostgreSQL database selection is absent")
+		}
+		passwordKey, _ := configuration["password_env"].(string)
+		password := ""
+		for _, entry := range env {
+			key, value, _ := strings.Cut(entry, "=")
+			if key == passwordKey {
+				password = value
+			}
+		}
+		if passwordKey == "" || password == "" {
+			return nil, fmt.Errorf("served PostgreSQL inspection credential is absent")
+		}
+		address := net.JoinHostPort(fmt.Sprint(configuration["host"]), fmt.Sprint(configuration["port"]))
+		selection := url.URL{Scheme: "postgres", User: url.UserPassword(fmt.Sprint(configuration["user"]), password),
+			Host: address, Path: "/" + fmt.Sprint(configuration["name"])}
+		query := selection.Query()
+		query.Set("sslmode", fmt.Sprint(configuration["sslmode"]))
+		selection.RawQuery = query.Encode()
+		location = selection.String()
+	}
+	return storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+}
+
+func providerCrashFullRows(t *testing.T, selected storetest.ReleaseProcessReadOnlyInspection) map[string]storetest.SelectedForkStorageTableSnapshot {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	rows, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
 }

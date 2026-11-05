@@ -17,9 +17,9 @@ func CompletionRecoveryAgentJoinSQL() string {
 		AND g.flow_instance_id=o.flow_instance_id AND g.flow_instance=o.flow_instance`
 }
 
-func CompletionRecoveryAgentStaleSQL(sqlite bool) string {
+func CompletionRecoveryAgentStaleSQL(sqlite bool, generationExpression string) string {
 	query := fmt.Sprintf(`g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS DISTINCT FROM o.runtime_epoch OR
-		g.lifecycle_generation IS DISTINCT FROM o.generation OR g.lifecycle_phase <> '%s'`, manager.AgentLifecycleRunning)
+		%s IS DISTINCT FROM o.generation OR g.lifecycle_phase <> '%s'`, generationExpression, manager.AgentLifecycleRunning)
 	if sqlite {
 		query = strings.ReplaceAll(query, "IS DISTINCT FROM", "IS NOT")
 	}
