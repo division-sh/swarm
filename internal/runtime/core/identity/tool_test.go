@@ -1,4 +1,4 @@
-package toolidentity
+package identity
 
 import (
 	"reflect"
@@ -17,7 +17,7 @@ func TestDeclarationNamesRetainsRoutingIdentities(t *testing.T) {
 		{"mcp__runtime-tools__emit_probe", []string{"mcp__runtime-tools__emit_probe", "emit_probe"}},
 		{"mcp__runtime-tools__read_file", []string{"mcp__runtime-tools__read_file", "read_file"}},
 	} {
-		if got := DeclarationNames(row.name); !reflect.DeepEqual(got, row.want) {
+		if got := ToolDeclarationNames(row.name); !reflect.DeepEqual(got, row.want) {
 			t.Fatalf("DeclarationNames(%q) = %v, want %v", row.name, got, row.want)
 		}
 	}
@@ -43,7 +43,7 @@ func TestCanonicalName(t *testing.T) {
 	}
 
 	for raw, want := range tests {
-		if got := CanonicalName(raw); got != want {
+		if got := CanonicalToolName(raw); got != want {
 			t.Fatalf("CanonicalName(%q) = %q, want %q", raw, got, want)
 		}
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +38,7 @@ func (b Binding) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(b.GenerationGrantID)); err != nil {
 		return fmt.Errorf("process execution generation grant is invalid: %w", err)
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(b.BundleHash)); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(strings.TrimSpace(b.BundleHash)); err != nil {
 		return fmt.Errorf("process execution bundle hash is invalid: %w", err)
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(b.RuntimeInstanceID)); err != nil {

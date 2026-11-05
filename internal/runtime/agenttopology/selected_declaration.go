@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -39,7 +39,7 @@ func (p SelectedDeclarationPlan) fingerprint() (string, error) {
 }
 
 func (p SelectedDeclarationPlan) Validate() error {
-	if err := bundleidentity.ValidateCanonicalHash(p.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(p.BundleHash); err != nil {
 		return err
 	}
 	if p.Agents == nil {
@@ -90,10 +90,10 @@ func (p SelectedForkDeclarationPlan) Validate() error {
 	if err != nil || id == uuid.Nil || id.String() != p.RunID {
 		return errors.New("selected declaration requires a canonical nonzero run UUID")
 	}
-	if err := bundleidentity.ValidateCanonicalHash(p.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(p.BundleHash); err != nil {
 		return err
 	}
-	if err := bundleidentity.ValidateCanonicalHash("bundle-v2:" + p.PlanFingerprint); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash("bundle-v2:" + p.PlanFingerprint); err != nil {
 		return fmt.Errorf("selected declaration fingerprint: %w", err)
 	}
 	return nil

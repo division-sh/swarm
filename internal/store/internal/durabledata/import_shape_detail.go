@@ -11,7 +11,7 @@ import (
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // RegisterCatalogWithImportShapesTx registers both exact-bundle catalogs in
@@ -117,7 +117,7 @@ func (o *Owner) GetDeclarationImportShape(ctx context.Context, bundleHash string
 	if err := o.requireCurrent(); err != nil {
 		return runtimedata.ImportShape{}, err
 	}
-	if err := bundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(bundleHash); err != nil {
 		return runtimedata.ImportShape{}, err
 	}
 	if err := ref.Validate(); err != nil {

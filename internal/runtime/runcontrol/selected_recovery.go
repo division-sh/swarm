@@ -3,7 +3,7 @@ package runcontrol
 import (
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -44,7 +44,7 @@ func (r SelectedForkRecoveryRequest) Validate() error {
 	if err := r.validateCancellationCommands(); err != nil {
 		return err
 	}
-	if err := bundleidentity.ValidateCanonicalHash(r.Entry.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(r.Entry.BundleHash); err != nil {
 		return err
 	}
 	b := r.Entry.Binding

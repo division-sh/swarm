@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
@@ -85,7 +85,7 @@ func parseCLIResponse(raw []byte) *Response {
 						args = m["arguments"]
 					}
 					resp.ToolCalls = append(resp.ToolCalls, ToolCall{
-						Name:      toolidentity.CanonicalName(name),
+						Name:      runtimeidentity.CanonicalToolName(name),
 						Arguments: args,
 					})
 				}
@@ -103,7 +103,7 @@ func parseCLIResponse(raw []byte) *Response {
 					args = m["input"]
 				}
 				resp.ToolCalls = append(resp.ToolCalls, ToolCall{
-					Name:      toolidentity.CanonicalName(name),
+					Name:      runtimeidentity.CanonicalToolName(name),
 					Arguments: args,
 				})
 			}
@@ -169,7 +169,7 @@ func buildConversationForkSandboxTransportSurface(tools []ToolDefinition) conver
 	canonicalVisible := make([]string, 0, len(runtimeNames))
 	visibleSet := make(map[string]struct{}, len(runtimeNames))
 	addCanonicalVisible := func(name string) {
-		name = toolidentity.CanonicalName(name)
+		name = runtimeidentity.CanonicalToolName(name)
 		if name == "" {
 			return
 		}
@@ -187,17 +187,17 @@ func buildConversationForkSandboxTransportSurface(tools []ToolDefinition) conver
 	providerMCPTools := make([]string, 0, len(runtimeNames))
 	localFallbackTools := make([]string, 0, len(runtimeNames))
 	for _, name := range runtimeNames {
-		canonical := toolidentity.CanonicalName(name)
+		canonical := runtimeidentity.CanonicalToolName(name)
 		if canonical == "" {
 			continue
 		}
-		providerMCPTools = append(providerMCPTools, toolidentity.RuntimeToolsMCPPrefix+canonical)
+		providerMCPTools = append(providerMCPTools, runtimeidentity.RuntimeToolsMCPPrefix+canonical)
 		if strings.HasPrefix(canonical, "emit_") {
 			localFallbackTools = append(localFallbackTools, canonical)
 			promptRuntime = append(promptRuntime, canonical)
 			continue
 		}
-		promptRuntime = append(promptRuntime, toolidentity.RuntimeToolsMCPPrefix+canonical)
+		promptRuntime = append(promptRuntime, runtimeidentity.RuntimeToolsMCPPrefix+canonical)
 	}
 
 	slices.Sort(canonicalVisible)
@@ -246,7 +246,7 @@ func conversationForkSandboxObservedCanonicalTools(tools []ToolDefinition, obser
 	filtered := make([]string, 0, len(observed))
 	seen := make(map[string]struct{}, len(observed))
 	for _, name := range observed {
-		name = toolidentity.CanonicalName(name)
+		name = runtimeidentity.CanonicalToolName(name)
 		if name == "" || isCLIControlToolName(name) {
 			continue
 		}
@@ -301,7 +301,7 @@ func conversationForkSandboxHasObservedSurface(resp *Response) bool {
 }
 
 func conversationForkSandboxToolCallAllowed(tools []ToolDefinition, resp *Response, name string) bool {
-	name = toolidentity.CanonicalName(name)
+	name = runtimeidentity.CanonicalToolName(name)
 	if name == "" {
 		return false
 	}
@@ -319,14 +319,14 @@ func appendCanonicalToolNames(dst []string, names []string) []string {
 	}
 	seen := make(map[string]struct{}, len(dst)+len(names))
 	for _, existing := range dst {
-		existing = toolidentity.CanonicalName(existing)
+		existing = runtimeidentity.CanonicalToolName(existing)
 		if existing == "" {
 			continue
 		}
 		seen[existing] = struct{}{}
 	}
 	for _, name := range names {
-		name = toolidentity.CanonicalName(name)
+		name = runtimeidentity.CanonicalToolName(name)
 		if name == "" {
 			continue
 		}

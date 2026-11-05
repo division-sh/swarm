@@ -7,8 +7,8 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 )
 
 type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) (any, error)
@@ -112,7 +112,7 @@ func (d *ToolDispatcher) admitRoutingName(ctx context.Context, actor models.Agen
 	if d == nil || d.resolver == nil {
 		return nil
 	}
-	for _, declaration := range toolidentity.DeclarationNames(name) {
+	for _, declaration := range runtimeidentity.ToolDeclarationNames(name) {
 		tool, found, err := d.resolver(ctx, actor, declaration)
 		if err != nil {
 			return err

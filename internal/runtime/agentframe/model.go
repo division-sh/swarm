@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/cel-go/cel"
@@ -356,7 +356,7 @@ func Complete(seed SessionSeed, draft TurnDraft, completion Completion) (Frame, 
 }
 
 func completeSession(seed SessionSeed, bundleHash string) (SessionContract, error) {
-	if err := bundleidentity.ValidateCanonicalHash(strings.TrimSpace(bundleHash)); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(strings.TrimSpace(bundleHash)); err != nil {
 		return SessionContract{}, fmt.Errorf("bundle hash: %w", err)
 	}
 	prompt, err := seed.ProviderPrompt.Text()

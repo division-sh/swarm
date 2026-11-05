@@ -14,7 +14,7 @@ import (
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
@@ -108,7 +108,7 @@ func RegisterCatalogTx(o *Owner, ctx context.Context, tx *sql.Tx, catalog runtim
 }
 
 func validateCatalog(catalog runtimedata.Catalog) error {
-	if err := runtimebundleidentity.ValidateCanonicalHash(catalog.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(catalog.BundleHash); err != nil {
 		return err
 	}
 	if len(catalog.Declarations) > runtimedata.MaxDataDeclarationsPerBundle {
@@ -751,7 +751,7 @@ func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string)
 	if err := o.requireCurrent(); err != nil {
 		return nil, err
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(bundleHash); err != nil {
 		return nil, err
 	}
 	var summaries []runtimedata.DeclarationSummary

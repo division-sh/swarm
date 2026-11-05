@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type cliStreamAccumulator struct {
@@ -194,7 +194,7 @@ func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
 			a.streamedCalls = append(a.streamedCalls, cliRecordedToolCall{
 				ID: strings.TrimSpace(call.ID),
 				Call: ToolCall{
-					Name:      toolidentity.CanonicalName(call.Name),
+					Name:      runtimeidentity.CanonicalToolName(call.Name),
 					Arguments: args,
 				},
 			})
@@ -305,7 +305,7 @@ func (a *cliStreamAccumulator) appendVisibleTool(name string) {
 			sort.Strings(a.providerVisibleTools)
 		}
 	}
-	if canonical := toolidentity.CanonicalName(name); canonical != "" {
+	if canonical := runtimeidentity.CanonicalToolName(name); canonical != "" {
 		if isCLIControlToolName(canonical) {
 			return
 		}

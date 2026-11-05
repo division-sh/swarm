@@ -7,7 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -128,7 +128,7 @@ func agentModuleGrantError(source semanticview.Source, flowID, name string) erro
 	if !ok {
 		return nil
 	}
-	for _, declaration := range toolidentity.DeclarationNames(name) {
+	for _, declaration := range runtimeidentity.ToolDeclarationNames(name) {
 		if tool, found := bundle.ToolEntryForFlow(flowID, declaration); found && !tool.AgentExposable() {
 			if tool.Handler() == runtimecontracts.ToolHandlerInProcess {
 				return fmt.Errorf("declares native provider tool %s; provider operations are private activities", declaration)

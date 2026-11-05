@@ -10,8 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
-	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -59,9 +58,9 @@ func (s PackSource) Diagnostic() string {
 }
 
 type PackIdentity struct {
-	id           packidentity.ID
-	version      packidentity.Version
-	manifestHash manifesthash.Hash
+	id           runtimeidentity.PackID
+	version      runtimeidentity.PackVersion
+	manifestHash runtimeidentity.ManifestHash
 	packType     packIdentityType
 	source       PackSource
 }
@@ -98,15 +97,15 @@ func admitPackIdentity(id, version, manifestHash, packType string, source PackSo
 	if id == "" || version == "" || strings.TrimSpace(manifestHash) == "" || strings.TrimSpace(packType) == "" {
 		return PackIdentity{}, fmt.Errorf("pack id, version, manifest hash, and type are required")
 	}
-	admittedID, err := packidentity.ParseID(id)
+	admittedID, err := runtimeidentity.ParsePackID(id)
 	if err != nil {
 		return PackIdentity{}, fmt.Errorf("pack identity %w", err)
 	}
-	admittedVersion, err := packidentity.ParseVersion(version)
+	admittedVersion, err := runtimeidentity.ParsePackVersion(version)
 	if err != nil {
 		return PackIdentity{}, fmt.Errorf("pack identity %w", err)
 	}
-	admittedManifestHash, err := manifesthash.Parse(manifestHash)
+	admittedManifestHash, err := runtimeidentity.ParseManifestHash(manifestHash)
 	if err != nil {
 		return PackIdentity{}, fmt.Errorf("pack identity %w", err)
 	}

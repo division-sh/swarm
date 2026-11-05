@@ -12,7 +12,7 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -38,7 +38,7 @@ type GrantRequest struct {
 }
 
 func (r GrantRequest) Validate() error {
-	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(r.BundleHash)); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(strings.TrimSpace(r.BundleHash)); err != nil {
 		return fmt.Errorf("runtime generation grant bundle_hash is invalid: %w", err)
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(r.RuntimeInstanceID)); err != nil {

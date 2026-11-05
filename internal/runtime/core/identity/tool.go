@@ -1,10 +1,10 @@
-package toolidentity
+package identity
 
 import "strings"
 
 const RuntimeToolsMCPPrefix = "mcp__runtime-tools__"
 
-func CanonicalName(name string) string {
+func CanonicalToolName(name string) string {
 	name = strings.TrimSpace(name)
 	if strings.HasPrefix(name, RuntimeToolsMCPPrefix) {
 		name = strings.TrimPrefix(name, RuntimeToolsMCPPrefix)
@@ -23,11 +23,11 @@ func CanonicalName(name string) string {
 	}
 }
 
-// DeclarationNames preserves each identity traversed before runtime routing.
-func DeclarationNames(name string) []string {
+// ToolDeclarationNames preserves each identity traversed before runtime routing.
+func ToolDeclarationNames(name string) []string {
 	requested := strings.TrimSpace(name)
 	bare := strings.TrimPrefix(requested, RuntimeToolsMCPPrefix)
-	canonical := CanonicalName(requested)
+	canonical := CanonicalToolName(requested)
 	result := []string{}
 	for _, candidate := range []string{requested, bare, canonical} {
 		if candidate == "" {
@@ -45,5 +45,5 @@ func DeclarationNames(name string) []string {
 }
 
 func IsEmitToolName(name string) bool {
-	return strings.HasPrefix(CanonicalName(name), "emit_")
+	return strings.HasPrefix(CanonicalToolName(name), "emit_")
 }

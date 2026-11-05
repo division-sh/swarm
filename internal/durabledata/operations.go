@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -463,7 +463,7 @@ func (f DeploymentFeed) Validate() error {
 	if parsed, err := uuid.Parse(f.RunID); err != nil || parsed == uuid.Nil || parsed.String() != f.RunID {
 		return fmt.Errorf("deployment feed requires a canonical non-zero run_id")
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(f.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(f.BundleHash); err != nil {
 		return err
 	}
 	if err := f.Declaration.Validate(); err != nil {

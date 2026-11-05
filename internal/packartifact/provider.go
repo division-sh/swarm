@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packmodel"
-	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -234,7 +234,7 @@ func (b ProviderBody) Hash() string {
 	if !b.Valid() {
 		return ""
 	}
-	return manifesthash.FromBytes(b.Bytes()).String()
+	return runtimeidentity.ManifestHashFromBytes(b.Bytes()).String()
 }
 
 func (b ProviderBody) SourceValue() yamlsource.Value {

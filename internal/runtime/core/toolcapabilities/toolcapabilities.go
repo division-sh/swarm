@@ -3,7 +3,7 @@ package toolcapabilities
 import (
 	"context"
 
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type ToolKind string
@@ -45,7 +45,7 @@ type Set struct {
 func NewSet(caps []Capability) Set {
 	byName := make(map[string]Capability, len(caps))
 	for _, cap := range caps {
-		name := toolidentity.CanonicalName(cap.Name)
+		name := runtimeidentity.CanonicalToolName(cap.Name)
 		if name == "" {
 			continue
 		}
@@ -59,7 +59,7 @@ func (s Set) Capability(name string) (Capability, bool) {
 	if len(s.ByName) == 0 {
 		return Capability{}, false
 	}
-	cap, ok := s.ByName[toolidentity.CanonicalName(name)]
+	cap, ok := s.ByName[runtimeidentity.CanonicalToolName(name)]
 	return cap, ok
 }
 

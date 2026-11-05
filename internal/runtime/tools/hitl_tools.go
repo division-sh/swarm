@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -30,7 +30,7 @@ type hitlIdentityLifecycleDescriptor struct {
 }
 
 func hitlIdentityLifecycleForName(name string) (hitlIdentityLifecycleDescriptor, bool) {
-	switch toolidentity.CanonicalName(name) {
+	switch runtimeidentity.CanonicalToolName(name) {
 	case NotifyHumanToolName:
 		return hitlIdentityLifecycleDescriptor{name: NotifyHumanToolName, lifecycle: hitlIdentityActive}, true
 	case AskHumanToolName:

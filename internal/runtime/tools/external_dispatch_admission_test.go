@@ -17,10 +17,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -723,13 +723,13 @@ func fixedTurnContextResolver(t testing.TB, actor models.AgentConfig) func(strin
 	}
 	planned := make([]managedcapabilities.PlannedTool, 0, len(actor.Tools))
 	for _, raw := range actor.Tools {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		planned = append(planned, managedcapabilities.PlannedTool{
 			Name:           name,
 			DefinitionHash: "rate-limit-test-definition-" + name,
 			Capability:     toolcapabilities.Capability{Name: name, Kind: toolcapabilities.KindStandard, Visible: true, Callable: true},
 			Bindings: []managedcapabilities.DeliveryBinding{{
-				Kind: managedcapabilities.BindingMCPTool, ExactName: toolidentity.RuntimeToolsMCPPrefix + name, RequiredEvidenceKind: "mcp_listed",
+				Kind: managedcapabilities.BindingMCPTool, ExactName: runtimeidentity.RuntimeToolsMCPPrefix + name, RequiredEvidenceKind: "mcp_listed",
 			}},
 		})
 	}

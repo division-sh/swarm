@@ -13,10 +13,10 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -312,7 +312,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			if surface, managed := managedcapabilities.FromContext(ctx); managed && surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn && len(surface.BindingNames(managedcapabilities.BindingMCPProvider)) > 0 {
 				mismatch := managedcapabilities.DeliveryMismatch{
 					BindingKind: managedcapabilities.BindingMCPProvider,
-					ExactName:   toolidentity.RuntimeToolsMCPPrefix + toolidentity.CanonicalName(toolName),
+					ExactName:   runtimeidentity.RuntimeToolsMCPPrefix + runtimeidentity.CanonicalToolName(toolName),
 					Kind:        "missing_mcp_provider_call_coordinate",
 					Detail:      "managed provider tools/call omitted its provider-owned occurrence coordinate",
 				}
@@ -531,7 +531,7 @@ func toolCallRelayResultLimit(toolName string, input any) int {
 }
 
 func toolIsLargeRelayFileRead(name string) bool {
-	return toolidentity.CanonicalName(name) == "read_file"
+	return runtimeidentity.CanonicalToolName(name) == "read_file"
 }
 
 func toolInputTargetsRuntimeRelayPath(input any) bool {
@@ -659,7 +659,7 @@ func toolCapabilityInContext(ctx context.Context, toolName string) (toolcapabili
 }
 
 func normalizeGatewayToolName(name string) string {
-	return toolidentity.CanonicalName(name)
+	return runtimeidentity.CanonicalToolName(name)
 }
 
 func emitTurnDedupeKey(toolName string, arguments any) string {

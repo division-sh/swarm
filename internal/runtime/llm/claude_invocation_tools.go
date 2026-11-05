@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -133,7 +133,7 @@ func exactCanonicalToolNames(names []string) ([]string, error) {
 	out := make([]string, 0, len(names))
 	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
-		canonical := toolidentity.CanonicalName(name)
+		canonical := runtimeidentity.CanonicalToolName(name)
 		if canonical == "" {
 			return nil, fmt.Errorf("empty tool name")
 		}

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type inboundEventContextKey struct{}
@@ -27,7 +27,7 @@ func DecodeSourceArtifactFact(bundleHash string) (SourceArtifactFact, error) {
 	if bundleHash != strings.TrimSpace(bundleHash) {
 		return SourceArtifactFact{}, fmt.Errorf("bundle_hash must not contain surrounding whitespace")
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(bundleHash); err != nil {
 		return SourceArtifactFact{}, err
 	}
 	return SourceArtifactFact{bundleHash: bundleHash}, nil

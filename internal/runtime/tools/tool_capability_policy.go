@@ -2,8 +2,8 @@ package tools
 
 import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 )
 
@@ -23,7 +23,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, emitRe
 	if hitlIdentityReferenceError(toolName, "tool authorization") != nil {
 		return decision
 	}
-	if toolidentity.IsEmitToolName(toolName) {
+	if runtimeidentity.IsEmitToolName(toolName) {
 		if emitRegistry != nil && emitRegistry.IsEmitToolAllowedForActor(actor, toolName) {
 			decision.class = toolAuthorizationEmitAllowed
 			decision.allowed = true
@@ -58,7 +58,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, emitRe
 }
 
 func toolKindPolicy(toolName string) toolcapabilities.ToolKind {
-	if toolidentity.IsEmitToolName(toolName) {
+	if runtimeidentity.IsEmitToolName(toolName) {
 		return toolcapabilities.KindEmit
 	}
 	return toolcapabilities.KindStandard

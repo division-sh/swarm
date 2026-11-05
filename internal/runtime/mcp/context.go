@@ -12,9 +12,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/channelactivation"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
@@ -253,7 +253,7 @@ func (r *TurnContextRegistry) ObserveMCPProviderCall(token, toolName, occurrence
 	if r == nil || strings.TrimSpace(token) == "" {
 		return managedcapabilities.Surface{}, fmt.Errorf("MCP provider call requires turn context token")
 	}
-	canonical := toolidentity.CanonicalName(toolName)
+	canonical := runtimeidentity.CanonicalToolName(toolName)
 	occurrence = strings.TrimSpace(occurrence)
 	if canonical == "" || occurrence == "" {
 		return managedcapabilities.Surface{}, fmt.Errorf("MCP provider call requires canonical tool and provider occurrence")
@@ -273,7 +273,7 @@ func (r *TurnContextRegistry) ObserveMCPProviderCall(token, toolName, occurrence
 	if surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn &&
 		(!turn.HasEffectAuthority || !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(turn.EffectAuthority.Target, surface)) {
 		updated, err := surface.ObserveMismatch(managedcapabilities.DeliveryMismatch{
-			BindingKind: managedcapabilities.BindingMCPProvider, ExactName: toolidentity.RuntimeToolsMCPPrefix + canonical,
+			BindingKind: managedcapabilities.BindingMCPProvider, ExactName: runtimeidentity.RuntimeToolsMCPPrefix + canonical,
 			Kind: "mcp_provider_call_authority_mismatch", Detail: "provider call authority does not match the planned turn surface",
 		})
 		if err != nil {
@@ -283,7 +283,7 @@ func (r *TurnContextRegistry) ObserveMCPProviderCall(token, toolName, occurrence
 		r.data[token] = turn
 		return updated, fmt.Errorf("MCP provider call authority does not match capability surface")
 	}
-	exactName := toolidentity.RuntimeToolsMCPPrefix + canonical
+	exactName := runtimeidentity.RuntimeToolsMCPPrefix + canonical
 	planned := false
 	for _, tool := range surface.Tools {
 		if tool.Name != canonical || !tool.Capability.Visible || !tool.Capability.Callable {

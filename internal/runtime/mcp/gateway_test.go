@@ -19,10 +19,10 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -123,7 +123,7 @@ func (f testToolExecutor) ToolDefinitionsForActor(models.AgentConfig) []llm.Tool
 func (f testToolExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, raw := range names {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		if name == "" {
 			continue
 		}
@@ -139,7 +139,7 @@ func (f testToolExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names [
 			requirement = toolcapabilities.ContextRequirementActorContext
 		}
 		kind := toolcapabilities.KindStandard
-		if toolidentity.IsEmitToolName(name) {
+		if runtimeidentity.IsEmitToolName(name) {
 			kind = toolcapabilities.KindEmit
 		}
 		caps = append(caps, toolcapabilities.Capability{
@@ -175,7 +175,7 @@ func (s *relayAwareToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig)
 func (s *relayAwareToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, raw := range names {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		if name == "" {
 			continue
 		}
@@ -221,7 +221,7 @@ func (s actorScopedToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig)
 func (s actorScopedToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, raw := range names {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		if name == "" {
 			continue
 		}
@@ -295,7 +295,7 @@ func roleScopedCurrentEntityEligibleInGatewayTest(ctx context.Context) bool {
 func roleScopedGatewayCapabilities(names []string, requestAllowed map[string]struct{}, currentEntityEligible bool) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, raw := range names {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		if name == "" {
 			continue
 		}
@@ -339,13 +339,13 @@ func (s *capabilityAwareExecutorStub) ToolDefinitionsForActor(models.AgentConfig
 func (s *capabilityAwareExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, raw := range names {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		callable := len(requestAllowed) == 0
 		if len(requestAllowed) > 0 {
 			_, callable = requestAllowed[name]
 		}
 		kind := toolcapabilities.KindStandard
-		if toolidentity.IsEmitToolName(name) {
+		if runtimeidentity.IsEmitToolName(name) {
 			kind = toolcapabilities.KindEmit
 		}
 		caps = append(caps, toolcapabilities.Capability{
@@ -382,7 +382,7 @@ func (s *actorAwareToolExecutorStub) ToolDefinitionsForActor(actor models.AgentC
 func (s *actorAwareToolExecutorStub) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
 	caps := make([]toolcapabilities.Capability, 0, len(names))
 	for _, raw := range names {
-		name := toolidentity.CanonicalName(raw)
+		name := runtimeidentity.CanonicalToolName(raw)
 		if name == "" {
 			continue
 		}
@@ -393,7 +393,7 @@ func (s *actorAwareToolExecutorStub) ToolCapabilitiesForActor(actor models.Agent
 			callable = false
 		}
 		kind := toolcapabilities.KindStandard
-		if toolidentity.IsEmitToolName(name) {
+		if runtimeidentity.IsEmitToolName(name) {
 			kind = toolcapabilities.KindEmit
 		}
 		caps = append(caps, toolcapabilities.Capability{
@@ -463,7 +463,7 @@ func testCapabilitySurface(t testing.TB, actor models.AgentConfig, names ...stri
 	t.Helper()
 	definitions := make([]llm.ToolDefinition, 0, len(names))
 	for _, name := range names {
-		definitions = append(definitions, llm.ToolDefinition{Name: toolidentity.CanonicalName(name)})
+		definitions = append(definitions, llm.ToolDefinition{Name: runtimeidentity.CanonicalToolName(name)})
 	}
 	return testCapabilitySurfaceForDefinitions(t, actor, definitions...)
 }
@@ -475,15 +475,15 @@ func testCapabilitySurfaceForDefinitions(t testing.TB, actor models.AgentConfig,
 	}
 	planned := make([]managedcapabilities.PlannedTool, 0, len(definitions))
 	for _, definition := range definitions {
-		canonical := toolidentity.CanonicalName(definition.Name)
+		canonical := runtimeidentity.CanonicalToolName(definition.Name)
 		kind := toolcapabilities.KindStandard
-		if toolidentity.IsEmitToolName(canonical) {
+		if runtimeidentity.IsEmitToolName(canonical) {
 			kind = toolcapabilities.KindEmit
 		}
 		planned = append(planned, managedcapabilities.PlannedTool{
 			Name: canonical, DefinitionHash: llm.ToolDefinitionIdentity(llmToolDefinitionForMCP(mcpToolDefinition(canonical, definition))),
 			Capability: toolcapabilities.Capability{Name: canonical, Kind: kind, Visible: true, Callable: true},
-			Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingMCPTool, ExactName: toolidentity.RuntimeToolsMCPPrefix + canonical, RequiredEvidenceKind: "mcp_listed"}},
+			Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingMCPTool, ExactName: runtimeidentity.RuntimeToolsMCPPrefix + canonical, RequiredEvidenceKind: "mcp_listed"}},
 		})
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{

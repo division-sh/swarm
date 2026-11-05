@@ -1,6 +1,6 @@
 package packmodel
 
-import "github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+import runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 
 const (
 	TypeTrigger        = "trigger"
@@ -33,4 +33,4 @@ type Requires struct {
 	ManagedCredentials []string `json:"managed_credentials"`
 }
 
-func ManifestHash(body []byte) string { return manifesthash.FromBytes(body).String() }
+func ManifestHash(body []byte) string { return runtimeidentity.ManifestHashFromBytes(body).String() }

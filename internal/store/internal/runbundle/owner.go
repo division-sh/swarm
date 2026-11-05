@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -199,7 +199,7 @@ func classify(row availabilityRow) (runtimerunbundle.Availability, error) {
 		RootAdmissionPresent:  row.RootAdmissionPresent,
 		SourceArtifactPresent: row.SourceArtifactPresent,
 	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(availability.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(availability.BundleHash); err != nil {
 		availability.ErrorCode = runtimerunbundle.CodeBundleDataIntegrityError
 		availability.Cause = "invalid_bundle_hash"
 		return availability, nil

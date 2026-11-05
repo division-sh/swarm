@@ -13,9 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -95,7 +94,7 @@ func (r SourceRef) Validate(persisted bool) error {
 // not a publication obligation. Initialization and dependency authority cannot
 // be inherited by persisting this projection.
 type ExecutionReceiver struct {
-	Node   identity.ExecutableNode        `json:"node"`
+	Node   runtimeidentity.ExecutableNode `json:"node"`
 	Target events.DeliveryTargetOwnership `json:"target"`
 }
 
@@ -304,7 +303,7 @@ func (o DeploymentOrigin) Validate() error {
 	if string(o.VersionID) != strings.TrimSpace(string(o.VersionID)) || string(o.SchemaDigest) != strings.TrimSpace(string(o.SchemaDigest)) {
 		return errors.New("deployment version and schema digest must be exact canonical values")
 	}
-	if err := bundleidentity.ValidateCanonicalHash(o.BundleHash); err != nil {
+	if err := runtimeidentity.ValidateCanonicalBundleHash(o.BundleHash); err != nil {
 		return err
 	}
 	if err := o.Declaration.Validate(); err != nil {
