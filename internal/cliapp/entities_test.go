@@ -1107,6 +1107,7 @@ func validEntitySummary(entityID string) map[string]any {
 		"entity_type":          "vertical",
 		"current_state":        "collecting",
 		"stage_defined":        true,
+		"life":                 1,
 		"slug":                 "vertical-1",
 		"name":                 "Vertical One",
 		"revision":             3,

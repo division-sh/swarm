@@ -514,11 +514,14 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 		return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
 	}
 	if entity.StageDefined == nil {
-		if entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
+		if entity.Life != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
 			entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil {
 			return fmt.Errorf("malformed %s: data-only entity cannot carry lifecycle metadata", prefix)
 		}
 		return nil
+	}
+	if entity.Life == nil || *entity.Life <= 0 {
+		return fmt.Errorf("malformed %s: constructed life must be positive", prefix)
 	}
 	if entity.Revision == nil || *entity.Revision <= 0 {
 		return fmt.Errorf("malformed %s: constructed revision must be positive", prefix)
