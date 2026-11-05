@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -191,10 +193,38 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, lease.ExpiresAt, 0)
+			selectedChild, err := pipeline.PrepareFlowInstanceSelection(f.ctx, f.store.(pipeline.FlowInstanceIndexReader), f.manager, request)
+			if err != nil || selectedChild.Activation == nil {
+				t.Fatalf("prepare session census sibling: %+v %v", selectedChild, err)
+			}
+			if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, *selectedChild.Activation); err != nil {
+				t.Fatal(err)
+			}
+			childLife := events.InstanceLife{RunID: runID, FlowInstance: selectedChild.Identity().InstancePath, Life: 1}
+			childIdentity := mustTestAgentIdentityForRun(runID, "life-agent", childLife.FlowInstance)
+			seedTestAgentRow(t, f.ctx, f.db, selected.postgres, childIdentity, "active")
+			childCtx := events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &childLife})
+			childLease, err := store.Acquire(childCtx, childIdentity, "captured-life-child-worker")
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, childLife, time.Now().UTC(), 1)
+			if result, err := store.ReleaseOutcome(childCtx, childLease); err != nil || !result.Acknowledged {
+				t.Fatalf("release census sibling: %+v %v", result, err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, childLife, time.Now().UTC(), 0)
 			// Fault only the native currentness coordinate; this does not claim to
 			// perform the atomic reset or its session lifecycle composition.
 			if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$2`, runID, runID); err != nil {
 				t.Fatal(err)
+			}
+			if _, err := readInstanceLifeSessionCensus(f.store, f.db, ctx, captured, time.Now().UTC()); err == nil {
+				t.Fatal("session census accepted the predecessor life")
+			} else if envelope, ok := failures.EnvelopeFromError(err); !ok || envelope.Detail.Code != "instance_restarted" {
+				t.Fatalf("session census lost exact stale-life refusal: %v", err)
 			}
 			before := snapshotRotationEffects(t, ctx, f.db, runID)
 			for name, write := range map[string]func() error{
@@ -225,8 +255,32 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 			if result, err := store.ReleaseOutcome(ctx, current); err != nil || !result.Acknowledged {
 				t.Fatalf("release exact current life: %+v %v", result, err)
 			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 0)
 		})
 	})
+}
+
+func readInstanceLifeSessionCensus(selected any, db *sql.DB, ctx context.Context, life events.InstanceLife, now time.Time) (int, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.lLMPostgresOwner.ReadActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
+	case *SQLiteRuntimeStore:
+		return owner.lLMSQLiteOwner.ReadActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
+	default:
+		panic("session census fixture requires its exact selected store")
+	}
+}
+
+func assertInstanceLifeSessionCensus(t *testing.T, selected any, db *sql.DB, ctx context.Context, life events.InstanceLife, now time.Time, want int) {
+	t.Helper()
+	if count, err := readInstanceLifeSessionCensus(selected, db, ctx, life, now); err != nil || count != want {
+		t.Fatalf("exact instance session census life=%+v count=%d want=%d err=%v", life, count, want, err)
+	}
 }
 
 func TestPostgresOrdinarySessionMutationChecksExpiryAfterRowLock(t *testing.T) {
