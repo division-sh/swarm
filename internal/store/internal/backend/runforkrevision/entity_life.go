@@ -15,8 +15,8 @@ import (
 )
 
 type EntityMetadataFact struct {
-	FirstRevision            int64                                          `json:"-"`
-	Revision                 int64                                          `json:"-"`
+	FirstRevision            int64
+	Revision                 int64
 	HistoricalConstruction   *runfork.RunForkCapturedHistoricalConstruction `json:"-"`
 	InitialProjectionVersion int                                            `json:"initial_projection_version"`
 	InitialMaterialization   json.RawMessage                                `json:"initial_materialization"`

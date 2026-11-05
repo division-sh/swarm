@@ -131,7 +131,9 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 			if err != nil {
 				return FlowInstanceSelection{}, err
 			}
-			if plan.Identity != observation.Identity() || plan.Restart == nil || *plan.Restart != *constructor.Restart || plan.Instance.Life != instance.Life+1 {
+			if plan.Identity != observation.Identity() || plan.Restart == nil ||
+				plan.Restart.Life != constructor.Restart.Life || plan.Restart.Revision != constructor.Restart.Revision ||
+				plan.Restart.FinalStage != constructor.Restart.FinalStage || plan.Instance.Life != instance.Life+1 {
 				return FlowInstanceSelection{}, fmt.Errorf("instance restart changed its observed identity or prepared life")
 			}
 			readiness, present := observation.Readiness()
