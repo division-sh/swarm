@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -26,7 +27,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, plan pipeline.FlowInstanceActivationPlan, record pipeline.FlowInstanceActivationRecord) (bool, pipeline.CommittedWorkflowLifecycleMutation, []agentidentity.Identity, error) {
+func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, plan pipeline.FlowInstanceActivationPlan, record pipeline.FlowInstanceActivationRecord) (bool, pipeline.CommittedWorkflowLifecycleMutation, []pipeline.InstanceRestartedAgent, error) {
 	var empty pipeline.CommittedWorkflowLifecycleMutation
 	if err := record.Validate(); err != nil {
 		return false, empty, nil, err
@@ -42,7 +43,7 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return false, empty, nil, err
 	}
 	life := events.InstanceLife{RunID: record.Identity.RunID, FlowInstance: record.Identity.Route.InstancePath, Life: plan.Restart.Life}
-	actors, err := agentpersistence.LockInstanceLifeActorsTx(ctx, tx, life, plan.Restart.ProcessBinding, !postgres)
+	actors, err := agentpersistence.ReadInstanceLifeActorsTx(ctx, tx, life, plan.Restart.ProcessBinding, !postgres)
 	if err != nil {
 		return false, empty, nil, err
 	}
@@ -54,13 +55,18 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return false, empty, nil, fmt.Errorf("instance restart requires its retained header")
 	}
 	if header.Life != life.Life {
-		if header.Life >= record.State.Life {
+		if header.Life == record.State.Life {
 			equal, err := committedInstanceLifeRestartEqual(ctx, tx, record)
 			if err != nil {
 				return false, empty, nil, err
 			}
 			if equal {
-				return false, empty, nil, nil
+				restarted, err := rotateInstanceLifeActorsTx(ctx, attempt, store.instanceLifeLifecycleOwner(), plan, actors, true)
+				if err != nil {
+					return false, empty, nil, err
+				}
+				lifecycle, err := recoverInstanceRestartLifecycleTx(ctx, tx, attempt, store, postgres, plan.Lifecycle)
+				return err == nil, lifecycle, restarted, err
 			}
 		}
 		return false, empty, nil, pipeline.InstanceRestarted(record.Identity, life.Life, header.Life)
@@ -85,7 +91,7 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if err != nil {
 		return false, empty, nil, err
 	}
-	restarted, err := rotateInstanceLifeActorsTx(ctx, attempt, store.instanceLifeLifecycleOwner(), plan, actors)
+	restarted, err := rotateInstanceLifeActorsTx(ctx, attempt, store.instanceLifeLifecycleOwner(), plan, actors, false)
 	if err != nil {
 		return false, empty, nil, err
 	}
@@ -169,11 +175,11 @@ func requireInstanceLifeQuiescentTx(ctx context.Context, tx *sql.Tx, store event
 	})
 }
 
-func rotateInstanceLifeActorsTx(ctx context.Context, attempt *mutationprotocol.Attempt, owner InstanceLifeLifecycleTxOwner, plan pipeline.FlowInstanceActivationPlan, actors []manager.AgentLifecycleState) ([]agentidentity.Identity, error) {
+func rotateInstanceLifeActorsTx(ctx context.Context, attempt *mutationprotocol.Attempt, owner InstanceLifeLifecycleTxOwner, plan pipeline.FlowInstanceActivationPlan, actors []manager.AgentLifecycleState, replay bool) ([]pipeline.InstanceRestartedAgent, error) {
 	if owner == nil {
 		return nil, fmt.Errorf("instance restart requires its full agent lifecycle owner")
 	}
-	identities := make([]agentidentity.Identity, 0, len(actors))
+	identities := make([]pipeline.InstanceRestartedAgent, 0, len(actors))
 	for _, actor := range actors {
 		raw, err := json.Marshal(struct {
 			Identity agentidentity.Identity
@@ -185,11 +191,26 @@ func rotateInstanceLifeActorsTx(ctx context.Context, attempt *mutationprotocol.A
 		}
 		digest := sha256.Sum256(raw)
 		operationID := uuid.NewSHA1(uuid.NameSpaceOID, digest[:]).String()
+		request := manager.AgentLifecycleTransition{DiagnosticOrigin: plan.Restart.DiagnosticOrigin,
+			OperationID: operationID, OperationKind: "restart", RequestHash: hex.EncodeToString(digest[:]), Identity: actor.Identity}
+		if replay {
+			result, found, err := owner.ReadAgentLifecycleOutcomeTx(ctx, attempt, request)
+			if err != nil {
+				return nil, err
+			}
+			if found && result.Subordinate.Action != sessions.LifecycleMutationRotateCurrentSet {
+				return nil, fmt.Errorf("instance restart operation did not rotate its exact current sessions")
+			}
+			if found && result.TransitionID == actor.LastTransitionID {
+				identities = append(identities, instanceRestartedActor(result))
+			}
+			continue
+		}
 		targetPhase, runMode := manager.AgentLifecycleRegistered, manager.AgentRunModeStopped
 		if actor.Phase == manager.AgentLifecycleRunning {
 			targetPhase, runMode = actor.Phase, actor.RunMode
 		}
-		_, err = owner.CommitAgentLifecycleTransitionTx(ctx, attempt, manager.AgentLifecycleTransition{
+		result, err := owner.CommitAgentLifecycleTransitionTx(ctx, attempt, manager.AgentLifecycleTransition{
 			DiagnosticOrigin: plan.Restart.DiagnosticOrigin, OperationID: operationID,
 			OperationKind: "restart", RequestHash: hex.EncodeToString(digest[:]), Identity: actor.Identity,
 			AgentID: actor.AgentID, Trigger: "instance_restart", ExpectedEpoch: actor.RuntimeEpoch,
@@ -203,7 +224,12 @@ func rotateInstanceLifeActorsTx(ctx context.Context, attempt *mutationprotocol.A
 		if err != nil {
 			return nil, err
 		}
-		identities = append(identities, actor.Identity)
+		identities = append(identities, instanceRestartedActor(result))
 	}
 	return identities, nil
+}
+
+func instanceRestartedActor(result manager.AgentLifecycleTransitionResult) pipeline.InstanceRestartedAgent {
+	return pipeline.InstanceRestartedAgent{Token: effects.LifecycleToken{Identity: result.Identity, AgentID: result.AgentID,
+		RuntimeEpoch: result.RuntimeEpoch, Generation: result.Generation}, TransitionID: result.TransitionID}
 }
