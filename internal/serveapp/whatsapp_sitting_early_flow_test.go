@@ -136,14 +136,16 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				}
 				native, operations = session.(*deploymentChannelSession), options.Operations
 				return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal,
-					afterRead: func(_ context.Context, op channelonboarding.Operation, view channelonboarding.PairingReadback, readErr error) {
-						operationID = op.OperationID
-						if readErr == nil && view.Code != "" {
+					observe: func(result channelonboarding.Result, _ bool) {
+						if view := result.Pairing; view != nil && view.Code != "" {
 							select {
-							case qr <- channelonboarding.Result{Operation: op, Pairing: &view}:
+							case qr <- result:
 							default:
 							}
 						}
+					},
+					afterRead: func(_ context.Context, op channelonboarding.Operation, view channelonboarding.PairingReadback, readErr error) {
+						operationID = op.OperationID
 						if readErr == nil && view.Paired && view.Connected && !op.AccountConfirmed && op.Phase == channelonboarding.PhaseAwaitingExternalIdentity && preview.CompareAndSwap(false, true) {
 							if err := pause("preview", ""); err != nil {
 								t.Errorf("preview hold: %v", err)
