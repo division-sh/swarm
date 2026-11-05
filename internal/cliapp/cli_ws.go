@@ -1,12 +1,12 @@
 package cliapp
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/gorilla/websocket"
 )
 
@@ -25,7 +25,7 @@ func cliAPIReadWebSocketJSON(conn *websocket.Conn, method, surface, endpoint, op
 			Budget: cliAPIResponseBudget, Overrun: len(raw),
 		}
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
+	if err := canonicaljson.DecodeInto(raw, out); err != nil {
 		return &cliAPIProtocolError{surface: surface, endpoint: endpoint, operation: operation, err: err}
 	}
 	return nil

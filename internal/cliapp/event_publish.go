@@ -2,12 +2,12 @@ package cliapp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
@@ -203,17 +203,11 @@ func (opts eventPublishCommandOptions) payload() (map[string]any, error) {
 		return nil, fmt.Errorf("event publish requires --payload-json <json-object>")
 	}
 	var payload map[string]any
-	decoder := json.NewDecoder(strings.NewReader(opts.payloadJSON))
-	decoder.UseNumber()
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, fmt.Errorf("--payload-json must be a valid JSON object: %w", err)
+	if err := canonicaljson.DecodeInto([]byte(opts.payloadJSON), &payload); err != nil {
+		return nil, fmt.Errorf("--payload-json must be a valid JSON object (exactly one JSON object): %w", err)
 	}
 	if payload == nil {
 		return nil, fmt.Errorf("--payload-json must be a JSON object")
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return nil, fmt.Errorf("--payload-json must contain exactly one JSON object")
 	}
 	return payload, nil
 }
