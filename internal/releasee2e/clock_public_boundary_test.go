@@ -29,7 +29,7 @@ func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
 			root := filepath.Join(base, backend)
 			config, env := clockReleaseConfig(t, root, backend)
 			source := filepath.Join(root, "contracts")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested"), source)
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested"), source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
@@ -88,7 +88,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			root := filepath.Join(base, backend)
 			config, env := clockReleaseConfig(t, root, backend)
 			source := filepath.Join(root, "contracts")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite"), source)
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite"), source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			selectedConfig, err := os.ReadFile(config)
 			if err != nil {

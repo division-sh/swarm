@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateflowpilot"
 )
 
 func TestW5AgentsVerifyAndDescribeSupportedSurface(t *testing.T) {

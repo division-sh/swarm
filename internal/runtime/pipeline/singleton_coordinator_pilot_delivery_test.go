@@ -12,7 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/google/uuid"
 )
 

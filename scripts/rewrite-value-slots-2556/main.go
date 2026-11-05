@@ -74,7 +74,7 @@ func captureCorpus(root, ledger, base string) error {
 	}
 	var plan []change
 	for _, name := range strings.Fields(string(names)) {
-		if len(slots[name]) == 0 && !strings.HasSuffix(name, "_test.go") && !strings.HasPrefix(name, "internal/runtime/testfixtures/canonicalrouting/") {
+		if len(slots[name]) == 0 && !strings.HasSuffix(name, "_test.go") && !strings.HasPrefix(name, "tests/support/runtime/testfixtures/canonicalrouting/") {
 			continue
 		}
 		command := exec.Command("git", "show", base+":"+name)

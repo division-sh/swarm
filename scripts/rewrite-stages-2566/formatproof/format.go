@@ -16,7 +16,7 @@ import (
 
 const (
 	Rule       = "f1-go-horizontal-v1"
-	Source     = "internal/runtime/testfixtures/canonicalrouting/notify_all_children.go"
+	Source     = "tests/support/runtime/testfixtures/canonicalrouting/notify_all_children.go"
 	Origin     = "16534f83b35657cf53278d6bfe5223855ae89dd89240e370540104153312123c"
 	Ledger     = "scripts/rewrite-stages-2566/finite-fixtures.json"
 	Successors = "scripts/rewrite-stages-2566/accounting-successors.json"

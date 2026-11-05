@@ -117,7 +117,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				}
 				fixtureCovered := false
 				for _, unit := range plan.Units {
-					if strings.HasPrefix(unit.ID, "broad-") && slices.Contains(unit.Packages, policy.Module+"/internal/runtime/testfixtures/canonicalrouting") {
+					if strings.HasPrefix(unit.ID, "broad-") && slices.Contains(unit.Packages, policy.Module+"/tests/support/runtime/testfixtures/canonicalrouting") {
 						fixtureCovered = true
 					}
 				}

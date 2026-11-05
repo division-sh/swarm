@@ -10,7 +10,7 @@ import (
 func CopyIssue2564H1Equivalent(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1"), root)
 	return root
 }
 
@@ -19,7 +19,7 @@ func CopyIssue2564H1Equivalent(t testing.TB) string {
 func CopyIssue2564H2Equivalent(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2"), root)
 	return root
 }
 
@@ -27,7 +27,7 @@ func CopyIssue2564H2Equivalent(t testing.TB) string {
 func CopyIssue2564H3CollectionOperations(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3"), root)
 	return root
 }
 
@@ -36,6 +36,6 @@ func CopyIssue2564H3CollectionOperations(t testing.TB) string {
 func CopyIssue2564M33NonterminalDeadline(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33"), root)
 	return root
 }

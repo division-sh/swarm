@@ -22,25 +22,25 @@ var angle = regexp.MustCompile(`list<([^<>]+)>`)
 // These pinned fragments become declarations only after Go concatenation or
 // formatting; they cannot be decoded as standalone YAML.
 var generatedSourceEdits = map[string][][2]string{
-	"internal/runtime/testfixtures/canonicalrouting/singleton_coordinator.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/singleton_coordinator.go": {
 		{"  audit_log: \"[AuditEntry]\"", "  audit_log: [AuditEntry]"},
 	},
-	"internal/runtime/testfixtures/canonicalrouting/notify_all_children.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/notify_all_children.go": {
 		{"  account_ids: \"[text]\"", "  account_ids: [text]"},
 		{"  account_ids: \"[NumericAccount]\"", "  account_ids: [NumericAccount]"},
 	},
-	"internal/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/notify_all_children_nested_serving.go": {
 		{"  task_ids: '[text]'", "  task_ids: [text]"},
 	},
-	"internal/runtime/testfixtures/canonicalrouting/arrival_join_binding.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/arrival_join_binding.go": {
 		{"  expected: \"[text]\"", "  expected: [text]"},
 		{"  missing: \"[text]\"", "  missing: [text]"},
 		{"  results: \"[JoinResult]\"", "  results: [JoinResult]"},
 	},
-	"internal/runtime/testfixtures/canonicalrouting/publication_sites.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/publication_sites.go": {
 		{"  items: '[%s]'", "  items: [%s]"},
 	},
-	"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitter_static.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/lifecycle_emitter_static.go": {
 		{"  items: \"[text]\"", "  items: [text]"},
 	},
 	"internal/runtime/pipeline/a2_join_deadline_execution_external_test.go": {
@@ -53,7 +53,7 @@ var generatedSourceEdits = map[string][][2]string{
 	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go": {
 		{"  account_ids: \"[NumericAccount]\"", "  account_ids: [NumericAccount]"},
 	},
-	"internal/runtime/testfixtures/canonicalrouting/root_reply.go": {
+	"tests/support/runtime/testfixtures/canonicalrouting/root_reply.go": {
 		{"  request_id: \"[text]\"", "  request_id: [text]"},
 	},
 	"internal/runtime/contracts/catalog_type_admission_test.go": {

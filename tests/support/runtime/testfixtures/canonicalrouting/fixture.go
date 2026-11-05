@@ -624,5 +624,5 @@ func RepoRoot(t testing.TB) string {
 	if !ok {
 		t.Fatal("resolve repo root")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", "..", ".."))
 }

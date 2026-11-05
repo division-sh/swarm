@@ -2,7 +2,7 @@ package cataloge2e
 
 import (
 	"context"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"path/filepath"
 	"strings"
 	"testing"

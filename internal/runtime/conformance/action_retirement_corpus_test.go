@@ -43,7 +43,7 @@ func TestActionRetirementCorpusHasNoLiveAuthoredActions(t *testing.T) {
 				t.Errorf("live YAML %s: retired fields=%v err=%v", path, found, err)
 			}
 		}
-		if !strings.HasPrefix(path, "internal/runtime/testfixtures/") || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if !strings.HasPrefix(path, "tests/support/runtime/testfixtures/") || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			continue
 		}
 		files := token.NewFileSet()
@@ -289,7 +289,7 @@ func actionRetirementCorpusFiles(t *testing.T, root string, allAuthored bool) ma
 		if relative == actionRetirementCorpusPath {
 			return nil
 		}
-		if allAuthored && filepath.Base(path) != "nodes.yaml" && filepath.Base(path) != "nodes.yml" && !(strings.HasPrefix(relative, "internal/runtime/testfixtures/") && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")) {
+		if allAuthored && filepath.Base(path) != "nodes.yaml" && filepath.Base(path) != "nodes.yml" && !(strings.HasPrefix(relative, "tests/support/runtime/testfixtures/") && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")) {
 			return nil
 		}
 		raw, err := os.ReadFile(path)
