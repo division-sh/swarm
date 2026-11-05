@@ -131,7 +131,7 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 					key := "life-timer-" + uuid.NewString()
 					command := testAgentGenericScheduleCommand(t, runID, "life-timer-agent", cell.path, uuid.NewString(), key, runtimegenericschedule.AbsoluteDue(cell.due))
 					if cell.path == runID {
-						command = testRootGenericScheduleCommand(t, runID, runID, key, runtimegenericschedule.AbsoluteDue(cell.due))
+						command = testRootGenericScheduleCommand(t, runID, uuid.NewString(), key, runtimegenericschedule.AbsoluteDue(cell.due))
 					}
 					var err error
 					command.RoutingSource, err = command.RoutingSource.WithLife(cell.life)
