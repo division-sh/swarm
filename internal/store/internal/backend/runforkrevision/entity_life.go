@@ -85,6 +85,10 @@ func ReadEntityLife(ctx context.Context, q entityLifeQueryer, runID, entityID st
 			rows.Close()
 			return EntityMetadataFact{}, empty, false, fmt.Errorf("entity revision key disagrees with its retained identity")
 		}
+		if present && fact.ConstructionKind == "constructed" && (fact.Life <= 0 || fact.InstanceRevision <= 0) {
+			rows.Close()
+			return EntityMetadataFact{}, empty, false, fmt.Errorf("entity life requires its retained positive life and native instance revision")
+		}
 		if present && fact.ConstructionKind == "constructed" && fact.Life == life && (!first || selected.Revision == 0) {
 			fact.Revision = revision
 			selected = fact
