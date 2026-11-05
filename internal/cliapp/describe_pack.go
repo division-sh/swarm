@@ -118,7 +118,7 @@ func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (desc
 		if err != nil {
 			return describePackContext{}, err
 		}
-		_, schemaErr := os.Stat(filepath.Join(paths.SourceRoot, "schema.yaml"))
+		_, schemaErr := os.Lstat(filepath.Join(paths.SourceRoot, "schema.yaml"))
 		if schemaErr != nil && !os.IsNotExist(schemaErr) {
 			return describePackContext{}, schemaErr
 		}
