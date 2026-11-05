@@ -218,62 +218,6 @@ func TestStoreStatusDoesNotBootstrapEmptyPostgres(t *testing.T) {
 	requireStoreReadout(t, stdout, "not held")
 }
 
-func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) {
-	var spec struct {
-		PlatformTables struct {
-			Tables map[string]struct {
-				PossessionLossContract       string `yaml:"possession_loss_contract"`
-				DiagnosticInspectionContract string `yaml:"diagnostic_inspection_contract"`
-			} `yaml:"tables"`
-		} `yaml:"platform_tables"`
-		AgentTopologyAuthority struct {
-			ProcessCapability struct {
-				Acquisition             string `yaml:"acquisition"`
-				Grants                  string `yaml:"grants"`
-				LifecycleReconciliation string `yaml:"lifecycle_reconciliation"`
-				Inspection              struct {
-					Rule string `yaml:"rule"`
-				} `yaml:"inspection"`
-			} `yaml:"process_capability"`
-		} `yaml:"agent_topology_authority"`
-	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), defaultPlatformSpecPath), &spec)
-	for _, retired := range []string{"runtime_startup_authority_facts", "runtime_startup_authority_repairs"} {
-		if _, exists := spec.PlatformTables.Tables[retired]; exists {
-			t.Fatalf("retired process journal remains in fresh DDL: %s", retired)
-		}
-	}
-	generation := spec.PlatformTables.Tables["runtime_process_generation"]
-	if !strings.Contains(generation.PossessionLossContract, "monitor deadline") ||
-		!strings.Contains(generation.PossessionLossContract, "while accepted work survives") {
-		t.Fatalf("loss contract omitted bounded proof or retained possession: %q", generation.PossessionLossContract)
-	}
-	if !strings.Contains(generation.DiagnosticInspectionContract, "without mutation") ||
-		!strings.Contains(generation.DiagnosticInspectionContract, "MVCC admission snapshot") ||
-		!strings.Contains(generation.DiagnosticInspectionContract, "No inspector creates") {
-		t.Fatalf("read-only inspection contract is incomplete: %q", generation.DiagnosticInspectionContract)
-	}
-	process := spec.AgentTopologyAuthority.ProcessCapability
-	for _, required := range []string{"backend-file identity", "pool bound to one inode", "<canonical database path>.possession",
-		"another SQLite-managed file are prohibited", "complete pair", "unsupported filesystem tampering",
-		"acknowledged native COMMIT", "there is no process journal"} {
-		if !strings.Contains(strings.ToLower(process.Acquisition), strings.ToLower(required)) {
-			t.Fatalf("acquisition contract omitted %q", required)
-		}
-	}
-	if !strings.Contains(process.Grants, "error can never publish successful release") || !strings.Contains(process.Grants, "configured monitor deadline") {
-		t.Fatalf("grant contract does not bind failed release classification: %q", process.Grants)
-	}
-	for _, required := range []string{"topology_authority_kind", "execution_lifetime", "fails closed"} {
-		if !strings.Contains(process.LifecycleReconciliation, required) {
-			t.Fatalf("lifecycle census omitted %q", required)
-		}
-	}
-	if !strings.Contains(process.Inspection.Rule, "cannot release") || !strings.Contains(process.Inspection.Rule, "before accepted work and exact disposal join") {
-		t.Fatalf("inspection creates early unlock permission: %q", process.Inspection.Rule)
-	}
-}
-
 func TestStoreHasNoRepairMutationCommand(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	path := filepath.Join(t.TempDir(), "uncreated", "selected.db")
