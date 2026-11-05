@@ -200,6 +200,7 @@ func issue2394ServedReporterSource(t *testing.T) string {
 }
 
 func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := issue2394ServedReporterSource(t)

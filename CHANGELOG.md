@@ -33,6 +33,9 @@ release approval or a promise of old-store migration.
 
 ### Changed
 
+- An rc.1 operator-channel proof store must be removed and the channel re-paired
+  before starting v0.7. Strict loading is unchanged; its refusal now includes
+  this operator action instead of only the retired-field decode error. (#2942)
 - Standby serve, `swarm health` and `/readyz` distinguish a held store from the
   last admitted serve instance and generation. `swarm store status` reports
   possession separately from readiness and reads interrupted-work counts without

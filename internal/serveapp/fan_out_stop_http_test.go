@@ -36,6 +36,7 @@ import (
 // durable obligations are a bounded fixture, not proof of authored creation or
 // a worker executing under the seeded held claim. Those have separate proofs.
 func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rig := newIssue2394StopRig(t, backend)
@@ -142,6 +143,7 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 }
 
 func TestIssue2394SelectedStopTwentyBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rig := newIssue2394StopRig(t, backend)

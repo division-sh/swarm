@@ -21,6 +21,7 @@ import (
 // Commit uncertainty is separately proved at the real driver Commit boundary in
 // runtimepersistence; statement rollback is not offered as its substitute.
 func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, fault := range []string{"invalid_capsule", "cancel_statement"} {
 			t.Run(string(backend)+"/"+fault, func(t *testing.T) {

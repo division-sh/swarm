@@ -35,6 +35,7 @@ func (s interruptedLifecycleDiagnosticStore) PersistLifecycleDiagnostic(ctx cont
 }
 
 func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			unsetStoreSelectorEnv(t)
