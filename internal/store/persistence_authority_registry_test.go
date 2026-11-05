@@ -191,7 +191,7 @@ func retiredRunFixtureMutationBridges(file *ast.File) []string {
 }
 
 func TestRetiredRunFixtureMutationBridgesRemainAbsent(t *testing.T) {
-	path := filepath.Join(persistenceAuthorityRepoRoot(t), "internal/testutil/runlifecyclefixture/fixture.go")
+	path := filepath.Join(persistenceAuthorityRepoRoot(t), "tests/support/testutil/runlifecyclefixture/fixture.go")
 	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
 	if err != nil {
 		t.Fatal(err)
