@@ -251,6 +251,11 @@ func TestDescribePackSignatureReadbackIsDefensive(t *testing.T) {
 	if _, err := (providertriggers.Manifest{}).InspectSignature(); err == nil {
 		t.Fatal("inspection accepted a missing admitted manifest")
 	}
+	stripe, _ := loaded.projection.ProviderTriggers.EntryByProvider("stripe")
+	signature, err := stripe.Manifest.InspectSignature()
+	if err != nil || signature.Encoding != "hex" || signature.TimestampParam != "t" || signature.TimestampTolerance != "5m" {
+		t.Fatalf("effective signature defaults/timestamp policy lost: %+v %v", signature, err)
+	}
 }
 
 func TestDescribePackProjectKeepsTargetSpecificCredentialFacts(t *testing.T) {
