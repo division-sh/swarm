@@ -378,7 +378,11 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			return returnCLIValidationError(errOut, err)
 		}
 		opts.apiOptions.input = input
-		defer func() { resultErr = errors.Join(resultErr, closeInput()) }()
+		defer func() {
+			if err := closeInput(); err != nil {
+				resultErr = errors.Join(resultErr, err)
+			}
+		}()
 	}
 	bundleHash := ""
 	if opts.sourceSet {
@@ -513,7 +517,11 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 			return returnCLIValidationError(errOut, err)
 		}
 		opts.apiOptions.input = input
-		defer func() { resultErr = errors.Join(resultErr, closeInput()) }()
+		defer func() {
+			if err := closeInput(); err != nil {
+				resultErr = errors.Join(resultErr, err)
+			}
+		}()
 	}
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
