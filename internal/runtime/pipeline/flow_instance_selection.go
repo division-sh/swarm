@@ -111,7 +111,7 @@ func selectObservedFlowInstance(ctx context.Context, planner FlowInstanceActivat
 	if err != nil {
 		return FlowInstanceSelection{}, err
 	}
-	if request.Mode != contracts.FlowInputResolutionModeSelect && instance.Status == "active" && instance.TerminatedAt.IsZero() {
+	if request.Mode != contracts.FlowInputResolutionModeSelect && instance.StageDefined && instance.Status == "active" && instance.TerminatedAt.IsZero() {
 		topology, found := semanticview.WorkflowStageTopology(request.Lookup.Source(), instance.WorkflowName)
 		if !found {
 			return FlowInstanceSelection{}, fmt.Errorf("existing receiver requires its compiled stage topology")

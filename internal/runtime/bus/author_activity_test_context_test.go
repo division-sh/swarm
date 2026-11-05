@@ -104,6 +104,7 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx cont
 		}
 	}
 	instance := runtimepipeline.WorkflowInstance{
+		Life:               1,
 		Mode:               schema.EffectiveMode(),
 		InstanceKey:        key,
 		ParentFlowID:       req.Instance.ParentRoute.FlowID,
