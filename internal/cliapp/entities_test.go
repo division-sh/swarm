@@ -237,6 +237,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
+	wrongLife := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Errorf("Authorization = %q, want bearer token", got)
@@ -244,7 +245,15 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		writeJSONRPCResult(t, w, captured.ID, validEntityFullResult("entity-1"))
+		result := validEntityFullResult("entity-1")
+		if captured.Params["iter"] != nil {
+			life := captured.Params["iter"]
+			if wrongLife {
+				life = float64(1)
+			}
+			result["entity"].(map[string]any)["life"] = life
+		}
+		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
 	defer server.Close()
 
@@ -278,6 +287,28 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	args := []string{"entity", "view", "entity-1", "--run-id", "run-1", "--iter", "2"}
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 || !reflect.DeepEqual(captured.Params, map[string]any{"entity_id": "entity-1", "run_id": "run-1", "iter": float64(2)}) {
+		t.Fatalf("explicit-life view lost exact entity/run/iter: code=%d params=%#v stderr=%s", code, captured.Params, stderr.String())
+	}
+	wrongLife = true
+	stdout.Reset()
+	stderr.Reset()
+	if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code == 0 {
+		t.Fatal("explicit-life view accepted another life")
+	}
+	for _, invalid := range []string{"0", "-1", "1.5"} {
+		captured = jsonRPCRequest{}
+		stdout.Reset()
+		stderr.Reset()
+		args[len(args)-1] = invalid
+		if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code == 0 || captured.Method != "" {
+			t.Fatalf("invalid iter %q reached RPC: code=%d request=%+v", invalid, code, captured)
+		}
 	}
 }
 
