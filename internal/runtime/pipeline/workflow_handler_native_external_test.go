@@ -215,6 +215,7 @@ func commitWorkflowNativeStructuralParent(t *testing.T, ctx context.Context, sou
 	}
 	entity, _ := entityruntime.ResolveForFlow(source, parent.TemplateID)
 	initial := pipeline.WorkflowInstance{
+		Life:       1,
 		InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
 		ParentFlowID: parent.ParentRoute.FlowID, ParentFlowInstance: parent.ParentRoute.FlowInstance, ParentEntityID: parent.ParentEntityID,
 		WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(),

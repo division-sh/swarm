@@ -29,6 +29,7 @@ func TestWorkflowInstanceStoreProjectionRejectsFieldsWithoutEntityContract(t *te
 func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 	now := time.Date(2026, time.August, 23, 4, 10, 0, 0, time.UTC)
 	record := WorkflowInstancePersistenceRecord{
+		Life:     1,
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
