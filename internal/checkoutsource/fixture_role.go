@@ -22,5 +22,6 @@ func IsTestFixturePackage(path string) bool {
 	return internal && (publicTestSupport ||
 		strings.Contains("/"+path+"/", "/testfixtures/") ||
 		path == "store/storetest" || path == "store/testsql" ||
-		path == "store/eventfixture" || strings.HasPrefix(path, "store/testutil/"))
+		path == "store/eventfixture" || strings.HasPrefix(path, "store/testutil/") ||
+		strings.HasPrefix(path, "testutil/"))
 }
