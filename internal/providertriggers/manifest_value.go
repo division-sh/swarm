@@ -48,6 +48,33 @@ func (m Manifest) RequiresSecret() bool {
 	return m.value != nil && m.value.definition.Secret.Required
 }
 
+// SignatureInspection is declaration readback, not request or secret authority.
+type SignatureInspection struct {
+	Authentication  RequestAuthentication `json:"authentication"`
+	Header          string                `json:"header,omitempty"`
+	Prefix          string                `json:"prefix,omitempty"`
+	SignedPayload   string                `json:"signed_payload,omitempty"`
+	Encoding        string                `json:"encoding,omitempty"`
+	SignatureParam  string                `json:"signature_param,omitempty"`
+	TimestampHeader string                `json:"timestamp_header,omitempty"`
+	TimestampParam  string                `json:"timestamp_param,omitempty"`
+}
+
+func (m Manifest) InspectSignature() (SignatureInspection, error) {
+	authentication, err := m.RequestAuthentication()
+	if err != nil {
+		return SignatureInspection{}, err
+	}
+	signature := m.value.definition.Signature
+	out := SignatureInspection{Authentication: authentication, Header: signature.Header,
+		Prefix: signature.Prefix, SignedPayload: signature.SignedPayload,
+		Encoding: signature.Encoding, SignatureParam: signature.SignatureParam}
+	if signature.Timestamp != nil {
+		out.TimestampHeader, out.TimestampParam = signature.Timestamp.Header, signature.Timestamp.Param
+	}
+	return out, nil
+}
+
 func (m Manifest) Metadata() map[string]string {
 	if m.value == nil {
 		return nil
