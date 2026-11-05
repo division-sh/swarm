@@ -1201,6 +1201,7 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 	return err
 }
 
+// NextLifecycleGeneration is per agent; it is not the process lease generation.
 func NextLifecycleGeneration(current uint64) uint64 {
 	return current + 1
 }
