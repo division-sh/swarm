@@ -540,6 +540,13 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 	}
 	target := record.Origin.Normalized()
+	life := events.InstanceLife{RunID: record.RunID, FlowInstance: target.FlowInstance, Life: record.OriginLife}
+	if life.FlowInstance == "" && target.EntityID == record.RunID && plan.ReceiverEndpoint().IsRoot() {
+		life.FlowInstance = record.RunID
+	}
+	if err := life.Validate(); err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
 	subscribers, err := r.resolveSelectedReceiverCarriers(ctx, evt.RunID(), plan, target)
 	if err != nil {
 		return nil, nil, nil, 0, nil, err
@@ -572,7 +579,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 				return nil, nil, nil, 0, nil, fmt.Errorf("project reply agent plan: %w", err)
 			}
 		}
-		deliveryContext := events.DeliveryContext{}
+		deliveryContext := events.DeliveryContext{Life: &life}
 		if record.EnclosingReplyContextID != "" {
 			deliveryContext.Reply = &events.ReplyContextRef{ID: record.EnclosingReplyContextID}
 		}

@@ -1034,6 +1034,7 @@ func (r ConnectRoutePlanReplyResolution) requestRecord(evt events.Event, origin 
 		ProviderInputPin:     r.providerInputPin.value,
 		ProviderOutputPin:    r.providerOutputPin.value,
 		Origin:               origin,
+		OriginLife:           evt.RoutingSource().Life(),
 		RequestCorrelationID: correlation,
 		CorrelationKey:       r.correlationKey.value,
 		State:                runtimereplycontext.StateOpen,

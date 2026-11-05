@@ -32,6 +32,7 @@ type Record struct {
 	ProviderInputPin        string
 	ProviderOutputPin       string
 	Origin                  events.RouteIdentity
+	OriginLife              int64
 	ReturnJoins             []events.JoinAdmissionReceipt
 	RequestCorrelationID    string
 	CorrelationKey          string
@@ -84,8 +85,8 @@ func (r Record) Validate() error {
 	if r.EnclosingReplyContextID == r.ID {
 		return fmt.Errorf("reply context cannot enclose itself")
 	}
-	if r.Origin.Empty() {
-		return fmt.Errorf("reply context origin route is required")
+	if r.Origin.Empty() || r.OriginLife <= 0 {
+		return fmt.Errorf("reply context requires its origin route and positive captured life")
 	}
 	if err := (events.DeliveryContext{Joins: r.ReturnJoins}).Validate(); err != nil {
 		return fmt.Errorf("reply context return admission: %w", err)
@@ -93,7 +94,7 @@ func (r Record) Validate() error {
 	for _, receipt := range r.ReturnJoins {
 		if receipt.Disposition == events.JoinAdmissionBound {
 			entry := receipt.Ref.StageEntry()
-			if entry.RunID != r.RunID || entry.InstancePath != r.Origin.FlowInstance || entry.EntityID != r.Origin.EntityID {
+			if entry.RunID != r.RunID || entry.InstancePath != r.Origin.FlowInstance || entry.EntityID != r.Origin.EntityID || entry.Life != r.OriginLife {
 				return fmt.Errorf("reply return admission contradicts its retained origin")
 			}
 		}
@@ -132,6 +133,7 @@ func (r Record) SameIdentity(other Record) bool {
 		r.ProviderInputPin == other.ProviderInputPin &&
 		r.ProviderOutputPin == other.ProviderOutputPin &&
 		r.Origin == other.Origin &&
+		r.OriginLife == other.OriginLife &&
 		r.sameReturnJoins(other) &&
 		r.RequestCorrelationID == other.RequestCorrelationID &&
 		r.CorrelationKey == other.CorrelationKey

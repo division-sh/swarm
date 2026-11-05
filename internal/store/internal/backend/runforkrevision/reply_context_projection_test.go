@@ -21,7 +21,7 @@ func TestReplyContextProjectionCoversCanonicalRecord(t *testing.T) {
 		"SourceRunID": "source_run_id", "SourceRequestEventID": "source_request_event_id", "EnclosingReplyContextID": "enclosing_reply_context_id",
 		"RequesterFlowID": "requester_flow_id", "RequestOutputPin": "request_output_pin", "ReplyInputPin": "reply_input_pin",
 		"ProviderFlowID": "provider_flow_id", "ProviderInputPin": "provider_input_pin", "ProviderOutputPin": "provider_output_pin",
-		"Origin": "origin_route", "ReturnJoins": "origin_route", "RequestCorrelationID": "request_correlation_id",
+		"Origin": "origin_route", "OriginLife": "origin_route", "ReturnJoins": "origin_route", "RequestCorrelationID": "request_correlation_id",
 		"CorrelationKey": "correlation_key", "State": "state", "AcceptedReplyEventID": "accepted_reply_event_id",
 		"CreatedAt": "created_at", "UpdatedAt": "updated_at", "TerminalAt": "terminal_at",
 	}
@@ -105,7 +105,7 @@ func TestReplyContextProjectionNormalizesWithoutLosingOriginOrDisposition(t *tes
 		SourceRunID: entry.RunID, SourceRequestEventID: "33333333-3333-4333-8333-333333333333",
 		RequesterFlowID: "collector", RequestOutputPin: "request", ReplyInputPin: "return", ProviderFlowID: "worker",
 		ProviderInputPin: "request", ProviderOutputPin: "return", RequestCorrelationID: "request-42", CorrelationKey: "item.id",
-		Origin:      events.RouteIdentity{FlowID: "collector", FlowInstance: entry.InstancePath, EntityID: entry.EntityID},
+		Origin: events.RouteIdentity{FlowID: "collector", FlowInstance: entry.InstancePath, EntityID: entry.EntityID}, OriginLife: entry.Life,
 		ReturnJoins: []events.JoinAdmissionReceipt{{Ref: bound, Disposition: events.JoinAdmissionBound}}, State: replycontext.StateOpen,
 	}
 	origin, err := want.EncodeOrigin()

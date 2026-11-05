@@ -270,7 +270,7 @@ func TestIssue642ToolEmitConsumesActualReplyPlanRefusals(t *testing.T) {
 				RunID: toolTestRunID, RequestEventID: requestID, SourceRunID: toolTestRunID, SourceRequestEventID: requestID,
 				RequesterFlowID: binding.RequesterFlowID, RequestOutputPin: binding.RequestOutputPin, ReplyInputPin: binding.ReplyInputPin,
 				ProviderFlowID: binding.ProviderFlowID, ProviderInputPin: binding.ProviderInputPin, ProviderOutputPin: binding.ProviderOutputPin,
-				Origin:               events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: flowidentity.EntityID("consumer")},
+				Origin: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: flowidentity.EntityID("consumer")}, OriginLife: 1,
 				RequestCorrelationID: requestID, State: replycontext.StateTerminal, AcceptedReplyEventID: uuid.NewString(),
 				CreatedAt: now, UpdatedAt: terminalAt, TerminalAt: &terminalAt,
 			}

@@ -19,7 +19,7 @@ func historicalReplyReturnFixture(t *testing.T) (RunForkPlan, string, replyconte
 		ID: "owned-reply", RunID: uuid.NewString(), RequestEventID: uuid.NewString(), SourceRunID: uuid.NewString(), SourceRequestEventID: uuid.NewString(),
 		RequesterFlowID: "requester", RequestOutputPin: "request", ReplyInputPin: "return",
 		ProviderFlowID: "provider", ProviderInputPin: "request", ProviderOutputPin: "return",
-		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/one", EntityID: uuid.NewString()},
+		Origin: events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/one", EntityID: uuid.NewString()}, OriginLife: 1,
 		RequestCorrelationID: "business-key", State: replycontext.StateTerminal, AcceptedReplyEventID: uuid.NewString(),
 		CreatedAt: born, UpdatedAt: settled, TerminalAt: &settled,
 	}
