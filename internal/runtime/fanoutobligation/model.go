@@ -176,6 +176,14 @@ func (c Capsule) Validate() error {
 	if !c.Route.Valid() || c.ChainDepth < 0 || c.ProducerSource.Empty() {
 		return errors.New("fan-out capsule requires route, producer source, and nonnegative chain depth")
 	}
+	if life := c.Context.Life; life != nil {
+		if life.RunID != c.Lineage.RunID || life.FlowInstance != c.Route.InstancePath || life.Life != c.ProducerSource.Life() {
+			return errors.New("fan-out continuation life contradicts its captured execution owner")
+		}
+		if c.Receiver != nil && life.Life != c.Receiver.Target.Life() {
+			return errors.New("fan-out receiver contradicts its captured continuation life")
+		}
+	}
 	if c.Receiver != nil {
 		r := c.Receiver
 		if err := r.Target.Validate(); err != nil {
