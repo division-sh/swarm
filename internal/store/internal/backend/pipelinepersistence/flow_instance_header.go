@@ -238,7 +238,7 @@ func requireRestartWorkflowDescriptor(lifecycle pipeline.WorkflowLifecycleCompan
 	if err != nil {
 		return err
 	}
-	if !sameWorkflowDescriptor(lifecycle, expected) || !actual.SameRestartControl(want) {
+	if !sameWorkflowDescriptor(lifecycle, expected) || !actual.SameRestartControl(want, lifecycle.Status) {
 		return fmt.Errorf("instance restart changed its exact physical descriptor")
 	}
 	return nil
