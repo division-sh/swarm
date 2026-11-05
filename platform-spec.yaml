@@ -32138,7 +32138,7 @@ cli_specification:
         auth_or_missing_token: 4
         entity_not_found: 5
       proof_expectations:
-      - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
+      - exact /v1/rpc entity.get call with required entity_id and optional run_id and positive iter params
       - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing explicit token for non-loopback API targets make zero API calls
       - ENTITY_NOT_FOUND maps to resource-not-found exit 5
       - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/bookkeeping/accumulated maps fail closed with tested exit-code behavior
@@ -40281,6 +40281,12 @@ api_specification:
         description: Disambiguates entities reused across runs.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: iter
+        required: false
+        description: Positive instance life; omitted selects the current life. Prior-life reads use retained state and revision rows.
+        schema:
+          type: integer
+          minimum: 1
       result:
         name: result
         required: true

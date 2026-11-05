@@ -1084,7 +1084,20 @@ func OperatorEntityHandlers(opts EntityHandlerOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
-			entity, err := reads.LoadOperatorEntity(ctx, entityID, runID)
+			var entity operatorread.OperatorEntityFull
+			if raw, present := req.Params["iter"]; present {
+				life, valid := integerParam(raw)
+				if !valid || life <= 0 {
+					return nil, NewInvalidParamsError(map[string]any{"field": "iter", "reason": "must be a positive integer"})
+				}
+				lifeReads, ok := reads.(operatorread.EntityLifeReader)
+				if !ok {
+					return nil, fmt.Errorf("entity life read owner is unavailable")
+				}
+				entity, err = lifeReads.LoadOperatorEntityAtLife(ctx, entityID, runID, int64(life))
+			} else {
+				entity, err = reads.LoadOperatorEntity(ctx, entityID, runID)
+			}
 			if errors.Is(err, operatorread.ErrEntityNotFound) {
 				return nil, NewApplicationError(EntityNotFoundCode, false, map[string]any{"entity_id": entityID})
 			}

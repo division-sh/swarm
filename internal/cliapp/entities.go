@@ -44,6 +44,8 @@ type entityViewCommandOptions struct {
 
 	runID    string
 	runIDSet bool
+	iter     int64
+	iterSet  bool
 }
 
 type entityAggregateCommandOptions struct {
@@ -193,11 +195,13 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
 			viewOpts.runIDSet = cmd.Flags().Changed("run-id")
+			viewOpts.iterSet = cmd.Flags().Changed("iter")
 			return runEntityViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], viewOpts)
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List entity ids with `swarm entity list`.")
 	cmd.Flags().StringVar(&viewOpts.runID, "run-id", "", "Disambiguate entities reused across runs")
+	cmd.Flags().Int64Var(&viewOpts.iter, "iter", 0, "Read one positive instance life; defaults to current")
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLIOutputVerboseFlag(cmd, &viewOpts.output)
@@ -255,6 +259,12 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 		return returnCLIValidationError(errOut, err)
 	}
 	params := map[string]any{}
+	if opts.iterSet {
+		if opts.iter <= 0 {
+			return returnCLIValidationError(errOut, fmt.Errorf("--iter must be a positive integer"))
+		}
+		params["iter"] = opts.iter
+	}
 	runID := ""
 	if opts.runIDSet {
 		var err error
