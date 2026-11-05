@@ -70,7 +70,7 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
-	cmd.AddCommand(newDescribeRoutesCommand(ctx, root, rootOpts))
+	cmd.AddCommand(newDescribeRoutesCommand(ctx, root, rootOpts), newDescribePackCommand(ctx, root, rootOpts))
 	return cmd
 }
 

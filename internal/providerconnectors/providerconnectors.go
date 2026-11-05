@@ -159,7 +159,7 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 			if _, exists := effective[installed.ToolID]; exists {
 				continue
 			}
-			subject, err := availableCapabilitySubject(installed)
+			subject, err := installed.CapabilitySubject()
 			if err != nil {
 				return nil, err
 			}
@@ -439,7 +439,8 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	return normalized[0], nil
 }
 
-func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) {
+// CapabilitySubject is installed declaration readback, not effective tool admission.
+func (installed InstalledTool) CapabilitySubject() (packs.Subject, error) {
 	provider, action, valid := splitToolID(installed.ToolID)
 	if !valid {
 		return packs.Subject{}, fmt.Errorf("installed provider connector tool %q must use <provider>.<action> id form", installed.ToolID)
