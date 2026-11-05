@@ -114,6 +114,56 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 				t.Fatalf("read scoped obligations after rollback: %v", err)
 			}
 			assertTimerFamilyObligation(t, mustTimerRun(t, after, runID).Families, runtimetimerobligation.FamilyScheduledTask, 0, 0, 0)
+			t.Run("captured_instance_life", func(t *testing.T) {
+				store := selected.(runtimegenericschedule.Store)
+				setGenericScheduleClock(t, store, func() time.Time { return observedAt.Add(-2 * time.Hour) })
+				for _, cell := range []struct {
+					path string
+					life int64
+					due  time.Time
+				}{
+					{"life-worker/one", 7, observedAt},
+					{"life-worker/one", 7, observedAt.Add(time.Hour)},
+					{"life-worker/one", 6, observedAt},
+					{"life-worker/sibling", 7, observedAt},
+					{runID, 7, observedAt},
+				} {
+					key := "life-timer-" + uuid.NewString()
+					command := testAgentGenericScheduleCommand(t, runID, "life-timer-agent", cell.path, uuid.NewString(), key, runtimegenericschedule.AbsoluteDue(cell.due))
+					if cell.path == runID {
+						command = testRootGenericScheduleCommand(t, runID, runID, key, runtimegenericschedule.AbsoluteDue(cell.due))
+					}
+					var err error
+					command.RoutingSource, err = command.RoutingSource.WithLife(cell.life)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if result, err := store.AdmitGenericScheduleOutcome(ctx, command); err != nil || !result.Acknowledged || result.Result.Outcome != runtimegenericschedule.AdmissionCreated {
+						t.Fatalf("admit captured-life timer: %+v %v", result, err)
+					}
+				}
+				for _, cell := range []struct {
+					path        string
+					life        int64
+					active, due int
+				}{{"life-worker/one", 7, 2, 1}, {"life-worker/one", 6, 1, 1}, {runID, 7, 1, 1}} {
+					scope, err := runtimetimerobligation.InstanceLife(events.InstanceLife{RunID: runID, FlowInstance: cell.path, Life: cell.life})
+					if err != nil {
+						t.Fatal(err)
+					}
+					snapshot, err := reader.ReadTimerObligations(ctx, scope, observedAt)
+					if err != nil {
+						t.Fatal(err)
+					}
+					assertTimerFamilyObligation(t, mustTimerRun(t, snapshot, runID).Families, runtimetimerobligation.FamilyTimer, cell.active, cell.due, cell.active)
+					if len(snapshot.Activations) != cell.active {
+						t.Fatalf("instance timer read included sibling or other life: %+v", snapshot.Activations)
+					}
+				}
+				if _, err := runtimetimerobligation.InstanceLife(events.InstanceLife{RunID: runID, FlowInstance: "life-worker/one"}); err == nil {
+					t.Fatal("instance timer scope repaired absent life")
+				}
+			})
 		})
 	}
 }

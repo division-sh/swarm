@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/events"
 )
 
 type Family string
@@ -39,6 +41,7 @@ func AllFamilies() []Family {
 
 type Scope struct {
 	runID string
+	life  events.InstanceLife
 }
 
 func All() Scope {
@@ -55,6 +58,17 @@ func Run(runID string) (Scope, error) {
 
 func (s Scope) RunID() string {
 	return s.runID
+}
+
+func InstanceLife(life events.InstanceLife) (Scope, error) {
+	if err := life.Validate(); err != nil {
+		return Scope{}, err
+	}
+	return Scope{runID: life.RunID, life: life}, nil
+}
+
+func (s Scope) InstanceLife() (events.InstanceLife, bool) {
+	return s.life, s.life.Life != 0
 }
 
 type FamilyObligation struct {

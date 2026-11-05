@@ -3,10 +3,12 @@ package timerobligation
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	. "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -111,6 +113,14 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 	if observedAt.IsZero() {
 		return Snapshot{}, fmt.Errorf("timer obligation reader requires exact observation time")
 	}
+	life, scopedLife := scope.InstanceLife()
+	lifeColumn := ""
+	if scopedLife {
+		if err := life.Validate(); err != nil || life.RunID != scope.RunID() {
+			return Snapshot{}, fmt.Errorf("timer obligation instance scope is invalid")
+		}
+		lifeColumn = ", t.routing_source"
+	}
 
 	query := `
 		SELECT
@@ -124,11 +134,10 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			COALESCE(CAST(t.occurrence_event_id AS TEXT), ''), t.occurrence_admitted_at, t.accepted_at,
 			COALESCE(t.cancel_cause, ''), t.cancelled_at,
 			COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
-			COALESCE(t.flow_instance, '')
+			COALESCE(t.flow_instance, '')` + lifeColumn + `
 		FROM timers t
 		LEFT JOIN runs r ON r.run_id = t.run_id
 		WHERE (? = '' OR t.run_id = ?)
-		ORDER BY t.task_type, t.run_id, t.timer_id
 	`
 	args := []any{scope.RunID(), scope.RunID()}
 	if postgres {
@@ -144,14 +153,23 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 				COALESCE(t.occurrence_event_id::text, ''), t.occurrence_admitted_at, t.accepted_at,
 				COALESCE(t.cancel_cause, ''), t.cancelled_at,
 				COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
-				COALESCE(t.flow_instance, '')
+				COALESCE(t.flow_instance, '')` + lifeColumn + `
 			FROM timers t
 			LEFT JOIN runs r ON r.run_id = t.run_id
 			WHERE (NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid)
-			ORDER BY t.task_type, t.run_id, t.timer_id
 		`
 		args = []any{scope.RunID()}
 	}
+	if scopedLife {
+		if postgres {
+			query += ` AND (t.flow_instance=$2 OR (COALESCE(t.flow_instance,'')='' AND $2=$1))`
+			args = append(args, life.FlowInstance)
+		} else {
+			query += ` AND (t.flow_instance=? OR (COALESCE(t.flow_instance,'')='' AND ?=?))`
+			args = append(args, life.FlowInstance, life.FlowInstance, life.RunID)
+		}
+	}
+	query += ` ORDER BY t.task_type, t.run_id, t.timer_id`
 
 	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -175,14 +193,35 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			runStatus                                                          string
 			activation                                                         Activation
 			initialAt, occurrenceAdmittedAt, acceptedAt, cancelledAt, failedAt any
+			sourceRaw                                                          []byte
 		)
-		if err := rows.Scan(
+		destination := []any{
 			&familyValue, &runID, &status, &ownerKind, &fireAtValue, &runStatus,
 			&activation.ActivationID, &initialAt, &activation.OccurrenceEventID,
 			&occurrenceAdmittedAt, &acceptedAt, &activation.CancelCause, &cancelledAt,
 			&activation.FailureCode, &activation.FailureMessage, &failedAt, &activation.FlowInstance,
-		); err != nil {
+		}
+		if scopedLife {
+			destination = append(destination, &sourceRaw)
+		}
+		if err := rows.Scan(destination...); err != nil {
 			return Snapshot{}, fmt.Errorf("scan timer obligation: %w", err)
+		}
+		if scopedLife {
+			var source events.RoutingSource
+			if err := json.Unmarshal(sourceRaw, &source); err != nil {
+				return Snapshot{}, fmt.Errorf("decode instance-life timer source: %w", err)
+			}
+			path := source.Route().FlowInstance
+			if source.Kind() == events.RoutingSourceRoot {
+				path = source.Route().EntityID
+			}
+			if runID != life.RunID || path != life.FlowInstance || source.Life() <= 0 {
+				return Snapshot{}, fmt.Errorf("instance-life timer source contradicts its retained owner")
+			}
+			if source.Life() != life.Life {
+				continue
+			}
 		}
 		fireAt, err := timerTimeValue(fireAtValue)
 		if err != nil {
