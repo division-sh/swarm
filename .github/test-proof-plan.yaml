@@ -1068,6 +1068,7 @@ units:
       TestContextCompactionPreservesMemoryAcrossRestartBothStores: [summary/default_sqlite, summary/explicit_postgres, summary_overflow/default_sqlite, summary_overflow/explicit_postgres, summary_overflow_deepseek/default_sqlite, summary_overflow_deepseek/explicit_postgres, anthropic_native/default_sqlite, anthropic_native/explicit_postgres, openai_native/default_sqlite, openai_native/explicit_postgres]
       TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores: [default_sqlite, explicit_postgres]
       TestExactOriginPublicationWaitHeldDiagnosticBothStores: [default_sqlite, explicit_postgres]
+    go_timeout: 15m
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
