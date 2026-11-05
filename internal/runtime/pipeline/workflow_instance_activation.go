@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -108,12 +109,17 @@ type CommittedFlowInstanceActivation struct {
 	Plan                    FlowInstanceActivationPlan
 	Created                 bool
 	StartedOver             bool
-	RestartedAgents         []agentidentity.Identity
+	RestartedAgents         []InstanceRestartedAgent
 	Lifecycle               CommittedWorkflowLifecycleMutation
 	ReadinessAttemptOrdinal uint64
 	Children                []CommittedFlowInstanceActivation
 	// Acknowledged is set only after the selected-store commit is acknowledged.
 	Acknowledged bool
+}
+
+type InstanceRestartedAgent struct {
+	Token        effects.LifecycleToken
+	TransitionID string
 }
 
 func (a CommittedFlowInstanceActivation) ChannelCardsChanged() bool {
@@ -165,7 +171,14 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 	if len(a.RestartedAgents) != 0 && !a.StartedOver {
 		return fmt.Errorf("only a committed instance restart can change actor generations")
 	}
-	for index, identity := range a.RestartedAgents {
+	for index, restarted := range a.RestartedAgents {
+		identity := restarted.Token.Identity
+		if !restarted.Token.Valid() {
+			return fmt.Errorf("instance restart requires its committed actor token")
+		}
+		if _, err := uuid.Parse(restarted.TransitionID); err != nil {
+			return fmt.Errorf("instance restart requires its exact actor transition")
+		}
 		if err := identity.Validate(); err != nil || identity.RunID != a.Plan.Readiness.RunID {
 			return fmt.Errorf("instance restart requires exact acquired actor identities")
 		}
@@ -177,7 +190,7 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 			return fmt.Errorf("instance restart actor belongs to another instance")
 		}
 		for _, previous := range a.RestartedAgents[:index] {
-			if identity == previous {
+			if identity == previous.Token.Identity {
 				return fmt.Errorf("instance restart repeated an actor identity")
 			}
 		}

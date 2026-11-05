@@ -153,6 +153,13 @@ func (pc *PipelineCoordinator) FinalizeInitialEntryLifecycle(ctx context.Context
 	return pc.workflowStore.finalizeInitialEntryLifecycle(ctx, committed)
 }
 
+func (pc *PipelineCoordinator) FinalizeRestartEntryLifecycle(ctx context.Context, committed CommittedWorkflowLifecycleMutation) error {
+	if pc == nil || pc.workflowStore == nil || pc.workflowStore.lifecycleOwner == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	return pc.workflowStore.lifecycleOwner.FinalizeWorkflowLifecycleMutation(ctx, committed)
+}
+
 func (pc *PipelineCoordinator) ArmInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return pc.workflowStore.ArmInitialEntryTimers(ctx, identity)
 }

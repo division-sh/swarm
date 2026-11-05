@@ -76,6 +76,7 @@ type completionCandidateWriter interface {
 
 type InstanceLifeLifecycleTxOwner interface {
 	CommitAgentLifecycleTransitionTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error)
+	ReadAgentLifecycleOutcomeTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error)
 }
 
 func (s *PipelinePostgresOwner) resourceSourceOwner() *storedurabledata.Owner { return s.resourceData }
@@ -83,6 +84,7 @@ func (s *PipelineSQLiteOwner) resourceSourceOwner() *storedurabledata.Owner   { 
 
 type GenericScheduleTxOwner interface {
 	AdmitTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+	ReadAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error)
 	CancelAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
 	LoadActivationTx(context.Context, *mutationprotocol.Attempt, string) (runtimegenericschedule.Activation, bool, error)
 	CancelActivationTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)

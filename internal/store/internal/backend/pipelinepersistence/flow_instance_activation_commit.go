@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -108,7 +107,7 @@ func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutati
 	}
 	var created bool
 	var lifecycle runtimepipeline.CommittedWorkflowLifecycleMutation
-	var restarted []agentidentity.Identity
+	var restarted []runtimepipeline.InstanceRestartedAgent
 	if plan.Restart != nil {
 		created, lifecycle, restarted, err = commitFlowInstanceRestart(ctx, tx, attempt, store, postgres, plan, record)
 	} else {

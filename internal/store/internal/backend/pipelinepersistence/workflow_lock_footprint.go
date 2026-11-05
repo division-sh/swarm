@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -88,11 +89,18 @@ func (s *PipelineSQLiteOwner) LockWorkflowPublicationTx(ctx context.Context, tx 
 // The prepared plans name locks, not accepted state. Semantic checks and receipt
 // writes stay at their commit sites after this complete native acquisition prefix.
 func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgres bool, owners []flowidentity.RunScopedFlowInstance, publications []runtimebus.PublicationCommand) error {
+	var lives []events.InstanceLife
+	var binding processbinding.Binding
 	for _, publication := range publications {
 		for _, plan := range publication.Activations {
-			if err := lockRestartActorsTx(ctx, tx, postgres, plan); err != nil {
+			if err := collectRestartActorScopes(plan, &lives, &binding); err != nil {
 				return err
 			}
+		}
+	}
+	if len(lives) != 0 {
+		if err := agentpersistence.LockInstanceLifeActorsTx(ctx, tx, lives, binding, !postgres); err != nil {
+			return err
 		}
 	}
 	if !postgres {
@@ -105,16 +113,18 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 	return acquireWorkflowPublicationFootprintTx(ctx, tx, footprint)
 }
 
-func lockRestartActorsTx(ctx context.Context, tx *sql.Tx, postgres bool, plan pipeline.FlowInstanceActivationPlan) error {
+func collectRestartActorScopes(plan pipeline.FlowInstanceActivationPlan, lives *[]events.InstanceLife, binding *processbinding.Binding) error {
 	if plan.Restart != nil {
-		if _, err := agentpersistence.LockInstanceLifeActorsTx(ctx, tx, events.InstanceLife{
-			RunID: plan.Readiness.RunID, FlowInstance: plan.Identity.InstancePath, Life: plan.Restart.Life,
-		}, plan.Restart.ProcessBinding, !postgres); err != nil {
-			return err
+		if len(*lives) != 0 && !binding.Equal(plan.Restart.ProcessBinding) {
+			return fmt.Errorf("instance restarts cross their exact publication process binding")
 		}
+		*binding = plan.Restart.ProcessBinding
+		*lives = append(*lives, events.InstanceLife{
+			RunID: plan.Readiness.RunID, FlowInstance: plan.Identity.InstancePath, Life: plan.Restart.Life,
+		})
 	}
 	for _, child := range plan.Children {
-		if err := lockRestartActorsTx(ctx, tx, postgres, child); err != nil {
+		if err := collectRestartActorScopes(child, lives, binding); err != nil {
 			return err
 		}
 	}
