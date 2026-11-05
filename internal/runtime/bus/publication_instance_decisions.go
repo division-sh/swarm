@@ -7,11 +7,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func (p publicationTargetOwnerEvidence) requireCurrentSourceLife(event events.Event) error {
+	actor, prepared, err := genericschedule.PreparedPublicationAgent(p.context, event)
+	if err != nil {
+		return err
+	}
 	source := event.RoutingSource()
 	if source.Life() == 0 || !p.required {
 		return nil
@@ -38,7 +43,22 @@ func (p publicationTargetOwnerEvidence) requireCurrentSourceLife(event events.Ev
 	if selected.Valid() {
 		return p.requireObservedSourceLife(selected, source.Life())
 	}
+	if prepared {
+		_, instanceOwned := p.observedAgents[actor.Normalize()]
+		if !instanceOwned && events.DeliveryContextFromContext(p.context).Life == nil && !p.hasSourceConstruction(route) {
+			return nil
+		}
+	}
 	return p.requireConstructedSourceLife(event, route)
+}
+
+func (p publicationTargetOwnerEvidence) hasSourceConstruction(route events.RouteIdentity) bool {
+	for candidate := range p.activationOwners {
+		if publicationSourceMatches(route, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func publicationSourceMatches(route, candidate events.RouteIdentity) bool {
