@@ -28,43 +28,49 @@ import (
 
 func TestInstanceLifeResetCommitBeforeFinalizeReplayBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			f, reset, _ := nativeInstanceResetFixture(t, backend)
-			committer := agentFixtureFlowActivationCommitter{store: f.store}
-			committed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
-			if err != nil {
-				t.Fatal(err)
+		for _, explicitStatus := range []bool{true, false} {
+			name := "omitted_status"
+			if explicitStatus {
+				name = "explicit_status"
 			}
-			if !committed.StartedOver || len(committed.RestartedAgents) != 1 || len(committed.Lifecycle.Wakeups) != 1 {
-				t.Fatalf("reset lost committed finalization evidence: %+v", committed)
-			}
-			before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-			// Simulate an acknowledged commit whose caller never ran its finalizer.
-			replayed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
-			if err != nil || !replayed.StartedOver || len(replayed.RestartedAgents) != 1 || len(replayed.Lifecycle.Wakeups) != 1 {
-				t.Fatalf("committed reset replay lost finalization evidence: %+v err=%v", replayed, err)
-			}
-			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
-				t.Fatal("exact replay changed durable reset/session/history evidence")
-			}
-			if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, replayed); err != nil {
-				t.Fatal(err)
-			}
-			assertNativeResetSessions(t, f, reset)
-			finishNativeResetLife(t, f, reset)
-			next := prepareNativeResetPlan(t, f, reset)
-			if _, err := committer.CommitFlowInstanceActivation(f.ctx, next); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := committer.CommitFlowInstanceActivation(f.ctx, reset); err == nil {
-				t.Fatal("superseded reset replay revived its preceding life")
-			} else if failure, ok := failures.EnvelopeFromError(err); !ok || failure.Detail.Code != "instance_restarted" {
-				t.Fatalf("superseded replay error=%v", err)
-			}
-			if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, replayed); err == nil {
-				t.Fatal("superseded committed finalizer revived its preceding life")
-			}
-		})
+			t.Run(backend+"/"+name, func(t *testing.T) {
+				f, reset, _ := nativeInstanceResetFixture(t, backend, explicitStatus)
+				committer := agentFixtureFlowActivationCommitter{store: f.store}
+				committed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !committed.StartedOver || len(committed.RestartedAgents) != 1 || len(committed.Lifecycle.Wakeups) != 1 {
+					t.Fatalf("reset lost committed finalization evidence: %+v", committed)
+				}
+				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				// Simulate an acknowledged commit whose caller never ran its finalizer.
+				replayed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
+				if err != nil || !replayed.StartedOver || len(replayed.RestartedAgents) != 1 || len(replayed.Lifecycle.Wakeups) != 1 {
+					t.Fatalf("committed reset replay lost finalization evidence: %+v err=%v", replayed, err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					t.Fatal("exact replay changed durable reset/session/history evidence")
+				}
+				if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, replayed); err != nil {
+					t.Fatal(err)
+				}
+				assertNativeResetSessions(t, f, reset)
+				finishNativeResetLife(t, f, reset)
+				next := prepareNativeResetPlan(t, f, reset)
+				if _, err := committer.CommitFlowInstanceActivation(f.ctx, next); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := committer.CommitFlowInstanceActivation(f.ctx, reset); err == nil {
+					t.Fatal("superseded reset replay revived its preceding life")
+				} else if failure, ok := failures.EnvelopeFromError(err); !ok || failure.Detail.Code != "instance_restarted" {
+					t.Fatalf("superseded replay error=%v", err)
+				}
+				if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, replayed); err == nil {
+					t.Fatal("superseded committed finalizer revived its preceding life")
+				}
+			})
+		}
 	}
 }
 
@@ -171,9 +177,12 @@ func TestPostgresInstanceResetAndLifecycleAcquireActorsBeforeSourceHead(t *testi
 	assertNativeResetSessions(t, f, reset)
 }
 
-func nativeInstanceResetFixture(t *testing.T, backend string) (receiverConfigActivationFixture, pipeline.FlowInstanceActivationPlan, agentidentity.Identity) {
+func nativeInstanceResetFixture(t *testing.T, backend string, explicitStatus ...bool) (receiverConfigActivationFixture, pipeline.FlowInstanceActivationPlan, agentidentity.Identity) {
 	t.Helper()
 	f, first := newWorkflowTargetConstructionFixture(t, backend, true)
+	if len(explicitStatus) == 0 || explicitStatus[0] {
+		first.Instance.Status = "active"
+	}
 	committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, first)
 	if err != nil {
 		t.Fatal(err)
