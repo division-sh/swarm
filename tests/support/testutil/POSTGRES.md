@@ -122,7 +122,7 @@ The no-argument command is bounded core developer feedback, not full
 qualification. An explicitly selected `--full` plan includes both unchanged
 900-second backend soak cells as well as its other admitted roots; it is not a
 non-soak shortcut. Do not add a whole local tier to focused proof by default.
-See the [canonical runner runbook](../../cmd/swarm-test/README.md) for selected
+See the [canonical runner runbook](../../../cmd/swarm-test/README.md) for selected
 tiers, clean-source admission and receipts.
 
 The plan runner launches independent unit workers, not one suite-wide service.
