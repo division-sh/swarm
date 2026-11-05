@@ -55,6 +55,7 @@ func (p deliveryPlanner) resolvePreparedRoutePlan(projection publicationTargetOw
 		}
 	}
 	if p.preparedOwners != nil {
+		projection.instances = p.connectPlanner.lifecycle.index
 		if err := projection.requireCurrentSourceLife(p.preparedOwners.event); err != nil {
 			return RoutePlan{}, err
 		}

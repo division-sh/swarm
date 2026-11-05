@@ -28,6 +28,25 @@ var (
 
 func IsAgentTargetAmbiguous(err error) bool { return errors.Is(err, ErrAgentTargetAmbiguous) }
 
+const (
+	TraceIterPositiveRequired  = "trace_iter_positive_required"
+	TraceIterOneEntityRequired = "trace_iter_one_entity_required"
+	TraceIterFollowRefused     = "trace_iter_follow_refused"
+)
+
+type TraceIterError struct{ Reason string }
+
+func (e *TraceIterError) Error() string {
+	switch e.Reason {
+	case TraceIterOneEntityRequired:
+		return e.Reason + ": --iter requires exactly one entity filter; a life belongs to one instance"
+	case TraceIterFollowRefused:
+		return e.Reason + ": --follow with --iter is refused; a prior life is finished, so there is nothing to follow"
+	default:
+		return TraceIterPositiveRequired + ": --iter must be a positive integer"
+	}
+}
+
 type EntityReadParamError struct {
 	Field  string
 	Reason string

@@ -2382,6 +2382,9 @@ func (a *Adapter) RunTraceReferencePage(ctx context.Context, q queryer, page Run
 	if page.Limit <= 0 {
 		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page limit must be positive")
 	}
+	if page.Life != nil && (*page.Life <= 0 || len(page.EntityIDs) != 1) {
+		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace life requires one entity and a positive iter")
+	}
 	if page.After != nil && (page.After.EventCreatedAt.IsZero() || strings.TrimSpace(page.After.EventID) == "") {
 		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page cursor requires event time and id")
 	}
@@ -2523,6 +2526,11 @@ func (a *Adapter) queryPostgresRunTraceReferences(ctx context.Context, q queryer
 	}
 	addTextFilter("e.event_name", page.EventNames)
 	addTextFilter("e.entity_id::text", page.EntityIDs)
+	if page.Life != nil {
+		where = append(where, runTraceLifePredicate(true, fmt.Sprintf("$%d", addArg(*page.Life))))
+	} else if len(page.EntityIDs) == 1 {
+		where = append(where, runTraceLifePredicate(true, ""))
+	}
 	statuses := make([]string, 0, len(page.DeliveryStatuses))
 	for _, status := range page.DeliveryStatuses {
 		statuses = append(statuses, string(status))
@@ -2613,6 +2621,12 @@ func (a *Adapter) querySQLiteRunTraceReferences(ctx context.Context, q queryer, 
 	}
 	addTextFilter("e.event_name", page.EventNames)
 	addTextFilter("COALESCE(e.entity_id, '')", page.EntityIDs)
+	if page.Life != nil {
+		where = append(where, runTraceLifePredicate(false, "?"))
+		args = append(args, *page.Life, *page.Life)
+	} else if len(page.EntityIDs) == 1 {
+		where = append(where, runTraceLifePredicate(false, ""))
+	}
 	statuses := make([]string, 0, len(page.DeliveryStatuses))
 	for _, status := range page.DeliveryStatuses {
 		statuses = append(statuses, string(status))
@@ -2658,6 +2672,32 @@ func (a *Adapter) querySQLiteRunTraceReferences(ctx context.Context, q queryer, 
 }
 
 const sqliteTraceCursorFloor = "0001-01-01T00:00:00Z"
+
+// Entity trace scope retains its existing producer-entity meaning. Life is
+// matched from the event's captured source, never from a time or cursor cut.
+func runTraceLifePredicate(postgres bool, selected string) string {
+	header := `SELECT 1 FROM flow_instances trace_life
+		WHERE trace_life.run_id=e.run_id AND trace_life.entity_id=e.entity_id`
+	match := `json_type(e.source_route,'$.life')='integer' AND json_extract(e.source_route,'$.life')=`
+	if postgres {
+		match = `e.source_route->'life'=to_jsonb(`
+	}
+	life := "trace_life.life"
+	if selected != "" {
+		life = selected
+	}
+	if postgres {
+		match += life + `::bigint)`
+	} else {
+		match += life
+	}
+	if selected != "" {
+		return `EXISTS (` + header + ` AND trace_life.life>=` + selected + ` AND ` + match + `)`
+	}
+	// Imported/run-owned rows have no instance life and retain their prior trace
+	// behavior. An instance-scoped current read requires captured current life.
+	return `(NOT EXISTS (` + header + `) OR EXISTS (` + header + ` AND ` + match + `))`
+}
 
 func traceNullableTimestamp(value time.Time) string {
 	if value.IsZero() {

@@ -1503,6 +1503,21 @@ func runTraceFilterParam(params map[string]any) (operatorread.RunDebugTraceFilte
 			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must contain only OpaqueId values"})
 		}
 	}
+	if raw, present := filter["iter"]; present {
+		life, valid := integerParam(raw)
+		if !valid || life <= 0 {
+			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.iter", "reason": operatorread.TraceIterPositiveRequired})
+		}
+		selected := int64(life)
+		out.Iter = &selected
+	}
+	if err := out.ValidateIter(); err != nil {
+		var selection *operatorread.TraceIterError
+		if errors.As(err, &selection) {
+			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.iter", "reason": selection.Reason})
+		}
+		return operatorread.RunDebugTraceFilter{}, err
+	}
 	if out.DeliveryStatuses, err = requiredRunTraceStringListFilter(filter, "delivery_status"); err != nil {
 		return operatorread.RunDebugTraceFilter{}, err
 	}
@@ -1548,6 +1563,7 @@ var eventListFilterFields = map[string]struct{}{
 }
 
 var runTraceFilterFields = map[string]struct{}{
+	"iter":            {},
 	"event_name":      {},
 	"entity_id":       {},
 	"delivery_status": {},
