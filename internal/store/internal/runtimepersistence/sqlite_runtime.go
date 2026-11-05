@@ -53,6 +53,35 @@ import (
 // file possession owner serializes process startup while persisted rows remain
 // the canonical state consumed by the runtime.
 type SQLiteRuntimeStore struct {
+	activityResultOwnerMethods
+	activityOwnerMethods
+	agentSQLiteOwnerMethods
+	budgetOwnerMethods
+	channelOnboardingOwnerMethods
+	decisionOwnerMethods
+	deliveryOwnerMethods
+	destructiveResetSQLiteOwnerMethods
+	effectOwnerMethods
+	entityOwnerMethods
+	eventSQLiteOwnerMethods
+	llmMethods
+	mailboxOwnerMethods
+	managedCapabilityOwnerMethods
+	operatorAgentSQLiteMethods
+	operatorChannelOwnerMethods
+	operatorConversationMethods
+	operatorEntityMethods
+	operatorObservabilityMethods
+	operatorRunSQLiteMethods
+	pipelineOwnerMethods
+	replyOwnerMethods
+	runForkOwnerMethods
+	runLifecycleSQLiteOwnerMethods
+	runtimeIngressOwnerMethods
+	apiIdempotencyMethods
+	startupOwnerMethods
+	timerObligationReaderMethods
+
 	channelChanges               runtimechanneldelivery.ReconcileSignal
 	destructiveResetSQLiteOwner  *storeadmin.DestructiveResetSQLiteOwner
 	agentSQLiteOwner             *storeagent.AgentSQLiteOwner

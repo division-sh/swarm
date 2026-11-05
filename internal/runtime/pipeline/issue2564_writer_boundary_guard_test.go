@@ -499,7 +499,7 @@ func writerBoundarySources(t *testing.T) map[string]string {
 		"internal/runtime/runforkexecution/runtime_container.go",
 		"internal/runtime/runtime.go",
 		"internal/runtime/tools/persistence.go",
-		"internal/store/internal/runtimepersistence/facade_forwarders_generated.go",
+		"internal/store/internal/runtimepersistence/owner_interfaces.go",
 	}
 	entityPaths, err := filepath.Glob(filepath.Join(root, "internal/store/internal/backend/entityruntime/*.go"))
 	if err != nil {
@@ -564,7 +564,7 @@ func (s *EntityPostgresOwner) restoredSave(ctx context.Context) error {
  return err
 }
 `, "raw_instance_sql"},
-		{"raw_save_forwarder", "internal/store/internal/runtimepersistence/facade_forwarders_generated.go", "", `
+		{"raw_save_forwarder", "internal/store/internal/runtimepersistence/owner_interfaces.go", "", `
 func (s *PostgresStore) SaveEntityField(ctx context.Context) error { return s.entityOwner().SaveEntityField(ctx) }
 `, "raw_save_authority"},
 		{"raw_mark_terminated", "internal/runtime/pipeline/workflow_instance_store.go", "", `

@@ -45,6 +45,35 @@ import (
 )
 
 type PostgresStore struct {
+	activityOwnerMethods
+	activityResultOwnerMethods
+	agentOwnerMethods
+	budgetOwnerMethods
+	channelOnboardingOwnerMethods
+	decisionOwnerMethods
+	deliveryOwnerMethods
+	destructiveResetOwnerMethods
+	effectOwnerMethods
+	entityOwnerMethods
+	eventOwnerMethods
+	llmMethods
+	mailboxOwnerMethods
+	managedCapabilityOwnerMethods
+	operatorAgentMethods
+	operatorChannelOwnerMethods
+	operatorConversationMethods
+	operatorEntityMethods
+	operatorObservabilityMethods
+	operatorRunMethods
+	pipelineOwnerMethods
+	apiIdempotencyMethods
+	replyOwnerMethods
+	runForkOwnerMethods
+	runLifecycleOwnerMethods
+	runtimeIngressOwnerMethods
+	startupOwnerMethods
+	timerObligationReaderMethods
+
 	channelChanges                 runtimechanneldelivery.ReconcileSignal
 	agentPostgresOwner             *storeagent.AgentPostgresOwner
 	destructiveResetPostgresOwner  *storeadmin.DestructiveResetPostgresOwner

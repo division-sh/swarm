@@ -147,9 +147,8 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 		t.Fatalf("unqueued completion must remain in the two pre-send owners: %#v", unqueuedCompletionConsumers)
 	}
 	want := map[string]int{
-		"internal/runtime/deliverycontinuation/coordinator.go":                      1,
-		"internal/store/internal/runtimepersistence/facade_forwarders_generated.go": 2,
-		"internal/runtime/testfixtures/startuphandoff/proof.go":                     1, // Test-only handoff witness delegates the exact native scan; no eligibility or execution owner.
+		"internal/runtime/deliverycontinuation/coordinator.go":  1,
+		"internal/runtime/testfixtures/startuphandoff/proof.go": 1, // Test-only handoff witness delegates the exact native scan; no eligibility or execution owner.
 	}
 	if len(scanConsumers) != len(want) {
 		t.Fatalf("delivery continuation scan consumers = %#v, want %#v", scanConsumers, want)
