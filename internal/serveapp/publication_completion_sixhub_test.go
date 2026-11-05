@@ -10,6 +10,7 @@ import (
 )
 
 func TestPublicPublicationSixHubOriginalDeadlineBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := issue2564H2Source(t)
