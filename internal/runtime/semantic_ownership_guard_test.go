@@ -441,10 +441,7 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 			"generation": "Generation",
 		},
 		"Authorization": {
-			"manifestHash": "Hash",
-			"generation":   "Generation",
-			"packID":       "ID",
-			"packVersion":  "Version",
+			"generation": "Generation",
 		},
 		"compiledHTTPToolSpec": {
 			"url":     "toolTemplate",
@@ -473,11 +470,8 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 			"packIdentity": "PackIdentity",
 		},
 		"PackIdentity": {
-			"manifestHash": "Hash",
-			"id":           "ID",
-			"version":      "Version",
-			"packType":     "packIdentityType",
-			"source":       "PackSource",
+			"packType": "packIdentityType",
+			"source":   "PackSource",
 		},
 	}
 	seenTypedFields := map[string]map[string]bool{}
