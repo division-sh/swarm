@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/spf13/cobra"
@@ -118,11 +119,11 @@ func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (desc
 		if err != nil {
 			return describePackContext{}, err
 		}
-		_, schemaErr := os.Lstat(filepath.Join(paths.SourceRoot, "schema.yaml"))
-		if schemaErr != nil && !os.IsNotExist(schemaErr) {
-			return describePackContext{}, schemaErr
+		present, err := describePackSourcePresent(paths.SourceRoot)
+		if err != nil {
+			return describePackContext{}, err
 		}
-		if opts.sourceRoot != "" || schemaErr == nil {
+		if opts.sourceRoot != "" || present {
 			artifact, err := sourceartifact.AdmitDirectory(paths.SourceRoot)
 			if err != nil {
 				return describePackContext{}, err
@@ -155,4 +156,15 @@ func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (desc
 	}
 	loaded.projection, err = packadmission.Admit(inventory, platform)
 	return loaded, err
+}
+
+func describePackSourcePresent(directory string) (bool, error) {
+	for _, name := range []string{packmodel.ManifestFileName, "schema.yaml"} {
+		if _, err := os.Lstat(filepath.Join(directory, name)); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return false, nil
 }
