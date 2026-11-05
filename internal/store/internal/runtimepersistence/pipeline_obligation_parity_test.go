@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -360,7 +361,7 @@ func provePipelineRunSummary(
 	base := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	owner := selected.PipelineObligations()
 
-	_ = commitPipelineParityEvent(t, ctx, selected, runID, base)
+	pendingID := commitPipelineParityEvent(t, ctx, selected, runID, base)
 	successID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(time.Second))
 	settlePipelineParityEvent(t, ctx, owner, successID, runtimepipelineobligation.Acknowledged("processed"))
 	terminalID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(2*time.Second))
@@ -398,6 +399,9 @@ func provePipelineRunSummary(
 	if !summary.HasOpenWork() {
 		t.Fatalf("summary %#v should report open work", summary)
 	}
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}, []string{pendingID, deferredID})
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 2}, nil)
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: "worker/sibling", Life: 1}, nil)
 
 	terminalOnlyRunID := uuid.NewString()
 	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, terminalOnlyRunID)
@@ -410,7 +414,37 @@ func provePipelineRunSummary(
 	if terminalOnly.TerminalNonSuccess != 1 || terminalOnly.HasOpenWork() || !terminalOnly.BlocksCompletion() {
 		t.Fatalf("terminal-only summary = %#v", terminalOnly)
 	}
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: terminalOnlyRunID, FlowInstance: terminalOnlyRunID, Life: 1}, nil)
 
+}
+
+func assertInstanceLifePipelineCensus(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, life events.InstanceLife, want []string) {
+	t.Helper()
+	tx, err := fixture.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var owner interface {
+		ReadUnsettledInstanceLifeEventsTx(context.Context, *sql.Tx, events.InstanceLife) ([]string, error)
+	}
+	switch selected := fixture.store.(type) {
+	case *PostgresStore:
+		owner = selected.pipelinePostgresOwner
+	case *SQLiteRuntimeStore:
+		owner = selected.pipelineSQLiteOwner
+	default:
+		t.Fatal("pipeline census requires its selected-store owner")
+	}
+	got, err := owner.ReadUnsettledInstanceLifeEventsTx(ctx, tx, life)
+	if err != nil || len(got) != len(want) {
+		t.Fatalf("instance pipeline census=%v want=%v err=%v", got, want, err)
+	}
+	for index, id := range want {
+		if got[index] != id {
+			t.Fatalf("instance pipeline census=%v want=%v", got, want)
+		}
+	}
 }
 
 func provePipelineDecisionRouteDispositions(
