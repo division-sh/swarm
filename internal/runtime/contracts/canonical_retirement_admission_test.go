@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestCanonicalRetirementBundleAdmission(t *testing.T) {

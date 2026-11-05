@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateflowpilot"
 )
 
 func TestVerifyAgentMessageRetirementSupportedCLI(t *testing.T) {

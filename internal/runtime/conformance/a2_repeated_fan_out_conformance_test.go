@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/notifyallchildren"
 	"github.com/google/uuid"
 )
 

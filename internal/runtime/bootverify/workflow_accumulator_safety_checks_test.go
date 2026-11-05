@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templatefanin"
 )
 
 func TestRunAcceptsCanonicalStreamAccumulatorProducerPath(t *testing.T) {

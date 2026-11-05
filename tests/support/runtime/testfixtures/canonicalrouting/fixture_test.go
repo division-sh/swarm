@@ -132,11 +132,11 @@ func TestPublicationSitesLoadAndVerify(t *testing.T) {
 }
 
 func TestClockDeploymentFixturesLoadAndVerify(t *testing.T) {
-	Prove(t, ArtifactID("internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment"))
+	Prove(t, ArtifactID("tests/support/runtime/testfixtures/canonicalrouting/testdata/clock-deployment"))
 	for _, variant := range []string{"nested", "finite"} {
 		t.Run(variant, func(t *testing.T) {
 			repo := RepoRoot(t)
-			root := filepath.Join(repo, "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment", variant)
+			root := filepath.Join(repo, "tests/support/runtime/testfixtures/canonicalrouting/testdata/clock-deployment", variant)
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 			if err != nil {
 				t.Fatal(err)
@@ -454,7 +454,7 @@ func walkYAMLMapping(t *testing.T, node *yaml.Node, visit func(string, *yaml.Nod
 func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 	t.Helper()
 	return ExecuteSource(t,
-		SourceID("internal/runtime/testfixtures/canonicalrouting/fixture_test.go:canonicalRoutingTeachingContractSource"), func() {
+		SourceID("tests/support/runtime/testfixtures/canonicalrouting/fixture_test.go:canonicalRoutingTeachingContractSource"), func() {
 			artifactIDs := canonicalExampleNames()
 			wantSet := map[string]struct{}{}
 			for _, id := range artifactIDs {
