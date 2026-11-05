@@ -72,6 +72,9 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if !record.Presence.Constructed() {
 		return false, fmt.Errorf("receiver construction persistence is incomplete")
 	}
+	if life := route.Initialization.ConstructionTarget().Life(); record.Lifecycle.State.Life != life {
+		return false, pipeline.InstanceRestarted(flow, life, record.Lifecycle.State.Life)
+	}
 	header, err := record.DecodeComplete(flow.Route, entity)
 	if err != nil {
 		return false, err
