@@ -13,16 +13,16 @@ import (
 )
 
 func (p publicationTargetOwnerEvidence) requireCurrentSourceLife(event events.Event) error {
-	actor, prepared, err := genericschedule.PreparedPublicationAgent(p.context, event)
-	if err != nil {
-		return err
-	}
 	source := event.RoutingSource()
 	if source.Life() == 0 || !p.required {
 		return nil
 	}
 	if p.context == nil || p.source == nil {
 		return fmt.Errorf("instance publication requires its exact source-life observation")
+	}
+	actor, prepared, err := genericschedule.PreparedPublicationAgent(p.context, event)
+	if err != nil {
+		return err
 	}
 	route := source.Route()
 	if source.Kind() == events.RoutingSourceRoot {
