@@ -1,4 +1,4 @@
-package versionmetadata
+package cliapp
 
 import (
 	"errors"
@@ -15,7 +15,7 @@ func TestResolveLocalVersionMetadataPrefersInjectedReleaseMetadata(t *testing.T)
 		},
 	}, nil)
 
-	got, err := Resolve(Injected{Version: "v1.6.0", Commit: "release-commit", Date: "2026-06-01T00:00:00Z"})
+	got, err := resolveLocalVersionMetadata(BuildMetadata{Version: "v1.6.0", Commit: "release-commit", Date: "2026-06-01T00:00:00Z"})
 	if err != nil {
 		t.Fatalf("resolveLocalVersionMetadata() error = %v", err)
 	}
@@ -46,7 +46,7 @@ func TestResolveLocalVersionMetadataFallsBackToBuildInfo(t *testing.T) {
 		},
 	}, nil)
 
-	got, err := Resolve(Injected{Version: "dev", Commit: "unknown", Date: "unknown"})
+	got, err := resolveLocalVersionMetadata(BuildMetadata{Version: "dev", Commit: "unknown", Date: "unknown"})
 	if err != nil {
 		t.Fatalf("resolveLocalVersionMetadata() error = %v", err)
 	}
@@ -67,7 +67,7 @@ func TestResolveLocalVersionMetadataFallsBackToBuildInfo(t *testing.T) {
 func TestResolveLocalVersionMetadataUsesDeterministicDevFallback(t *testing.T) {
 	withVersionMetadataHooks(t, "dev", "unknown", "unknown", "0.7.0", nil, nil)
 
-	got, err := Resolve(Injected{Version: "dev", Commit: "unknown", Date: "unknown"})
+	got, err := resolveLocalVersionMetadata(BuildMetadata{Version: "dev", Commit: "unknown", Date: "unknown"})
 	if err != nil {
 		t.Fatalf("resolveLocalVersionMetadata() error = %v", err)
 	}
@@ -88,7 +88,7 @@ func TestResolveLocalVersionMetadataUsesDeterministicDevFallback(t *testing.T) {
 func TestResolveLocalVersionMetadataFailsWithoutPlatformVersion(t *testing.T) {
 	withVersionMetadataHooks(t, "dev", "unknown", "unknown", "", nil, errors.New("platform.version missing"))
 
-	if _, err := Resolve(Injected{Version: "dev", Commit: "unknown", Date: "unknown"}); err == nil {
+	if _, err := resolveLocalVersionMetadata(BuildMetadata{Version: "dev", Commit: "unknown", Date: "unknown"}); err == nil {
 		t.Fatal("resolveLocalVersionMetadata() error = nil, want platform version error")
 	}
 }

@@ -9,7 +9,6 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -529,7 +528,7 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 				return wave1ResolvedType{}, strings.TrimSpace(view.FlowID), strings.TrimSpace(rootField), nil
 			}
 		}
-		if platformcontext.LegacyEntityMetadataField(rootField) {
+		if legacyPlatformEntityMetadataField(rootField) {
 			return wave1ResolvedType{}, "", "", fmt.Errorf("%s", legacyEntityMetadataDiagnostic(rootField))
 		}
 		return wave1ResolvedType{}, strings.TrimSpace(target.flowID()), strings.TrimSpace(rootField), nil

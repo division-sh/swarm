@@ -1,14 +1,10 @@
 package config
 
-import (
-	"strings"
-
-	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
-)
+import "strings"
 
 type ExtensionsConfig struct {
-	Budget   BudgetConfig           `yaml:"budget"`
-	Sharding runtimesharding.Config `yaml:"sharding"`
+	Budget   BudgetConfig   `yaml:"budget"`
+	Sharding ShardingConfig `yaml:"sharding"`
 }
 
 type BudgetConfig struct {

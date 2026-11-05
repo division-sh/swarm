@@ -7,7 +7,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/versionmetadata"
 )
 
 type StateStoreSchemaPlanSet struct {
@@ -16,7 +15,7 @@ type StateStoreSchemaPlanSet struct {
 
 // SchemaBootstrapRequest describes the same boot schema without preparing it.
 func SchemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platformPlans []store.SchemaTableDDL) (store.SchemaBootstrapRequest, error) {
-	metadata, err := versionmetadata.Resolve(InjectedBuildMetadata())
+	metadata, err := resolveLocalVersionMetadata(InjectedBuildMetadata())
 	if err != nil {
 		return store.SchemaBootstrapRequest{}, fmt.Errorf("resolve schema bootstrap build identity: %w", err)
 	}

@@ -6,7 +6,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -22,6 +21,26 @@ type wave1ResolvedType struct {
 	Kind       string
 	Type       string
 	IsOptional bool
+}
+
+const platformEntityRoot = "instance"
+
+func platformEntityFieldUnsupported(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "entity_id", "entity_type", "workflow_name", "workflow_version", "run_id", "fields", "accumulator", "entered_state_at", "revision", "created_at", "updated_at", "name":
+		return true
+	default:
+		return false
+	}
+}
+
+func legacyPlatformEntityMetadataField(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "entity_id", "flow_instance", "current_state", "gates", "revision", "created_at", "updated_at", "entity_type", "workflow_name", "workflow_version":
+		return true
+	default:
+		return false
+	}
 }
 
 var wave1PlatformEntityTypes = map[string]wave1ResolvedType{
@@ -81,7 +100,7 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		if head == "fan_out_count" {
 			return wave1ResolvedType{}, "", fmt.Errorf("state.fan_out_count is platform bookkeeping; use the handler-local fan_out.count")
 		}
-		if platformcontext.LegacyEntityMetadataField(head) {
+		if legacyPlatformEntityMetadataField(head) {
 			return wave1ResolvedType{}, "", fmt.Errorf("%s", legacyEntityMetadataDiagnostic(head))
 		}
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s does not declare field %q", defaultFlowLabel(flowID), view.EntityType, head)
@@ -147,7 +166,7 @@ func wave1ProjectDeclaredEntityLeaf(view wave1EntityContractView, current, ref s
 }
 
 func wave1ResolvePlatformEntityPath(ref string) (wave1ResolvedType, error) {
-	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), platformcontext.EntityRoot+"."))
+	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), platformEntityRoot+"."))
 	if ref == "" {
 		return wave1ResolvedType{}, fmt.Errorf("_entity field path is required")
 	}
@@ -159,7 +178,7 @@ func wave1ResolvePlatformEntityPath(ref string) (wave1ResolvedType, error) {
 		}
 		return resolved, nil
 	}
-	if platformcontext.EntityFieldUnsupported(head) {
+	if platformEntityFieldUnsupported(head) {
 		return wave1ResolvedType{}, fmt.Errorf("instance.%s is not exposed; supported fields are id, stage, and path", head)
 	}
 	return wave1ResolvedType{}, fmt.Errorf("instance.%s is not a supported platform entity metadata field", head)

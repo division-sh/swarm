@@ -1,4 +1,4 @@
-package readwindow
+package cliapp
 
 import (
 	"fmt"
@@ -8,23 +8,23 @@ import (
 	"time"
 )
 
-type BoundInput struct {
+type cliReadWindowBoundInput struct {
 	Value string
 	Set   bool
 }
 
-type Input struct {
-	Since        BoundInput
-	Until        BoundInput
+type cliReadWindowInput struct {
+	Since        cliReadWindowBoundInput
+	Until        cliReadWindowBoundInput
 	ReferenceUTC time.Time
 }
 
-type Window struct {
+type cliReadWindow struct {
 	Since *time.Time
 	Until *time.Time
 }
 
-func Reference(clock func() time.Time) time.Time {
+func cliReadWindowReference(clock func() time.Time) time.Time {
 	now := time.Now
 	if clock != nil {
 		now = clock
@@ -32,28 +32,28 @@ func Reference(clock func() time.Time) time.Time {
 	return now().UTC()
 }
 
-func Resolve(input Input) (Window, error) {
+func resolveCLIReadWindow(input cliReadWindowInput) (cliReadWindow, error) {
 	if input.ReferenceUTC.IsZero() {
-		return Window{}, fmt.Errorf("read-window reference time is required")
+		return cliReadWindow{}, fmt.Errorf("read-window reference time is required")
 	}
 	reference := input.ReferenceUTC.UTC()
-	window := Window{}
+	window := cliReadWindow{}
 	if input.Since.Set {
 		since, err := resolveCLIReadWindowBound("--since", input.Since.Value, reference)
 		if err != nil {
-			return Window{}, err
+			return cliReadWindow{}, err
 		}
 		window.Since = &since
 	}
 	if input.Until.Set {
 		until, err := resolveCLIReadWindowBound("--until", input.Until.Value, reference)
 		if err != nil {
-			return Window{}, err
+			return cliReadWindow{}, err
 		}
 		window.Until = &until
 	}
 	if window.Since != nil && window.Until != nil && window.Since.After(*window.Until) {
-		return Window{}, fmt.Errorf("--until must be greater than or equal to --since")
+		return cliReadWindow{}, fmt.Errorf("--until must be greater than or equal to --since")
 	}
 	return window, nil
 }
@@ -65,14 +65,14 @@ func resolveCLIReadWindowBound(name, raw string, reference time.Time) (time.Time
 	if absolute, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 		return absolute.UTC(), nil
 	}
-	duration, ok := ParseDuration(raw)
+	duration, ok := parseCLIReadWindowDuration(raw)
 	if !ok {
 		return time.Time{}, fmt.Errorf("%s must be an RFC3339 timestamp or a positive relative duration using lowercase h, m, s, or ms", name)
 	}
 	return reference.Add(-duration).UTC(), nil
 }
 
-func ParseDuration(raw string) (time.Duration, bool) {
+func parseCLIReadWindowDuration(raw string) (time.Duration, bool) {
 	if raw == "" {
 		return 0, false
 	}
@@ -120,7 +120,7 @@ func ParseDuration(raw string) (time.Duration, bool) {
 	return total, total > 0
 }
 
-func (window Window) AddParams(params map[string]any) {
+func (window cliReadWindow) AddParams(params map[string]any) {
 	if window.Since != nil {
 		params["since"] = window.Since.UTC().Format(time.RFC3339Nano)
 	}

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/cli/readwindow"
 )
 
 var cliReadWindowSupportedCommands = []struct {
@@ -36,9 +34,9 @@ func TestParseCLIReadWindowDuration(t *testing.T) {
 		{input: "1h30m15s250ms", want: time.Hour + 30*time.Minute + 15*time.Second + 250*time.Millisecond},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
-			got, ok := readwindow.ParseDuration(tc.input)
+			got, ok := parseCLIReadWindowDuration(tc.input)
 			if !ok || got != tc.want {
-				t.Fatalf("readwindow.ParseDuration(%q) = %s, %t; want %s, true", tc.input, got, ok, tc.want)
+				t.Fatalf("parseCLIReadWindowDuration(%q) = %s, %t; want %s, true", tc.input, got, ok, tc.want)
 			}
 		})
 	}
@@ -49,8 +47,8 @@ func TestParseCLIReadWindowDuration(t *testing.T) {
 		"2562047788015216h",
 	} {
 		t.Run("reject_"+strings.ReplaceAll(input, " ", "space"), func(t *testing.T) {
-			if got, ok := readwindow.ParseDuration(input); ok {
-				t.Fatalf("readwindow.ParseDuration(%q) = %s, true; want rejection", input, got)
+			if got, ok := parseCLIReadWindowDuration(input); ok {
+				t.Fatalf("parseCLIReadWindowDuration(%q) = %s, true; want rejection", input, got)
 			}
 		})
 	}

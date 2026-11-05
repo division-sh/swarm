@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cli/readwindow"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 )
@@ -97,7 +96,7 @@ func newLogsCommand(opts rootCommandOptions) *cobra.Command {
 			logOpts.orderSet = cmd.Flags().Changed("order")
 			logOpts.sinceSet = cmd.Flags().Changed("since")
 			logOpts.untilSet = cmd.Flags().Changed("until")
-			logOpts.reference = readwindow.Reference(logOpts.apiOptions.now)
+			logOpts.reference = cliReadWindowReference(logOpts.apiOptions.now)
 			return runLogsCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), logOpts)
 		},
 	}
@@ -219,9 +218,9 @@ func (opts runtimeLogCommandOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["order"] = order
 	}
-	window, err := readwindow.Resolve(readwindow.Input{
-		Since:        readwindow.BoundInput{Value: opts.since, Set: opts.sinceSet},
-		Until:        readwindow.BoundInput{Value: opts.until, Set: opts.untilSet},
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: opts.since, Set: opts.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: opts.until, Set: opts.untilSet},
 		ReferenceUTC: opts.reference,
 	})
 	if err != nil {

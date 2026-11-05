@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
-	"github.com/division-sh/swarm/internal/cli/readwindow"
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
@@ -298,7 +297,7 @@ func newEventsListCommand(opts rootCommandOptions) *cobra.Command {
 			listOpts.limitSet = cmd.Flags().Changed("limit")
 			listOpts.sinceSet = cmd.Flags().Changed("since")
 			listOpts.untilSet = cmd.Flags().Changed("until")
-			listOpts.reference = readwindow.Reference(listOpts.apiOptions.now)
+			listOpts.reference = cliReadWindowReference(listOpts.apiOptions.now)
 			return runEventListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), listOpts)
 		},
 	}
@@ -510,9 +509,9 @@ func (opts eventListCommandOptions) params() (map[string]any, error) {
 		}
 		params["limit"] = opts.limit
 	}
-	window, err := readwindow.Resolve(readwindow.Input{
-		Since:        readwindow.BoundInput{Value: opts.since, Set: opts.sinceSet},
-		Until:        readwindow.BoundInput{Value: opts.until, Set: opts.untilSet},
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: opts.since, Set: opts.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: opts.until, Set: opts.untilSet},
 		ReferenceUTC: opts.reference,
 	})
 	if err != nil {
