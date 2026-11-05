@@ -32,7 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 func runtimeDepsForServeTest(t testing.TB, stores *selectedStoreOwner, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {

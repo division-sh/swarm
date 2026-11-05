@@ -11,7 +11,7 @@ import (
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 

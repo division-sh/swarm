@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 )
 
 // AttemptCorruptRunSnapshotForTest selects only the exact backend's named

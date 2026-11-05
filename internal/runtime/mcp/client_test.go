@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/testutil/mcpapi"
+	"github.com/division-sh/swarm/tests/support/testutil/mcpapi"
 )
 
 func TestClientCallWithCredentialKeyResolverUsesBoundDeploymentCredential(t *testing.T) {

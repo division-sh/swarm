@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func TestRunnerPayloadLifetimeAfterOuterDeath(t *testing.T) {
@@ -31,7 +31,7 @@ while [ ! -f "$SWARM_TEST_PROCESS_PREFIX.release" ]; do
   sleep .01
 done
 `)
-		command := exec.Command(filepath.Join(root, "runner"), "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+		command := exec.Command(filepath.Join(root, "runner"), "--", "./tests/support/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
 		command.Env = descendantSettlementEnvironment(os.Environ(), root, filepath.Join(root, "state"), true, "SWARM_TEST_PROCESS_PREFIX="+filepath.Join(root, "child"))
 		command.Stdout, command.Stderr = os.Stdout, os.Stderr
 		if err := testprocess.Start(command); err != nil {
@@ -65,7 +65,7 @@ done
 	root := t.TempDir()
 	_, source, _, _ := runtime.Caller(0)
 	build := exec.Command("go", "build", "-o", filepath.Join(root, "runner"), "./cmd/swarm-test")
-	build.Dir = filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+	build.Dir = filepath.Clean(filepath.Join(filepath.Dir(source), "..", "..", ".."))
 	if raw, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build runner: %v\n%s", err, raw)
 	}

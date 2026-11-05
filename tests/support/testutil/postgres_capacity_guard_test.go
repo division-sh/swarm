@@ -66,7 +66,7 @@ func TestPostgresCapacityAllocationGuard(t *testing.T) {
 		function string
 		writes   []string
 	}{
-		{"internal/testpostgres/manager.go", "NewManager", []string{"ensureControlDatabase", "Reconcile"}},
+		{"tests/support/testpostgres/manager.go", "NewManager", []string{"ensureControlDatabase", "Reconcile"}},
 		{"internal/releasee2e/golden_agent_workload_test.go", "goldenPostgresStore", []string{"ExecContext"}},
 	} {
 		t.Run(owner.function, func(t *testing.T) {

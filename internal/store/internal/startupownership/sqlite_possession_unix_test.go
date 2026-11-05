@@ -15,7 +15,7 @@ import (
 	"time"
 
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite"
 )

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestDormantIngressTelegramScaffoldJourney(t *testing.T) {

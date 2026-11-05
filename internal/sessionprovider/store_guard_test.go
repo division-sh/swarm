@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/sessionstate"
-	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/whatsappfixture"
 
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/store"

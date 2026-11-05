@@ -10,7 +10,8 @@ import (
 func IsTestFixturePackage(path string) bool {
 	support := strings.TrimPrefix(path, "github.com/division-sh/swarm/")
 	if support == "tests/support/runtime/bus/bustest" || support == "tests/support/runtime/effects/effecttest" ||
-		support == "tests/support/runtime/testfixtures" || strings.HasPrefix(support, "tests/support/runtime/testfixtures/") {
+		support == "tests/support/runtime/testfixtures" || strings.HasPrefix(support, "tests/support/runtime/testfixtures/") ||
+		strings.HasPrefix(support, "tests/support/testutil/") {
 		return true
 	}
 	const module = "github.com/division-sh/swarm/internal/"
@@ -21,6 +22,5 @@ func IsTestFixturePackage(path string) bool {
 	return internal && (publicTestSupport ||
 		strings.Contains("/"+path+"/", "/testfixtures/") ||
 		path == "store/storetest" || path == "store/testsql" ||
-		path == "store/eventfixture" || strings.HasPrefix(path, "store/testutil/") ||
-		strings.HasPrefix(path, "testutil/"))
+		path == "store/eventfixture" || strings.HasPrefix(path, "store/testutil/"))
 }

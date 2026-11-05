@@ -24,10 +24,10 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/testpostgres"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/telegramapi"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/telegramapi"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 	"gopkg.in/yaml.v3"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store/platformschema"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"gopkg.in/yaml.v3"
 )
 

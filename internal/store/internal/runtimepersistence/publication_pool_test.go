@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestPublicationPoolFixtureKeepsExactOriginalCapacityAndRefusesActiveReservations(t *testing.T) {

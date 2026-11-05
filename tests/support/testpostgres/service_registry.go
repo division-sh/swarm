@@ -109,7 +109,7 @@ func DefaultServiceRegistry() (*ServiceRegistry, error) {
 	}
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
-		return nil, fmt.Errorf("Docker is required for the test runner; configure host Postgres using internal/testutil/POSTGRES.md: %w", err)
+		return nil, fmt.Errorf("Docker is required for the test runner; configure host Postgres using tests/support/testutil/POSTGRES.md: %w", err)
 	}
 	return NewServiceRegistry(stateRoot, dockerBin), nil
 }

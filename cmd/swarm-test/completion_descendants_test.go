@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testpostgres"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 // Extracted from agent-g's fixture repair in befb39402; retain every acquired

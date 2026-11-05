@@ -22,7 +22,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/testutil/llmapi"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 )
 
 var turnRenderingCells = []string{"payload", "string", "object", "results", "read", "long", "environment", "emit_refusal", "producer", "leak_reply", "leak_error", "leak_ok"}

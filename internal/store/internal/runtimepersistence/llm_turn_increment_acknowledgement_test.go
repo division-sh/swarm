@@ -10,7 +10,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 
 	"github.com/division-sh/swarm/internal/runtime/sessions"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestSessionTurnIncrementAcknowledgesPostcommitHandoffAndSurvivesRestartBothStores(t *testing.T) {

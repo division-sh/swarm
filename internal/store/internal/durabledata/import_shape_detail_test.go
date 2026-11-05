@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	_ "modernc.org/sqlite"
 )
 

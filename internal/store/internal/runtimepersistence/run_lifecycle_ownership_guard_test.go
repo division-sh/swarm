@@ -74,13 +74,13 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":           true,
 		"internal/store/internal/backend/runlifecycle/test_snapshot_fault.go":           true,
 		"internal/store/internal/backend/runlifecycle/test_receiver_fork_cut.go":        true,
-		"internal/testutil/runlifecyclefixture/fixture.go":                              true,
+		"tests/support/testutil/runlifecyclefixture/fixture.go":                         true,
 	}
 	allowedCandidateColumns := map[string]bool{
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
 		"internal/store/internal/backend/runlifecycle/selected_completion.go":      true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":      true,
-		"internal/testutil/runlifecyclefixture/fixture.go":                         true,
+		"tests/support/testutil/runlifecyclefixture/fixture.go":                    true,
 	}
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
 	var violations []string

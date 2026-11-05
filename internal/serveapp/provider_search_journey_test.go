@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/testutil/llmapi"
+	"github.com/division-sh/swarm/tests/support/testutil/llmapi"
 	"gopkg.in/yaml.v3"
 )
 

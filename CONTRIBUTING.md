@@ -143,7 +143,7 @@ reviewer's named obligations and the runner runbook rather than inferring a
 whole local tier from the type of change.
 
 Postgres-backed tests should use the supported host setup in
-[internal/testutil/POSTGRES.md](internal/testutil/POSTGRES.md). Keep the test
+[tests/support/testutil/POSTGRES.md](tests/support/testutil/POSTGRES.md). Keep the test
 DSN invocation-scoped. Whole-suite and coordinated shared-host runs must use
 the canonical `swarm-test` runner shown above. Focused direct `go test ./pkg`
 remains the expected small-blast-radius development loop. For a disposable

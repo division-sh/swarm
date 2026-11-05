@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 func TestRuntimeLogNativeEvidenceOwnersRejectUninitializedAuthority(t *testing.T) {

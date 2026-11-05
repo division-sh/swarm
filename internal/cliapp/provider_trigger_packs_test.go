@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 // Public ingress behavior is owned by the standing-activation served tests.

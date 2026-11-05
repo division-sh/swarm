@@ -9,7 +9,7 @@ import (
 	"time"
 
 	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestPostgresStore_APIIdempotencyReplaysAndConflicts(t *testing.T) {

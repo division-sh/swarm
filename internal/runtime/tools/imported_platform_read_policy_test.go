@@ -14,8 +14,8 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 func TestImportedPlatformReadUsesAuthoredOnceOnlyPolicy(t *testing.T) {

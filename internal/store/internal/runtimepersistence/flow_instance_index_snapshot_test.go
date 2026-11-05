@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
+	"github.com/division-sh/swarm/tests/support/testutil/runtimepipelinefixture"
 )
 
 func TestR7DirectoryReadsOwnSnapshotAndFreshCommittedHeadersBothStores(t *testing.T) {

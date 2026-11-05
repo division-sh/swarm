@@ -215,7 +215,7 @@ func preflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
 		"github.com/division-sh/swarm/internal/runtime/effects",
 		"github.com/division-sh/swarm/internal/runtime/deliverycontinuation",
 		"github.com/division-sh/swarm/internal/runtime/manager",
-		"github.com/division-sh/swarm/internal/testutil",
+		"github.com/division-sh/swarm/tests/support/testutil",
 		"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity",
 		"github.com/division-sh/swarm/cmd/swarm-test-timing",
 		"github.com/division-sh/swarm/internal/testtiming",

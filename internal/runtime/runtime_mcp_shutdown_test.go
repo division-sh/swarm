@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/testutil/mcpapi"
+	"github.com/division-sh/swarm/tests/support/testutil/mcpapi"
 )
 
 func TestRuntimeShutdownClosesExternalMCPClient(t *testing.T) {
