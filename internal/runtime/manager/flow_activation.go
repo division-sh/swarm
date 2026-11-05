@@ -222,13 +222,13 @@ func (am *AgentManager) finalizeRestartedEntry(ctx context.Context, committed ru
 
 func (am *AgentManager) requireCurrentRestartedInstance(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 	reader, ok := am.workflowInstances.(interface {
-		LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, identity.EntityID) (runtimepipeline.WorkflowInstance, bool, error)
+		LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowInstance, bool, error)
 	})
 	if !ok {
 		return fmt.Errorf("instance restart requires its existing constructed-instance reader")
 	}
 	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: committed.Plan.Readiness.RunID, Route: committed.Plan.Identity.Route()}
-	instance, found, err := reader.LoadConstructedFlowInstance(ctx, owner, identity.NormalizeEntityID(committed.Plan.Identity.EntityID))
+	instance, found, err := reader.LoadConstructedFlowInstance(ctx, owner, runtimeidentity.NormalizeEntityID(committed.Plan.Identity.EntityID))
 	if err != nil {
 		return err
 	}
