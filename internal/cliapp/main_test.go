@@ -2384,10 +2384,6 @@ func stringSliceContains(values []string, want string) bool {
 	return false
 }
 
-func joinedContains(values []string, want string) bool {
-	return strings.Contains(strings.Join(values, "\n"), want)
-}
-
 func writeRuntimeConfigText(t *testing.T, path, configText string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
