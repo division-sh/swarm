@@ -97,7 +97,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	if iterTrace.Error != nil || observability.lastTrace.Filter.Iter == nil || *observability.lastTrace.Filter.Iter != 1 {
 		t.Fatalf("run.trace lost selected iter: filter=%+v error=%v", observability.lastTrace.Filter, iterTrace.Error)
 	}
-	for _, entities := range []string{``, `"entity_id":["entity-1","entity-2"],`} {
+	for _, entities := range []string{``, `"entity_id":[],`, `"entity_id":["entity-1","entity-2"],`} {
 		refused := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-life-refused","method":"run.trace","params":{"run_id":"run-1","filter":{`+entities+`"iter":1}}}`)
 		if refused.Error == nil || refused.Error.Code != codeInvalidParams {
 			t.Fatalf("iter without exactly one entity was accepted: %+v", refused)

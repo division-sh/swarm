@@ -612,6 +612,7 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 		{name: "invalid subscriber type", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"subscriber_type": []any{"system"}}}, wantField: "filter.subscriber_type"},
 		{name: "invalid entity id", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"entity_id": []any{"bad id!"}}}, wantField: "filter.entity_id"},
 		{name: "iter without entity", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"iter": 1}}, wantField: "filter.iter", wantReason: operatorread.TraceIterOneEntityRequired},
+		{name: "iter with empty entities", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"iter": 1, "entity_id": []any{}}}, wantField: "filter.iter", wantReason: operatorread.TraceIterOneEntityRequired},
 		{name: "iter with several entities", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"iter": 1, "entity_id": []any{"entity-1", "entity-2"}}}, wantField: "filter.iter", wantReason: operatorread.TraceIterOneEntityRequired},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -2673,24 +2673,46 @@ func (a *Adapter) querySQLiteRunTraceReferences(ctx context.Context, q queryer, 
 
 const sqliteTraceCursorFloor = "0001-01-01T00:00:00Z"
 
-// Entity trace scope retains its existing producer-entity meaning. Life is
-// matched from the event's captured source, never from a time or cursor cut.
+// Preserve the event-entity predicate. Its life comes from the exact recorded
+// receiver when it owns this row, otherwise the exact producer, never a time cut.
 func runTraceLifePredicate(postgres bool, selected string) string {
 	header := `SELECT 1 FROM flow_instances trace_life
 		WHERE trace_life.run_id=e.run_id AND trace_life.entity_id=e.entity_id`
-	match := `json_type(e.source_route,'$.life')='integer' AND json_extract(e.source_route,'$.life')=`
+	captured := `CASE
+		WHEN json_extract(d.delivery_target_route,'$.route.flow_instance')=trace_life.instance_path
+			AND json_type(d.delivery_target_route,'$.life')='integer'
+			THEN json_extract(d.delivery_target_route,'$.life')
+		WHEN json_extract(d.delivery_context,'$.life.run_id')=trace_life.run_id
+			AND json_extract(d.delivery_context,'$.life.flow_instance')=trace_life.instance_path
+			AND json_type(d.delivery_context,'$.life.life')='integer'
+			THEN json_extract(d.delivery_context,'$.life.life')
+		WHEN (json_extract(e.source_route,'$.entity_id')=trace_life.entity_id OR
+			(COALESCE(json_extract(e.source_route,'$.entity_id'),'')='' AND
+				(json_extract(e.source_route,'$.flow_instance')=trace_life.instance_path OR
+				(e.routing_source_kind='root' AND trace_life.instance_path=e.run_id))))
+			AND json_type(e.source_route,'$.life')='integer'
+			THEN json_extract(e.source_route,'$.life') END`
 	if postgres {
-		match = `e.source_route->'life'=to_jsonb(`
+		captured = `CASE
+			WHEN d.delivery_target_route->'route'->>'flow_instance'=trace_life.instance_path
+				THEN d.delivery_target_route->'life'
+			WHEN d.delivery_context->'life'->>'run_id'=trace_life.run_id::text
+				AND d.delivery_context->'life'->>'flow_instance'=trace_life.instance_path
+				THEN d.delivery_context->'life'->'life'
+			WHEN (e.source_route->>'entity_id'=trace_life.entity_id::text OR
+				(COALESCE(e.source_route->>'entity_id','')='' AND
+					(e.source_route->>'flow_instance'=trace_life.instance_path OR
+					(e.routing_source_kind='root' AND trace_life.instance_path=e.run_id::text))))
+				THEN e.source_route->'life' END`
 	}
 	life := "trace_life.life"
 	if selected != "" {
 		life = selected
 	}
 	if postgres {
-		match += life + `::bigint)`
-	} else {
-		match += life
+		life = `to_jsonb(` + life + `::bigint)`
 	}
+	match := `(` + captured + `)=` + life
 	if selected != "" {
 		return `EXISTS (` + header + ` AND trace_life.life>=` + selected + ` AND ` + match + `)`
 	}
