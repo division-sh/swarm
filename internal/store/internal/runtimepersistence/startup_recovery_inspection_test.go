@@ -64,8 +64,11 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 		setCompletionAttemptLease(t, exhausted, exhaustedCall.Attempt().AttemptID, now.Add(-time.Minute))
 		neutral := newNeutralEffectParityFixture(t, fixture.store, fixture.db, fixture.sqlite)
 		httpCall := beginNeutralRecoveryAttempt(t, neutral, "authored_http_tool", "inspection", true, false)
-		for _, attemptID := range []string{resume.Attempt().AttemptID, deadCall.Attempt().AttemptID, exhaustedCall.Attempt().AttemptID} {
+		for _, attemptID := range []string{resume.Attempt().AttemptID, deadCall.Attempt().AttemptID, exhaustedCall.Attempt().AttemptID, httpCall.Attempt().AttemptID} {
 			setCompletionAttemptLease(t, fixture, attemptID, now.Add(time.Minute))
+			if !completionAttemptLease(t, fixture, attemptID).After(now) {
+				t.Fatalf("inspection fixture attempt %s already expired", attemptID)
+			}
 		}
 		want := effects.StartupRecoveryCounts{ProviderTurnsToResume: 1, ProviderTurnsToDeadLetter: 2, HTTPToolCallsUnknown: 1}
 		before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
