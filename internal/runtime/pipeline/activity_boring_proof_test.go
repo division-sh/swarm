@@ -404,13 +404,22 @@ func newActivityBoringFixture(t *testing.T, backend, serverURL string, open func
 func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBoringFixture, ctx context.Context, intent runtimeengine.ActivityIntent, request events.Event) {
 	t.Helper()
 	entity := intent.EntityID.String()
+	constructionCtx := effects.WithExecutionMode(ctx, intent.ExecutionMode)
+	parent := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
+		Life: 1, InstanceID: intent.SourceRunID, StorageRef: intent.SourceRunID, EntityID: intent.SourceRunID,
+		WorkflowName: semanticview.RootExecutionFlowID(fixture.pc.SemanticSource()), WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
+		CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
+	})
+	if err := fixture.native.Construct(constructionCtx, parent); err != nil {
+		t.Fatal(err)
+	}
 	instance := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
 		Life: 1, InstanceID: entity, StorageRef: intent.FlowInstance, EntityID: entity,
 		WorkflowName: "research", WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
 		CurrentState: "pending", CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
 		Fields: map[string]any{"marker": entity}, EntityType: "state",
 	})
-	if err := fixture.native.Construct(effects.WithExecutionMode(ctx, intent.ExecutionMode), instance); err != nil {
+	if err := fixture.native.Construct(constructionCtx, instance); err != nil {
 		t.Fatal(err)
 	}
 	source := eventtest.ExistingRunRootIngressWithRoutingSource(intent.SourceEventID, "research/source.requested", "", intent.SourceTaskID,
