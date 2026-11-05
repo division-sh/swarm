@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -33,6 +34,7 @@ type PackComponentDescription struct {
 	Source       string                  `json:"source"`
 	Version      string                  `json:"version"`
 	ManifestHash string                  `json:"manifest_hash"`
+	HasChannel   bool                    `json:"has_channel"`
 	Receive      *PackReceiveDescription `json:"receive,omitempty"`
 	Tools        []PackToolDescription   `json:"tools"`
 }
@@ -149,8 +151,9 @@ func buildPackDescription(ctx context.Context, loaded describePackContext, provi
 }
 
 func packDescriptionComponent(provider packartifact.AdmittedProvider, source string) PackComponentDescription {
+	_, hasChannel := provider.Body(packmodel.BodyChannel)
 	return PackComponentDescription{Scope: provider.DeclaringFlow(), Directory: provider.Directory(), Source: source,
-		Version: provider.Metadata().Version, ManifestHash: manifesthash.FromBytes(provider.ManifestBody()).String(), Tools: []PackToolDescription{}}
+		Version: provider.Metadata().Version, ManifestHash: manifesthash.FromBytes(provider.ManifestBody()).String(), HasChannel: hasChannel, Tools: []PackToolDescription{}}
 }
 
 func appendCapturedPackComponents(result *PackDescription, bundle *runtimecontracts.WorkflowContractBundle) error {

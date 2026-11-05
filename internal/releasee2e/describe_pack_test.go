@@ -61,13 +61,14 @@ func TestDescribePackPublicReadOnlyJourney(t *testing.T) {
 		}
 		body := strings.ReplaceAll(fragment.YAML, "REPLACE_CHAT_ID", "12345")
 		body = strings.ReplaceAll(body, "REPLACE_TEXT", "synthetic reply")
+		body = strings.ReplaceAll(body, "REPLACE_OPERATOR_ACCOUNT", "420079")
 		writeReleaseFile(t, filepath.Join(source, fragment.File), body)
 	}
 	verified := command("verify", source, "--portable", "--json")
 	if !strings.Contains(verified, `"ok":true`) {
 		t.Fatalf("public concrete snippet verification failed: %s", verified)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".swarm", "store.sqlite")); !os.IsNotExist(err) {
-		t.Fatalf("read-only command unexpectedly created a runtime store: %v", err)
+	if _, err := os.Stat(filepath.Join(root, ".swarm")); !os.IsNotExist(err) {
+		t.Fatalf("read-only command unexpectedly created runtime state: %v", err)
 	}
 }

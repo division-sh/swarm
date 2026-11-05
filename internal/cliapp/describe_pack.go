@@ -37,6 +37,9 @@ func newDescribePackCommand(ctx context.Context, root InvocationRoot, rootOpts r
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				opts.provider = args[0]
+				if opts.provider == "" {
+					return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("an explicit provider must be a nonempty canonical ID"))
+				}
 			}
 			if len(args) > 1 {
 				opts.sourceRoot = args[1]
