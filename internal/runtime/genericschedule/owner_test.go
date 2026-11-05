@@ -396,7 +396,7 @@ func testPreparedPublicationOwnerBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fact, err := correlation.NewSourceArtifactFact(strings.Repeat("a", 64))
+	fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func testPreparedPublicationOwnerBinding(t *testing.T) {
 			}
 		})
 	}
-	foreign, err := correlation.NewSourceArtifactFact(strings.Repeat("b", 64))
+	foreign, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("b", 64))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1098,7 +1098,7 @@ func TestLifecyclePreparationAcknowledgementControlsOccurrenceSettlement(t *test
 				t.Fatal(err)
 			}
 			defer stopLifecycleProof(t, lifecycle)
-			fact, err := correlation.NewSourceArtifactFact(strings.Repeat("a", 64))
+			fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 			if err != nil {
 				t.Fatal(err)
 			}
