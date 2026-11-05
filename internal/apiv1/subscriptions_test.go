@@ -536,6 +536,7 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 			"run_id":       "run-1",
 			"replay_since": base.Format(time.RFC3339Nano),
 			"filter": map[string]any{
+				"iter":            1,
 				"event_name":      []any{"scan.requested"},
 				"entity_id":       []any{"entity-1"},
 				"delivery_status": []any{"delivered"},
@@ -560,6 +561,9 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 	}
 	if got := observability.lastTrace.Filter; len(got.EventNames) != 1 || got.EventNames[0] != "scan.requested" || len(got.EntityIDs) != 1 || got.EntityIDs[0] != "entity-1" || len(got.DeliveryStatuses) != 1 || got.DeliveryStatuses[0] != "delivered" || len(got.SubscriberIDs) != 1 || got.SubscriberIDs[0] != "agent-1" || len(got.SubscriberTypes) != 1 || got.SubscriberTypes[0] != "agent" {
 		t.Fatalf("run.subscribe_trace filter = %#v", got)
+	}
+	if observability.lastTrace.Filter.Iter == nil || *observability.lastTrace.Filter.Iter != 1 {
+		t.Fatalf("run.subscribe_trace lost selected life: %+v", observability.lastTrace.Filter)
 	}
 
 	verboseConn := dialTestWS(t, server.URL)
@@ -595,9 +599,10 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 	defer server.Close()
 
 	for _, tc := range []struct {
-		name      string
-		params    map[string]any
-		wantField string
+		name       string
+		params     map[string]any
+		wantField  string
+		wantReason string
 	}{
 		{name: "unknown top-level limit", params: map[string]any{"run_id": "run-1", "limit": 1}, wantField: "limit"},
 		{name: "unknown top-level until", params: map[string]any{"run_id": "run-1", "until": "2026-05-13T10:05:00Z"}, wantField: "until"},
@@ -606,6 +611,8 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 		{name: "invalid delivery status", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"delivery_status": []any{"done"}}}, wantField: "filter.delivery_status"},
 		{name: "invalid subscriber type", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"subscriber_type": []any{"system"}}}, wantField: "filter.subscriber_type"},
 		{name: "invalid entity id", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"entity_id": []any{"bad id!"}}}, wantField: "filter.entity_id"},
+		{name: "iter without entity", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"iter": 1}}, wantField: "filter.iter", wantReason: operatorread.TraceIterOneEntityRequired},
+		{name: "iter with several entities", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"iter": 1, "entity_id": []any{"entity-1", "entity-2"}}}, wantField: "filter.iter", wantReason: operatorread.TraceIterOneEntityRequired},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			conn := dialTestWS(t, server.URL)
@@ -622,6 +629,9 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 			}
 			if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != tc.wantField {
 				t.Fatalf("run.subscribe_trace details = %#v, want field %q", details, tc.wantField)
+			}
+			if tc.wantReason != "" && asMap(t, asMap(t, resp.Error.Data)["details"])["reason"] != tc.wantReason {
+				t.Fatalf("run.subscribe_trace lost shared typed iter refusal: %+v", resp.Error)
 			}
 		})
 	}

@@ -208,6 +208,16 @@ func TestPublicationAgentDecisionBindsNegativeEligibilityAfterIdentity(t *testin
 			if len(reader.lookups) != 1 || reader.lookups[0].ExactPath() != target.FlowInstance {
 				t.Fatalf("negative or positive eligibility escaped exact read: %+v", reader.lookups)
 			}
+			intent := RoutePlanDeliveryIntent{AgentIdentity: actor}
+			captured, err := projection.captureTargetlessAgentLife(intent)
+			if err != nil || captured.Context.Life == nil || captured.Context.Life.RunID != base.Owner().RunID || captured.Context.Life.FlowInstance != target.FlowInstance || captured.Context.Life.Life != header.Life || len(reader.lookups) != 2 {
+				t.Fatalf("constructed actor lost its exact captured life: %+v %v", captured.Context.Life, err)
+			}
+			readFailure := errors.New("constructed actor life read failed")
+			reader.err = readFailure
+			if _, err := projection.captureTargetlessAgentLife(intent); !errors.Is(err, readFailure) {
+				t.Fatalf("constructed actor suppressed its exact read failure: %v", err)
+			}
 		})
 	}
 }

@@ -81,6 +81,7 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 	}
 	var runID, sessionID string
 	var originalInstance instanceLifeJourneyReadback
+	var originalTrace map[string]bool
 	for sequence := 1; sequence <= turns; sequence++ {
 		input := map[string]any{"bundle_hash": servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot), "event_name": "evidence.requested",
 			"payload": map[string]any{"conversation": "synthetic", "sequence": sequence}, "idempotency_key": fmt.Sprintf("evidence-%d", sequence)}
@@ -126,6 +127,7 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 			current := waitInstanceLifeFinished(t, h, runID, published.EventID)
 			if sequence == 1 {
 				originalInstance = current
+				originalTrace = readInstanceLifeTrace(t, h, runID, current.EntityID, nil)
 			} else {
 				if current.EntityID != originalInstance.EntityID || current.Life == nil || *current.Life != 2 {
 					t.Fatalf("constructor restart changed identity or wrong life: before=%+v after=%+v", originalInstance, current)
@@ -136,6 +138,21 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "entity.get", map[string]any{"run_id": runID, "entity_id": current.EntityID, "iter": 1}, &prior)
 				if prior.Entity.EntityID != current.EntityID || prior.Entity.Life == nil || *prior.Entity.Life != 1 || prior.Entity.State == nil || *prior.Entity.State != "done" {
 					t.Fatalf("explicit prior life lost history: %+v", prior.Entity)
+				}
+				one := int64(1)
+				retained := readInstanceLifeTrace(t, h, runID, current.EntityID, &one)
+				if len(retained) != len(originalTrace) {
+					t.Fatalf("prior-life trace lost events: original=%v retained=%v", originalTrace, retained)
+				}
+				for id := range originalTrace {
+					if !retained[id] {
+						t.Fatal("prior-life trace mixed or replaced its captured event identity")
+					}
+				}
+				for id := range readInstanceLifeTrace(t, h, runID, current.EntityID, nil) {
+					if originalTrace[id] {
+						t.Fatal("current-life trace exposed the preceding life's event")
+					}
 				}
 			}
 			h.stop(t)

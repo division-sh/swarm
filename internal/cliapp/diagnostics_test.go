@@ -697,6 +697,32 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+	for _, mode := range []string{"snapshot", "summary"} {
+		t.Run("iter_"+mode, func(t *testing.T) {
+			selected, calls := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+				want := map[string]any{"entity_id": []any{"entity-1"}, "iter": float64(1)}
+				if req.Method != "run.trace" || req.Params["run_id"] != "run-1" || !reflect.DeepEqual(req.Params["filter"], want) {
+					t.Fatalf("selected-life trace changed scope: %+v", req)
+				}
+				result := map[string]any{"trace": []any{}}
+				if mode == "summary" && req.Params["cursor"] == nil {
+					result["next_cursor"] = "life-page-2"
+				}
+				return result
+			})
+			defer selected.Close()
+			args := []string{"run", "trace", "run-1", "--entity-id", "entity-1", "--iter", "1"}
+			wantCalls := 1
+			if mode == "summary" {
+				args = append(args, "--delivery-summary")
+				wantCalls = 2
+			}
+			var out, warning bytes.Buffer
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &warning, testRootCommandOptions(selected)); code != 0 || len(*calls) != wantCalls {
+				t.Fatalf("iter %s: exit=%d calls=%d stderr=%s", mode, code, len(*calls), warning.String())
+			}
+		})
+	}
 }
 
 func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
@@ -1549,6 +1575,11 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "runs invalid limit", args: []string{"run", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
 		{name: "runs invalid since", args: []string{"run", "list", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},
 		{name: "trace extra arg", args: []string{"run", "trace", "run-1", "extra"}, wantStderr: "accepts at most one argument"},
+		{name: "trace iter zero", args: []string{"run", "trace", "run-1", "--iter", "0", "--entity-id", "entity-1"}, wantStderr: operatorread.TraceIterPositiveRequired},
+		{name: "trace iter without entity", args: []string{"run", "trace", "run-1", "--iter", "1"}, wantStderr: operatorread.TraceIterOneEntityRequired},
+		{name: "trace iter several entities", args: []string{"run", "trace", "run-1", "--iter", "1", "--entity-id", "entity-1", "--entity-id", "entity-2"}, wantStderr: operatorread.TraceIterOneEntityRequired},
+		{name: "trace iter follow", args: []string{"run", "trace", "run-1", "--iter", "1", "--entity-id", "entity-1", "--follow"}, wantStderr: operatorread.TraceIterFollowRefused},
+		{name: "trace iter shorthand follow", args: []string{"run", "trace", "run-1", "--iter", "1", "--entity-id", "entity-1", "-f"}, wantStderr: operatorread.TraceIterFollowRefused},
 		{name: "trace invalid limit low", args: []string{"run", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid limit high", args: []string{"run", "trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid since", args: []string{"run", "trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},

@@ -561,7 +561,7 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 		t.Fatalf("resolve runtime-created carrier: %v", err)
 	}
 	routes := resolved.DeliveryRoutes()
-	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() {
+	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() || routes[0].Context.Life != nil {
 		t.Fatalf("runtime-created carrier routes = %#v, want exact identity with explicit target absence", routes)
 	}
 }
@@ -601,7 +601,7 @@ func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
-				if routes := resolved.DeliveryRoutes(); len(routes) != 1 || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() {
+				if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() || routes[0].Context.Life != nil {
 					t.Fatalf("independent targetless actor acquired flow ownership: %+v", routes)
 				}
 				instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
