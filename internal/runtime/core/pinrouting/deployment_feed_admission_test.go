@@ -6,8 +6,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/notifyallchildren"
 )
 
 func TestDeploymentFeedSelectedRootRequiresInputNotOutput(t *testing.T) {

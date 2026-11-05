@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func admitR2ValueFixture(t *testing.T, source string) (runtimecontracts.ExpressionValue, error) {

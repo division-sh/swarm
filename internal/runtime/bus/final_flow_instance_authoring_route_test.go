@@ -13,7 +13,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/google/uuid"
 )
 

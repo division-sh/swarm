@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
 
 const testMemoryRunID = "11111111-1111-1111-1111-111111111111"

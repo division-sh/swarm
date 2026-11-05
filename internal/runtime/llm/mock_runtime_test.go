@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/sessions"

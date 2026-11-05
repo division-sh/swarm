@@ -131,7 +131,7 @@ func TestCanonicalRoutingProofsRequireDirectExecutableDeclaration(t *testing.T) 
 	const source = `package fixture
 import (
     "testing"
-    "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+    "github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 func proofHelper(t *testing.T) {
     canonicalrouting.Prove(t, canonicalrouting.ArtifactID("examples/routing/root-ingress"))
@@ -211,7 +211,7 @@ func TestCanonicalRoutingSourceProofsRequireDirectExactDeclaration(t *testing.T)
 	const source = `package fixture
 import (
     "testing"
-    "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+    "github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 func proofHelper(t *testing.T) {
 	canonicalrouting.ProveSource(t, buildSource(t))
@@ -381,7 +381,7 @@ func TestCanonicalRoutingPublicAPIHasNoGenericPositiveMutation(t *testing.T) {
 		"ReplaceFile":           {},
 		"WriteFile":             {},
 	}
-	packageRoot := filepath.Join(RepoRoot(t), "internal", "runtime", "testfixtures", "canonicalrouting")
+	packageRoot := filepath.Join(RepoRoot(t), "tests", "support", "runtime", "testfixtures", "canonicalrouting")
 	entries, err := os.ReadDir(packageRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -966,7 +966,7 @@ func walkRepositoryGoFiles(repo string, visit func(path string, raw []byte) erro
 
 func loadArtifactRegistry(t testing.TB, repo string) artifactRegistry {
 	t.Helper()
-	registryPath := filepath.Join(repo, "internal", "runtime", "testfixtures", "canonicalrouting", "artifact_registry.yaml")
+	registryPath := filepath.Join(repo, "tests", "support", "runtime", "testfixtures", "canonicalrouting", "artifact_registry.yaml")
 	raw, err := os.ReadFile(registryPath)
 	if err != nil {
 		t.Fatal(err)

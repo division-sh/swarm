@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 	"testing"
 	"time"
 

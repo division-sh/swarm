@@ -10,7 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"

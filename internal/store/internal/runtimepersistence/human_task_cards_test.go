@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"

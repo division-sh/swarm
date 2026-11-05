@@ -12,7 +12,7 @@ func CopyServedFanOutReporter(t testing.TB) string {
 	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{
 		NumericRegistrationRows: true, NumericReporterSink: true, RegistrationUUIDField: true,
 	})
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/served-reporter"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/served-reporter"), root)
 	return root
 }
 
@@ -21,6 +21,6 @@ func CopyServedFanOutReporter(t testing.TB) string {
 func CopyFanOutMixedAgentRoute(t testing.TB) string {
 	t.Helper()
 	root := CopyFanOutMixedRoute(t)
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/fan-out-execution/mixed-agent"), root)
 	return root
 }
