@@ -21,6 +21,13 @@ func selectedFanOutPartitionFixture(t *testing.T) (*runForkRevisionSnapshot, run
 	node := identitytest.FlowNode(t, ".", "remaining")
 	nodeRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: snapshot.RunID})}
+	var err error
+	nodeRoute.Target, err = nodeRoute.Target.WithLife(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	life := events.InstanceLife{RunID: snapshot.RunID, FlowInstance: snapshot.RunID, Life: 7}
+	nodeRoute.Context.Life = &life
 	nodeID, err := deliverylifecycle.DeliveryID(sourceEvent.ID(), nodeRoute)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +63,8 @@ func selectedFanOutPartitionFixture(t *testing.T) (*runForkRevisionSnapshot, run
 		routes = append(routes, route)
 	}
 	if routes[0].AgentIdentity.RunID != childRun || routes[1].Target.Route().FlowInstance != childRun ||
-		routes[1].Target.Route().EntityID != "" || !routes[1].Target.EntitylessReceiver() {
+		routes[1].Target.Route().EntityID != "" || !routes[1].Target.EntitylessReceiver() || routes[1].Target.Life() != 7 ||
+		routes[1].Context.Life == nil || routes[1].Context.Life.RunID != childRun || routes[1].Context.Life.FlowInstance != childRun || routes[1].Context.Life.Life != 7 {
 		t.Fatal("projection did not retain separate agent, entityless node and child ownership")
 	}
 	return snapshot, replay, admitted, routes

@@ -238,6 +238,42 @@ func (o *SQLiteOwner) AdmitTx(ctx context.Context, attempt *mutationprotocol.Att
 	return admitAttempt(ctx, attempt, false, command, o.now, o.execution)
 }
 
+func (o *PostgresOwner) ReadAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error) {
+	return readAdmissionTx(ctx, attempt, true, command)
+}
+
+func (o *SQLiteOwner) ReadAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error) {
+	return readAdmissionTx(ctx, attempt, false, command)
+}
+
+func readAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error) {
+	if attempt == nil {
+		return runtimegenericschedule.Activation{}, errors.New("schedule read requires its native transaction")
+	}
+	command = command.Canonical()
+	scope, err := command.ScopeKey()
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	hash, err := command.ImmutableHash()
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	var result runtimegenericschedule.AdmissionResult
+	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		persisted, found, err := loadByKeyTx(ctx, tx, dialectFor(postgres), scope, command.ScheduleKey, false)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return sql.ErrNoRows
+		}
+		result, err = exactReplay(scope, command.ScheduleKey, hash, persisted)
+		return err
+	})
+	return result.Activation, err
+}
+
 // admitAttempt is the sole executable immutable activation admission boundary.
 // The due clock is called only after scoped-key lookup proves this is not replay.
 func admitAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time, execution RunExecutionOwner) (runtimegenericschedule.AdmissionResult, error) {

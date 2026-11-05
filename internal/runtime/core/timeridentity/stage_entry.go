@@ -13,6 +13,7 @@ import (
 // commits. Fork origins retain that source history, not a child occurrence.
 type StageEntryRef struct {
 	RunID        string `json:"run_id"`
+	Life         int64  `json:"life"`
 	OriginRunID  string `json:"origin_run_id,omitempty"`
 	FlowScope    string `json:"flow_scope"`
 	InstanceID   string `json:"instance_id"`
@@ -26,6 +27,9 @@ type StageEntryRef struct {
 }
 
 func (r StageEntryRef) Validate() error {
+	if r.Life <= 0 {
+		return fmt.Errorf("stage entry requires positive captured instance life")
+	}
 	if r.RunID == "" || r.RunID != strings.TrimSpace(r.RunID) || r.EntityID == "" || r.EntityID != strings.TrimSpace(r.EntityID) || r.Stage == "" || r.Stage != strings.TrimSpace(r.Stage) {
 		return fmt.Errorf("stage entry requires exact run, entity and stage identity")
 	}

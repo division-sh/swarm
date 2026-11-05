@@ -23,6 +23,7 @@ const (
 var realModelCells = []string{"memory", "tool_round", "empty_content", "refusal"}
 
 func TestProviderDeepSeekRealModelEvidence(t *testing.T) {
+	cells := append(append([]string(nil), realModelCells...), "instance_life")
 	selected, reason := realModelSelection(os.Getenv, func() (string, bool) {
 		head := exec.Command("git", "rev-parse", "HEAD")
 		head.Dir = repoRootForTest()
@@ -34,7 +35,7 @@ func TestProviderDeepSeekRealModelEvidence(t *testing.T) {
 		status.Dir = repoRootForTest()
 		dirty, err := status.Output()
 		return strings.TrimSpace(string(sha)), err == nil && len(dirty) == 0
-	})
+	}, cells...)
 	if reason != "" {
 		t.Skip("NOT RUN: " + reason)
 	}
@@ -54,7 +55,7 @@ func TestProviderDeepSeekRealModelEvidence(t *testing.T) {
 	}
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			for _, cell := range realModelCells {
+			for _, cell := range cells {
 				if selected[cell] {
 					t.Run(cell, func(t *testing.T) { runProviderEvidenceJourney(t, backend, cell, live) })
 				}

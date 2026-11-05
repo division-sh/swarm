@@ -10,7 +10,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -46,6 +48,7 @@ type FlowInstanceActivationRequest struct {
 	TriggerEvent      events.Event
 	OccurredAt        time.Time
 	ScenarioSeed      *ScenarioSetupEntityRequest
+	Restart           *FlowInstanceRestart
 }
 
 func (r FlowInstanceActivationRequest) ConstructorPayload() (map[string]any, error) {
@@ -96,6 +99,7 @@ type FlowInstanceActivationPlan struct {
 	Children            []FlowInstanceActivationPlan
 	ActivationVariables map[string]string
 	OccurredAt          time.Time
+	Restart             *FlowInstanceRestart
 }
 
 // CommittedFlowInstanceActivation is exact selected-store evidence that the
@@ -104,11 +108,18 @@ type FlowInstanceActivationPlan struct {
 type CommittedFlowInstanceActivation struct {
 	Plan                    FlowInstanceActivationPlan
 	Created                 bool
+	StartedOver             bool
+	RestartedAgents         []InstanceRestartedAgent
 	Lifecycle               CommittedWorkflowLifecycleMutation
 	ReadinessAttemptOrdinal uint64
 	Children                []CommittedFlowInstanceActivation
 	// Acknowledged is set only after the selected-store commit is acknowledged.
 	Acknowledged bool
+}
+
+type InstanceRestartedAgent struct {
+	Token        effects.LifecycleToken
+	TransitionID string
 }
 
 func (a CommittedFlowInstanceActivation) ChannelCardsChanged() bool {
@@ -154,7 +165,16 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 	if err := a.Lifecycle.Validate(); err != nil {
 		return fmt.Errorf("committed flow instance activation lifecycle: %w", err)
 	}
-	if !a.Created && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
+	if a.Created && a.StartedOver || a.StartedOver && a.Plan.Restart == nil {
+		return fmt.Errorf("committed instance restart cannot be a physical construction")
+	}
+	if len(a.RestartedAgents) != 0 && !a.StartedOver {
+		return fmt.Errorf("only a committed instance restart can change actor generations")
+	}
+	if err := a.validateRestartedAgents(); err != nil {
+		return err
+	}
+	if !a.Created && !a.StartedOver && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
 		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
 	}
 	if len(a.Children) != len(a.Plan.Children) {
@@ -166,6 +186,34 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 		}
 		if err := child.Validate(); err != nil {
 			return fmt.Errorf("committed construction descendant %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+func (a CommittedFlowInstanceActivation) validateRestartedAgents() error {
+	for index, restarted := range a.RestartedAgents {
+		identity := restarted.Token.Identity
+		if !restarted.Token.Valid() {
+			return fmt.Errorf("instance restart requires its committed actor token")
+		}
+		if _, err := uuid.Parse(restarted.TransitionID); err != nil {
+			return fmt.Errorf("instance restart requires its exact actor transition")
+		}
+		if err := identity.Validate(); err != nil || identity.RunID != a.Plan.Readiness.RunID {
+			return fmt.Errorf("instance restart requires exact acquired actor identities")
+		}
+		path := identity.Route.InstancePath
+		if identity.Route.Presence == agentidentity.RouteRoot {
+			path = identity.RunID
+		}
+		if path != a.Plan.Identity.InstancePath {
+			return fmt.Errorf("instance restart actor belongs to another instance")
+		}
+		for _, previous := range a.RestartedAgents[:index] {
+			if identity == previous.Token.Identity {
+				return fmt.Errorf("instance restart repeated an actor identity")
+			}
 		}
 	}
 	return nil
@@ -211,8 +259,8 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if err := r.State.Validate(); err != nil {
 		return fmt.Errorf("flow instance activation state: %w", err)
 	}
-	if !r.State.Transition.CreatesState() {
-		return fmt.Errorf("flow instance activation requires a creating state record")
+	if !r.State.Transition.CreatesState() && !r.State.Transition.RestartsState() {
+		return fmt.Errorf("flow instance activation requires a creating or restarting state record")
 	}
 	r.Identity = r.Identity.Normalize()
 	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
@@ -321,7 +369,11 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	state, err := workflowEngineStateRecord(flowOwner, instance, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, normalized.OccurredAt)
+	transition, expectedState, expectedRevision := WorkflowEngineStateTransitionCreateStateAndCompanion, "", int64(0)
+	if normalized.Restart != nil {
+		transition, expectedState, expectedRevision = WorkflowEngineStateTransitionRestartStateAndCompanion, normalized.Restart.FinalStage.ID(), normalized.Restart.Revision
+	}
+	state, err := workflowEngineStateRecord(flowOwner, instance, expectedState, expectedRevision, transition, normalized.OccurredAt)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
@@ -342,6 +394,9 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 }
 
 func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, error) {
+	if p.Instance.Life == 0 {
+		p.Instance.Life = 1
+	}
 	p.Instance.Fields = cloneMap(p.Instance.Fields)
 	p.Instance.Bookkeeping = cloneMap(p.Instance.Bookkeeping)
 	readiness, err := p.Readiness.Normalized()
@@ -374,6 +429,9 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if err != nil {
 		return err
 	}
+	if err := p.validateLifeConstruction(); err != nil {
+		return err
+	}
 	if !p.Identity.Route().Valid() || p.Instance.StorageRef == "" || p.Instance.InstanceID == "" {
 		return fmt.Errorf("flow instance activation plan requires exact instance identity")
 	}
@@ -392,6 +450,30 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if p.Lifecycle.RequestCompletionCandidate {
 		return fmt.Errorf("flow instance activation cannot request run completion")
 	}
+	return p.validateConstructionChildren()
+}
+
+func (p FlowInstanceActivationPlan) validateLifeConstruction() error {
+	if p.Restart != nil {
+		if err := p.Restart.Validate(p.Instance); err != nil {
+			return err
+		}
+		if err := p.Restart.ProcessBinding.Validate(); err != nil {
+			return fmt.Errorf("instance restart process owner: %w", err)
+		}
+		if err := p.Restart.DiagnosticOrigin.Validate(); err != nil {
+			return err
+		}
+		if len(p.Children) != 0 {
+			return fmt.Errorf("instance restart cannot reconstruct existing descendants")
+		}
+	} else if p.Instance.Life != 1 {
+		return fmt.Errorf("ordinary construction requires first life")
+	}
+	return nil
+}
+
+func (p FlowInstanceActivationPlan) validateConstructionChildren() error {
 	seen := map[string]bool{p.Identity.InstancePath: true}
 	for index, child := range p.Children {
 		localScope := strings.TrimPrefix(child.Identity.ScopeKey, p.Identity.ScopeKey+"/")

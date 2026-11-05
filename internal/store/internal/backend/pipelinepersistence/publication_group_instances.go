@@ -253,6 +253,7 @@ func captureFlowInstancePlanningDependencies(observation pipeline.FlowInstanceOb
 	out.instance = pipeline.WorkflowInstance{
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		EntityType: instance.EntityType, Mode: instance.Mode, InstanceKey: instance.InstanceKey,
+		Life: instance.Life,
 	}
 	if exact {
 		out.instance.Status, out.instance.TerminatedAt = instance.Status, instance.TerminatedAt

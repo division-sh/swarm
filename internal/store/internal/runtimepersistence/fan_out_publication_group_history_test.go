@@ -438,7 +438,7 @@ func seedFanOutGroupHistoryFixture(t *testing.T, backend string, count int) (*fa
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, seed.bundleHash))
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, seed.runID), mustStoreTestSourceArtifactFact(seed.bundleHash))
 	f := &fanOutGroupHistoryFixture{ctx: ctx, raw: raw, db: db, observer: db, postgres: postgres, runID: seed.runID,
-		sourceRoute: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()}
+		sourceRoute: constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), seed.runID, "producer", seed.createdAt)}
 	var err error
 	f.source, err = events.NewStaticFlowRoutingSource(f.sourceRoute)
 	if err != nil {

@@ -292,11 +292,11 @@ func TestDeliveryContinuationUsesClosedReceiverProjection(t *testing.T) {
 	}
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(), events.EventType("custom.continuation_receiver_projection"), "receiver-projection-test", "", []byte(`{}`), 0,
-		"", "", events.EventEnvelope{}, time.Now().UTC(),
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	route := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 		Context:   events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-continuation"}},
 	}
 	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
@@ -327,7 +327,7 @@ func TestDeliveryContinuationDispatchResultNamesExactLiveWakeOwner(t *testing.T)
 			route: events.DeliveryRoute{
 				Recipient:     events.MustAgentDeliveryRecipient("missing-agent"),
 				AgentIdentity: testAgentRouteIdentity(t, "missing-agent", ""),
-				Context:       events.DeliveryContext{RunID: uuid.NewString()},
+				Context:       events.DeliveryContext{RunID: evt.RunID()},
 			},
 			want:     runtimedeliverycontinuation.DispatchDeferred,
 			wantWake: runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle,
@@ -336,7 +336,7 @@ func TestDeliveryContinuationDispatchResultNamesExactLiveWakeOwner(t *testing.T)
 			name: "missing_internal_subscription",
 			route: events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "missing-node")),
-				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 			},
 			want:     runtimedeliverycontinuation.DispatchDeferred,
 			wantWake: runtimedeliverycontinuation.DispatchWakeInternalSubscriptionLifecycle,
@@ -376,7 +376,7 @@ func TestDeliveryContinuationDispatchTransfersToExactAgentCarrier(t *testing.T) 
 	route := events.DeliveryRoute{
 		Recipient:     events.MustAgentDeliveryRecipient(agentID),
 		AgentIdentity: testAgentRouteIdentity(t, agentID, ""),
-		Context:       events.DeliveryContext{RunID: uuid.NewString()},
+		Context:       events.DeliveryContext{RunID: evt.RunID()},
 	}
 	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
 	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
@@ -405,7 +405,7 @@ func TestDeliveryContinuationDispatchTransfersToExactInternalCarrier(t *testing.
 	evt := deliveryContinuationProjectionEvent("continuation-internal-transfer", eventType)
 	route := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(node),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 	}
 	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
 	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
@@ -454,7 +454,7 @@ func TestDeliveryContinuationDispatchConsumesOnlyCommittedDeferredPublications(t
 			parent := deliveryContinuationProjectionEvent("continuation-parent-"+test.name, events.EventType("custom.continuation_parent"))
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
-				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 			}
 			result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, route)
 			if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
@@ -481,7 +481,7 @@ func TestDeliveryContinuationDispatchRejectsDeferredPublicationWithoutCommitEvid
 	parent := deliveryContinuationProjectionEvent("continuation-uncommitted-parent", events.EventType("custom.continuation_parent"))
 	route := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 	}
 	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, route)
 	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchFatal {
@@ -543,7 +543,7 @@ func TestDeliveryContinuationDispatchTransfersCommittedDeferredHandoffBeforeCarr
 
 	parentRoute := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 	}
 	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, parentRoute)
 	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
@@ -824,7 +824,7 @@ func receiverProjectionEventForType(suffix string, eventType events.EventType) e
 func deliveryContinuationProjectionEvent(suffix string, eventType events.EventType) events.Event {
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(), eventType, "receiver-projection-test", "", []byte(`{}`), 0,
-		"", "", events.EventEnvelope{}, time.Now().UTC(),
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	return eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-" + suffix}})
 }

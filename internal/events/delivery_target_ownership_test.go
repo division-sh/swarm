@@ -24,6 +24,11 @@ func TestDeliveryTargetOwnershipRoundTripsClosedVariants(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			var err error
+			test.owner, err = test.owner.WithLife(7)
+			if err != nil {
+				t.Fatal(err)
+			}
 			raw, err := json.Marshal(test.owner)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -87,6 +92,15 @@ func TestDeliveryTargetOwnershipExactEqualityIncludesKindAndNormalizedRoute(t *t
 	if !SameRouteIdentity(existing.Route(), materializing.Route()) {
 		t.Fatalf("ownership variants should retain the same normalized receiver route")
 	}
+	nextLife, err := existing.WithLife(2)
+	if err != nil || SameDeliveryTargetOwnership(existing, nextLife) || !SameRouteIdentity(existing.Route(), nextLife.Route()) {
+		t.Fatalf("life must fence work without changing route identity: %+v %v", nextLife, err)
+	}
+	for _, life := range []int64{0, -1} {
+		if _, err := existing.WithLife(life); err == nil {
+			t.Fatalf("accepted invalid captured life %d", life)
+		}
+	}
 }
 
 func TestDeliveryTargetOwnershipDecodeFailsClosed(t *testing.T) {
@@ -100,6 +114,9 @@ func TestDeliveryTargetOwnershipDecodeFailsClosed(t *testing.T) {
 		{name: "materializing without entity", raw: `{"kind":"materializing_entity","route":{"flow_instance":"review/one"}}`},
 		{name: "entityless with entity", raw: `{"kind":"entityless_receiver","route":{"flow_instance":"review/one","entity_id":"` + entityID + `"}}`},
 		{name: "trailing value", raw: `{"kind":"entityless_receiver","route":{"flow_instance":"review/one"}} {}`},
+		{name: "missing life", raw: `{"kind":"entityless_receiver","route":{"flow_instance":"review/one"}}`},
+		{name: "zero life", raw: `{"kind":"entityless_receiver","route":{"flow_instance":"review/one"},"life":0}`},
+		{name: "negative life", raw: `{"kind":"entityless_receiver","route":{"flow_instance":"review/one"},"life":-1}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

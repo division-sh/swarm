@@ -156,6 +156,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 		fields["members_list"] = []any{}
 	}
 	initial, lifecycle, err := f.pc.PrepareInitialEntryLifecycle(ctx, f.owner, pipeline.WorkflowInstance{
+		Life:       1,
 		InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(),
 		Mode:         bundle.RootSchema.EffectiveMode(),
 		CurrentState: "awaiting", StageDefined: true, EntityType: "state", EnteredStageAt: at, CreatedAt: at,

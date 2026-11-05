@@ -28,6 +28,23 @@ func TestProjectEntityOwnershipMapsOnlyCanonicalRoot(t *testing.T) {
 			}
 		})
 	}
+	sourceRun, childRun := eventtest.UUID("continuation-source-run"), eventtest.UUID("continuation-child-run")
+	for _, path := range []string{sourceRun, "worker/one"} {
+		source := events.InstanceLife{RunID: sourceRun, FlowInstance: path, Life: 7}
+		child, err := ProjectInstanceLifeOwnership(sourceRun, childRun, source)
+		wantPath := path
+		if path == sourceRun {
+			wantPath = childRun
+		}
+		if err != nil || child.RunID != childRun || child.FlowInstance != wantPath || child.Life != source.Life || source.RunID != sourceRun || source.FlowInstance != path {
+			t.Fatalf("captured life changed during ownership projection: source=%+v child=%+v err=%v", source, child, err)
+		}
+		for _, invalid := range []events.InstanceLife{{RunID: childRun, FlowInstance: path, Life: 7}, {RunID: sourceRun, FlowInstance: childRun, Life: 7}, {RunID: sourceRun, FlowInstance: path}} {
+			if _, err := ProjectInstanceLifeOwnership(sourceRun, childRun, invalid); err == nil {
+				t.Fatalf("foreign or missing captured life accepted: %+v", invalid)
+			}
+		}
+	}
 }
 
 func TestProjectEntityOwnershipRejectsContradictoryCoordinates(t *testing.T) {
@@ -73,6 +90,16 @@ func TestProjectSelectedContractSourceEventPreservesProducerAndIsIdempotent(t *t
 		{"template producer", eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one"), eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.source.Life() > 0 {
+				tc.source, err = tc.source.WithLife(7)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tc.wantSource, err = tc.wantSource.WithLife(7)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			input := RunForkSelectedContractSourceEvent{
 				SourceEventID: "source-event", EventName: "producer/work.ready", ExecutionMode: executionmode.Live,
 				RoutingSource: tc.source, Scope: "independent-business-scope",

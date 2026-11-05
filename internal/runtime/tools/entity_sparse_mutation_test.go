@@ -296,6 +296,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
+		Life:         1,
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, EntityID: entityID,
 		Mode: view.Schema.EffectiveMode(), InstanceKey: instanceKey,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
@@ -360,6 +361,7 @@ func constructEntityToolParentFixture(t *testing.T, ctx context.Context, selecte
 	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
+		Life:         1,
 		WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(),
 		StorageRef: parent.InstancePath, InstanceID: parent.InstanceID, EntityID: parent.EntityID,
 		Mode: schema.EffectiveMode(), CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0,

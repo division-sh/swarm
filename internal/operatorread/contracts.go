@@ -21,6 +21,10 @@ type EntityReader interface {
 	AggregateOperatorEntities(context.Context, OperatorEntityAggregateOptions) (OperatorEntityAggregateResult, error)
 }
 
+type EntityLifeReader interface {
+	LoadOperatorEntityAtLife(context.Context, string, string, int64) (OperatorEntityFull, error)
+}
+
 type AgentReader interface {
 	ResolveOperatorAgentIdentity(context.Context, string, string, string) (agentidentity.Identity, error)
 	ListOperatorAgents(context.Context, OperatorAgentListOptions) (OperatorAgentListResult, error)

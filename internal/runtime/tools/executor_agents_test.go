@@ -150,21 +150,31 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 	actor = toolTestConstructedActor(t, exec, actor)
 	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), runtimeeffects.ExecutionModeLive)
-	if _, err := exec.execSchedule(ctx, actor, map[string]any{
-		"schedule_key": "imported-proof",
-		"event_type":   flowPath + "/telegram.followup.requested",
-		"mode":         "absolute",
-		"at":           time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
-		"payload":      map[string]any{"chat_id": "42"},
-	}); err != nil {
-		t.Fatalf("execSchedule(imported template agent): %v", err)
-	}
-	wantRoute := events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: actor.EntityID}
-	if got := scheduler.command.RoutingSource.Route().Normalized(); got != wantRoute {
-		t.Fatalf("schedule routing source = %#v, want %#v", got, wantRoute)
-	}
-	if scheduler.command.FlowInstance != instancePath {
-		t.Fatalf("schedule flow instance = %q, want %q", scheduler.command.FlowInstance, instancePath)
+	loader := exec.workflowInstances.(emitWorkflowInstanceLoader)
+	for _, life := range []int64{1, 2} {
+		// This component reader models the selected current header, not native
+		// reset admission. The call must retain that exact captured life.
+		current := loader.rows[instancePath]
+		current.Life = life
+		loader.rows[instancePath] = current
+		captured := events.InstanceLife{RunID: toolTestRunID, FlowInstance: instancePath, Life: life}
+		ctx := events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &captured})
+		if _, err := exec.execSchedule(ctx, actor, map[string]any{
+			"schedule_key": "imported-proof",
+			"event_type":   flowPath + "/telegram.followup.requested",
+			"mode":         "absolute",
+			"at":           time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+			"payload":      map[string]any{"chat_id": "42"},
+		}); err != nil {
+			t.Fatalf("execSchedule(imported template agent): %v", err)
+		}
+		wantRoute := events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: actor.EntityID}
+		if got := scheduler.command.RoutingSource.Route().Normalized(); got != wantRoute || scheduler.command.RoutingSource.Life() != life {
+			t.Fatalf("schedule routing source = %#v life=%d, want %#v life=%d", got, scheduler.command.RoutingSource.Life(), wantRoute, life)
+		}
+		if scheduler.command.FlowInstance != instancePath {
+			t.Fatalf("schedule flow instance = %q, want %q", scheduler.command.FlowInstance, instancePath)
+		}
 	}
 }
 

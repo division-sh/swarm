@@ -13,8 +13,8 @@ func TestLifecycleDiagnosticOriginRequiresExactTypedSelectedPoint(t *testing.T) 
 		{Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 2},
 		{Kind: runfork.RunForkPointDeploymentRevision, Revision: 2},
 	} {
-		origin := LifecycleDiagnosticOrigin{
-			Owner: LifecycleDiagnosticSelectedFork, Causality: LifecycleDiagnosticObservation,
+		origin := runfork.LifecycleDiagnosticOrigin{
+			Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 			SourceRunID: uuid.NewString(), ForkPoint: point, ForkEventID: point.EventID,
 			SelectedFork: effects.SelectedContractForkAuthority{
 				ExecutionID: uuid.NewString(), ForkRunID: uuid.NewString(), Generation: 1,

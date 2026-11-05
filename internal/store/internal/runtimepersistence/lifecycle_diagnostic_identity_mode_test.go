@@ -6,7 +6,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -25,8 +25,8 @@ func TestLifecycleDiagnosticSettlementIdentityAndModeOnBothStores(t *testing.T) 
 				t.Run(mode, func(t *testing.T) {
 					store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
-					item := enqueueDiagnosticTestIdentity(t, store, testAgentIdentity(t, "mode-worker", "global"), runtimemanager.LifecycleDiagnosticOrigin{
-						Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation,
+					item := enqueueDiagnosticTestIdentity(t, store, testAgentIdentity(t, "mode-worker", "global"), runfork.LifecycleDiagnosticOrigin{
+						Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation,
 					}, origin)
 					if err := runtimepkg.NewRuntimeLogger(store, first, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 						t.Fatal(err)

@@ -166,6 +166,7 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 			"flow_instance":        "review/primary",
 			"entity_type":          "mvp_spec",
 			"stage_defined":        true,
+			"life":                 float64(1),
 			"current_state":        "collecting",
 			"revision":             float64(2),
 			"entered_state_at":     "2026-05-20T01:05:00Z",
@@ -195,7 +196,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 			summary := map[string]any{
 				"entity_id": "entity-1", "run_id": "run-1", "flow_instance": "work", "entity_type": "task",
 				"created_at": "2026-10-10T01:00:00Z", "updated_at": "2026-10-10T01:00:00Z",
-				"stage_defined": nil, "current_state": nil, "revision": nil,
+				"stage_defined": nil, "life": nil, "current_state": nil, "revision": nil,
 				"entered_state_at": nil, "lifecycle_created_at": nil, "lifecycle_updated_at": nil,
 			}
 			result := map[string]any{
@@ -203,7 +204,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 				"bookkeeping": nil, "accumulated": nil, "loops": nil,
 			}
 			if kind != "data_only" {
-				summary["stage_defined"], summary["revision"] = false, float64(1)
+				summary["stage_defined"], summary["life"], summary["revision"] = false, float64(1), float64(1)
 				summary["lifecycle_created_at"], summary["lifecycle_updated_at"] = "2026-10-10T01:00:00Z", "2026-10-10T01:00:00Z"
 				result["bookkeeping"], result["accumulated"], result["loops"] = map[string]any{}, map[string]any{}, []any{}
 			}
@@ -212,7 +213,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 			}
 			validator.validateMethodResult(t, "entity.get", result)
 			validator.validateMethodResult(t, "entity.list", map[string]any{"entities": []any{summary}})
-			for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+			for _, key := range []string{"stage_defined", "life", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
 				t.Run("missing_"+key, func(t *testing.T) {
 					original := summary[key]
 					delete(summary, key)
@@ -223,7 +224,7 @@ func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
 					}
 				})
 			}
-			for key, value := range map[string]any{"stage_defined": float64(0), "current_state": false, "revision": float64(0), "entered_state_at": "not-a-clock", "lifecycle_created_at": "", "lifecycle_updated_at": false} {
+			for key, value := range map[string]any{"stage_defined": float64(0), "life": float64(0), "current_state": false, "revision": float64(0), "entered_state_at": "not-a-clock", "lifecycle_created_at": "", "lifecycle_updated_at": false} {
 				t.Run("invalid_"+key, func(t *testing.T) {
 					original := summary[key]
 					summary[key] = value

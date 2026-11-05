@@ -2,15 +2,19 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -169,7 +173,127 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 		if err := selected.db.QueryRowContext(ctx, `SELECT COALESCE(lease_holder,''),COALESCE(lease_grant_id,''),lease_expires_at IS NULL FROM agent_sessions WHERE session_id=$1`, expiredExact.SessionID).Scan(&holder, &grant, &expiryNull); err != nil || holder != "" || grant != "" || !expiryNull {
 			t.Fatalf("expired cleanup left authority: holder=%q grant=%q expiry_null=%v err=%v", holder, grant, expiryNull, err)
 		}
+		t.Run("captured_instance_life", func(t *testing.T) {
+			backend := "sqlite"
+			if selected.postgres {
+				backend = "postgres"
+			}
+			f, request := newR7SelectionProof(t, backend)
+			runID := request.Lookup.RunID()
+			identity := mustTestAgentIdentityForRun(runID, "life-agent", "")
+			seedTestAgentRow(t, f.ctx, f.db, selected.postgres, identity, "active")
+			captured := events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}
+			ctx := runtimeeffects.WithDifferentOwner(f.ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+			ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &captured})
+			store := f.store.(interface {
+				sessions.Registry
+				runtimellm.ConversationPersistence
+			})
+			lease, err := store.Acquire(ctx, identity, "captured-life-worker")
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, lease.ExpiresAt, 0)
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=NULL WHERE session_id=$1`, lease.SessionID); err == nil {
+				t.Fatal("native session schema accepted partial lease coordinates")
+			}
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id='' WHERE session_id=$1`, lease.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readInstanceLifeSessionCensus(f.store, f.db, ctx, captured, time.Now().UTC()); err == nil {
+				t.Fatal("session census treated empty lease authority as quiescent")
+			}
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=$2 WHERE session_id=$1`, lease.SessionID, lease.GrantID); err != nil {
+				t.Fatal(err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
+			selectedChild, err := pipeline.PrepareFlowInstanceSelection(f.ctx, f.store.(pipeline.FlowInstanceIndexReader), f.manager, request)
+			if err != nil || selectedChild.Activation == nil {
+				t.Fatalf("prepare session census sibling: %+v %v", selectedChild, err)
+			}
+			if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, *selectedChild.Activation); err != nil {
+				t.Fatal(err)
+			}
+			childLife := events.InstanceLife{RunID: runID, FlowInstance: selectedChild.Identity().InstancePath, Life: 1}
+			childIdentity := mustTestAgentIdentityForRun(runID, "life-agent", childLife.FlowInstance)
+			seedTestAgentRow(t, f.ctx, f.db, selected.postgres, childIdentity, "active")
+			childCtx := events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &childLife})
+			childLease, err := store.Acquire(childCtx, childIdentity, "captured-life-child-worker")
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, childLife, time.Now().UTC(), 1)
+			if result, err := store.ReleaseOutcome(childCtx, childLease); err != nil || !result.Acknowledged {
+				t.Fatalf("release census sibling: %+v %v", result, err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, childLife, time.Now().UTC(), 0)
+			// Fault only the native currentness coordinate; this does not claim to
+			// perform the atomic reset or its session lifecycle composition.
+			if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$2`, runID, runID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readInstanceLifeSessionCensus(f.store, f.db, ctx, captured, time.Now().UTC()); err == nil {
+				t.Fatal("session census accepted the predecessor life")
+			} else if envelope, ok := failures.EnvelopeFromError(err); !ok || envelope.Detail.Code != "instance_restarted" {
+				t.Fatalf("session census lost exact stale-life refusal: %v", err)
+			}
+			before := snapshotRotationEffects(t, ctx, f.db, runID)
+			for name, write := range map[string]func() error{
+				"acquire":   func() error { _, err := store.Acquire(ctx, identity, "captured-life-worker"); return err },
+				"renew":     func() error { _, err := store.Renew(ctx, lease); return err },
+				"increment": func() error { _, err := store.IncrementTurnOutcome(ctx, lease); return err },
+				"rotate": func() error {
+					_, err := store.Rotate(ctx, lease, sessions.RotationMetadata{RetryReason: "old-life"})
+					return err
+				},
+				"conversation": func() error {
+					return store.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Status: "active", Memory: agentmemory.Plan{Enabled: true}})
+				},
+			} {
+				if err := write(); err == nil {
+					t.Fatalf("%s accepted a predecessor-life session", name)
+				} else if envelope, ok := failures.EnvelopeFromError(err); !ok || envelope.Class != failures.ClassStaleArrival || envelope.Detail.Code != "instance_restarted" {
+					t.Fatalf("%s lost typed stale-life refusal: %v", name, err)
+				}
+				requireRotationEffectsUnchanged(t, before, snapshotRotationEffects(t, ctx, f.db, runID))
+			}
+			captured.Life = 2
+			ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &captured})
+			current, err := store.Acquire(ctx, identity, "captured-life-worker")
+			if err != nil {
+				t.Fatalf("exact current life refused: %v", err)
+			}
+			if result, err := store.ReleaseOutcome(ctx, current); err != nil || !result.Acknowledged {
+				t.Fatalf("release exact current life: %+v %v", result, err)
+			}
+			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 0)
+		})
 	})
+}
+
+func readInstanceLifeSessionCensus(selected any, db *sql.DB, ctx context.Context, life events.InstanceLife, now time.Time) (int, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.lLMPostgresOwner.ReadActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
+	case *SQLiteRuntimeStore:
+		return owner.lLMSQLiteOwner.ReadActiveInstanceLifeSessionLeasesTx(ctx, tx, life, now)
+	default:
+		panic("session census fixture requires its exact selected store")
+	}
+}
+
+func assertInstanceLifeSessionCensus(t *testing.T, selected any, db *sql.DB, ctx context.Context, life events.InstanceLife, now time.Time, want int) {
+	t.Helper()
+	if count, err := readInstanceLifeSessionCensus(selected, db, ctx, life, now); err != nil || count != want {
+		t.Fatalf("exact instance session census life=%+v count=%d want=%d err=%v", life, count, want, err)
+	}
 }
 
 func TestPostgresOrdinarySessionMutationChecksExpiryAfterRowLock(t *testing.T) {

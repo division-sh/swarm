@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -354,7 +355,7 @@ func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store,
 		}
 		now := time.Now().UTC()
 		if _, commitErr := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+			DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 			OperationID:      uuid.NewString(), OperationKind: kind, RequestHash: uuid.NewString(),
 			Identity: identity, AgentID: identity.AgentID(), Trigger: kind,
 			ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
@@ -606,7 +607,7 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	}
 	now := time.Now().UTC()
 	transition := runtimemanager.AgentLifecycleTransition{
-		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 		OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Identity: identity, AgentID: identity.AgentID(),
 		Trigger: "storetest_fixture", TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
 		ConfigRevision: configRevision, RunMode: runtimemanager.AgentRunModeStopped, Agent: &rec, Topology: topology, Now: now,
@@ -632,7 +633,7 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	}
 	if !found && rec.Status != "terminated" {
 		_, err = grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+			DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 			OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(), Identity: identity, AgentID: identity.AgentID(),
 			Trigger: "storetest_fixture", ExpectedEpoch: result.RuntimeEpoch, ExpectedGeneration: result.Generation, ExpectedPhase: result.Phase,
 			TargetEpoch: result.RuntimeEpoch, TargetGeneration: result.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
@@ -696,7 +697,7 @@ func ensureFixtureRun(ctx context.Context, selected Store, runID string, started
 func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	t.Helper()
 	if req.DiagnosticOrigin.Owner == "" {
-		req.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+		req.DiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}
 	}
 	if selected == nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle fixture selected store is required")
@@ -831,7 +832,7 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	t.Helper()
 	if req.DiagnosticOrigin.Owner == "" {
-		req.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+		req.DiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}
 	}
 	if selected == nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle fixture selected store is required")

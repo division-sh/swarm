@@ -134,7 +134,7 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 		CreatedAt:               event.CreatedAt().UTC().Truncate(time.Microsecond),
 		RoutingSourceKind:       event.RoutingSource().Kind().StorageCode(),
 		RoutingSourceAuthority:  event.RoutingSource().Authority().StorageCode(),
-		SourceRoute:             marshalRoute(event.RoutingSource().Route()),
+		SourceRoute:             EncodeSourceRoute(event.RoutingSource()),
 		TargetRoute:             marshalRoute(envelope.Target),
 		TargetSet:               marshalRouteSet(envelope.TargetSet),
 		RouteSettlement:         rawSettlement,
@@ -374,7 +374,7 @@ func (r Record) decodeWithSettlement(settlement events.RouteSettlement) (events.
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, decodedEnvelope.routingSourceRoute, r.RoutingSourceAuthority)
+	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, decodedEnvelope.routingSourceRoute, r.RoutingSourceAuthority, decodedEnvelope.routingSourceLife)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("event record routing source: %w", err)
 	}
@@ -506,15 +506,17 @@ func (r Record) DecodeSettlement() (events.RouteSettlement, error) {
 type decodedRecordEnvelope struct {
 	envelope           events.EventEnvelope
 	routingSourceRoute events.RouteIdentity
+	routingSourceLife  int64
 }
 
 func (r Record) decodeEnvelope() (decodedRecordEnvelope, error) {
-	source, err := unmarshalRoute("source_route", r.SourceRoute)
+	fact, err := unmarshalSourceRoute(r.SourceRoute)
 	if err != nil {
 		return decodedRecordEnvelope{}, err
 	}
 	// External ingress keeps its stored routing source but has no envelope source.
-	routingSourceRoute := source
+	routingSourceRoute := fact.RouteIdentity.Normalized()
+	source := routingSourceRoute
 	if r.RoutingSourceKind == events.RoutingSourceExternalIngress.StorageCode() ||
 		r.RoutingSourceKind == events.RoutingSourceDeploymentFeed.StorageCode() {
 		source = events.RouteIdentity{}
@@ -537,7 +539,46 @@ func (r Record) decodeEnvelope() (decodedRecordEnvelope, error) {
 	if err := events.ValidateEnvelope(envelope); err != nil {
 		return decodedRecordEnvelope{}, err
 	}
-	return decodedRecordEnvelope{envelope: envelope.Normalized(), routingSourceRoute: routingSourceRoute}, nil
+	return decodedRecordEnvelope{envelope: envelope.Normalized(), routingSourceRoute: routingSourceRoute, routingSourceLife: fact.Life}, nil
+}
+
+type sourceRouteFact struct {
+	events.RouteIdentity
+	Life int64 `json:"life,omitempty"`
+}
+
+// EncodeSourceRoute is shared by native publication and fixed-cut reconstruction.
+func EncodeSourceRoute(source events.RoutingSource) []byte {
+	raw, _ := json.Marshal(sourceRouteFact{RouteIdentity: source.Route(), Life: source.Life()})
+	return raw
+}
+
+// DecodeRoutingSource reads just the recorded source coordinate without
+// granting event admission or replacing the full record's validation.
+func (r Record) DecodeRoutingSource() (events.RoutingSource, error) {
+	fact, err := unmarshalSourceRoute(r.SourceRoute)
+	if err != nil {
+		return events.RoutingSource{}, Corrupt(r.EventID, err)
+	}
+	source, err := events.RestoreRoutingSource(r.RoutingSourceKind, fact.RouteIdentity, r.RoutingSourceAuthority, fact.Life)
+	if err != nil {
+		return events.RoutingSource{}, Corrupt(r.EventID, err)
+	}
+	if !jsonEqual(r.SourceRoute, EncodeSourceRoute(source)) {
+		return events.RoutingSource{}, Corrupt(r.EventID, fmt.Errorf("recorded routing source changed its durable facts"))
+	}
+	return source, nil
+}
+
+func unmarshalSourceRoute(raw []byte) (sourceRouteFact, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return sourceRouteFact{}, fmt.Errorf("source_route is required")
+	}
+	var fact sourceRouteFact
+	if err := json.Unmarshal(raw, &fact); err != nil {
+		return sourceRouteFact{}, fmt.Errorf("decode source_route: %w", err)
+	}
+	return fact, nil
 }
 
 func marshalRoute(route events.RouteIdentity) []byte {

@@ -25,8 +25,8 @@ func selectedRecipientContextFixture(t *testing.T) (context.Context, events.Even
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := eventtest.SelectedForkReplay(uuid.NewString(), "work.ready", eventtest.Producer(events.EventProducerPlatform, "selected-owner"),
-		"", []byte(`{}`), 0, lineage, events.EventEnvelope{}, time.Now().UTC())
+	event := eventtest.SelectedForkReplayWithRoutingSource(uuid.NewString(), "work.ready", eventtest.Producer(events.EventProducerPlatform, "selected-owner"),
+		[]byte(`{}`), lineage, events.EventEnvelope{}, eventtest.RootRoutingSource(child), time.Now().UTC())
 	plan := RoutePlan{Event: event}
 	var recipients []forkrecipient.Evidence
 	for _, name := range []string{"first", "second"} {

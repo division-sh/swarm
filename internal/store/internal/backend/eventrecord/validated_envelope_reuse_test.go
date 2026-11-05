@@ -104,10 +104,11 @@ func oldEnvelopeReuseValidate(r Record, settlement events.RouteSettlement) error
 }
 
 func oldEnvelopeReuseEnvelope(r Record) (events.EventEnvelope, error) {
-	source, err := unmarshalRoute("source_route", r.SourceRoute)
+	sourceFact, err := unmarshalSourceRoute(r.SourceRoute)
 	if err != nil {
 		return events.EventEnvelope{}, err
 	}
+	source := sourceFact.RouteIdentity.Normalized()
 	if r.RoutingSourceKind == events.RoutingSourceExternalIngress.StorageCode() {
 		source = events.RouteIdentity{}
 	}
@@ -140,11 +141,11 @@ func oldEnvelopeReuseDecode(r Record, settlement events.RouteSettlement) (events
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	routingSourceRoute, err := unmarshalRoute("source_route", r.SourceRoute)
+	sourceFact, err := unmarshalSourceRoute(r.SourceRoute)
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, routingSourceRoute, r.RoutingSourceAuthority)
+	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, sourceFact.RouteIdentity.Normalized(), r.RoutingSourceAuthority, sourceFact.Life)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("event record routing source: %w", err)
 	}

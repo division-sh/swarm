@@ -26,6 +26,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -138,7 +139,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			req := runtimemanager.AgentLifecycleTransition{
-				DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+				DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 				OperationID:      uuid.NewString(), OperationKind: "source_set_retire", RequestHash: uuid.NewString(),
 				Identity: identity, AgentID: identity.AgentID(), Trigger: "source_set_retire",
 				ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
@@ -417,7 +418,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 	readinessRecord.Topology = preparedTopology
 	preparation := runtimemanager.AgentLifecycleTransition{
-		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 		OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(),
 		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_preparation_fixture",
 		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
@@ -499,7 +500,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	readinessRecord.Topology = readinessTopology
 	if len(sourceSetRebind) < 2 || !sourceSetRebind[1] {
 		if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+			DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 			OperationID:      uuid.NewString(), OperationKind: "reconfigure", RequestHash: uuid.NewString(),
 			Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_fixture",
 			ExpectedEpoch: preparedState.RuntimeEpoch, ExpectedGeneration: preparedState.Generation, ExpectedPhase: preparedState.Phase,
@@ -556,7 +557,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		request := runtimemanager.FlowReadinessSourceSetRebindRequest{
 			Attempt: admitted.Attempt, PlanHash: readinessFingerprint,
 			Transitions: []runtimemanager.AgentLifecycleTransition{{
-				DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+				DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 				OperationID:      uuid.NewString(), OperationKind: "source_set_rebind", RequestHash: uuid.NewString(),
 				Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_source_set_rebind_proof",
 				ExpectedEpoch: readinessState.RuntimeEpoch, ExpectedGeneration: readinessState.Generation, ExpectedPhase: readinessState.Phase,
@@ -615,7 +616,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		return
 	}
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 		OperationID:      uuid.NewString(), OperationKind: "process_takeover", RequestHash: uuid.NewString(),
 		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "forged_takeover",
 		ExpectedEpoch: readinessState.RuntimeEpoch, ExpectedGeneration: readinessState.Generation, ExpectedPhase: readinessState.Phase,
@@ -627,7 +628,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}
 	terminateLifecycleReadinessOwnerForTest(t, ctx, store, runID, readinessPlan.Identity.InstancePath)
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 		OperationID:      uuid.NewString(), OperationKind: "teardown", RequestHash: uuid.NewString(),
 		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "terminated_census_fixture",
 		ExpectedEpoch: readinessState.RuntimeEpoch, ExpectedGeneration: readinessState.Generation, ExpectedPhase: readinessState.Phase,
@@ -965,7 +966,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+	request.DiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}
 	request.Topology, err = runtimeagenttopology.StaticAdmission(plan.Revision, before.ProcessBinding.BundleHash, before.Topology.Lifetime)
 	if err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +45,8 @@ type entityViewCommandOptions struct {
 
 	runID    string
 	runIDSet bool
+	iter     int64
+	iterSet  bool
 }
 
 type entityAggregateCommandOptions struct {
@@ -67,6 +70,7 @@ type entitySummary struct {
 	FlowInstance       string  `json:"flow_instance"`
 	EntityType         string  `json:"entity_type"`
 	StageDefined       *bool   `json:"stage_defined"`
+	Life               *int64  `json:"life"`
 	CurrentState       *string `json:"current_state"`
 	Slug               string  `json:"slug,omitempty"`
 	Name               string  `json:"name,omitempty"`
@@ -108,7 +112,7 @@ func (e *entitySummary) UnmarshalJSON(raw []byte) error {
 	type decoded entitySummary
 	return decodeRequiredEntityProperties(raw, (*decoded)(e),
 		"entity_id", "run_id", "flow_instance", "entity_type", "created_at", "updated_at",
-		"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at")
+		"stage_defined", "life", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at")
 }
 
 func (e *entityFull) UnmarshalJSON(raw []byte) error {
@@ -192,11 +196,13 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
 			viewOpts.runIDSet = cmd.Flags().Changed("run-id")
+			viewOpts.iterSet = cmd.Flags().Changed("iter")
 			return runEntityViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], viewOpts)
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List entity ids with `swarm entity list`.")
 	cmd.Flags().StringVar(&viewOpts.runID, "run-id", "", "Disambiguate entities reused across runs")
+	cmd.Flags().Int64Var(&viewOpts.iter, "iter", 0, "Read one positive instance life; defaults to current")
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLIOutputVerboseFlag(cmd, &viewOpts.output)
@@ -254,6 +260,12 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 		return returnCLIValidationError(errOut, err)
 	}
 	params := map[string]any{}
+	if opts.iterSet {
+		if opts.iter <= 0 {
+			return returnCLIValidationError(errOut, fmt.Errorf("--iter must be a positive integer"))
+		}
+		params["iter"] = opts.iter
+	}
 	runID := ""
 	if opts.runIDSet {
 		var err error
@@ -290,6 +302,9 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 	}
 	if err := validateEntityFullResult("entity.get result", result); err != nil {
 		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
+	}
+	if opts.iterSet && (result.Entity.Life == nil || *result.Entity.Life != opts.iter) {
+		return returnCLIAPIError(errOut, fmt.Errorf("entity.get returned a different instance life"), entityViewAPIErrorClassifier())
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
 		writeEntityFullResult(w, result, entityRenderOptions{verbose: opts.output.verbose})
@@ -463,7 +478,18 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Loops == nil {
 		return fmt.Errorf("malformed %s: constructed loops must be an array", prefix)
 	}
+	if _, err := entityLifeStartedAt(result); err != nil {
+		return fmt.Errorf("malformed %s: %w", prefix, err)
+	}
 	return nil
+}
+
+func entityLifeStartedAt(result entityFull) (time.Time, error) {
+	if result.Entity.Life == nil {
+		return time.Time{}, nil
+	}
+	birth, _ := time.Parse(time.RFC3339Nano, *result.Entity.LifecycleCreatedAt)
+	return pipeline.InstanceLifeStartedAt(*result.Entity.Life, birth, result.Bookkeeping)
 }
 
 func validateEntitySummary(prefix string, entity entitySummary) error {
@@ -500,11 +526,14 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 		return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
 	}
 	if entity.StageDefined == nil {
-		if entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
+		if entity.Life != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
 			entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil {
 			return fmt.Errorf("malformed %s: data-only entity cannot carry lifecycle metadata", prefix)
 		}
 		return nil
+	}
+	if entity.Life == nil || *entity.Life <= 0 {
+		return fmt.Errorf("malformed %s: constructed life must be positive", prefix)
 	}
 	if entity.Revision == nil || *entity.Revision <= 0 {
 		return fmt.Errorf("malformed %s: constructed revision must be positive", prefix)
@@ -619,9 +648,15 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	}
 	if entity.StageDefined != nil {
 		header = append(header,
+			cliLabeledDetailRow{Label: "life", Value: fmt.Sprintf("%d", *entity.Life)},
 			cliLabeledDetailRow{Label: "revision", Value: fmt.Sprintf("%d", *entity.Revision)},
 			cliLabeledDetailRow{Label: "lifecycle created", Value: entityTimestampText(now, *entity.LifecycleCreatedAt, opts.verbose)},
 			cliLabeledDetailRow{Label: "lifecycle updated", Value: entityTimestampText(now, *entity.LifecycleUpdatedAt, opts.verbose)})
+		if *entity.Life > 1 {
+			if started, err := entityLifeStartedAt(result); err == nil {
+				header = append(header, cliLabeledDetailRow{Label: "history", Value: "started over on " + started.UTC().Format(time.RFC3339Nano)})
+			}
+		}
 	}
 	header = append(header,
 		cliLabeledDetailRow{Label: "slug", Value: entityDash(entityOneLine(entity.Slug))},

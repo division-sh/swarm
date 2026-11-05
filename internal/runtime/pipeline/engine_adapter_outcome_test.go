@@ -68,6 +68,7 @@ func outcomeConstructedMutation(t *testing.T) (runtimeengine.EngineMutation, Wor
 		t.Fatal(err)
 	}
 	command := WorkflowEngineMutationCommand{State: WorkflowEngineStateRecord{
+		Life:     1,
 		Identity: flow, EntityID: eventtest.UUID("outcome-entity"), WorkflowName: ".", WorkflowVersion: "v1",
 		Mode: "static", Status: "active", CurrentState: "pending", StageDefined: true,
 		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`),
@@ -89,6 +90,31 @@ func TestOutcomeConstructedMutationRetainsExactRecordedHeader(t *testing.T) {
 	}
 	if mutation.Address.FlowInstance != command.State.Identity {
 		t.Fatalf("mutation changed the constructed receiver: %+v", mutation.Address)
+	}
+	var controls map[string]any
+	if err := json.Unmarshal(command.State.Config, &controls); err != nil {
+		t.Fatal(err)
+	}
+	controls["status"] = "active"
+	withStatus, err := json.Marshal(controls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusHeader, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, withStatus)
+	if err != nil || !header.SameRestartControl(statusHeader, "active") {
+		t.Fatalf("redundant status changed physical control: %v", err)
+	}
+	controls["workflow_version"] = "foreign"
+	foreign, err := json.Marshal(controls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignHeader, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, foreign)
+	if err != nil || header.SameRestartControl(foreignHeader, "active") {
+		t.Fatalf("restart control accepted changed workflow version: %v", err)
+	}
+	if header.SameRestartControl(statusHeader, "terminated") {
+		t.Fatal("restart control accepted status different from its authoritative header")
 	}
 	invalid := command
 	invalid.State.Config = json.RawMessage(`{}`)

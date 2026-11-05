@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -437,7 +438,7 @@ func TestFanOutPreparationReobservesAgentInventoryBeforeCommitBothStores(t *test
 				t.Fatalf("agent lifecycle state found=%v err=%v", found, err)
 			}
 			if _, err := f.grant.CommitAgentLifecycleTransition(f.ctx, manager.AgentLifecycleTransition{
-				DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
+				DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 				OperationID:      uuid.NewString(), OperationKind: "teardown", RequestHash: "preparation-inventory-terminate",
 				Identity: agentIdentity, AgentID: agentIdentity.AgentID(), Trigger: "terminate",
 				ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,

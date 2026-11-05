@@ -322,14 +322,19 @@ func (p *RoutePlan) AddDeliveryIntents(intents ...RoutePlanDeliveryIntent) {
 
 func (p RoutePlan) WithDefaultDeliveryContext(deliveryContext events.DeliveryContext) RoutePlan {
 	p = p.Normalized()
-	deliveryContext = deliveryContext.ReplyOnly()
-	if deliveryContext.Empty() || p.ReplyContextConsumed {
+	deliveryContext = deliveryContext.Continuation()
+	if deliveryContext.Empty() {
 		return p
 	}
 	for i := range p.DeliveryIntents {
-		if p.DeliveryIntents[i].Context.Empty() {
-			p.DeliveryIntents[i].Context = deliveryContext
+		current := p.DeliveryIntents[i].Context.Normalized()
+		if current.Reply == nil && len(current.Joins) == 0 && !p.ReplyContextConsumed {
+			current.Reply = deliveryContext.Reply
 		}
+		if current.Life == nil {
+			current.Life = deliveryContext.Life
+		}
+		p.DeliveryIntents[i].Context = current
 	}
 	return p.Normalized()
 }

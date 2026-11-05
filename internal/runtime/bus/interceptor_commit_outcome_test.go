@@ -214,7 +214,7 @@ func TestInterceptorCommitContinuationRetainsErrorAndHandoff(t *testing.T) {
 	stageInterceptorOutcome(t, bus, child, EventAppendInserted)
 	route := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: busInternalTestRunID}),
 	}
 	result := bus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, route)
 	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchFatal || !errors.Is(result.Failure(), cleanupErr) {

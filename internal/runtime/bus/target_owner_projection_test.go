@@ -29,18 +29,22 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 		required: true,
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: rootRunID,
 					EntityID: rootOwner},
 			},
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: "review",
 					EntityID: staticOwner},
 			},
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: "portfolio",
 					EntityID: singletonOwner},
 			},
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: "operating/instance-a",
 					EntityID: templateOwner},
 			},
@@ -141,6 +145,7 @@ func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) 
 func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 	blueprint := events.RouteIdentity{FlowID: "parent/child", FlowInstance: "parent/child"}
 	parent := runtimepipeline.DeliveryTargetOwnerCandidate{
+		Life: 1,
 		Route: events.RouteIdentity{FlowInstance: "parent",
 			EntityID: eventtest.UUID("parent-owner")},
 	}
@@ -149,6 +154,7 @@ func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 		t.Fatal("parent descriptor became receiver-owned state")
 	}
 	child := runtimepipeline.DeliveryTargetOwnerCandidate{
+		Life: 1,
 		Route: events.RouteIdentity{FlowInstance: blueprint.FlowInstance,
 			EntityID: eventtest.UUID("child-owner")},
 	}
@@ -561,7 +567,7 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 		t.Fatalf("resolve runtime-created carrier: %v", err)
 	}
 	routes := resolved.DeliveryRoutes()
-	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() {
+	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() || routes[0].Context.Life != nil {
 		t.Fatalf("runtime-created carrier routes = %#v, want exact identity with explicit target absence", routes)
 	}
 }
@@ -601,7 +607,7 @@ func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *test
 				if err != nil {
 					t.Fatal(err)
 				}
-				if routes := resolved.DeliveryRoutes(); len(routes) != 1 || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() {
+				if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() || routes[0].Context.Life != nil {
 					t.Fatalf("independent targetless actor acquired flow ownership: %+v", routes)
 				}
 				instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
@@ -730,6 +736,7 @@ func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwne
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{{
 			Route: events.RouteIdentity{FlowInstance: target.FlowInstance,
 				EntityID: target.EntityID},
+			Life:          1,
 			Materializing: true,
 		}},
 		targetsAvailable: true,

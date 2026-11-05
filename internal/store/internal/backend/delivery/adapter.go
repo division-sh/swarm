@@ -2382,6 +2382,9 @@ func (a *Adapter) RunTraceReferencePage(ctx context.Context, q queryer, page Run
 	if page.Limit <= 0 {
 		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page limit must be positive")
 	}
+	if page.Life != nil && (*page.Life <= 0 || len(page.EntityIDs) != 1) {
+		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace life requires one entity and a positive iter")
+	}
 	if page.After != nil && (page.After.EventCreatedAt.IsZero() || strings.TrimSpace(page.After.EventID) == "") {
 		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page cursor requires event time and id")
 	}
@@ -2523,6 +2526,11 @@ func (a *Adapter) queryPostgresRunTraceReferences(ctx context.Context, q queryer
 	}
 	addTextFilter("e.event_name", page.EventNames)
 	addTextFilter("e.entity_id::text", page.EntityIDs)
+	if page.Life != nil {
+		where = append(where, runTraceLifePredicate(true, fmt.Sprintf("$%d", addArg(*page.Life))))
+	} else if len(page.EntityIDs) == 1 {
+		where = append(where, runTraceLifePredicate(true, ""))
+	}
 	statuses := make([]string, 0, len(page.DeliveryStatuses))
 	for _, status := range page.DeliveryStatuses {
 		statuses = append(statuses, string(status))
@@ -2613,6 +2621,12 @@ func (a *Adapter) querySQLiteRunTraceReferences(ctx context.Context, q queryer, 
 	}
 	addTextFilter("e.event_name", page.EventNames)
 	addTextFilter("COALESCE(e.entity_id, '')", page.EntityIDs)
+	if page.Life != nil {
+		where = append(where, runTraceLifePredicate(false, "?"))
+		args = append(args, *page.Life, *page.Life)
+	} else if len(page.EntityIDs) == 1 {
+		where = append(where, runTraceLifePredicate(false, ""))
+	}
 	statuses := make([]string, 0, len(page.DeliveryStatuses))
 	for _, status := range page.DeliveryStatuses {
 		statuses = append(statuses, string(status))
@@ -2658,6 +2672,54 @@ func (a *Adapter) querySQLiteRunTraceReferences(ctx context.Context, q queryer, 
 }
 
 const sqliteTraceCursorFloor = "0001-01-01T00:00:00Z"
+
+// Preserve the event-entity predicate. Its life comes from the exact recorded
+// receiver when it owns this row, otherwise the exact producer, never a time cut.
+func runTraceLifePredicate(postgres bool, selected string) string {
+	header := `SELECT 1 FROM flow_instances trace_life
+		WHERE trace_life.run_id=e.run_id AND trace_life.entity_id=e.entity_id`
+	captured := `CASE
+		WHEN json_extract(d.delivery_target_route,'$.route.flow_instance')=trace_life.instance_path
+			AND json_type(d.delivery_target_route,'$.life')='integer'
+			THEN json_extract(d.delivery_target_route,'$.life')
+		WHEN json_extract(d.delivery_context,'$.life.run_id')=trace_life.run_id
+			AND json_extract(d.delivery_context,'$.life.flow_instance')=trace_life.instance_path
+			AND json_type(d.delivery_context,'$.life.life')='integer'
+			THEN json_extract(d.delivery_context,'$.life.life')
+		WHEN (json_extract(e.source_route,'$.entity_id')=trace_life.entity_id OR
+			(COALESCE(json_extract(e.source_route,'$.entity_id'),'')='' AND
+				(json_extract(e.source_route,'$.flow_instance')=trace_life.instance_path OR
+				(e.routing_source_kind='root' AND trace_life.instance_path=e.run_id))))
+			AND json_type(e.source_route,'$.life')='integer'
+			THEN json_extract(e.source_route,'$.life') END`
+	if postgres {
+		captured = `CASE
+			WHEN d.delivery_target_route->'route'->>'flow_instance'=trace_life.instance_path
+				THEN d.delivery_target_route->'life'
+			WHEN d.delivery_context->'life'->>'run_id'=trace_life.run_id::text
+				AND d.delivery_context->'life'->>'flow_instance'=trace_life.instance_path
+				THEN d.delivery_context->'life'->'life'
+			WHEN (e.source_route->>'entity_id'=trace_life.entity_id::text OR
+				(COALESCE(e.source_route->>'entity_id','')='' AND
+					(e.source_route->>'flow_instance'=trace_life.instance_path OR
+					(e.routing_source_kind='root' AND trace_life.instance_path=e.run_id::text))))
+				THEN e.source_route->'life' END`
+	}
+	life := "trace_life.life"
+	if selected != "" {
+		life = selected
+	}
+	if postgres {
+		life = `to_jsonb(` + life + `::bigint)`
+	}
+	match := `(` + captured + `)=` + life
+	if selected != "" {
+		return `EXISTS (` + header + ` AND trace_life.life>=` + selected + ` AND ` + match + `)`
+	}
+	// Imported/run-owned rows have no instance life and retain their prior trace
+	// behavior. An instance-scoped current read requires captured current life.
+	return `(NOT EXISTS (` + header + `) OR EXISTS (` + header + ` AND ` + match + `))`
+}
 
 func traceNullableTimestamp(value time.Time) string {
 	if value.IsZero() {
@@ -2940,28 +3002,51 @@ func (a *Adapter) ActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 	if tx == nil {
 		return nil, fmt.Errorf("delivery active-run snapshot transaction is required")
 	}
-	return a.activeRunSnapshots(ctx, tx, runID, true)
+	return a.activeRunSnapshots(ctx, tx, runID, true, nil)
 }
 
 func (a *Adapter) ReadActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID string) ([]Snapshot, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery active-run read transaction is required")
 	}
-	return a.activeRunSnapshots(ctx, tx, runID, false)
+	return a.activeRunSnapshots(ctx, tx, runID, false, nil)
 }
 
-func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID string, forUpdate bool) ([]Snapshot, error) {
+func (a *Adapter) ReadActiveInstanceLifeSnapshots(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]Snapshot, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("instance-life delivery read requires its selected transaction")
+	}
+	if err := life.Validate(); err != nil {
+		return nil, err
+	}
+	return a.activeRunSnapshots(ctx, tx, life.RunID, false, &life)
+}
+
+func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID string, forUpdate bool, life *events.InstanceLife) ([]Snapshot, error) {
 	if _, err := uuid.Parse(strings.TrimSpace(runID)); err != nil {
 		return nil, fmt.Errorf("delivery active-run snapshot run id: %w", err)
 	}
-	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id`
+	query := `SELECT delivery_id::text FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`
+	args := []any{runID}
+	if life != nil {
+		query += ` AND (delivery_target_route->'route'->>'flow_instance'=$2 OR
+			(subscriber_type='agent' AND (agent_flow_instance_path=$2 OR (agent_route_presence='root' AND $2=$1::text))))`
+		args = append(args, life.FlowInstance)
+	}
+	query += ` ORDER BY delivery_id`
 	if forUpdate {
 		query += " FOR UPDATE"
 	}
 	if a.dialect == DialectSQLite {
-		query = `SELECT delivery_id FROM event_deliveries WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed') ORDER BY delivery_id`
+		query = `SELECT delivery_id FROM event_deliveries WHERE run_id = ? AND status IN ('pending', 'in_progress', 'failed')`
+		if life != nil {
+			query = `SELECT delivery_id FROM event_deliveries WHERE run_id = $1 AND status IN ('pending', 'in_progress', 'failed')
+				AND (json_extract(delivery_target_route,'$.route.flow_instance')=$2 OR
+				(subscriber_type='agent' AND (agent_flow_instance_path=$2 OR (agent_route_presence='root' AND $2=$1))))`
+		}
+		query += ` ORDER BY delivery_id`
 	}
-	rows, err := tx.QueryContext(ctx, query, runID)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("select active run delivery snapshots: %w", err)
 	}
@@ -2987,9 +3072,30 @@ func (a *Adapter) activeRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 		if err != nil {
 			return nil, err
 		}
+		if life != nil {
+			captured, err := capturedDeliveryLife(record.Snapshot)
+			if err != nil || captured.RunID != life.RunID || captured.FlowInstance != life.FlowInstance {
+				return nil, errors.Join(err, fmt.Errorf("instance-life delivery scope disagrees with its recorded receiver"))
+			}
+			if captured.Life != life.Life {
+				continue
+			}
+		}
 		out = append(out, record.Snapshot)
 	}
 	return out, nil
+}
+
+func capturedDeliveryLife(snapshot Snapshot) (events.InstanceLife, error) {
+	if target := snapshot.Route.Target; !target.Empty() {
+		life := events.InstanceLife{RunID: snapshot.RunID, FlowInstance: target.Route().FlowInstance, Life: target.Life()}
+		return life, life.Validate()
+	}
+	if snapshot.Route.Context.Life == nil {
+		return events.InstanceLife{}, fmt.Errorf("targetless delivery has no captured instance life")
+	}
+	life := *snapshot.Route.Context.Life
+	return life, life.Validate()
 }
 
 func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, error) {

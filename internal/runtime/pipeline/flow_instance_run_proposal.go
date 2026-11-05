@@ -30,3 +30,15 @@ func (p FlowInstanceRunProposal) Validate(runID string, source correlation.Sourc
 	}
 	return nil
 }
+
+func (p FlowInstanceRunProposal) ValidateRootPublication(source correlation.SourceArtifactFact, event events.Event) error {
+	if err := p.Validate(event.RunID(), source); err != nil {
+		return err
+	}
+	routing := event.RoutingSource()
+	if p.admission.ID() != event.ID() || routing.Kind() != events.RoutingSourceRoot || routing.Life() != 1 ||
+		(routing.Route().EntityID != "" && routing.Route().EntityID != event.RunID()) {
+		return fmt.Errorf("new run source life requires its exact create-authorized root publication")
+	}
+	return nil
+}

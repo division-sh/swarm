@@ -20,7 +20,7 @@ const DataReadColumns = `CAST(es.run_id AS TEXT), CAST(es.entity_id AS TEXT),
 	CAST(fi.entity_id AS TEXT), fi.instance_path, fi.entity_type, fi.flow_template,
 	fi.mode, fi.status, fi.config, fi.current_state, fi.stage_defined, fi.revision,
 	fi.entered_state_at, fi.created_at, fi.updated_at, fi.terminated_at,
-	fi.bookkeeping, fi.accumulator, fi.parent_instance, fi.instance_key,
+	fi.bookkeeping, fi.accumulator, fi.parent_instance, fi.instance_key, fi.life,
 	(SELECT COUNT(*) FROM flow_instances owner
 	 WHERE owner.run_id = es.run_id AND (owner.entity_id = es.entity_id OR owner.instance_path = es.flow_instance))`
 
@@ -39,14 +39,14 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	var headerID, path, entityType, template, mode, status, stage sql.NullString
 	var parentInstance, instanceKey sql.NullString
 	var stageDefined sql.NullBool
-	var revision sql.NullInt64
+	var revision, life sql.NullInt64
 	var owners int
 	var dataCreated, dataUpdated, entered, created, updated, terminated any
 	var fields, config, bookkeeping, accumulator []byte
 	dest := []any{&runID, &state.EntityID, &state.FlowInstance, &state.EntityType, &slug, &name,
 		&fields, &dataCreated, &dataUpdated, &headerID, &path, &entityType, &template,
 		&mode, &status, &config, &stage, &stageDefined, &revision, &entered, &created, &updated,
-		&terminated, &bookkeeping, &accumulator, &parentInstance, &instanceKey, &owners}
+		&terminated, &bookkeeping, &accumulator, &parentInstance, &instanceKey, &life, &owners}
 	if err := row.Scan(append(dest, tail...)...); err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}
@@ -73,13 +73,14 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	}
 	target := pipeline.WorkflowTargetPersistenceRecord{Presence: pipeline.WorkflowTargetPersistenceStateOnly, State: state}
 	if headerID.Valid {
-		if !stageDefined.Valid || !revision.Valid {
+		if !stageDefined.Valid || !revision.Valid || !life.Valid {
 			return operatorread.OperatorEntityFull{}, fmt.Errorf("constructed lifecycle presence is incomplete")
 		}
 		header.EntityID, header.FlowInstance, header.EntityType = headerID.String, path.String, entityType.String
 		header.WorkflowName, header.Mode, header.Status = template.String, mode.String, status.String
 		header.ParentInstance, header.InstanceKey = parentInstance.String, instanceKey.String
 		header.CurrentState, header.StageDefined, header.Revision = stage.String, stageDefined.Bool, revision.Int64
+		header.Life = life.Int64
 		target.Presence = pipeline.WorkflowTargetPersistenceComplete
 		target.Lifecycle = pipeline.WorkflowLifecycleCompanionPersistenceRecord{
 			ParentInstance: header.ParentInstance, InstanceKey: header.InstanceKey,
@@ -116,6 +117,7 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 		return operatorread.OperatorEntityFull{}, err
 	}
 	out.Entity.StageDefined, out.Entity.Revision = &header.StageDefined, &header.Revision
+	out.Entity.Life = &header.Life
 	out.Entity.LifecycleCreatedAt, out.Entity.LifecycleUpdatedAt = &header.CreatedAt, &header.UpdatedAt
 	if header.StageDefined {
 		out.Entity.CurrentState, out.Entity.EnteredStateAt = &header.CurrentState, &header.EnteredStageAt

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -126,10 +127,12 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 			for _, test := range []struct {
 				name            string
 				preSettle       bool
+				lifeChanged     bool
 				wantCommitError bool
 			}{
 				{name: "success commits state and delivery"},
 				{name: "stale claim rolls back state", preSettle: true, wantCommitError: true},
+				{name: "stale life rolls back state and delivery", lifeChanged: true, wantCommitError: true},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					flowID := "engine-delivery-" + uuid.NewString()
@@ -170,6 +173,11 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 							t.Fatalf("pre-settle workflow engine delivery fixture: %v", err)
 						}
 					}
+					if test.lifeChanged {
+						if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$2`, runID, instancePath); err != nil {
+							t.Fatal(err)
+						}
+					}
 
 					before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 					committed, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
@@ -181,7 +189,12 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 					})
 					if test.wantCommitError {
 						if err == nil {
-							t.Fatal("stale delivery claim committed the workflow engine mutation")
+							t.Fatalf("%s committed the workflow engine mutation", test.name)
+						}
+						if test.lifeChanged {
+							if envelope, typed := failures.EnvelopeFromError(err); !typed || envelope.Class != failures.ClassStaleArrival || envelope.Detail.Code != "instance_restarted" {
+								t.Fatalf("changed life lost its typed refusal: %v", err)
+							}
 						}
 						assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "active", 1, 1)
 						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
@@ -395,6 +408,33 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 			assertFanOutIntentCount(t, ctx, db, backend, runID, 1)
 			assertFanOutBarrierCount(t, ctx, db, runID, 1)
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			var census interface {
+				ReadPendingInstanceLifeFanOutTx(context.Context, *sql.Tx, events.InstanceLife) (int, error)
+			}
+			switch selected := fixture.store.(type) {
+			case *PostgresStore:
+				census = selected.pipelinePostgresOwner
+			case *SQLiteRuntimeStore:
+				census = selected.pipelineSQLiteOwner
+			}
+			for _, life := range []int64{1, 2} {
+				want := 0
+				if life == 1 {
+					want = 4 // Three owed ordinals and their armed barrier.
+				}
+				count, err := census.ReadPendingInstanceLifeFanOutTx(ctx, tx, events.InstanceLife{RunID: runID, FlowInstance: instancePath, Life: life})
+				if err != nil || count != want {
+					t.Fatalf("native fan-out life=%d pending=%d want=%d err=%v", life, count, want, err)
+				}
+			}
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
 			var capsuleRaw []byte
 			if err := db.QueryRowContext(ctx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2`, runID, claimed.Claim.DeliveryID()).Scan(&capsuleRaw); err != nil {
 				t.Fatalf("load committed fan-out capsule: %v", err)

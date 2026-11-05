@@ -122,6 +122,7 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
 			commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
+				Life:       1,
 				InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: "dispatching", EntityType: "state", Fields: map[string]any{"expected": []any{"a", "b"}},
 			}, now)
@@ -300,6 +301,7 @@ func a2SameCommitWitnessState(t *testing.T, witness a2SameCommitMutationWitness)
 		t.Fatal(err)
 	}
 	instance, err := runtimepipeline.DecodeWorkflowInstancePersistenceRecord(runtimepipeline.WorkflowInstancePersistenceRecord{
+		Life:     record.Life,
 		EntityID: record.EntityID, FlowInstance: record.Identity.Route.InstancePath, EntityType: record.EntityType,
 		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode, Status: record.Status,
 		Config: record.Config, StageDefined: record.StageDefined, TerminatedAt: record.TerminatedAt,

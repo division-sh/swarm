@@ -23,6 +23,7 @@ type componentFlowConstructionStore interface {
 // owners. Empty route sets do not qualify public construction/readiness.
 func seedComponentFlowConstruction(t *testing.T, ctx context.Context, selected componentFlowConstructionStore, source semanticview.Source, instance runtimepipeline.WorkflowInstance) {
 	t.Helper()
+	instance.Life = 1
 	ctx = nativeBusProcessContext(t, ctx, selected)
 	bundle, found := semanticview.Bundle(source)
 	if !found {

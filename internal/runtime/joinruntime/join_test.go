@@ -324,7 +324,7 @@ func testJoinRef(t *testing.T, flowID, stage, nodeID, handlerEvent, occurrence s
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := timeridentity.StageEntryRef{RunID: "run", FlowScope: "flow", InstanceID: "one", InstancePath: "flow/one", EntityID: "entity", Stage: stage, Cause: "construction"}
+	entry := timeridentity.StageEntryRef{Life: 1, RunID: "run", FlowScope: "flow", InstanceID: "one", InstancePath: "flow/one", EntityID: "entity", Stage: stage, Cause: "construction"}
 	if occurrence != "" {
 		entry.Cause, entry.EventID, entry.OccurrenceID, entry.TransitionID = "delivery", "event", occurrence, "transition"
 	}

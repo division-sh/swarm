@@ -31,6 +31,9 @@ func testPipelineRunContextNoSeed(t *testing.T) context.Context {
 
 func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
 	occurredAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	if instance.Life == 0 {
+		instance.Life = 1
+	}
 	// Component fixtures are keyless unless their caller supplies a mode;
 	// attaching readiness must not turn that declaration into a template.
 	if instance.Mode == "" {

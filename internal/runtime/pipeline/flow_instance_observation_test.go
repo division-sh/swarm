@@ -34,6 +34,7 @@ func instanceObservationTestFixture(t *testing.T) (FlowInstanceLookupRequest, Wo
 	}
 	at := time.Now().UTC()
 	instance := WorkflowInstance{
+		Life:         1,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active",
 		InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "open", Revision: 1,
 		CreatedAt: at, UpdatedAt: at, Fields: map[string]any{"nested": map[string]any{"value": "original"}},

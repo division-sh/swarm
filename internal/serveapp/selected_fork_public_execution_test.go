@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
-	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -328,12 +327,12 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				provenance, _ := details["diagnostic_provenance"].(map[string]any)
 				origin, _ := provenance["origin"].(map[string]any)
 				switch origin["owner"] {
-				case string(manager.LifecycleDiagnosticSelectedFork):
+				case string(runfork.LifecycleDiagnosticSelectedFork):
 					selectedDiagnostics++
 					if details["runtime_lineage_run_id"] != fork.ForkRunID || details["runtime_lineage_selected_fork_context"] != true || details["runtime_lineage_owner"] != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner {
 						t.Fatalf("selected diagnostic %s lost its exact owner: %+v", id, receipt)
 					}
-				case string(manager.LifecycleDiagnosticNormal):
+				case string(runfork.LifecycleDiagnosticNormal):
 					ordinaryDiagnostics++
 					binding, _ := details["process_binding"].(map[string]any)
 					if binding["generation_grant_id"] != ordinaryGrant.GrantID || binding["bundle_hash"] != fact.BundleHash() || details["runtime_lineage_selected_fork_context"] == true {
