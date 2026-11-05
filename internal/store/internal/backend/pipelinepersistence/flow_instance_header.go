@@ -35,6 +35,10 @@ func InstallActiveForkReceiverHeaderDoneFaultTx(ctx context.Context, tx *sql.Tx,
 func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool, record pipeline.WorkflowEngineStateRecord, create bool) (workflowEngineStateFact, error) {
 	var query string
 	var args []any
+	expectedLife := record.Life
+	if record.Transition.RestartsState() {
+		expectedLife--
+	}
 	if create {
 		query = `INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, slug, name, flow_template, mode, parent_instance, instance_key,
@@ -56,7 +60,7 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 	} else {
 		query = `UPDATE flow_instances SET slug = NULLIF(?, ''), name = NULLIF(?, ''),
 			config = ?, status = ?, current_state = ?, bookkeeping = ?, accumulator = ?,
-			revision = revision + 1, entered_state_at = ?, updated_at = ?, terminated_at = ?
+			revision = revision + 1, entered_state_at = ?, updated_at = ?, terminated_at = ?, life = ?
 			WHERE run_id = ? AND instance_path = ? AND entity_id = ? AND revision = ? AND current_state = ?
 			AND flow_template = ? AND mode = ? AND entity_type IS NULLIF(?, '')
 			AND parent_instance IS NULLIF(?, '') AND instance_key IS NULLIF(?, '') AND life = ?`
@@ -64,7 +68,7 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 			query = `UPDATE flow_instances SET slug = NULLIF($1, ''), name = NULLIF($2, ''),
 				config = $3::jsonb, status = $4, current_state = $5,
 				bookkeeping = $6::jsonb, accumulator = $7::jsonb, revision = revision + 1,
-				entered_state_at = $8, updated_at = $9, terminated_at = $10
+				entered_state_at = $8, updated_at = $9, terminated_at = $10, life = $22
 				WHERE run_id = $11::uuid AND instance_path = $12 AND entity_id = $13::uuid
 				AND revision = $14 AND current_state = $15 AND flow_template = $16 AND mode = $17
 				AND entity_type IS NOT DISTINCT FROM NULLIF($18, '')
@@ -73,9 +77,16 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 		}
 		args = []any{record.Slug, record.Name, string(record.Config), record.Status, record.CurrentState,
 			string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt,
-			record.UpdatedAt, nullableWorkflowTerminationTime(record.TerminatedAt), record.Identity.RunID,
-			record.Identity.Route.InstancePath, record.EntityID, record.ExpectedRevision, record.ExpectedState,
-			record.WorkflowName, record.Mode, record.EntityType, record.ParentInstance, record.InstanceKey, record.Life}
+			record.UpdatedAt, nullableWorkflowTerminationTime(record.TerminatedAt)}
+		if !postgres {
+			args = append(args, record.Life)
+		}
+		args = append(args, record.Identity.RunID, record.Identity.Route.InstancePath, record.EntityID,
+			record.ExpectedRevision, record.ExpectedState, record.WorkflowName, record.Mode, record.EntityType,
+			record.ParentInstance, record.InstanceKey, expectedLife)
+		if postgres {
+			args = append(args, record.Life)
+		}
 	}
 	var fact workflowEngineStateFact
 	write := transactiontest.BeginWorkflowHeaderJSON(ctx, len(record.Config))
@@ -88,8 +99,8 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 		if readErr != nil {
 			return workflowEngineStateFact{}, readErr
 		}
-		if found && header.Life != record.Life {
-			return workflowEngineStateFact{}, pipeline.InstanceRestarted(record.Identity, record.Life, header.Life)
+		if found && header.Life != expectedLife {
+			return workflowEngineStateFact{}, pipeline.InstanceRestarted(record.Identity, expectedLife, header.Life)
 		}
 		return workflowEngineStateFact{}, workflowEngineStateRevisionConflict(record)
 	}
