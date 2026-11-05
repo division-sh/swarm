@@ -195,11 +195,14 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 			}
 			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, time.Now().UTC(), 1)
 			assertInstanceLifeSessionCensus(t, f.store, f.db, ctx, captured, lease.ExpiresAt, 0)
-			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=NULL WHERE session_id=$1`, lease.SessionID); err != nil {
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=NULL WHERE session_id=$1`, lease.SessionID); err == nil {
+				t.Fatal("native session schema accepted partial lease coordinates")
+			}
+			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id='' WHERE session_id=$1`, lease.SessionID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := readInstanceLifeSessionCensus(f.store, f.db, ctx, captured, time.Now().UTC()); err == nil {
-				t.Fatal("session census treated partial lease authority as quiescent")
+				t.Fatal("session census treated empty lease authority as quiescent")
 			}
 			if _, err := f.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_grant_id=$2 WHERE session_id=$1`, lease.SessionID, lease.GrantID); err != nil {
 				t.Fatal(err)
