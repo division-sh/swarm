@@ -301,6 +301,7 @@ func a2SameCommitWitnessState(t *testing.T, witness a2SameCommitMutationWitness)
 		t.Fatal(err)
 	}
 	instance, err := runtimepipeline.DecodeWorkflowInstancePersistenceRecord(runtimepipeline.WorkflowInstancePersistenceRecord{
+		Life:     record.Life,
 		EntityID: record.EntityID, FlowInstance: record.Identity.Route.InstancePath, EntityType: record.EntityType,
 		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode, Status: record.Status,
 		Config: record.Config, StageDefined: record.StageDefined, TerminatedAt: record.TerminatedAt,
