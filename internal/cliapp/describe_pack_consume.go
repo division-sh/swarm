@@ -40,6 +40,10 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 		example, receiver = events[0], provider+"-receiver-1"
 	}
 	for _, tool := range component.Tools {
+		if tool.ID == "whatsapp.send_text" {
+			fragments[0].YAML += "# whatsapp.send_text activity example withheld: native admission requires account: policy.operator_account (or state.operator_account) and the exact whatsapp/trigger.yaml in the activity's owning flow.\n# Use `swarm new whatsapp-receptionist` as an authored starting point; do not place this activity in the generated receiver child.\n"
+			continue
+		}
 		fragment, err := packToolActivityFragment(component.Scope, receiver, example, tool)
 		if err != nil {
 			return nil, err

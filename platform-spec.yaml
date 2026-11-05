@@ -14871,6 +14871,8 @@ flow_model:
             receiver schema/state and deliberately selected tool examples replace retired pin/import/instance_key syntax.
             Webhook aliases retain their existing admitted-root/flow derivation, not an authored ingress/alias override.
             Business placeholders are explicitly marked as requiring substitution, never claimed as runnable proof.
+            A WhatsApp send_text activity example is withheld unless its owning-flow session trigger and account
+            mapping can be represented without inference; the output names the required authored placement.
           safety: Read-only metadata; no serve, credential write, model/provider/device call or executable admission.
         canonical_code_owner: internal/runtime/authoringview.Build + internal/cliapp describe
         rule: >
@@ -28970,6 +28972,13 @@ cli_specification:
                 as one text line: 'derived from `_embed[i]`, types.yaml:LINE'.
               quiet_values:
               - flow ids and summary values declared by the command implementation
+            describe_pack:
+              command: swarm describe pack
+              classification: shared_output
+              fact_owner: admitted pack description over the selected inventory and exact captured components
+              json_shape: complete PackDescription projection with distinct component identity, project requirements and consumption fragments
+              quiet_values:
+              - exact selected provider id
             describe_routes:
               command: swarm describe routes
               classification: shared_output
