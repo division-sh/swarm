@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"reflect"
 	"sync"
 	"testing"
@@ -267,5 +268,23 @@ func assertNativeResetSessions(t *testing.T, f receiverConfigActivationFixture, 
 	}
 	if count != 2 || active != 1 || predecessorTurns != 1 || successorTurns != 0 {
 		t.Fatalf("reset session evidence: count=%d active=%d predecessor_turns=%d successor_turns=%d", count, active, predecessorTurns, successorTurns)
+	}
+	var predecessor, successor string
+	var previousRaw, currentRaw []byte
+	if err := f.db.QueryRowContext(f.ctx, `SELECT old.session_id, current.session_id, old.conversation, current.conversation
+		FROM agent_sessions old JOIN agent_sessions current ON current.session_id=old.successor_session_id
+		WHERE old.run_id=$1 AND old.flow_instance=$2 AND old.status='terminated' AND current.status='active'
+		AND current.run_id=old.run_id AND current.flow_instance=old.flow_instance AND current.agent_id=old.agent_id`, reset.Readiness.RunID, reset.Identity.InstancePath).Scan(&predecessor, &successor, &previousRaw, &currentRaw); err != nil {
+		t.Fatal(err)
+	}
+	var previous, current []llm.Message
+	if err := json.Unmarshal(previousRaw, &previous); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(currentRaw, &current); err != nil {
+		t.Fatal(err)
+	}
+	if predecessor == successor || len(previous) != 1 || previous[0].Content != "retained preceding life" || len(current) != 0 {
+		t.Fatal("reset changed predecessor history, lost its exact successor link, or retained old memory")
 	}
 }
