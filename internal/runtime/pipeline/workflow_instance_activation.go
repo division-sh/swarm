@@ -169,6 +169,13 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 		if err := identity.Validate(); err != nil || identity.RunID != a.Plan.Readiness.RunID {
 			return fmt.Errorf("instance restart requires exact acquired actor identities")
 		}
+		path := identity.Route.InstancePath
+		if identity.Route.Presence == agentidentity.RouteRoot {
+			path = identity.RunID
+		}
+		if path != a.Plan.Identity.InstancePath {
+			return fmt.Errorf("instance restart actor belongs to another instance")
+		}
 		for _, previous := range a.RestartedAgents[:index] {
 			if identity == previous {
 				return fmt.Errorf("instance restart repeated an actor identity")
