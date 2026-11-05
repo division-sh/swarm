@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -114,11 +115,30 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 			t.Fatal("inspection retained an expired snapshot")
 		}
 		historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
-		for _, attemptID := range []string{resume.Attempt().AttemptID, deadCall.Attempt().AttemptID, exhaustedCall.Attempt().AttemptID} {
-			setCompletionAttemptLease(t, fixture, attemptID, now.Add(-time.Minute))
+		for _, owned := range []struct {
+			fixture   completionSettlementFixture
+			attemptID string
+		}{{fixture, resume.Attempt().AttemptID}, {dead, deadCall.Attempt().AttemptID}, {exhausted, exhaustedCall.Attempt().AttemptID}} {
+			root, present, err := correlation.RootAdmissionFromContext(owned.fixture.original)
+			if err != nil || !present {
+				t.Fatalf("takeover source admission: present=%v err=%v", present, err)
+			}
+			fact, present := correlation.SourceArtifactFactFromContext(owned.fixture.original)
+			if !present {
+				t.Fatal("takeover source fact is absent")
+			}
+			takeover, request := providerDrainStartupTakeover(t, owned.fixture)
+			if !completionAttemptLease(t, owned.fixture, owned.attemptID).After(request.Now) {
+				t.Fatalf("successor recovery lease expired before takeover for %s", owned.attemptID)
+			}
+			ctx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContext(), fact), root)
+			result, err := takeover.CommitAgentLifecycleTransition(ctx, request)
+			if err != nil || result.ProviderDrainCount != 1 {
+				t.Fatalf("unexpired successor recovery: result=%+v err=%v", result, err)
+			}
 		}
 		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
-		if err != nil || summary.OutcomeUncertain != 4 || summary.PrelaunchTerminal != 0 {
+		if err != nil || summary.OutcomeUncertain != 1 || summary.PrelaunchTerminal != 0 {
 			t.Fatalf("same-row native recovery: %+v %v", summary, err)
 		}
 		requireOriginDeliveryOutcome(t, fixture, "failed", "effect_recovery_outcome_unconfirmed")
