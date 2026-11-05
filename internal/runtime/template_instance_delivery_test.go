@@ -82,6 +82,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		DeliveryStore:       pg,
 	})
 	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
+	producerRoute, producerSource := templateInstanceCommittedSource(t, constructed)
 
 	assertRuntimeTestConstructedInstance(t, ctx, pg, source, constructed.Plan.Identity)
 	eventID := "99999999-9999-4999-8999-999999999902"
@@ -94,10 +95,10 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		0,
 		templateInstanceDeliveryRunID,
 		events.EnvelopeForSourceRoute(
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
-			events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, producerRoute.EntityID), producerRoute.FlowInstance),
+			producerRoute,
 		),
-		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", "11111111-1111-4111-8111-111111111111"),
+		producerSource,
 		time.Now().UTC(),
 	)
 
@@ -141,6 +142,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg,
 	})
 	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
+	producerRoute, producerSource := templateInstanceCommittedSource(t, constructed)
 	assertRuntimeTestConstructedInstance(t, ctx, pg, source, constructed.Plan.Identity)
 	ch := runtimeInternalDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	eventID := "99999999-9999-4999-8999-999999999903"
@@ -153,10 +155,10 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 		0,
 		templateInstanceDeliveryRunID,
 		events.EnvelopeForSourceRoute(
-			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-4111-8111-111111111111"), "operating/inst-1"),
-			events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, producerRoute.EntityID), producerRoute.FlowInstance),
+			producerRoute,
 		),
-		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", "11111111-1111-4111-8111-111111111111"),
+		producerSource,
 		time.Now().UTC(),
 	)
 
@@ -195,6 +197,20 @@ func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, s
 		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template", InstanceKey: "inst-1",
 		CurrentState: "initializing", StageDefined: true, EntityType: "state", Fields: map[string]any{"instance_id": "inst-1"},
 	})
+}
+
+func templateInstanceCommittedSource(t testing.TB, committed runtimepipeline.CommittedFlowInstanceActivation) (events.RouteIdentity, events.RoutingSource) {
+	t.Helper()
+	identity := committed.Plan.Identity
+	route := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(route)
+	if err == nil {
+		source, err = source.WithLife(committed.Plan.Instance.Life)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return route, source
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
