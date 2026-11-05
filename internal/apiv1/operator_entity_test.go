@@ -27,6 +27,7 @@ type fakeEntityReadStore struct {
 	lastList      operatorread.OperatorEntityListOptions
 	lastEntityID  string
 	lastRunID     string
+	lastLife      int64
 	lastAggregate operatorread.OperatorEntityAggregateOptions
 }
 
@@ -39,6 +40,11 @@ func (s *fakeEntityReadStore) LoadOperatorEntity(_ context.Context, entityID, ru
 	s.lastEntityID = entityID
 	s.lastRunID = runID
 	return s.getResult, s.getErr
+}
+
+func (s *fakeEntityReadStore) LoadOperatorEntityAtLife(ctx context.Context, entityID, runID string, life int64) (operatorread.OperatorEntityFull, error) {
+	s.lastLife = life
+	return s.LoadOperatorEntity(ctx, entityID, runID)
 }
 
 func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
@@ -115,6 +121,17 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	}
 	if entities.lastEntityID != "entity-1" || entities.lastRunID != "run-1" {
 		t.Fatalf("entity.get args = entity_id=%q run_id=%q", entities.lastEntityID, entities.lastRunID)
+	}
+	prior := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"prior","method":"entity.get","params":{"entity_id":"entity-1","run_id":"run-1","iter":1}}`)
+	if prior.Error != nil || entities.lastLife != 1 || entities.lastEntityID != "entity-1" || entities.lastRunID != "run-1" {
+		t.Fatalf("entity.get explicit life lost identity or selection: error=%#v life=%d", prior.Error, entities.lastLife)
+	}
+	for _, invalid := range []string{"0", "-1", "1.5", `"1"`, "null", "true"} {
+		entities.lastLife = 0
+		response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"invalid","method":"entity.get","params":{"entity_id":"entity-1","iter":`+invalid+`}}`)
+		if response.Error == nil || entities.lastLife != 0 {
+			t.Fatalf("invalid iter %s reached the life reader: error=%#v life=%d", invalid, response.Error, entities.lastLife)
+		}
 	}
 
 	aggregate := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg","method":"entity.aggregate","params":{"run_id":"run-1","group_by":"current_state"}}`)

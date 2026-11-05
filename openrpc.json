@@ -6050,6 +6050,15 @@
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
           }
+        },
+        {
+          "name": "iter",
+          "required": false,
+          "description": "Positive instance life; omitted selects the current life. Prior-life reads use retained state and revision rows.",
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
+          }
         }
       ],
       "result": {
