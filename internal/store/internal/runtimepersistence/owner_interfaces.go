@@ -179,6 +179,7 @@ type effectOwnerMethods interface {
 	ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation, terminalResult *agentframe.ToolContinuation) error
 	GetExternalEffectOutcome(ctx context.Context, operationID string) (effects.OperationOutcome, bool, error)
 	HeartbeatCompletionAttempt(ctx context.Context, attempt effects.Attempt, now time.Time, lease time.Duration) error
+	InspectStartupRecovery(ctx context.Context, now time.Time, available bool) (effects.StartupRecoveryCounts, error)
 	InstallContextCompaction(ctx context.Context, lease *sessions.Lease, result llm.ContextCompactionResult) error
 	IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error)
 	IsForkChatWorkspaceAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error)
