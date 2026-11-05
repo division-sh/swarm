@@ -1186,13 +1186,15 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='canceled' THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, summary.RunID).Scan(&summary.Canceled); err != nil {
 		return summary, err
 	}
+	components := newFanOutFoldTiming(ctx)
 	foldStarted := time.Now()
-	foldErr := foldFanOutPublicationSettlement(ctx, db, postgres, summary.RunID, &summary)
+	foldErr := foldFanOutPublicationSettlement(ctx, db, postgres, summary.RunID, &summary, components)
 	foldElapsed := time.Since(foldStarted)
-	slog.DebugContext(ctx, "fan_out_summary_fold_timing",
+	attributes := []any{
 		"run_id", summary.RunID, "postgres", postgres, "observation", now,
 		"started", foldStarted, "elapsed", foldElapsed,
-		"population", summary.Intents, "failed", foldErr != nil)
+		"population", summary.Intents, "failed", foldErr != nil}
+	slog.DebugContext(ctx, "fan_out_summary_fold_timing", append(attributes, components.attributes(foldElapsed)...)...)
 	if foldErr != nil {
 		return summary, foldErr
 	}
@@ -1240,7 +1242,9 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	return summary, summary.Validate()
 }
 
-func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, postgres bool, runID string, summary *fanoutobligation.RunSummary) error {
+func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, postgres bool, runID string, summary *fanoutobligation.RunSummary, timing *fanOutFoldTiming) error {
+	keysRead := timing.begin(fanOutTimingKeys, 0)
+	defer keysRead.finish(false, 0)
 	rows, err := db.QueryContext(ctx, `
 		SELECT origin_kind, deployment_feed_id, triggering_delivery_id, flow_path, declaration_family, semantic_path
 		FROM fan_out_intents
@@ -1253,6 +1257,7 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 	defer rows.Close()
 	keys := make([]fanoutobligation.IntentKey, 0)
 	for rows.Next() {
+		keysRead.row()
 		var key fanoutobligation.IntentKey
 		var kind string
 		var feedID, deliveryID, flowPath, family, semanticPath sql.NullString
@@ -1289,11 +1294,14 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	keysRead.finish(true, len(keys))
 	for _, key := range keys {
-		fold, err := foldFanOutIntentTerminalDispositions(ctx, db, postgres, key)
+		timing.intentStarted()
+		fold, err := foldFanOutIntentTerminalDispositions(ctx, db, postgres, key, timing)
 		if err != nil {
 			return err
 		}
+		timing.intentReturned()
 		summary.Settled += fold.Summary.Succeeded + fold.Summary.DeadLettered + fold.Summary.NoRoute
 		summary.Unsettled += fold.PendingCommitted
 	}
