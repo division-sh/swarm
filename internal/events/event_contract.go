@@ -375,6 +375,7 @@ func IntegrityProjection(event Event) (any, error) {
 			Kind      string          `json:"kind"`
 			Route     routeProjection `json:"route"`
 			Authority string          `json:"authority"`
+			Life      int64           `json:"life"`
 		} `json:"routing_source"`
 		OperatorReferenceEventID string `json:"operator_reference_event_id"`
 		SelectedFork             *struct {
@@ -405,6 +406,7 @@ func IntegrityProjection(event Event) (any, error) {
 	projection.RoutingSource.Kind = source.Kind().StorageCode()
 	projection.RoutingSource.Route = projectRoute(source.Route())
 	projection.RoutingSource.Authority = source.Authority().StorageCode()
+	projection.RoutingSource.Life = source.Life()
 	if reference, ok := event.OperatorReference(); ok {
 		projection.OperatorReferenceEventID = reference.ReferencedEventID()
 	}
