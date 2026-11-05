@@ -63,6 +63,42 @@ func pairedBootstrapStateFixture(t *testing.T, f *runtimeBootstrapFixture, op ch
 	return account
 }
 
+func requireUnapprovedDeploymentCallback(t *testing.T, ctx context.Context, connection *RuntimeConnection, expected channelonboarding.Operation, stage string) {
+	t.Helper()
+	occurrence := connection.state.currentOccurrence()
+	guard := occurrence.callbacks
+	sender := types.NewJID("15550100124", types.DefaultUserServer)
+	message := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: sender, Sender: sender},
+			ID:            uuid.NewString(), Timestamp: time.Now().UTC(),
+		},
+		Message: &waE2E.Message{Conversation: proto.String("message before account approval")},
+	}
+	if guard.receive(message) {
+		t.Fatal("unapproved account acknowledged incoming input", stage)
+	}
+	guard.mu.Lock()
+	fenced := guard.fenced
+	guard.mu.Unlock()
+	if failure := guard.currentFailure(); failure != nil || fenced {
+		t.Fatal("preapproval callback fatally fenced the connection", stage, failure, fenced)
+	}
+	if pending, err := connection.captures.pending(ctx); err != nil || len(pending) != 0 {
+		t.Fatal("preapproval callback captured input", stage, len(pending), err)
+	}
+	unchanged, err := connection.operations.GetChannelOnboarding(ctx, expected.OperationID)
+	if err != nil || !reflect.DeepEqual(unchanged, expected) {
+		t.Fatal("preapproval callback changed its operation", stage, err)
+	}
+	if connection.state.currentOccurrence() != occurrence {
+		t.Fatal("preapproval callback replaced its SDK occurrence", stage)
+	}
+	if _, err := connection.AdmitSessionAccount(ctx, expected.SessionAccount); err == nil {
+		t.Fatal("unapproved account gained authority", stage)
+	}
+}
+
 func TestWhatsAppSessionIdentityUsesNativeAdmissionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -201,6 +237,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				if _, err := f.connection.ChannelExecution(ctx); err == nil {
 					t.Fatal("deployment pairing granted runtime execution")
 				}
+				requireUnapprovedDeploymentCallback(t, ctx, f.connection, initial.Operation, "QR wait")
 				account := pairedBootstrapStateFixture(t, f, op, types.NewJID("15550100123", types.DefaultUserServer))
 				ctx = worklifetime.WithProcess(startupownership.CarryMutationAuthority(f.peer.ctx, ctx), process)
 				f.connection, err = OpenDeploymentConnection(ctx, opts)
@@ -224,37 +261,8 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				if _, err := f.connection.AdmitSessionAccount(ctx, checkpoint.SessionAccount); err == nil {
 					t.Fatal("unconfirmed account granted operator authority")
 				}
-				// pairedBootstrapStateFixture supplies retained SDK state, not a
-				// phone handshake. Exercise the actual callback before approval.
-				occurrence := f.connection.state.currentOccurrence()
-				guard := occurrence.callbacks
-				sender := types.NewJID("15550100124", types.DefaultUserServer)
-				message := &events.Message{
-					Info: types.MessageInfo{
-						MessageSource: types.MessageSource{Chat: sender, Sender: sender},
-						ID:            uuid.NewString(), Timestamp: time.Now().UTC(),
-					},
-					Message: &waE2E.Message{Conversation: proto.String("message before account approval")},
-				}
-				if guard.receive(message) {
-					t.Fatal("unapproved account acknowledged an incoming message")
-				}
-				guard.mu.Lock()
-				fenced := guard.fenced
-				guard.mu.Unlock()
-				if failure := guard.currentFailure(); failure != nil || fenced {
-					t.Fatal("preapproval callback fatally fenced the paired connection", failure, fenced)
-				}
-				if pending, err := f.connection.captures.pending(ctx); err != nil || len(pending) != 0 {
-					t.Fatal("preapproval callback captured input", len(pending), err)
-				}
-				unchanged, err := operations.GetChannelOnboarding(ctx, checkpoint.OperationID)
-				if err != nil || !reflect.DeepEqual(unchanged, preview.Operation) {
-					t.Fatal("preapproval callback changed its onboarding operation", err)
-				}
-				if f.connection.state.currentOccurrence() != occurrence {
-					t.Fatal("preapproval callback replaced its SDK occurrence")
-				}
+				// This fixture supplies retained SDK state, not a phone handshake.
+				requireUnapprovedDeploymentCallback(t, ctx, f.connection, preview.Operation, "paired preview")
 				logout := func(op channelonboarding.Operation) channelonboarding.Result {
 					t.Helper()
 					reconcile := completion.fail || completion.failUnlink
