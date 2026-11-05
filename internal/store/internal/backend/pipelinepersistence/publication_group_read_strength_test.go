@@ -18,7 +18,7 @@ import (
 )
 
 func TestGroupInstancePlanningInventoryKeepsImmutableFactsAndExactReadStrength(t *testing.T) {
-	for _, change := range []string{"stage", "termination", "attachment", "attempt", "emitted", "agent", "creation", "native_input", "native_fields", "run_state", "membership"} {
+	for _, change := range []string{"stage", "termination", "attachment", "attempt", "emitted", "agent", "creation", "native_input", "native_fields", "run_state", "membership", "life"} {
 		t.Run(change, func(t *testing.T) {
 			before, after := groupReadStrengthObservations(t, change)
 			scope, err := pipeline.NewFlowInstanceLookupScope(before.Selection().Source(), before.SourceFact(), before.Owner().RunID, []string{"."}, nil)
@@ -97,7 +97,7 @@ func groupReadStrengthObservations(t *testing.T, change string) (pipeline.FlowIn
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	instance := pipeline.WorkflowInstance{WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active", InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "pending", StageDefined: true, Revision: 1, CreatedAt: at, UpdatedAt: at}
+	instance := pipeline.WorkflowInstance{Life: 1, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active", InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "pending", StageDefined: true, Revision: 1, CreatedAt: at, UpdatedAt: at}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: source.WorkflowVersion(), BundleHash: fact.BundleHash(), Fields: map[string]any{"seed": "original"}}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{Plan: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live}, OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentReady, AttemptState: "accepted", AttemptOrdinal: 1}
@@ -155,6 +155,8 @@ func groupReadStrengthObservations(t *testing.T, change string) (pipeline.FlowIn
 	case "run_state":
 		run.State = runlifecycle.StatePaused
 		readiness.RunStatus = "paused"
+	case "life":
+		instance.Life++
 	}
 	return before, admit()
 }
