@@ -303,7 +303,7 @@ func timerMatchesInstanceLife(raw []byte, runID string, life events.InstanceLife
 	}
 	path := source.Route().FlowInstance
 	if source.Kind() == events.RoutingSourceRoot {
-		path = source.Route().EntityID
+		path = runID
 	}
 	if runID != life.RunID || path != life.FlowInstance || source.Life() <= 0 {
 		return false, fmt.Errorf("instance-life timer source contradicts its retained owner")
