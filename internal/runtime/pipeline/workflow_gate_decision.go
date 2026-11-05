@@ -9,10 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -153,7 +152,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 
 func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation, source events.RoutingSource) (runtimeengine.ActivityIntent, error) {
 	continuation = continuation.Canonical()
-	owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(continuation.NodeID)
 	if err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("proposed-effect continuation owner identity: %w", err)
 	}
@@ -165,8 +164,8 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 		SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent,
 		RevisionEvent: continuation.RevisionEvent, RejectedEvent: continuation.RejectedEvent,
 
-		EntityID: identity.NormalizeEntityID(continuation.EntityID), Owner: owner,
-		ExecutionFlowID: identity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
+		EntityID: runtimeidentity.NormalizeEntityID(continuation.EntityID), Owner: owner,
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
 		RoutingSource:   source,
 		HandlerEventKey: continuation.HandlerEventKey, SourceEventID: continuation.SourceEventID,
 		SourceRunID: continuation.SourceRunID, SourceTaskID: continuation.SourceTaskID,
@@ -421,7 +420,7 @@ func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instanc
 	if strings.TrimSpace(anchor.FlowID) != strings.TrimSpace(activation.FlowID) {
 		return fmt.Errorf("stage_gate anchor does not match its authoritative workflow instance")
 	}
-	if _, err := requireWorkflowInstanceIdentity(anchor.Route, identity.NormalizeEntityID(anchor.EntityID), instance); err != nil {
+	if _, err := requireWorkflowInstanceIdentity(anchor.Route, runtimeidentity.NormalizeEntityID(anchor.EntityID), instance); err != nil {
 		return fmt.Errorf("stage_gate anchor does not match its authoritative workflow instance: %w", err)
 	}
 	return nil
@@ -563,7 +562,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecisionAttempt(ctx context.Cont
 			unlock()
 		}
 	}()
-	address := runtimeengine.StateAddress{FlowID: identity.NormalizeFlowID(anchor.FlowID), FlowInstance: flowIdentity, EntityID: identity.NormalizeEntityID(anchor.EntityID)}
+	address := runtimeengine.StateAddress{FlowID: runtimeidentity.NormalizeFlowID(anchor.FlowID), FlowInstance: flowIdentity, EntityID: runtimeidentity.NormalizeEntityID(anchor.EntityID)}
 	repo := pipelineEngineStateRepo{coordinator: pc}
 	snapshot, found, err := repo.LoadState(ctx, address)
 	if err != nil {

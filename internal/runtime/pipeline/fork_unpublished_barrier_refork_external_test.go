@@ -15,8 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -46,11 +45,11 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			continue
 		}
 		t.Run(backend, func(t *testing.T) {
-			producer, err := identity.AdmitExecutableNodeDeclaration("producer", "producer")
+			producer, err := runtimeidentity.AdmitExecutableNodeDeclaration("producer", "producer")
 			if err != nil {
 				t.Fatal(err)
 			}
-			final, err := identity.AdmitExecutableNodeDeclaration(".", "controller")
+			final, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "controller")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -210,7 +209,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 					t.Fatal(phase.Err())
 				}
 				proof := forkEngineClaimProofRequest(t, phase, selected, parent.ForkRunID, occurrence.Publication.EventID, observed)
-				if observed.id != activityidentity.ForkLineageEventID(proof.ChildRunID, occurrence.Publication.EventID) {
+				if observed.id != runtimeidentity.ForkLineageEventID(proof.ChildRunID, occurrence.Publication.EventID) {
 					t.Fatal("pending barrier crash acquired another occurrence")
 				}
 				source, err := selected.Entities().LoadOperatorEntity(phase, parent.ForkRunID, parent.ForkRunID)
@@ -282,7 +281,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 					t.Fatalf("continue pending barrier: %+v error=%v", child, err)
 				}
 			}
-			id := activityidentity.ForkLineageEventID(child.Materialization.ForkRunID, occurrence.Publication.EventID)
+			id := runtimeidentity.ForkLineageEventID(child.Materialization.ForkRunID, occurrence.Publication.EventID)
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				t.Fatal(err)
 			}

@@ -12,8 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -55,7 +54,7 @@ func (p *issue642ServedBarrierProbe) NotifyLifecycle(ctx context.Context, signal
 func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			producer, err := identity.AdmitExecutableNodeDeclaration("producer", "producer")
+			producer, err := runtimeidentity.AdmitExecutableNodeDeclaration("producer", "producer")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +111,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 				fork.ForkRevision != plan.ForkPoint.Revision || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost exact activation/cut acknowledgment: %+v", fork)
 			}
-			childID := activityidentity.ForkLineageEventID(fork.ForkRunID, original.event)
+			childID := runtimeidentity.ForkLineageEventID(fork.ForkRunID, original.event)
 			child := issue642WaitBarrierDeliveredEvent(t, phase, rt, childID, producer.Key())
 			if child.RunID != fork.ForkRunID || child.EventID == original.event {
 				t.Fatal("public fork reused the source claim")
@@ -163,7 +162,7 @@ func issue642RequireServedBarrierGrandchild(t *testing.T, rt issue2564ServedFixt
 		grandchild.Owner != runfork.RunForkSelectedContractExecutionOwner || grandchild.ExecutedEventCount != 1 {
 		t.Fatalf("served grandchild changed the committed join cut or borrowed activation: %+v", grandchild)
 	}
-	publication := issue642WaitBarrierDeliveredEvent(t, phase, rt, activityidentity.ForkLineageEventID(grandchild.ForkRunID, inherited.EventID), producer)
+	publication := issue642WaitBarrierDeliveredEvent(t, phase, rt, runtimeidentity.ForkLineageEventID(grandchild.ForkRunID, inherited.EventID), producer)
 	issue642WaitExactBarrierPipeline(t, phase, rt, publication.EventID)
 	output := issue642WaitBarrierOutput(t, phase, rt, grandchild.ForkRunID)
 	issue642WaitExactBarrierPipeline(t, phase, rt, output.EventID)

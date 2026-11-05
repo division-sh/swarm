@@ -11,10 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -129,7 +128,7 @@ func loopTestRequest(t testing.TB, state StateSnapshot, handler runtimecontracts
 	t.Helper()
 	raw, _ := json.Marshal(payload)
 	return ExecutionRequest{
-		EntityID: identity.NormalizeEntityID("00000000-0000-0000-0000-000000000001"),
+		EntityID: runtimeidentity.NormalizeEntityID("00000000-0000-0000-0000-000000000001"),
 		Node:     testFlowExecutableNode(t, "validation", "loop-node"), Handler: handler, State: state,
 		Event: eventtest.RunCreatingRootIngress(eventID, events.EventType("loop.event"), "", "", raw, 0,
 			"00000000-0000-0000-0000-000000000010", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "00000000-0000-0000-0000-000000000001"),
@@ -275,7 +274,7 @@ func loopCarrierTestRequest(t testing.TB, state StateSnapshot, handler runtimeco
 }
 
 func uuidForLoopCarrier(name string, ordinal int) string {
-	return activityidentity.ForkLineageEventID("00000000-0000-0000-0000-000000000010", fmt.Sprintf("%s:%d", name, ordinal))
+	return runtimeidentity.ForkLineageEventID("00000000-0000-0000-0000-000000000010", fmt.Sprintf("%s:%d", name, ordinal))
 }
 
 func TestExecutorCompiledLoopOperationsRetainExactCarrier(t *testing.T) {

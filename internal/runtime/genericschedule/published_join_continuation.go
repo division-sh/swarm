@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/google/uuid"
@@ -202,7 +202,7 @@ func (p JoinContinuation) RetainedPublication(authorityStamp string) (joinruntim
 		return joinruntime.TransferredPublication{}, fmt.Errorf("published join continuation is absent")
 	}
 	publication := joinruntime.TransferredPublication{
-		EventID:     activityidentity.ForkLineageEventID(p.child.RunID, p.SourceEventID()),
+		EventID:     runtimeidentity.ForkLineageEventID(p.child.RunID, p.SourceEventID()),
 		SourceRunID: p.SourceRunID(), SourceEventID: p.SourceEventID(),
 		AuthorityStamp: authorityStamp, ExecutionMode: p.child.ExecutionMode,
 		CommittedCause: p.cause,

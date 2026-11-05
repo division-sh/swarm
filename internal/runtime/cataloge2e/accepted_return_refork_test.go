@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -90,7 +89,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	if err != nil || capturedReturn == nil || !reflect.DeepEqual(*capturedReturn, beforeRows[0]) {
 		t.Fatalf("native fixed cut lost physical return's exact own row: %+v error=%v", capturedReturn, err)
 	}
-	provider, err := identity.AdmitExecutableNodeDeclaration("provider", "provider-node")
+	provider, err := runtimeidentity.AdmitExecutableNodeDeclaration("provider", "provider-node")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +107,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	sourceRow, row := beforeRows[0], childRows[0]
 	projected, projectionErr := runfork.ProjectEntityOwnership(sourceRun, staged.ForkRunID, sourceRow.Origin.EntityID, sourceRow.Origin.FlowInstance)
 	if projectionErr != nil || row.RunID != staged.ForkRunID || row.ID == sourceRow.ID || row.RequestEventID == sourceRow.RequestEventID ||
-		row.AcceptedReplyEventID == sourceRow.AcceptedReplyEventID || row.AcceptedReplyEventID == activityidentity.ForkLineageEventID(staged.ForkRunID, cut) ||
+		row.AcceptedReplyEventID == sourceRow.AcceptedReplyEventID || row.AcceptedReplyEventID == runtimeidentity.ForkLineageEventID(staged.ForkRunID, cut) ||
 		row.State != replycontext.StateTerminal || row.SourceRunID != sourceRow.SourceRunID || row.SourceRequestEventID != sourceRow.SourceRequestEventID ||
 		row.Origin != (events.RouteIdentity{FlowID: sourceRow.Origin.FlowID, FlowInstance: projected.Fork.FlowInstance, EntityID: projected.Fork.EntityID}) ||
 		row.RequestCorrelationID != sourceRow.RequestCorrelationID || row.RequesterFlowID != sourceRow.RequesterFlowID || row.ProviderFlowID != sourceRow.ProviderFlowID ||
@@ -130,7 +129,7 @@ func executeAcceptedReturnRefork(t *testing.T, h *runtimeHarness, selected uncla
 	wait, stop := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 	defer stop()
 	waitCopiedActivityRequesterReturn(t, wait, selected, staged.ForkRunID)
-	inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, cut)
+	inputID := runtimeidentity.ForkLineageEventID(staged.ForkRunID, cut)
 	for {
 		returned, found, err := selected.LoadPreparedPublishEvent(wait, inputID)
 		if err != nil || !found || len(returned.DeliveryRoutes) != len(publication.DeliveryRoutes) {

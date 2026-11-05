@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -26,7 +26,7 @@ func TestRunForkContinuedReadbackDistinguishesUnpublishedFromMissingEvidence(t *
 				}
 				child, source := uuid.NewString(), uuid.NewString()
 				replay := runfork.RunForkFanOutPendingReplay{Ordinal: 0, SourceEventID: uuid.NewString(), SourceDeliveryIDs: []string{uuid.NewString()}}
-				eventID := activityidentity.ForkLineageEventID(child, replay.SourceEventID)
+				eventID := runtimeidentity.ForkLineageEventID(child, replay.SourceEventID)
 				owners := sqlmock.NewRows([]string{"event", "source", "owner"})
 				switch fault {
 				case "selected_without_outcome":

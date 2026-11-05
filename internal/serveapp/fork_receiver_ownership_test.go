@@ -17,8 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -93,7 +93,7 @@ func waitServedSelectedForkFrontier(t *testing.T, reader receiverProofStateReade
 	if reader == nil {
 		t.Fatal("selected frontier requires its original native reader")
 	}
-	eventID := activityidentity.ForkLineageEventID(child, frontier)
+	eventID := runtimeidentity.ForkLineageEventID(child, frontier)
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var outcome string

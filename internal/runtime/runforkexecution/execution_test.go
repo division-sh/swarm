@@ -32,11 +32,11 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -1108,8 +1108,8 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	// Exact ordered dispatch is durable evidence from the selected attachment.
 	wait, cancel := context.WithTimeout(ctx, selectedContractAgentRuntimeDefaultQuiescenceTimeout)
 	defer cancel()
-	want := []string{activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, earlierEventID),
-		activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, laterEventID)}
+	want := []string{runtimeidentity.ForkLineageEventID(result.Materialization.ForkRunID, earlierEventID),
+		runtimeidentity.ForkLineageEventID(result.Materialization.ForkRunID, laterEventID)}
 	for {
 		logs, err := pg.ListOperatorRuntimeLogs(wait, operatorread.OperatorRuntimeLogListOptions{RunID: result.Materialization.ForkRunID,
 			Component: "run_fork", ActionOrEventType: "selected_contract_event_dispatched", Order: "asc", Limit: 3})

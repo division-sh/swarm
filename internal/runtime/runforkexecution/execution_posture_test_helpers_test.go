@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -56,7 +56,7 @@ func observeSelectedRetainedExecution(t *testing.T, ctx context.Context, owner S
 			published := true
 			if retained.retained != nil {
 				for _, source := range selectedContractExecutionFrontierEventIDs(retained.retained.frontier.FrontierEvents) {
-					frontier, err := storetest.ReadCausalDeliveryFrontier(wait, selected, child, activityidentity.ForkLineageEventID(child, source))
+					frontier, err := storetest.ReadCausalDeliveryFrontier(wait, selected, child, runtimeidentity.ForkLineageEventID(child, source))
 					if err != nil {
 						return selectedRetainedExecutionObservation{}, err
 					}

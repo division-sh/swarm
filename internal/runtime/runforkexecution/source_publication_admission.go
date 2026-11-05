@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -33,7 +33,7 @@ func admitPreparedSourcePublications(ctx context.Context, eventBus *bus.EventBus
 		if err != nil {
 			return err
 		}
-		event, err := selectedContractForkEvent(sourceRun, childRun, activityidentity.ForkLineageEventID(childRun, source.SourceEventID), source, authority)
+		event, err := selectedContractForkEvent(sourceRun, childRun, runtimeidentity.ForkLineageEventID(childRun, source.SourceEventID), source, authority)
 		if err != nil {
 			return err
 		}

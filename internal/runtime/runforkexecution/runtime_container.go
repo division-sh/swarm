@@ -17,8 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -779,7 +779,7 @@ func (c selectedContractForkLocalRuntimeContainer) commitSelectedInputs() (input
 		if err != nil {
 			return inputs, err
 		}
-		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
+		forkEventID := runtimeidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
 		evt, err := selectedContractForkEvent(req.SourceRunID, req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
 		if err != nil {
 			return inputs, err

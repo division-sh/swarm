@@ -6,7 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/google/uuid"
@@ -28,7 +28,7 @@ func TestIssue642RequestOwnRowRecognitionDoesNotRequireProviderRoute(t *testing.
 			if !root {
 				name = row.Origin.FlowInstance + "/" + name
 			}
-			event := eventtest.SelectedForkReplay(activityidentity.ForkLineageEventID(child, source.RequestEventID), events.EventType(name),
+			event := eventtest.SelectedForkReplay(runtimeidentity.ForkLineageEventID(child, source.RequestEventID), events.EventType(name),
 				eventtest.Producer(events.EventProducerPlatform, "selected-owner"), "", []byte(`{"item":{"id":"item-42"}}`), 0, lineage, events.EventEnvelope{}, row.CreatedAt)
 			if !capturedReplyRequestEventMatches(event, row) {
 				t.Fatalf("canonical request name lost: %s", name)

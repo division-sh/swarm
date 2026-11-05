@@ -8,8 +8,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/google/uuid"
@@ -38,7 +38,7 @@ func TestProposedEffectCompletionUsesFrozenPublicationIdentityBothStores(t *test
 							source = eventtest.ConcreteTemplateRoutingSource(scope.flow, scope.instance, continuation.EntityID)
 						}
 						continuation.FlowID, continuation.FlowInstance = scope.flow, scope.instance
-						continuation.NodeID = activityidentity.MustNodeOwner(mustPersistenceNode(scope.flow, "support")).Key()
+						continuation.NodeID = runtimeidentity.MustNodeActivityOwner(mustPersistenceNode(scope.flow, "support")).Key()
 						anchor, err := card.Anchor.ProposedEffect()
 						if err != nil {
 							t.Fatal(err)

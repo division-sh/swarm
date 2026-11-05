@@ -9,9 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -39,14 +39,14 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		t.Fatal(err)
 	}
 	sourceGeneration := activation.Generation()
-	writerOwner := activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "writer"))
-	fact := activityidentity.Fact{
+	writerOwner := runtimeidentity.MustNodeActivityOwner(mustPersistenceNode("flow-a", "writer"))
+	fact := runtimeidentity.ActivityFact{
 		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID,
 		Owner: writerOwner, ExecutionFlowID: "flow-a",
 		HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write",
 		Attempt: 1, RevisionID: sourceGeneration.RevisionID,
 	}
-	requestEventID := activityidentity.RequestEventID(fact)
+	requestEventID := runtimeidentity.ActivityRequestEventID(fact)
 	at := time.Unix(1700003100, 0).UTC()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
@@ -79,7 +79,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		"activity_id": "commit", "tool": "provider.write",
 		"result": map[string]any{"ok": true}, "revision_id": sourceGeneration.RevisionID,
 	}
-	resultEventID := activityidentity.ResultEventID(fact, "write.succeeded")
+	resultEventID := runtimeidentity.ActivityResultEventID(fact, "write.succeeded")
 	seedApprovedActivityRecordedEvidence(t, ctx, authorActivityReceiptFixture{db: db, store: pg, dialect: authoractivityfixture.DialectPostgres}, true, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowInstance: "flow-a", NodeID: writerOwner.Key(), HandlerEventKey: "review.accepted",
 		ExecutionMode: executionmode.Live, ActivityID: "commit", Tool: "provider.write", Attempt: 1, Status: pipeline.ActivityAttemptStatusSucceeded,
@@ -102,12 +102,12 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	if forkPayload.SourceRunID != materialized.ForkRunID || forkPayload.Generation.RevisionID == sourceGeneration.RevisionID || !forkPayload.Generation.Valid() {
 		t.Fatalf("fork payload = %#v, fork_run=%s source_generation=%#v valid=%v", forkPayload, materialized.ForkRunID, sourceGeneration, forkPayload.Generation.Valid())
 	}
-	forkFact := activityidentity.Fact{
+	forkFact := runtimeidentity.ActivityFact{
 		RunID: materialized.ForkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
 		EntityID: entityID, Owner: writerOwner, ExecutionFlowID: "flow-a", HandlerEventKey: "review.accepted",
 		ActivityID: "commit", Tool: "provider.write", Attempt: 1, RevisionID: forkPayload.Generation.RevisionID,
 	}
-	forkRequestID := activityidentity.RequestEventID(forkFact)
+	forkRequestID := runtimeidentity.ActivityRequestEventID(forkFact)
 	var forkRun, status, forkResultID string
 	var forkGenerationRaw, forkResultRaw []byte
 	if err := db.QueryRowContext(ctx, `SELECT run_id::text, status, result_event_id::text, loop_generation, result_payload FROM activity_attempts WHERE request_event_id = $1::uuid`, forkRequestID).
@@ -125,7 +125,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	if forkRun != materialized.ForkRunID || status != "succeeded" || !forkGeneration.Equal(forkPayload.Generation) || forkResult["revision_id"] != forkPayload.Generation.RevisionID {
 		t.Fatalf("fork attempt = run:%s status:%s generation:%#v payload:%#v", forkRun, status, forkGeneration, forkResult)
 	}
-	if forkResultID != activityidentity.ResultEventID(forkFact, "write.succeeded") || forkResultID == resultEventID {
+	if forkResultID != runtimeidentity.ActivityResultEventID(forkFact, "write.succeeded") || forkResultID == resultEventID {
 		t.Fatalf("fork result id = %s, source = %s", forkResultID, resultEventID)
 	}
 }
@@ -142,14 +142,14 @@ func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T
 		t.Fatal(err)
 	}
 	sourceGeneration := activation.Generation()
-	readerOwner := activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "reader"))
-	fact := activityidentity.Fact{
+	readerOwner := runtimeidentity.MustNodeActivityOwner(mustPersistenceNode("flow-a", "reader"))
+	fact := runtimeidentity.ActivityFact{
 		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID,
 		Owner: readerOwner, ExecutionFlowID: "flow-a",
 		HandlerEventKey: "review.inspect", ActivityID: "inspect", Tool: "provider.read",
 		Attempt: 1, RevisionID: sourceGeneration.RevisionID,
 	}
-	requestEventID := activityidentity.RequestEventID(fact)
+	requestEventID := runtimeidentity.ActivityRequestEventID(fact)
 	at := time.Unix(1700003200, 0).UTC()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
@@ -188,13 +188,13 @@ func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T
 	if forkPayload.SourceRunID != materialized.ForkRunID || forkPayload.Generation.RevisionID == sourceGeneration.RevisionID {
 		t.Fatalf("fork read payload = %#v", forkPayload)
 	}
-	forkFact := activityidentity.Fact{
+	forkFact := runtimeidentity.ActivityFact{
 		RunID: materialized.ForkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
 		EntityID: entityID, Owner: readerOwner, ExecutionFlowID: "flow-a", HandlerEventKey: "review.inspect",
 		ActivityID: "inspect", Tool: "provider.read", Attempt: 1, RevisionID: forkPayload.Generation.RevisionID,
 	}
 	var attempts int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE request_event_id = $1::uuid`, activityidentity.RequestEventID(forkFact)).Scan(&attempts); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE request_event_id = $1::uuid`, runtimeidentity.ActivityRequestEventID(forkFact)).Scan(&attempts); err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 0 {
@@ -213,14 +213,14 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	generation := activation.Generation()
-	writerOwner := activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "writer"))
-	fact := activityidentity.Fact{
+	writerOwner := runtimeidentity.MustNodeActivityOwner(mustPersistenceNode("flow-a", "writer"))
+	fact := runtimeidentity.ActivityFact{
 		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID,
 		Owner: writerOwner, ExecutionFlowID: "flow-a",
 		HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write",
 		Attempt: 1, RevisionID: generation.RevisionID,
 	}
-	requestEventID := activityidentity.RequestEventID(fact)
+	requestEventID := runtimeidentity.ActivityRequestEventID(fact)
 	at := time.Unix(1700003300, 0).UTC()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
@@ -260,7 +260,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		"activity_id": "commit", "tool": "provider.write",
 		"failure": map[string]any{"code": "provider_unavailable"}, "revision_id": generation.RevisionID,
 	}
-	resultEventID := activityidentity.ResultEventID(fact, "write.failed")
+	resultEventID := runtimeidentity.ActivityResultEventID(fact, "write.failed")
 	seedApprovedActivityRecordedEvidence(t, ctx, authorActivityReceiptFixture{db: db, store: pg, dialect: authoractivityfixture.DialectPostgres}, true, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowInstance: "flow-a", NodeID: writerOwner.Key(), HandlerEventKey: "review.accepted",
 		ExecutionMode: executionmode.Live, ActivityID: "commit", Tool: "provider.write", Attempt: 1, Status: pipeline.ActivityAttemptStatusFailed,
@@ -277,13 +277,13 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	if err := json.Unmarshal(prepared[0].Payload, &forkPayload); err != nil {
 		t.Fatal(err)
 	}
-	forkFact := activityidentity.Fact{
+	forkFact := runtimeidentity.ActivityFact{
 		RunID: materialized.ForkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
 		EntityID: entityID, Owner: writerOwner, ExecutionFlowID: "flow-a", HandlerEventKey: "review.accepted",
 		ActivityID: "commit", Tool: "provider.write", Attempt: 1, RevisionID: forkPayload.Generation.RevisionID,
 	}
 	var rawFailure []byte
-	if err := db.QueryRowContext(ctx, `SELECT failure FROM activity_attempts WHERE request_event_id = $1::uuid`, activityidentity.RequestEventID(forkFact)).Scan(&rawFailure); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT failure FROM activity_attempts WHERE request_event_id = $1::uuid`, runtimeidentity.ActivityRequestEventID(forkFact)).Scan(&rawFailure); err != nil {
 		t.Fatal(err)
 	}
 	var typed map[string]any

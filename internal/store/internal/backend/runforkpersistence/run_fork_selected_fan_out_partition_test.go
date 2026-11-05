@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -34,7 +34,7 @@ func selectedFanOutPartitionFixture(t *testing.T) (*runForkRevisionSnapshot, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := eventtest.SelectedForkReplay(activityidentity.ForkLineageEventID(childRun, sourceEvent.ID()), sourceEvent.Type(),
+	child := eventtest.SelectedForkReplay(runtimeidentity.ForkLineageEventID(childRun, sourceEvent.ID()), sourceEvent.Type(),
 		eventtest.Producer(events.EventProducerPlatform, "selected-owner"), "", sourceEvent.Payload(), 0, lineage,
 		events.EventEnvelope{}, time.Now().UTC())
 	child, err = eventtest.AdmitPayload(child, ".", string(child.Type()))

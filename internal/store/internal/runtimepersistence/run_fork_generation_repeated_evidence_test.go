@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -37,11 +37,11 @@ func TestForkGenerationRepeatedActivityEvidenceBothStores(t *testing.T) {
 						if err := json.Unmarshal(first[0].Payload, &payload); err != nil {
 							t.Fatal(err)
 						}
-						owner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+						owner, err := runtimeidentity.ParseActivityOwnerKey(payload.NodeID)
 						if err != nil {
 							t.Fatal(err)
 						}
-						requestID := activityidentity.RequestEventID(activityidentity.Fact{
+						requestID := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 							RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
 							EntityID: payload.EntityID, Owner: owner, ExecutionFlowID: payload.FlowID,
 							HandlerEventKey: payload.HandlerEventKey, ActivityID: payload.ActivityID, Tool: payload.Tool,

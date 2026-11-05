@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -128,7 +128,7 @@ func (f cursorMailboxFixture) card(t *testing.T, entity string, at time.Time, ki
 			CardID: decisioncard.ProposedEffectCardID(anchor.RequestEventID, anchor.Decision), RunID: card.RunID, RequestEventID: anchor.RequestEventID,
 			ActivityID: anchor.ActivityID, Tool: "telegram.send_message", Input: input, BundleHash: card.BundleHash, WorkflowVersion: card.WorkflowVersion,
 			SuccessEvent: "reply.sent", FailureEvent: "reply.failed", RevisionEvent: "reply.revise", RejectedEvent: "reply.rejected",
-			EntityID: entity, NodeID: activityidentity.MustNodeOwner(identitytest.RootNode(t, "reviewer")).Key(),
+			EntityID: entity, NodeID: runtimeidentity.MustNodeActivityOwner(identitytest.RootNode(t, "reviewer")).Key(),
 			FlowInstance: f.base.RunID, HandlerEventKey: "review.requested", SourceEventID: f.eventID, SourceRunID: card.RunID,
 			ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: at, UpdatedAt: at,
 		}.Canonical()

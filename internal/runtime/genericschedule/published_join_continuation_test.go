@@ -10,8 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -118,7 +118,7 @@ func TestPublishedJoinContinuationPreservesExactPublication(t *testing.T) {
 								!reflect.DeepEqual(continuation.SourceEvent(), original) {
 								t.Fatalf("continuation=%+v err=%v", continuation, err)
 							}
-							id := activityidentity.ForkLineageEventID(child.RunID, original.ID())
+							id := runtimeidentity.ForkLineageEventID(child.RunID, original.ID())
 							event, err := continuation.Event(id, "selection:exact")
 							if err != nil {
 								t.Fatal(err)
@@ -293,7 +293,7 @@ func TestPublishedJoinContinuationSealedValueAndEventIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := activityidentity.ForkLineageEventID(child.RunID, original.ID())
+	id := runtimeidentity.ForkLineageEventID(child.RunID, original.ID())
 	for _, invalid := range []struct{ id, authority string }{
 		{uuid.NewString(), "selection:exact"}, {original.ID(), "selection:exact"}, {" " + id, "selection:exact"}, {id, ""}, {id, " "},
 	} {
@@ -345,7 +345,7 @@ func TestPublishedJoinContinuationEmptyConstructionWithoutDeadline(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := continuation.Event(activityidentity.ForkLineageEventID(continuation.ChildCommand().RunID, original.ID()), "selection:empty")
+	event, err := continuation.Event(runtimeidentity.ForkLineageEventID(continuation.ChildCommand().RunID, original.ID()), "selection:empty")
 	if err != nil || event.Type() != "platform.join_complete" || !arm.OutcomePending || arm.OutcomeFired {
 		t.Fatalf("empty completion projection consumed its arm: event=%+v arm=%+v err=%v", event, arm, err)
 	}
@@ -368,7 +368,7 @@ func TestPublishedJoinContinuationRepeatedProjectionPreservesFirstOrigin(t *test
 	if ref.StageEntry().OriginRunID != first.Command.RunID || ref.StageEntry().OriginRunID == second.Command.RunID {
 		t.Fatalf("repeated fork replaced original origin: %+v", ref.StageEntry())
 	}
-	event, err := continuation.Event(activityidentity.ForkLineageEventID(grandchild.RunID, secondOriginal.ID()), "selection:again")
+	event, err := continuation.Event(runtimeidentity.ForkLineageEventID(grandchild.RunID, secondOriginal.ID()), "selection:again")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestPublishedJoinContinuationPreservesEntityAcrossDistinctRunScopes(t *test
 	if err != nil || !continuation.Present() {
 		t.Fatalf("same entity in a distinct run refused: %+v err=%v", continuation, err)
 	}
-	event, err := continuation.Event(activityidentity.ForkLineageEventID(child.RunID, original.ID()), "selection:shared-entity")
+	event, err := continuation.Event(runtimeidentity.ForkLineageEventID(child.RunID, original.ID()), "selection:shared-entity")
 	if err != nil || event.RunID() == source.Command.RunID || event.EntityID() != source.Command.EntityID {
 		t.Fatalf("child publication changed run-scoped entity meaning: %+v err=%v", event, err)
 	}
@@ -428,7 +428,7 @@ func TestPublishedJoinContinuationValidateEventOwnsLineageAndImmutableFrame(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			expected, err := continuation.Event(activityidentity.ForkLineageEventID(child.RunID, original.ID()), "selection:exact")
+			expected, err := continuation.Event(runtimeidentity.ForkLineageEventID(child.RunID, original.ID()), "selection:exact")
 			if err != nil {
 				t.Fatal(err)
 			}

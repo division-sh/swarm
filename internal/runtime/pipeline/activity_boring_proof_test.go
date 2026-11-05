@@ -15,8 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -505,9 +504,9 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 		SuccessEvent: resultEvents.SuccessEvent,
 		FailureEvent: resultEvents.FailureEvent,
 
-		EntityID:        identity.NormalizeEntityID(evt.EntityID()),
-		Owner:           runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
-		ExecutionFlowID: identity.NormalizeFlowID("research"),
+		EntityID:        runtimeidentity.NormalizeEntityID(evt.EntityID()),
+		Owner:           runtimeidentity.MustNodeActivityOwner(mustActivityBoringNode("scanner")),
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID("research"),
 		FlowInstance:    flowInstance,
 		HandlerEventKey: "source.requested",
 		SourceEventID:   evt.ID(),
@@ -548,9 +547,9 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		SuccessEvent: resultEvents.SuccessEvent,
 		FailureEvent: resultEvents.FailureEvent,
 
-		EntityID:        identity.NormalizeEntityID(entityID),
-		Owner:           runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
-		ExecutionFlowID: identity.NormalizeFlowID("research"),
+		EntityID:        runtimeidentity.NormalizeEntityID(entityID),
+		Owner:           runtimeidentity.MustNodeActivityOwner(mustActivityBoringNode("scanner")),
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID("research"),
 		FlowInstance:    "research/" + entityID,
 		HandlerEventKey: "source.requested",
 		SourceEventID:   uuid.NewString(),
@@ -579,8 +578,8 @@ func activityBoringNodeRoute(evt events.Event, nodeID string) events.DeliveryRou
 	}
 }
 
-func mustActivityBoringNode(nodeID string) identity.ExecutableNode {
-	node, err := identity.AdmitExecutableNodeDeclaration("research", strings.TrimSpace(nodeID))
+func mustActivityBoringNode(nodeID string) runtimeidentity.ExecutableNode {
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("research", strings.TrimSpace(nodeID))
 	if err != nil {
 		panic(err)
 	}

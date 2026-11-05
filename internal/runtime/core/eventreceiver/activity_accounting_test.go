@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -15,9 +15,9 @@ import (
 
 func receiverPublishedActivity(t *testing.T, runID string) activityresult.PublishedContinuation {
 	t.Helper()
-	publication, err := activityresult.NewPublishedContinuation(activityidentity.Fact{
+	publication, err := activityresult.NewPublishedContinuation(runtimeidentity.ActivityFact{
 		RunID: runID, SourceEventID: uuid.NewString(), EntityID: uuid.NewString(),
-		Owner:           activityidentity.MustNodeOwner(identitytest.RootNode(t, "receiver")),
+		Owner:           runtimeidentity.MustNodeActivityOwner(identitytest.RootNode(t, "receiver")),
 		ExecutionFlowID: ".", HandlerEventKey: "work.started", ActivityID: "compute", Tool: "compute", Attempt: 1,
 	}, uuid.NewString(), "compute.succeeded", []byte(`{"result":"recorded"}`), executionmode.Live,
 		"exact-input", "", time.Now().UTC())

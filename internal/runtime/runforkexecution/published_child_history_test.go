@@ -9,7 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -40,7 +40,7 @@ func TestIssue642PublishedChildRemainsHistoricallyPlannableBothStores(t *testing
 			if err != nil || len(source.JoinSchedules) != 1 {
 				t.Fatalf("source control: joins=%d err=%v", len(source.JoinSchedules), err)
 			}
-			id := activityidentity.ForkLineageEventID(checkpoint.ForkRun, source.JoinSchedules[0].CurrentEventID)
+			id := runtimeidentity.ForkLineageEventID(checkpoint.ForkRun, source.JoinSchedules[0].CurrentEventID)
 			if _, err := selected.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{SourceRunID: checkpoint.ForkRun, At: id}); err != nil {
 				t.Fatalf("acknowledged child cannot reconstruct its own committed publication cut: %v", err)
 			}
@@ -71,7 +71,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				if err != nil || len(source.JoinSchedules) != 1 {
 					t.Fatalf("original source control: joins=%d err=%v", len(source.JoinSchedules), err)
 				}
-				id := activityidentity.ForkLineageEventID(checkpoint.ForkRun, source.JoinSchedules[0].CurrentEventID)
+				id := runtimeidentity.ForkLineageEventID(checkpoint.ForkRun, source.JoinSchedules[0].CurrentEventID)
 				start, err := lifecycle.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{SourceRunID: checkpoint.ForkRun, AtStart: true})
 				if err != nil || len(start.JoinSchedules) != 0 || len(start.TransferredJoins) != 1 {
 					t.Fatalf("acknowledged/prepublication cut: joins=%d transfers=%d err=%v", len(start.JoinSchedules), len(start.TransferredJoins), err)
@@ -165,7 +165,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				}
 				grandchild := result.Materialization.ForkRunID
 				waitPublishedChildCompletion(t, selected, owner, process, baseline, grandchild)
-				grandEvent := storetest.LoadCanonicalEventRecord(t, ctx, selected, activityidentity.ForkLineageEventID(grandchild, id))
+				grandEvent := storetest.LoadCanonicalEventRecord(t, ctx, selected, runtimeidentity.ForkLineageEventID(grandchild, id))
 				lineage, found := grandEvent.SelectedForkLineage()
 				if !found || lineage.SourceRunID() != checkpoint.ForkRun || lineage.SourceEventID() != id ||
 					!grandEvent.CreatedAt().Equal(source.JoinSchedules[0].CurrentDueAt) {

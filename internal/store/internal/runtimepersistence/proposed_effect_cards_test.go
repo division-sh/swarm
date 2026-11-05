@@ -15,8 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -643,7 +643,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := activityidentity.MustNodeOwner(mustPersistenceRootNode("support"))
+	owner := runtimeidentity.MustNodeActivityOwner(mustPersistenceRootNode("support"))
 	continuation := decisioncard.ProposedEffectContinuation{
 		CardID: decisioncard.ProposedEffectCardID(requestID, "support_reply"), RunID: runID,
 		RequestEventID: requestID, ActivityID: "send_support_reply", Tool: "telegram.send_message", Input: input,

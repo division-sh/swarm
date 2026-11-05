@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -368,7 +368,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 	activityNativeJournalForFixture(t, fixture, runID)
 	record := runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: mode, EntityID: uuid.NewString(), FlowInstance: "flow/" + uuid.NewString(),
-		NodeID: activityidentity.MustNodeOwner(mustPersistenceNode("flow", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
+		NodeID: runtimeidentity.MustNodeActivityOwner(mustPersistenceNode("flow", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
 		Attempt: 1, SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input",
 	}
 	if generated {

@@ -22,7 +22,6 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -732,7 +731,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				entityID := runID
 				ctx, bundleSource := workflowLifecycleSourceContext(t, selected, bundle, runID)
 				supportNode := externalPipelineNode(t, "", "support")
-				supportOwner := activityidentity.MustNodeOwner(supportNode)
+				supportOwner := runtimeidentity.MustNodeActivityOwner(supportNode)
 				now := time.Date(2026, 7, 14, 22, 0, 0, 0, time.UTC)
 				input, err := canonicaljson.FromGo(map[string]any{"chat_id": "support-room", "text": "Exact approved text"})
 				if err != nil {
@@ -743,7 +742,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					[]byte(`{"chat_id":"support-room","text":"Exact approved text"}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
 				storetest.CommitSemanticEvent(t, ctx, selected.events, sourceEvent)
-				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
+				requestEventID := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
 					Owner: supportOwner, ExecutionFlowID: ".",
 					HandlerEventKey: "support.reply_drafted", ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,

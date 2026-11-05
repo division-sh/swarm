@@ -16,9 +16,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -57,7 +57,7 @@ type selectedActivityInputSettlementHold struct {
 
 func (p selectedActivityInputSettlementHold) Settle(ctx context.Context, claim pipelineobligation.Claim, disposition pipelineobligation.Disposition) (pipelineobligation.SettlementOutcome, error) {
 	authority, selected := effects.AuthorityFromContext(ctx)
-	if selected && authority.Kind == effects.AuthoritySelectedContractFork && claim.EventID() == activityidentity.ForkLineageEventID(authority.SelectedFork.ForkRunID, p.sourceRequest) {
+	if selected && authority.Kind == effects.AuthoritySelectedContractFork && claim.EventID() == runtimeidentity.ForkLineageEventID(authority.SelectedFork.ForkRunID, p.sourceRequest) {
 		select {
 		case <-ctx.Done():
 			return pipelineobligation.SettlementOutcome{}, ctx.Err()
@@ -162,9 +162,9 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		t.Fatal(err)
 	}
 	node := mustRunForkNode("flow_a", "test-node")
-	fact := activityidentity.Fact{RunID: sourceRun, SourceEventID: initiatingID, EntityID: entityID, Owner: activityidentity.MustNodeOwner(node),
+	fact := runtimeidentity.ActivityFact{RunID: sourceRun, SourceEventID: initiatingID, EntityID: entityID, Owner: runtimeidentity.MustNodeActivityOwner(node),
 		ExecutionFlowID: "flow_a", HandlerEventKey: "review.requested", ActivityID: "connector", Tool: "provider.connector", Attempt: 1, RevisionID: activation.RevisionID}
-	requestID := activityidentity.RequestEventID(fact)
+	requestID := runtimeidentity.ActivityRequestEventID(fact)
 	source := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID})}
 	request := selectedContractActivityRequestPayload{
@@ -187,7 +187,7 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		if !present || !authority.Valid() || authority.SelectedFork.ForkRunID != event.RunID() || calls.Load() != wantCalls {
 			t.Fatalf("result commit lost exact selected authority or changed provider execution: %+v calls=%d want=%d", authority, calls.Load(), wantCalls)
 		}
-		inputID := activityidentity.ForkLineageEventID(event.RunID(), requestID)
+		inputID := runtimeidentity.ForkLineageEventID(event.RunID(), requestID)
 		receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(ctx, selected, inputID)
 		if err != nil || receipt.Found {
 			t.Fatalf("crash cut missed the still-pending original input: %+v error=%v", receipt, err)

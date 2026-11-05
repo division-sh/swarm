@@ -15,8 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -83,14 +83,14 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if err := json.Unmarshal(loaded[0].Payload, &payload); err != nil {
 							t.Fatal(err)
 						}
-						owner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+						owner, err := runtimeidentity.ParseActivityOwnerKey(payload.NodeID)
 						if err != nil {
 							t.Fatal(err)
 						}
-						fact := activityidentity.Fact{RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
+						fact := runtimeidentity.ActivityFact{RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
 							EntityID: payload.EntityID, Owner: owner, ExecutionFlowID: payload.FlowID, HandlerEventKey: payload.HandlerEventKey,
 							ActivityID: payload.ActivityID, Tool: payload.Tool, Attempt: 1, RevisionID: payload.Generation.RevisionID}
-						copied, found, err := journal.LoadActivityAttempt(ctx, activityidentity.RequestEventID(fact))
+						copied, found, err := journal.LoadActivityAttempt(ctx, runtimeidentity.ActivityRequestEventID(fact))
 						if err != nil || !found {
 							t.Fatalf("read copied terminal attempt: found=%v err=%v", found, err)
 						}
@@ -98,7 +98,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if err != nil || cursor != "" || len(cards) != 0 {
 							t.Fatalf("recorded copy unexpectedly has a live fork-local card: %+v cursor=%q error=%v", cards, cursor, err)
 						}
-						if copied.RunID != child.ForkRunID || copied.Status != status || copied.ExecutionMode != sourceRecord.ExecutionMode || copied.InputHash != sourceRecord.InputHash || copied.ResultEventType != sourceRecord.ResultEventType || copied.ResultEventID != activityidentity.ResultEventID(fact, sourceRecord.ResultEventType) || copied.ResultEventID == sourceRecord.ResultEventID {
+						if copied.RunID != child.ForkRunID || copied.Status != status || copied.ExecutionMode != sourceRecord.ExecutionMode || copied.InputHash != sourceRecord.InputHash || copied.ResultEventType != sourceRecord.ResultEventType || copied.ResultEventID != runtimeidentity.ActivityResultEventID(fact, sourceRecord.ResultEventType) || copied.ResultEventID == sourceRecord.ResultEventID {
 							t.Fatalf("copied attempt lost exact identity/terminal evidence: %#v", copied)
 						}
 						if !copied.StartedAt.Equal(sourceRecord.StartedAt) || !copied.UpdatedAt.Equal(sourceRecord.UpdatedAt) || copied.CompletedAt == nil || sourceRecord.CompletedAt == nil || !copied.CompletedAt.Equal(*sourceRecord.CompletedAt) {
@@ -207,11 +207,11 @@ func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
 					if err := json.Unmarshal(loaded[0].Payload, &payload); err != nil {
 						t.Fatal(err)
 					}
-					owner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+					owner, err := runtimeidentity.ParseActivityOwnerKey(payload.NodeID)
 					if err != nil {
 						t.Fatal(err)
 					}
-					copiedID := activityidentity.RequestEventID(activityidentity.Fact{
+					copiedID := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 						RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
 						EntityID: payload.EntityID, Owner: owner, ExecutionFlowID: payload.FlowID, HandlerEventKey: payload.HandlerEventKey,
 						ActivityID: payload.ActivityID, Tool: payload.Tool, Attempt: 1, RevisionID: payload.Generation.RevisionID,
@@ -362,12 +362,12 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)
 	flow, instance := "flow-a", "flow-a"
 	node := mustPersistenceNode(flow, "writer")
-	owner := activityidentity.MustNodeOwner(node)
+	owner := runtimeidentity.MustNodeActivityOwner(node)
 	activity, tool, handler, success, failure := "commit", "provider.write", "review.accepted", "flow-a/commit.succeeded", "flow-a/commit.failed"
 	if ordinaryReplay && !approved {
 		flow, instance, entityID = ".", runID, runID
 		node = mustPersistenceRootNode("writer")
-		owner = activityidentity.MustNodeOwner(node)
+		owner = runtimeidentity.MustNodeActivityOwner(node)
 		success, failure = "commit.succeeded", "commit.failed"
 	}
 	var card decisioncard.Card
@@ -377,7 +377,7 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 		card, continuation = newDeclaredRootActivityCard(t, runID, at, declarations)
 		parentID, entityID, flow, instance = continuation.SourceEventID, runID, continuation.FlowID, runID
 		var err error
-		owner, err = activityidentity.ParseOwnerKey(continuation.NodeID)
+		owner, err = runtimeidentity.ParseActivityOwnerKey(continuation.NodeID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -443,8 +443,8 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 		}
 	}
 	captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, postgres)
-	fact := activityidentity.Fact{RunID: runID, SourceEventID: parentID, EntityID: entityID, Owner: owner, ExecutionFlowID: flow, HandlerEventKey: handler, ActivityID: activity, Tool: tool, Attempt: 1, RevisionID: generation.RevisionID}
-	requestID := activityidentity.RequestEventID(fact)
+	fact := runtimeidentity.ActivityFact{RunID: runID, SourceEventID: parentID, EntityID: entityID, Owner: owner, ExecutionFlowID: flow, HandlerEventKey: handler, ActivityID: activity, Tool: tool, Attempt: 1, RevisionID: generation.RevisionID}
+	requestID := runtimeidentity.ActivityRequestEventID(fact)
 	var input any = map[string]any{"value": "recorded"}
 	decisionID := ""
 	if approved {
@@ -543,7 +543,7 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 			record.Failure = &envelope
 			record.ResultPayload = map[string]any{"activity_id": activity, "failure": map[string]any{"code": "activity_timestamp_test"}}
 		}
-		record.ResultEventID = activityidentity.ResultEventID(fact, record.ResultEventType)
+		record.ResultEventID = runtimeidentity.ActivityResultEventID(fact, record.ResultEventType)
 		if generation.Valid() {
 			record.ResultPayload[generation.RevisionField] = generation.RevisionID
 		}
@@ -599,11 +599,11 @@ func newDeclaredRootActivityCard(t *testing.T, runID string, at time.Time, decla
 	continuation.BundleHash, continuation.FlowID = bundle.SourceArtifact.BundleHash(), "."
 	continuation.SuccessEvent, continuation.FailureEvent = "send_support_reply.succeeded", "send_support_reply.failed"
 	continuation.RevisionEvent, continuation.RejectedEvent = "send_support_reply.revision_requested", "send_support_reply.rejected"
-	owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(continuation.NodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	continuation.RequestEventID = activityidentity.RequestEventID(activityidentity.Fact{
+	continuation.RequestEventID = runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 		RunID: runID, SourceEventID: continuation.SourceEventID, EntityID: runID, Owner: owner,
 		ExecutionFlowID: continuation.FlowID, HandlerEventKey: continuation.HandlerEventKey,
 		ActivityID: continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,

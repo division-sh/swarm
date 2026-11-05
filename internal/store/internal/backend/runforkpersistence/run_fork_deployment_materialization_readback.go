@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
@@ -105,7 +105,7 @@ func requireRunForkDeploymentOutcomesTx(ctx context.Context, tx *sql.Tx, postgre
 		}
 		wantPending[pending.Ordinal] = fanoutobligation.Outcome{
 			Ordinal: pending.Ordinal, Kind: fanoutobligation.OutcomeContinued,
-			EventID:       activityidentity.ForkLineageEventID(key.RunID, pending.SourceEventID),
+			EventID:       runtimeidentity.ForkLineageEventID(key.RunID, pending.SourceEventID),
 			SourceEventID: pending.SourceEventID, InheritedDisposition: pending.InheritedDisposition,
 		}
 	}

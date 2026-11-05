@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
@@ -45,7 +45,7 @@ func TestPendingJoinContinuationPreservesImmediateObligationWithoutEvent(t *test
 					if err != nil || publication != projected.Publication {
 						t.Fatal("continuation differs from canonical pending correspondence")
 					}
-					event, err := continued.Event(activityidentity.ForkLineageEventID(child.RunID, source.Publication.EventID), "pending-selected-owner")
+					event, err := continued.Event(runtimeidentity.ForkLineageEventID(child.RunID, source.Publication.EventID), "pending-selected-owner")
 					if err != nil || !event.CreatedAt().Equal(source.Command.Due.Absolute) {
 						t.Fatalf("pending continuation changed retained due: %v", err)
 					}

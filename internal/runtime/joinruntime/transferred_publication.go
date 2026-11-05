@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
@@ -52,7 +52,7 @@ func (p TransferredPublication) Validate(runID string, ref timeridentity.JoinRef
 			return fmt.Errorf("transferred publication requires canonical nonzero run and event UUIDs")
 		}
 	}
-	if p.SourceRunID == runID || p.EventID != activityidentity.ForkLineageEventID(runID, p.SourceEventID) {
+	if p.SourceRunID == runID || p.EventID != runtimeidentity.ForkLineageEventID(runID, p.SourceEventID) {
 		return fmt.Errorf("transferred publication requires distinct source run and deterministic destination event")
 	}
 	if p.CommittedCause.RunID == runID || (p.CommittedCause.RunID == p.SourceRunID && p.CommittedCause.EventID != p.SourceEventID) {

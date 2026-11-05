@@ -11,9 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -66,8 +65,8 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 				t.Fatal(err)
 			}
 			intent, _, _, accountingCtx := publishedActivityAccountingFixture(t)
-			intent.SourceRunID, intent.EntityID, intent.FlowInstance = run, identity.EntityID(run), run
-			intent.ExecutionFlowID, intent.Owner = identity.FlowID("."), activityidentity.MustNodeOwner(pipelineNode(t, ".", "reader"))
+			intent.SourceRunID, intent.EntityID, intent.FlowInstance = run, runtimeidentity.EntityID(run), run
+			intent.ExecutionFlowID, intent.Owner = runtimeidentity.FlowID("."), runtimeidentity.MustNodeActivityOwner(pipelineNode(t, ".", "reader"))
 			intent.ActivityID, intent.Tool, intent.HandlerEventKey = "read", "read", "read.requested"
 			intent.SuccessEvent, intent.FailureEvent = "read.succeeded", "read.failed"
 			intent.Generation, intent.LoopStage = activation.Generation(), "review"

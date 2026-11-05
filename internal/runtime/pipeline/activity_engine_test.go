@@ -23,8 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -1976,9 +1975,9 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 
 		SuccessEvent:    "research.scanner_source_scrape.succeeded",
 		FailureEvent:    "research.scanner_source_scrape.failed",
-		EntityID:        identity.NormalizeEntityID("entity-1"),
-		Owner:           runtimeactivityidentity.MustNodeOwner(mustPipelineNode("research", "scanner")),
-		ExecutionFlowID: identity.NormalizeFlowID("research"),
+		EntityID:        runtimeidentity.NormalizeEntityID("entity-1"),
+		Owner:           runtimeidentity.MustNodeActivityOwner(mustPipelineNode("research", "scanner")),
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID("research"),
 		FlowInstance:    "research/entity-1",
 		SourceEventID:   "evt-1",
 		SourceRunID:     "run-1",
@@ -2016,7 +2015,7 @@ func testNonIdempotentActivityIntent(runID, sourceEventID, entityID string) runt
 	intent.SourceRunID = runID
 	intent.SourceEventID = sourceEventID
 	intent.ParentEventID = sourceEventID
-	intent.EntityID = identity.NormalizeEntityID(entityID)
+	intent.EntityID = runtimeidentity.NormalizeEntityID(entityID)
 	return intent.Normalized()
 }
 

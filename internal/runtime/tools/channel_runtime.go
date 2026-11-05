@@ -10,9 +10,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -192,9 +191,9 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		SuccessEvent: strings.TrimSpace(toolID) + ".succeeded",
 		FailureEvent: strings.TrimSpace(toolID) + ".failed",
 
-		EntityID:        identity.NormalizeEntityID(entityID),
-		Owner:           activityidentity.MustAgentOwner(actor.ID),
-		ExecutionFlowID: identity.NormalizeFlowID(flowID),
+		EntityID:        runtimeidentity.NormalizeEntityID(entityID),
+		Owner:           runtimeidentity.MustAgentActivityOwner(actor.ID),
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID(flowID),
 		FlowInstance:    flowInstance,
 		HandlerEventKey: strings.TrimSpace(toolID),
 		SourceEventID:   inbound.ID(),

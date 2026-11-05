@@ -6,8 +6,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -85,7 +85,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 			if !reflect.DeepEqual(child, []any{map[string]any{"revision_id": want.RevisionID, "token": "loop-notice-proof"}}) {
 				t.Fatalf("fork did not collect the remapped current revision: %#v", child)
 			}
-			requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
+			requireForkLoopStateEffect(t, rt, fork.ForkRunID, runtimeidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkCollectedReviews(t, rt.Endpoint, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {

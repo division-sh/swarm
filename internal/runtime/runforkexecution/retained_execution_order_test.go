@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -452,7 +452,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			wantInputs := 0
 			if fault == "continuation" {
 				wantInputs = 1
-				inputID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, request.At)
+				inputID := runtimeidentity.ForkLineageEventID(result.Materialization.ForkRunID, request.At)
 				input := storetest.LoadCanonicalEventRecord(t, wait, selected, inputID)
 				source := storetest.LoadCanonicalEventRecord(t, wait, selected, request.At)
 				lineage, retained := input.SelectedForkLineage()

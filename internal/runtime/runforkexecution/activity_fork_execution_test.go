@@ -22,10 +22,9 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -122,13 +121,13 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				t.Fatalf("create source loop activation: %v", err)
 			}
 			sourceGeneration := activation.Generation()
-			sourceFact := activityidentity.Fact{
+			sourceFact := runtimeidentity.ActivityFact{
 				RunID: sourceRunID, SourceEventID: initiatingEventID, EntityID: entityID,
-				Owner: activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a", HandlerEventKey: "review.requested",
+				Owner: runtimeidentity.MustNodeActivityOwner(activityNode), ExecutionFlowID: "flow_a", HandlerEventKey: "review.requested",
 				ActivityID: "connector", Tool: "provider.connector", Attempt: 1,
 				RevisionID: sourceGeneration.RevisionID,
 			}
-			sourceRequestEventID := activityidentity.RequestEventID(sourceFact)
+			sourceRequestEventID := runtimeidentity.ActivityRequestEventID(sourceFact)
 			routingSource := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
 			activityRoute := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(activityNode),
@@ -138,7 +137,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 				EntityID: entityID, FlowInstance: "flow_a",
-				NodeID: activityidentity.MustNodeOwner(activityNode).Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
+				NodeID: runtimeidentity.MustNodeActivityOwner(activityNode).Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID,
 				Generation: sourceGeneration, LoopStage: "review",
 			}
@@ -235,16 +234,16 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if forkRequest.SourceRunID != result.Materialization.ForkRunID || forkRequest.SourceEventID != forkEventID || !forkRequest.Generation.Valid() || forkRequest.Generation.RevisionID == sourceGeneration.RevisionID {
 				t.Fatalf("fork request identity = %#v, source generation = %#v", forkRequest, sourceGeneration)
 			}
-			forkFact := activityidentity.Fact{
+			forkFact := runtimeidentity.ActivityFact{
 				RunID: result.Materialization.ForkRunID, SourceEventID: forkRequest.SourceEventID,
 				ParentEventID: forkRequest.ParentEventID, EntityID: entityID,
-				Owner: activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a",
+				Owner: runtimeidentity.MustNodeActivityOwner(activityNode), ExecutionFlowID: "flow_a",
 				HandlerEventKey: "review.requested", ActivityID: "connector",
 				Tool: "provider.connector", Attempt: 1, RevisionID: forkRequest.Generation.RevisionID,
 			}
-			forkRequestEventID := activityidentity.RequestEventID(forkFact)
-			forkResultEventID := activityidentity.ResultEventID(forkFact, tt.resultEventType)
-			if forkRequestEventID == sourceRequestEventID || forkResultEventID == activityidentity.ResultEventID(sourceFact, tt.resultEventType) {
+			forkRequestEventID := runtimeidentity.ActivityRequestEventID(forkFact)
+			forkResultEventID := runtimeidentity.ActivityResultEventID(forkFact, tt.resultEventType)
+			if forkRequestEventID == sourceRequestEventID || forkResultEventID == runtimeidentity.ActivityResultEventID(sourceFact, tt.resultEventType) {
 				t.Fatalf("fork activity reused source identity: request=%s result=%s", forkRequestEventID, forkResultEventID)
 			}
 
@@ -420,7 +419,7 @@ func waitSelectedContractActivityInputAccounting(t *testing.T, ctx context.Conte
 	if result.Materialization.ForkRunID == "" || result.SelectedContractExecutionAdmission == nil || result.ForkLocalRuntimeContainer == nil {
 		t.Fatalf("selected input lacks its exact native child and execution admission: %+v", result)
 	}
-	id := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceRequestID)
+	id := runtimeidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceRequestID)
 	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	reader, ok := fixture.owner.ports.fork.(runtimebus.PreparedPublishEventReader)
@@ -643,11 +642,11 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 		t.Fatal(err)
 	}
 	selected := fixture.owner.ports.fork.(pipeline.WorkflowPersistenceOwner)
-	before, err := selected.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(entityID))
+	before, err := selected.LoadWorkflowTargetPersistence(ctx, owner, runtimeidentity.NormalizeEntityID(entityID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	instance, err := before.DecodeComplete(owner.Route, identity.NormalizeEntityID(entityID))
+	instance, err := before.DecodeComplete(owner.Route, runtimeidentity.NormalizeEntityID(entityID))
 	if err != nil {
 		t.Fatalf("load exact source loop header: %v", err)
 	}
@@ -671,7 +670,7 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 	}
 }
 
-func seedSelectedContractActivityAttempt(t *testing.T, ctx context.Context, selected any, fact activityidentity.Fact, generation attemptgeneration.Generation, status, resultEventType, failureClass, failureCode string, at time.Time) {
+func seedSelectedContractActivityAttempt(t *testing.T, ctx context.Context, selected any, fact runtimeidentity.ActivityFact, generation attemptgeneration.Generation, status, resultEventType, failureClass, failureCode string, at time.Time) {
 	t.Helper()
 	resultPayload := map[string]any{
 		"activity_id": "connector", "tool": "provider.connector", "revision_id": generation.RevisionID,
@@ -687,8 +686,8 @@ func seedSelectedContractActivityAttempt(t *testing.T, ctx context.Context, sele
 		failure = &typed
 		resultPayload["failure"] = failure
 	}
-	requestEventID := activityidentity.RequestEventID(fact)
-	resultEventID := activityidentity.ResultEventID(fact, resultEventType)
+	requestEventID := runtimeidentity.ActivityRequestEventID(fact)
+	resultEventID := runtimeidentity.ActivityResultEventID(fact, resultEventType)
 	inputHash := sha256.Sum256([]byte(`{"value":"x"}`))
 	ctx = nativeRunForkTestContext(t, ctx, selected)
 	if err := storetest.SeedHistoricalActivityForkAttempt(ctx, selected, pipeline.ActivityAttemptRecord{

@@ -18,7 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -281,7 +281,7 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 			if replay := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params); !reflect.DeepEqual(fork, replay) {
 				t.Fatalf("synchronous fork ACK changed on replay: first=%+v replay=%+v", fork, replay)
 			}
-			waitWorkspaceProofPipelineReceipt(t, rt.Events, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), "success")
+			waitWorkspaceProofPipelineReceipt(t, rt.Events, fork.ForkRunID, runtimeidentity.ForkLineageEventID(fork.ForkRunID, frontier), "success")
 			waitServedRunDeliveryQuiescence(t, func(ctx context.Context, runID string) (deliverylifecycle.RunSummary, error) {
 				return storetest.ReadServedRunDeliverySummary(ctx, rt.Events, runID)
 			}, fork.ForkRunID)

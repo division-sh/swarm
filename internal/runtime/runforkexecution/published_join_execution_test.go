@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -575,7 +574,7 @@ func TestIssue642PublishedJoinCrashRestartBothStores(t *testing.T) {
 					}
 				}
 				child := checkpoint.ForkRun
-				event := storetest.LoadCanonicalEventRecord(t, wait, selected, activityidentity.ForkLineageEventID(child, source.CurrentEventID))
+				event := storetest.LoadCanonicalEventRecord(t, wait, selected, runtimeidentity.ForkLineageEventID(child, source.CurrentEventID))
 				if event.Type() != "platform.join_complete" || !event.CreatedAt().Equal(source.CurrentDueAt) || event.SourceAgent() != genericschedule.OccurrenceProducerID() {
 					t.Fatalf("recovery replaced its retained occurrence: %+v", event)
 				}
@@ -729,7 +728,7 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 				}
 			}
 			requirePublishedJoinChildReceiver(t, wait, selected, owner, source, child)
-			forkEvent := activityidentity.ForkLineageEventID(child, source.CurrentEventID)
+			forkEvent := runtimeidentity.ForkLineageEventID(child, source.CurrentEventID)
 			event := storetest.LoadCanonicalEventRecord(t, wait, selected, forkEvent)
 			if event.Type() != "platform.join_complete" || !event.CreatedAt().Equal(source.CurrentDueAt) || event.SourceAgent() != genericschedule.OccurrenceProducerID() {
 				t.Fatalf("published occurrence was replaced rather than continued: %+v", event)
@@ -796,7 +795,7 @@ func requirePublishedJoinChildReceiver(t *testing.T, ctx context.Context, select
 	if !valid {
 		t.Fatal("source publication lost its exact join handle")
 	}
-	event := storetest.LoadCanonicalEventRecord(t, ctx, selected, activityidentity.ForkLineageEventID(child, source.CurrentEventID))
+	event := storetest.LoadCanonicalEventRecord(t, ctx, selected, runtimeidentity.ForkLineageEventID(child, source.CurrentEventID))
 	var payload map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
 		t.Fatal(err)

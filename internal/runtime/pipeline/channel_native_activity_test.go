@@ -16,8 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
@@ -71,8 +70,8 @@ func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActiv
 	intent := engine.ActivityIntent{ActivityID: "native-activity", Tool: private.ToolID(), Input: value,
 		BundleHash: activation.Coordinate.BundleHash, PlanGeneration: private.Generation(),
 		SuccessEvent: "channel.deliver.succeeded", FailureEvent: "channel.deliver.failed",
-		SourceRunID: runID, SourceEventID: uuid.NewString(), ParentEventID: uuid.NewString(), EntityID: identity.NormalizeEntityID(uuid.NewString()),
-		ExecutionFlowID: identity.NormalizeFlowID("."), FlowInstance: runID, Owner: activityidentity.MustAgentOwner("agent"),
+		SourceRunID: runID, SourceEventID: uuid.NewString(), ParentEventID: uuid.NewString(), EntityID: runtimeidentity.NormalizeEntityID(uuid.NewString()),
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID("."), FlowInstance: runID, Owner: runtimeidentity.MustAgentActivityOwner("agent"),
 		HandlerEventKey: "channel.deliver", ExecutionMode: effects.ExecutionModeLive}
 	started := activityAttemptStartRecord(intent, activityInputHash(value))
 	started.StartedAt = time.Now().UTC()

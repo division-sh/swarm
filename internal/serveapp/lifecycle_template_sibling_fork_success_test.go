@@ -14,8 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -279,7 +278,7 @@ func requireLifecycleTemplatePendingCut(t *testing.T, bundleHash string, selecte
 		frontier.FrontierEvents[0].EventName != "work.observed" || len(frontier.FrontierEvents[0].DerivedRecipients) != 1 {
 		t.Fatalf("T17 dropped the one owed frontier event: %+v error=%v", frontier, err)
 	}
-	node, err := identity.AdmitExecutableNodeDeclaration(".", "controller")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "controller")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,8 +298,8 @@ func requireLifecycleTemplateFrontierDelivery(t *testing.T, selected *selectedSt
 	ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
 	defer cancel()
 	native := selected.RuntimeDeps().DeliveryStore
-	eventID := activityidentity.ForkLineageEventID(child, sourceEventID)
-	node, err := identity.AdmitExecutableNodeDeclaration(".", "controller")
+	eventID := runtimeidentity.ForkLineageEventID(child, sourceEventID)
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "controller")
 	if err != nil {
 		t.Fatal(err)
 	}

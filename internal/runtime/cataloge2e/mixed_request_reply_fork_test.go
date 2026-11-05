@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -102,7 +101,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 			if err != nil || !found || len(source.DeliveryRoutes) != 2 {
 				t.Fatalf("ordinary request did not publish the complete mixed recipient set: %+v found=%t error=%v", source.DeliveryRoutes, found, err)
 			}
-			observer, err := identity.AdmitExecutableNodeDeclaration(".", "request-observer")
+			observer, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "request-observer")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -188,7 +187,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 				}
 			}
 			waitCopiedActivityRequesterReturn(t, wait, selected, staged.ForkRunID)
-			inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, requestID)
+			inputID := runtimeidentity.ForkLineageEventID(staged.ForkRunID, requestID)
 			for {
 				input, found, err := selected.LoadPreparedPublishEvent(wait, inputID)
 				if err != nil || !found || len(input.DeliveryRoutes) != wantRecipients {
@@ -242,7 +241,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 						if err != nil || providerReplies != 0 {
 							t.Fatalf("completed reply/provider was reissued: count=%d error=%v", providerReplies, err)
 						}
-						retainedReturn := storetest.LoadCanonicalEventRecord(t, wait, selected, activityidentity.ForkLineageEventID(staged.ForkRunID, cut))
+						retainedReturn := storetest.LoadCanonicalEventRecord(t, wait, selected, runtimeidentity.ForkLineageEventID(staged.ForkRunID, cut))
 						lineage, isSelected := retainedReturn.SelectedForkLineage()
 						if !isSelected || lineage.SourceEventID() != cut || string(retainedReturn.Type()) != "request.finished" {
 							t.Fatal("completed return was re-executed rather than retaining its exact cut publication")
@@ -304,7 +303,7 @@ func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, h *r
 	if err != nil || !found || len(source.DeliveryRoutes) == 0 {
 		t.Fatalf("source mixed response: %+v found=%t error=%v", source, found, err)
 	}
-	node, err := identity.AdmitExecutableNodeDeclaration(".", "response-observer")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "response-observer")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +316,7 @@ func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, h *r
 	if original.Recipient.Empty() {
 		// Ordinary source replies intentionally target only the paired return.
 		// A selected replay cannot invent the authored but uncaptured observer.
-		publication, found, err := selected.LoadPreparedPublishEvent(ctx, activityidentity.ForkLineageEventID(child, sourceEventID))
+		publication, found, err := selected.LoadPreparedPublishEvent(ctx, runtimeidentity.ForkLineageEventID(child, sourceEventID))
 		if err != nil || !found || len(source.DeliveryRoutes) != 1 || len(publication.DeliveryRoutes) != 1 {
 			t.Fatalf("return changed its captured partition: source=%+v child=%+v found=%t error=%v", source, publication, found, err)
 		}
@@ -335,7 +334,7 @@ func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, h *r
 	if original.Context.ReplyContextID() != "" {
 		t.Fatal("source ordinary response observer borrowed reply authority")
 	}
-	inputID := activityidentity.ForkLineageEventID(child, sourceEventID)
+	inputID := runtimeidentity.ForkLineageEventID(child, sourceEventID)
 	var ordinaryPlan pinrouting.ConnectRoutePlan
 	for _, plan := range pinrouting.CompileConnectGraph(h.rt.Pipeline.SemanticSource()).Plans() {
 		if plan.ReceiverLocalEvent() == "provider.observed" {
@@ -407,7 +406,7 @@ func proveMixedRequestObserverOnlyReforkPartition(t *testing.T, ctx context.Cont
 
 func holdMixedRequestObserverUntilProviderSettles(t *testing.T, h *runtimeHarness, selected unclaimedFanOutReplyStore, step catalogTriggerStep, returnedRequester bool) string {
 	t.Helper()
-	node, err := identity.AdmitExecutableNodeDeclaration(".", "request-observer")
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "request-observer")
 	if err != nil {
 		t.Fatal(err)
 	}

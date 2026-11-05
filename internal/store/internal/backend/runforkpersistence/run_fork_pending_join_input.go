@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -120,7 +120,7 @@ func admitRunForkPendingJoinInput(ctx context.Context, tx *sql.Tx, admission run
 	if err != nil {
 		return runfork.RunForkSelectedContractSourceEvent{}, err
 	}
-	id := activityidentity.ForkLineageEventID(admission.forkRunID, source.Publication.EventID)
+	id := runtimeidentity.ForkLineageEventID(admission.forkRunID, source.Publication.EventID)
 	materialized, found, err := child.PendingJoinOccurrence(id)
 	if err != nil || !found {
 		return runfork.RunForkSelectedContractSourceEvent{}, fmt.Errorf("pending join lacks exact child materialization: found=%t: %w", found, err)

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -82,7 +82,7 @@ func proveCopiedActivityTerminalHistory(t *testing.T, h *runtimeHarness, selecte
 			t.Fatalf("terminal-history execution failed: %+v failure=%s error=%v diagnostics=%v", run, failure, err, readErr)
 		}
 		pending, pendingErr := storetest.ReadServedIncompletePipelineHandoffCount(settlementCtx, selected, staged.ForkRunID)
-		cutPublished, found, cutErr := selected.LoadPreparedPublishEvent(settlementCtx, activityidentity.ForkLineageEventID(staged.ForkRunID, cut))
+		cutPublished, found, cutErr := selected.LoadPreparedPublishEvent(settlementCtx, runtimeidentity.ForkLineageEventID(staged.ForkRunID, cut))
 		if pendingErr != nil || cutErr != nil {
 			t.Fatalf("read exact terminal-cut pipeline accounting: %v/%v", pendingErr, cutErr)
 		}
@@ -98,7 +98,7 @@ func proveCopiedActivityTerminalHistory(t *testing.T, h *runtimeHarness, selecte
 				if work.EventName != "platform.activity_requested" || work.Classification != runfork.RunForkPendingClassificationPending {
 					continue
 				}
-				inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, work.EventID)
+				inputID := runtimeidentity.ForkLineageEventID(staged.ForkRunID, work.EventID)
 				receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(settlementCtx, selected, inputID)
 				if err != nil || (receipt.Found && (receipt.Outcome != "success" || len(receipt.Failure) != 0)) {
 					t.Fatalf("terminal result dropped or failed its exact pending-input accounting: %+v error=%v", receipt, err)
@@ -131,7 +131,7 @@ func proveCopiedActivityTerminalHistory(t *testing.T, h *runtimeHarness, selecte
 		if work.EventName != "platform.activity_requested" || work.Classification != runfork.RunForkPendingClassificationPending {
 			continue
 		}
-		inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, work.EventID)
+		inputID := runtimeidentity.ForkLineageEventID(staged.ForkRunID, work.EventID)
 		receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(settlementCtx, selected, inputID)
 		if err != nil || !receipt.Found || receipt.Outcome != "success" || len(receipt.Failure) != 0 {
 			t.Fatalf("terminal result dropped or failed its exact pending-input accounting: %+v error=%v", receipt, err)

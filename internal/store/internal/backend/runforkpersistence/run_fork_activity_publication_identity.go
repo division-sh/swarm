@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -62,7 +62,7 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 		return semanticview.ActivityRequestOrigin{}, err
 	}
 	step := semanticview.ActivityRequestCut{RunID: cut.runID, RequestID: request.ID(), Revision: a.snapshot.Revision, Source: artifact}
-	if activityidentity.RequestEventID(fact) == request.ID() {
+	if runtimeidentity.ActivityRequestEventID(fact) == request.ID() {
 		if err := requireOriginalActivityRequestArtifact(request, artifact); err != nil {
 			return semanticview.ActivityRequestOrigin{}, err
 		}
@@ -227,7 +227,7 @@ func (a runForkSourceStateAdmission) inheritedActivityPublicationAtCut(ctx conte
 	if err != nil || !present {
 		return absent, false, err
 	}
-	id := activityidentity.ForkLineageEventID(a.snapshot.RunID, previous.ID())
+	id := runtimeidentity.ForkLineageEventID(a.snapshot.RunID, previous.ID())
 	if _, present := cut.events[id]; !present {
 		return absent, false, nil
 	}

@@ -10,8 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -334,9 +334,9 @@ func forkPendingProposedEffect(plan runfork.RunForkPlan, sourceCard decisioncard
 	fork.EntityID = projection.Fork.EntityID
 	fork.FlowInstance = projection.Fork.FlowInstance
 	fork.ReplyContextID = replyID
-	fork.SourceEventID = activityidentity.ForkLineageEventID(fork.RunID, source.SourceEventID)
+	fork.SourceEventID = runtimeidentity.ForkLineageEventID(fork.RunID, source.SourceEventID)
 	if source.ParentEventID != "" {
-		fork.ParentEventID = activityidentity.ForkLineageEventID(fork.RunID, source.ParentEventID)
+		fork.ParentEventID = runtimeidentity.ForkLineageEventID(fork.RunID, source.ParentEventID)
 	}
 	if source.Generation != (attemptgeneration.Generation{}) {
 		ref, err := correspondence.AdmitSource(source.Generation)
@@ -352,17 +352,17 @@ func forkPendingProposedEffect(plan runfork.RunForkPlan, sourceCard decisioncard
 		}
 		fork.Generation = child.Generation()
 	}
-	owner, err := activityidentity.ParseOwnerKey(fork.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(fork.NodeID)
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("fork proposed effect %s owner identity: %w", fork.ActivityID, err)
 	}
-	fact := activityidentity.Fact{
+	fact := runtimeidentity.ActivityFact{
 		RunID: fork.RunID, SourceEventID: fork.SourceEventID, ParentEventID: fork.ParentEventID,
 		EntityID: fork.EntityID, Owner: owner, ExecutionFlowID: fork.FlowID,
 		HandlerEventKey: fork.HandlerEventKey, ActivityID: fork.ActivityID, Tool: fork.Tool,
 		Attempt: 1, RevisionID: fork.Generation.RevisionID,
 	}
-	fork.RequestEventID = activityidentity.RequestEventID(fact)
+	fork.RequestEventID = runtimeidentity.ActivityRequestEventID(fact)
 	sourceAnchor, err := sourceCard.Anchor.ProposedEffect()
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err

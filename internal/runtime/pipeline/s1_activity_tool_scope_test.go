@@ -17,8 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packadmission"
-	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -51,7 +50,7 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 			Module: staticSemanticWorkflowModule{source: source}, RegisteredAccounts: accounts,
 		})
 		intent := testNonIdempotentActivityIntent(uuid.NewString(), uuid.NewString(), uuid.NewString())
-		intent.Tool, intent.ExecutionFlowID = "whatsapp.send_text", identity.NormalizeFlowID(".")
+		intent.Tool, intent.ExecutionFlowID = "whatsapp.send_text", runtimeidentity.NormalizeFlowID(".")
 		intent.Input = mustActivityInput(map[string]any{"account": "+15550100", "destination": "+15550200", "text": "customer reply"})
 		_, lease, err := pc.prepareSessionActivityIntent(fixture.Context, intent)
 		if lease != nil {
@@ -175,7 +174,7 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		var currents []func(context.Context) error
 		for _, account := range []string{"420079", "420080", "420081", ""} {
 			intent := testNonIdempotentActivityIntent(uuid.NewString(), uuid.NewString(), uuid.NewString())
-			intent.Tool, intent.ExecutionFlowID = "telegram.send_message", identity.NormalizeFlowID(".")
+			intent.Tool, intent.ExecutionFlowID = "telegram.send_message", runtimeidentity.NormalizeFlowID(".")
 			intent.Input = mustActivityInput(map[string]any{"account": account, "chat_id": "17", "text": "customer reply"})
 			values, _, current, matched, err := pc.accountActivityCredentials(ctx, intent, tool)
 			if account == "420081" || account == "" {
@@ -274,8 +273,8 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 		intent.Input = mustActivityInput(map[string]any{})
 		intent.ActivityID = "send"
 		intent.Tool = toolID
-		intent.Owner = runtimeactivityidentity.MustNodeOwner(mustPipelineNode(flow, "scanner"))
-		intent.ExecutionFlowID = identity.NormalizeFlowID(flow)
+		intent.Owner = runtimeidentity.MustNodeActivityOwner(mustPipelineNode(flow, "scanner"))
+		intent.ExecutionFlowID = runtimeidentity.NormalizeFlowID(flow)
 		intent.FlowInstance = flow + "/entity-1"
 		intent.HandlerEventKey = "request"
 		intent.SuccessEvent = flow + "/send.succeeded"

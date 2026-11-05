@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -207,7 +207,7 @@ func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelec
 	}
 	// The sealed projection is also what publication later consumes. A source
 	// payload copied through the ordinary business-event path cannot select it.
-	projected, err := continuation.Event(activityidentity.ForkLineageEventID(a.forkRunID, event.SourceEventID), runfork.RunForkSelectedContractExecutionOwner)
+	projected, err := continuation.Event(runtimeidentity.ForkLineageEventID(a.forkRunID, event.SourceEventID), runfork.RunForkSelectedContractExecutionOwner)
 	if err != nil {
 		return event, err
 	}

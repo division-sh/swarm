@@ -12,8 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -155,7 +154,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	if err != nil || len(outcomes) != rows {
 		t.Fatalf("exact pin-feed publication count: outcomes=%+v err=%v", outcomes, err)
 	}
-	receiver, err := identity.AdmitExecutableNodeDeclaration(semanticview.RootExecutionFlowID(loaded.Source), "root-collector")
+	receiver, err := runtimeidentity.AdmitExecutableNodeDeclaration(semanticview.RootExecutionFlowID(loaded.Source), "root-collector")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +190,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 			t.Fatalf("read exact initial dispatch before replay baseline: %+v error=%v", page, err)
 		}
 		if len(page.Logs) == 1 {
-			if page.Logs[0].EventID != activityidentity.ForkLineageEventID(materialized.ForkRunID, request.At) {
+			if page.Logs[0].EventID != runtimeidentity.ForkLineageEventID(materialized.ForkRunID, request.At) {
 				t.Fatal("pin replay joined a different source dispatch")
 			}
 			break

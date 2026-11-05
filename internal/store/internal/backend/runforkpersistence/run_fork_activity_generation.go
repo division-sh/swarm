@@ -14,9 +14,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -239,7 +238,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if state == nil {
 		return event, fmt.Errorf("activity request requires admitted source ownership")
 	}
-	owner, err := activityidentity.ParseOwnerKey(sourceRequest.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(sourceRequest.NodeID)
 	if err != nil {
 		return event, err
 	}
@@ -267,7 +266,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if node, isNode := owner.Node(); isNode {
 		role, declared, err = admission.carriage.ResolveOriginalActivity(origin, node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
 	} else {
-		role, declared, err = admission.carriage.ResolveEvent(sourceEvent.RoutingSource, sourceRequest.HandlerEventKey, identity.ExecutableNode{}, "")
+		role, declared, err = admission.carriage.ResolveEvent(sourceEvent.RoutingSource, sourceRequest.HandlerEventKey, runtimeidentity.ExecutableNode{}, "")
 	}
 	if err != nil {
 		return event, err
@@ -441,9 +440,9 @@ func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceReques
 	payload["entity_id"], _ = json.Marshal(entityID)
 	var parentID string
 	if json.Unmarshal(payload["parent_event_id"], &parentID) == nil && strings.TrimSpace(parentID) != "" {
-		payload["parent_event_id"], _ = json.Marshal(activityidentity.ForkLineageEventID(forkRunID, parentID))
+		payload["parent_event_id"], _ = json.Marshal(runtimeidentity.ForkLineageEventID(forkRunID, parentID))
 	}
-	payload["source_event_id"], _ = json.Marshal(activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID))
+	payload["source_event_id"], _ = json.Marshal(runtimeidentity.ForkLineageEventID(forkRunID, sourceRequestEventID))
 	return json.Marshal(payload)
 }
 func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, lockPostgres bool, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
@@ -536,18 +535,18 @@ func (a runForkSourceStateAdmission) eventRole(eventID string) (semanticview.Loo
 	if a.firstTurn != nil {
 		original, present := a.firstTurn.Event()
 		if present && original.ID() == eventID {
-			return a.carriage.ResolveEvent(original.RoutingSource(), string(original.Type()), identity.ExecutableNode{}, "")
+			return a.carriage.ResolveEvent(original.RoutingSource(), string(original.Type()), runtimeidentity.ExecutableNode{}, "")
 		}
 	}
 	for _, event := range a.snapshot.Events {
 		if event.EventID != eventID {
 			continue
 		}
-		var node identity.ExecutableNode
+		var node runtimeidentity.ExecutableNode
 		var handler string
 		if event.ProducedByType == string(events.EventProducerNode) {
 			var err error
-			node, err = identity.ParseExecutableNodeKey(event.ProducedBy)
+			node, err = runtimeidentity.ParseExecutableNodeKey(event.ProducedBy)
 			if err != nil {
 				return semanticview.LoopRevisionRole{}, false, err
 			}
@@ -647,7 +646,7 @@ func validateSourceActivityEvidence(e runForkActivityAttemptEvidence, request ru
 	if err != nil {
 		return err
 	}
-	if activityidentity.RequestEventID(fact) != requestID || activityidentity.ResultEventID(fact, e.ResultEventType) != e.ResultEventID {
+	if runtimeidentity.ActivityRequestEventID(fact) != requestID || runtimeidentity.ActivityResultEventID(fact, e.ResultEventType) != e.ResultEventID {
 		return fmt.Errorf("source activity journal request/result identity contradicts its ownership")
 	}
 	wantResult := request.FailureEvent
@@ -660,12 +659,12 @@ func validateSourceActivityEvidence(e runForkActivityAttemptEvidence, request ru
 	return nil
 }
 
-func runForkActivityFact(request runForkActivityRequestPayload) (activityidentity.Fact, error) {
-	owner, err := activityidentity.ParseOwnerKey(request.NodeID)
+func runForkActivityFact(request runForkActivityRequestPayload) (runtimeidentity.ActivityFact, error) {
+	owner, err := runtimeidentity.ParseActivityOwnerKey(request.NodeID)
 	if err != nil {
-		return activityidentity.Fact{}, err
+		return runtimeidentity.ActivityFact{}, err
 	}
-	return activityidentity.Fact{RunID: request.SourceRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
+	return runtimeidentity.ActivityFact{RunID: request.SourceRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
 		EntityID: request.EntityID, Owner: owner, ExecutionFlowID: request.FlowID, HandlerEventKey: request.HandlerEventKey,
 		ActivityID: request.ActivityID, Tool: request.Tool, Attempt: 1, RevisionID: request.Generation.RevisionID}, nil
 }
@@ -689,8 +688,8 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	if fact.RunID != forkRunID {
 		return fmt.Errorf("copied activity request does not belong to the fork")
 	}
-	requestEventID := activityidentity.RequestEventID(fact)
-	resultEventID := activityidentity.ResultEventID(fact, evidence.ResultEventType)
+	requestEventID := runtimeidentity.ActivityRequestEventID(fact)
+	resultEventID := runtimeidentity.ActivityResultEventID(fact, evidence.ResultEventType)
 	resultPayload, err := projectForkRevisionPayload(evidence.ResultPayload, reference)
 	if err != nil {
 		return fmt.Errorf("remint activity %s recorded result: %w", request.ActivityID, err)
@@ -769,8 +768,8 @@ func confirmCopiedActivityEvidenceTx(ctx context.Context, tx *sql.Tx, forkRunID,
 	if err != nil {
 		return err
 	}
-	requestEventID := activityidentity.RequestEventID(fact)
-	resultEventID := activityidentity.ResultEventID(fact, evidence.ResultEventType)
+	requestEventID := runtimeidentity.ActivityRequestEventID(fact)
+	resultEventID := runtimeidentity.ActivityResultEventID(fact, evidence.ResultEventType)
 	generation := request.Generation
 	generationJSON, err := json.Marshal(generation)
 	if err != nil {

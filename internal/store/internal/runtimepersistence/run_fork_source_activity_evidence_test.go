@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
 
@@ -32,7 +32,7 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 					case "flow_instance":
 						value = "foreign/flow"
 					case "node_id":
-						value = activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "reader")).Key()
+						value = runtimeidentity.MustNodeActivityOwner(mustPersistenceNode("flow-a", "reader")).Key()
 					case "handler_event_key":
 						value = "review.inspect"
 					case "activity_id":
@@ -117,14 +117,14 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 					if err != nil || request.Generation != want {
 						t.Fatalf("attempt two was not preserved: got=%#v want=%#v err=%v", request.Generation, want, err)
 					}
-					owner, err := activityidentity.ParseOwnerKey(request.NodeID)
+					owner, err := runtimeidentity.ParseActivityOwnerKey(request.NodeID)
 					if err != nil {
 						t.Fatal(err)
 					}
-					fact := activityidentity.Fact{RunID: child.ForkRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
+					fact := runtimeidentity.ActivityFact{RunID: child.ForkRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
 						EntityID: request.EntityID, Owner: owner, ExecutionFlowID: request.FlowID, HandlerEventKey: request.HandlerEventKey,
 						ActivityID: request.ActivityID, Tool: request.Tool, Attempt: 1, RevisionID: want.RevisionID}
-					copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, activityidentity.RequestEventID(fact))
+					copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, runtimeidentity.ActivityRequestEventID(fact))
 					if err != nil || !found || copied.Generation != want || copied.ResultPayload[want.RevisionField] != want.RevisionID || copied.InputHash != record.InputHash {
 						t.Fatalf("copied result did not consume exact correspondence: %#v found=%v err=%v", copied, found, err)
 					}

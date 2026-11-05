@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -20,7 +20,7 @@ type PublishedContinuation struct {
 	completedAt                                             time.Time
 }
 
-func NewPublishedContinuation(child activityidentity.Fact, sourceResultID, resultType string, payload json.RawMessage, mode executionmode.Mode, inputHash, replyID string, completedAt time.Time) (PublishedContinuation, error) {
+func NewPublishedContinuation(child runtimeidentity.ActivityFact, sourceResultID, resultType string, payload json.RawMessage, mode executionmode.Mode, inputHash, replyID string, completedAt time.Time) (PublishedContinuation, error) {
 	if child.RunID == "" || child.SourceEventID == "" || child.Owner.Empty() || sourceResultID == "" || resultType == "" ||
 		!json.Valid(payload) || !mode.Valid() || inputHash == "" || completedAt.IsZero() {
 		return PublishedContinuation{}, fmt.Errorf("published activity continuation requires exact source and child journal evidence")
@@ -29,7 +29,7 @@ func NewPublishedContinuation(child activityidentity.Fact, sourceResultID, resul
 	if err != nil {
 		return PublishedContinuation{}, err
 	}
-	return PublishedContinuation{requestID: activityidentity.RequestEventID(child), resultID: activityidentity.ResultEventID(child, resultType),
+	return PublishedContinuation{requestID: runtimeidentity.ActivityRequestEventID(child), resultID: runtimeidentity.ActivityResultEventID(child, resultType),
 		sourceResultID: sourceResultID, runID: child.RunID, resultType: resultType, payload: canonical,
 		mode: mode, inputHash: inputHash, replyID: replyID, completedAt: completedAt}, nil
 }

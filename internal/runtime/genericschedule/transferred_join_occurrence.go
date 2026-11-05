@@ -5,7 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -79,7 +79,7 @@ func (o TransferredJoinOccurrence) Project(child AdmissionCommand, authorityStam
 		return TransferredJoinOccurrence{}, err
 	}
 	projected := TransferredJoinOccurrence{Command: child, Publication: joinruntime.TransferredPublication{
-		EventID:     activityidentity.ForkLineageEventID(child.RunID, o.Publication.EventID),
+		EventID:     runtimeidentity.ForkLineageEventID(child.RunID, o.Publication.EventID),
 		SourceRunID: source.RunID, SourceEventID: o.Publication.EventID,
 		AuthorityStamp: authorityStamp, ExecutionMode: source.ExecutionMode,
 		CommittedCause: o.Publication.CommittedCause,

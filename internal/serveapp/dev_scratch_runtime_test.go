@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -121,7 +121,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "paused" || fork.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
-	waitServedEventPublishedLog(t, endpoint, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, published.EventID))
+	waitServedEventPublishedLog(t, endpoint, fork.ForkRunID, runtimeidentity.ForkLineageEventID(fork.ForkRunID, published.EventID))
 	waitServedRunDeliveryQuiescence(t, deliveryReader, fork.ForkRunID)
 	requireServedRunStatus(t, endpoint, fork.ForkRunID, "live")
 

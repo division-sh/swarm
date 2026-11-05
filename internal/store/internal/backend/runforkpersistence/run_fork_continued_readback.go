@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -131,7 +131,7 @@ func requireRunForkContinuedPublicationReadback(ctx context.Context, tx *sql.Tx,
 	if !found {
 		var orphan bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE run_id=$1 AND event_id IN ($2,$3))`,
-			childRun, activityidentity.ForkLineageEventID(childRun, replay.SourceEventID), deterministicRunForkReplayEventID(childRun, replay.SourceEventID)).Scan(&orphan); err != nil {
+			childRun, runtimeidentity.ForkLineageEventID(childRun, replay.SourceEventID), deterministicRunForkReplayEventID(childRun, replay.SourceEventID)).Scan(&orphan); err != nil {
 			return err
 		}
 		if present || orphan {

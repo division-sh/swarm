@@ -19,10 +19,10 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -863,11 +863,11 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, decisionEvent); err != nil {
 					t.Fatal(err)
 				}
-				owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
+				owner, err := runtimeidentity.ParseActivityOwnerKey(continuation.NodeID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				resultEventID := activityidentity.ResultEventID(activityidentity.Fact{
+				resultEventID := runtimeidentity.ActivityResultEventID(runtimeidentity.ActivityFact{
 					RunID: sourceRunID, SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID,
 					Owner: owner, ExecutionFlowID: continuation.FlowID,
 					HandlerEventKey: continuation.HandlerEventKey,
@@ -882,7 +882,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				switch tc.status {
 				case "failed":
 					resultEventType = continuation.FailureEvent
-					storedResultEventID = activityidentity.ResultEventID(activityidentity.Fact{
+					storedResultEventID = runtimeidentity.ActivityResultEventID(runtimeidentity.ActivityFact{
 						RunID: sourceRunID, SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID,
 						Owner: owner, ExecutionFlowID: continuation.FlowID, HandlerEventKey: continuation.HandlerEventKey,
 						ActivityID: continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,
@@ -1037,7 +1037,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					requireOriginalActivityProposalComparisonControls(t, ctx, cards, request, card.CardID, continuation.BundleHash, targetBundle.SourceArtifact.BundleHash())
 				}
 				if tc.wantCopied {
-					lateFact := activityidentity.Fact{RunID: sourceRunID, SourceEventID: request.ID(),
+					lateFact := runtimeidentity.ActivityFact{RunID: sourceRunID, SourceEventID: request.ID(),
 						EntityID: continuation.EntityID, Owner: owner, ExecutionFlowID: continuation.FlowID,
 						HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID, Tool: continuation.Tool, Attempt: 1}
 					latePayload := make(map[string]any, len(requestPayload))
@@ -1049,7 +1049,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					if err != nil {
 						t.Fatal(err)
 					}
-					late := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(lateFact), runForkActivityRequestEvent,
+					late := eventtest.ChildForProducerWithRoutingSource(runtimeidentity.ActivityRequestEventID(lateFact), runForkActivityRequestEvent,
 						request.Producer(), "", lateRaw, 1, events.EventLineage{RunID: sourceRunID, ParentEventID: request.ID(), ExecutionMode: continuation.ExecutionMode},
 						events.EventEnvelope{}, anchor.Source, now.Add(4*time.Minute))
 					if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, late); err != nil {
@@ -1101,11 +1101,11 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if prepared.RoutingSource != eventtest.RootRoutingSource(forkRunID) || forkPayload.EntityID != forkRunID || forkPayload.SourceRunID != forkRunID {
 					t.Fatalf("approved effect lost root identity or confirmation policy: source=%#v payload=%#v", prepared.RoutingSource, forkPayload)
 				}
-				forkOwner, err := activityidentity.ParseOwnerKey(forkPayload.NodeID)
+				forkOwner, err := runtimeidentity.ParseActivityOwnerKey(forkPayload.NodeID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				forkRequestID := activityidentity.RequestEventID(activityidentity.Fact{
+				forkRequestID := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 					RunID: forkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
 					EntityID: forkPayload.EntityID, Owner: forkOwner, ExecutionFlowID: forkPayload.FlowID,
 					HandlerEventKey: forkPayload.HandlerEventKey, ActivityID: forkPayload.ActivityID, Tool: forkPayload.Tool, Attempt: 1,

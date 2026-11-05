@@ -10,8 +10,8 @@ import (
 	"time"
 
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -191,7 +191,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != original.ForkRunID || ack.BindingID != original.BindingID || !reflect.DeepEqual(ack.Request, original.Request) || (!beforeACK && !reflect.DeepEqual(ack, original)) {
 					t.Fatalf("recovery did not preserve its exact operation and permanent ACK: %+v err=%v", ack, err)
 				}
-				inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, ack.Result.ForkEventID)
+				inputID := runtimeidentity.ForkLineageEventID(checkpoint.ForkRun, ack.Result.ForkEventID)
 				childOwner, err := flowidentity.NewRunScopedFlowInstance(checkpoint.ForkRun, flowidentity.Route{ScopeKey: ".", InstanceID: checkpoint.ForkRun, InstancePath: checkpoint.ForkRun})
 				if err != nil {
 					t.Fatal(err)

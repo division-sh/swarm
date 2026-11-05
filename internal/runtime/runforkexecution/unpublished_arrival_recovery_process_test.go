@@ -11,7 +11,7 @@ import (
 	"time"
 
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -65,7 +65,7 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	}
 	pending := plan.TransferredJoins[0]
 	if pending.Publication.CommittedCause.RunID != ancestor || pending.Publication.CommittedCause.EventID != original.CurrentEventID ||
-		pending.Publication.EventID != activityidentity.ForkLineageEventID(parentRun, original.CurrentEventID) {
+		pending.Publication.EventID != runtimeidentity.ForkLineageEventID(parentRun, original.CurrentEventID) {
 		t.Fatal("pending parent lost its exact committed cause")
 	}
 	if _, exists, err := owner.ports.busDurable.PreparedEvents.LoadPreparedPublishEvent(ctx, pending.Publication.EventID); err != nil || exists {
@@ -142,7 +142,7 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 					t.Fatalf("crash lost its immediate-source pending obligation: %+v error=%v", parent, err)
 				}
 				pending := parent.TransferredJoins[0]
-				id := activityidentity.ForkLineageEventID(crashed.ForkRun, pending.Publication.EventID)
+				id := runtimeidentity.ForkLineageEventID(crashed.ForkRun, pending.Publication.EventID)
 				binding, err := lifecycle.RequireRunForkSelectedContractBinding(t.Context(), crashed.ForkRun)
 				if err != nil || binding.SourceRunID != crashed.SourceRun || binding.ForkPoint.Kind != runfork.RunForkPointRunStart {
 					t.Fatalf("crash flattened the immediate-source boundary: %+v error=%v", binding, err)

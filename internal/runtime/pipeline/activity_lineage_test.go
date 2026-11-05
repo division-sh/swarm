@@ -10,9 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -65,8 +64,10 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 		{"source_run", func(i *runtimeengine.ActivityIntent) { i.SourceRunID = uuid.NewString() }},
 		{"causal_parent", func(i *runtimeengine.ActivityIntent) { i.SourceEventID = uuid.NewString() }},
 		{"grandparent", func(i *runtimeengine.ActivityIntent) { i.ParentEventID = uuid.NewString() }},
-		{"entity", func(i *runtimeengine.ActivityIntent) { i.EntityID = identity.NormalizeEntityID(uuid.NewString()) }},
-		{"flow", func(i *runtimeengine.ActivityIntent) { i.ExecutionFlowID = identity.NormalizeFlowID("foreign") }},
+		{"entity", func(i *runtimeengine.ActivityIntent) {
+			i.EntityID = runtimeidentity.NormalizeEntityID(uuid.NewString())
+		}},
+		{"flow", func(i *runtimeengine.ActivityIntent) { i.ExecutionFlowID = runtimeidentity.NormalizeFlowID("foreign") }},
 		{"instance", func(i *runtimeengine.ActivityIntent) { i.FlowInstance = "research/foreign" }},
 		{"handler", func(i *runtimeengine.ActivityIntent) { i.HandlerEventKey = "unrelated.event" }},
 		{"activity", func(i *runtimeengine.ActivityIntent) { i.ActivityID = "foreign" }},
@@ -129,8 +130,8 @@ func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *test
 		t.Fatal(err)
 	}
 	intent := runtimeengine.ActivityIntent{
-		RoutingSource: eventtest.StaticFlowRoutingSource(".", runID, runID), EntityID: identity.NormalizeEntityID(runID), FlowInstance: runID,
-		Owner: activityidentity.MustNodeOwner(node), ExecutionFlowID: identity.NormalizeFlowID("."),
+		RoutingSource: eventtest.StaticFlowRoutingSource(".", runID, runID), EntityID: runtimeidentity.NormalizeEntityID(runID), FlowInstance: runID,
+		Owner: runtimeidentity.MustNodeActivityOwner(node), ExecutionFlowID: runtimeidentity.NormalizeFlowID("."),
 		ActivityID: result.ActivityID, Tool: "source_scrape", Input: mustActivityInput(map[string]any{}),
 
 		SuccessEvent: result.SuccessEvent, FailureEvent: result.FailureEvent, RevisionEvent: result.RevisionRequested, RejectedEvent: result.Rejected,
@@ -145,11 +146,11 @@ func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *test
 			copy, execution := intent, delivery
 			switch cell {
 			case "foreign_flow":
-				copy.ExecutionFlowID = identity.NormalizeFlowID("foreign")
+				copy.ExecutionFlowID = runtimeidentity.NormalizeFlowID("foreign")
 			case "foreign_instance":
 				copy.FlowInstance = uuid.NewString()
 			case "foreign_entity":
-				copy.EntityID = identity.NormalizeEntityID(uuid.NewString())
+				copy.EntityID = runtimeidentity.NormalizeEntityID(uuid.NewString())
 			case "static_producer":
 				copy.RoutingSource = eventtest.StaticFlowRoutingSource("foreign", "foreign", runID)
 			case "nonterminal_parent":

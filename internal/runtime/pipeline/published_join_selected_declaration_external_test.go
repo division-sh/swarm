@@ -11,10 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -91,7 +90,7 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 	}
 	ancestor, sourceEvent := uuid.NewString(), uuid.NewString()
 	occurrence := genericschedule.TransferredJoinOccurrence{Command: command, Publication: joinruntime.TransferredPublication{
-		EventID: activityidentity.ForkLineageEventID(run, sourceEvent), SourceRunID: ancestor, SourceEventID: sourceEvent,
+		EventID: runtimeidentity.ForkLineageEventID(run, sourceEvent), SourceRunID: ancestor, SourceEventID: sourceEvent,
 		AuthorityStamp: runfork.RunForkSelectedContractExecutionOwner, ExecutionMode: executionmode.Live,
 		CommittedCause: joinruntime.CommittedPublicationCause{RunID: ancestor, EventID: sourceEvent},
 	}}
@@ -145,7 +144,7 @@ func TestPublishedBarrierSelectedDeclarationDoesNotRelaxLiveAdmission(t *testing
 			bad := target.WorkflowJoins()[0].Clone()
 			switch fault {
 			case "node":
-				bad.Node, err = identity.AdmitExecutableNodeDeclaration("other", "producer")
+				bad.Node, err = runtimeidentity.AdmitExecutableNodeDeclaration("other", "producer")
 			case "handler":
 				bad.HandlerEvent = "other.requested"
 			case "mode":

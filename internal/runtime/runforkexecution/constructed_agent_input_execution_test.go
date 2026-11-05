@@ -19,10 +19,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -485,7 +485,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
-		forkEventID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, eventID)
+		forkEventID := runtimeidentity.ForkLineageEventID(result.Materialization.ForkRunID, eventID)
 		forkEvent := storetest.LoadCanonicalEventRecord(t, wait, selected, forkEventID)
 		lineage, retained := forkEvent.SelectedForkLineage()
 		if !retained || lineage.SourceRunID() != runID || lineage.SourceEventID() != eventID || forkEvent.RunID() != result.Materialization.ForkRunID {

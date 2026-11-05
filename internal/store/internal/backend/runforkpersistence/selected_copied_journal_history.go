@@ -9,8 +9,8 @@ import (
 	"reflect"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -118,7 +118,7 @@ func (admission runForkSourceStateAdmission) readClosedSelectedCopiedJournalTx(c
 	if err != nil {
 		return absent, err
 	}
-	if record.RequestEventID != activityidentity.RequestEventID(fact) || !record.ExecutionBinding.IsZero() {
+	if record.RequestEventID != runtimeidentity.ActivityRequestEventID(fact) || !record.ExecutionBinding.IsZero() {
 		return absent, errors.New("copied journal has no exact NULL-bound child request identity")
 	}
 	if err := admission.confirmCopiedJournalInputTx(ctx, tx, permanent, physical, parent, reference, projected); err != nil {
@@ -182,7 +182,7 @@ func validateCopiedActivityDeclaration(original semanticview.OriginalLoopCarriag
 	if err := original.RequireSource(origin.Cuts[0].Source.BundleHash()); err != nil {
 		return err
 	}
-	owner, err := activityidentity.ParseOwnerKey(request.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(request.NodeID)
 	if err != nil {
 		return err
 	}

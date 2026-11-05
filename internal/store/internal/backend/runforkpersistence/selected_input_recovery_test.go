@@ -10,7 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -46,7 +46,7 @@ func newSelectedInputReadFixture(t *testing.T) selectedInputReadFixture {
 	}
 	lineage := runfork.RunForkSelectedContractExecutionLineage{
 		ForkRunID: f.evidence.binding.ForkRunID, SourceRunID: f.evidence.binding.SourceRunID, SourceEventID: source.SourceEventID,
-		ForkEventID: activityidentity.ForkLineageEventID(f.evidence.binding.ForkRunID, source.SourceEventID), EventName: source.EventName,
+		ForkEventID: runtimeidentity.ForkLineageEventID(f.evidence.binding.ForkRunID, source.SourceEventID), EventName: source.EventName,
 		SelectionAuthority: "original-publication-owner", CreatedAt: time.Unix(100, 0).UTC(),
 	}
 	selected, err := events.NewSelectedForkLineage(lineage.ForkRunID, lineage.SourceRunID, lineage.SourceEventID, lineage.SelectionAuthority, "", source.ExecutionMode)
@@ -123,7 +123,7 @@ func expectSelectedInputLineage(mock sqlmock.Sqlmock, f selectedInputReadFixture
 	}
 	mock.ExpectQuery(`FROM run_fork_selected_contract_executions WHERE`).
 		WithArgs(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID,
-			activityidentity.ForkLineageEventID(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID)).WillReturnRows(rows)
+			runtimeidentity.ForkLineageEventID(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID)).WillReturnRows(rows)
 }
 
 func TestSelectedForkInputReadRequiresCanonicalRequest(t *testing.T) {
@@ -201,7 +201,7 @@ func TestSelectedForkInputPublishedStrictBothDialects(t *testing.T) {
 				tx, mock := startSnapshotTransaction(t)
 				expectSelectedInputLineage(mock, f, test.lineages)
 				if test.lineages < 2 {
-					mock.ExpectQuery(`FROM events e`).WithArgs(activityidentity.ForkLineageEventID(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID)).
+					mock.ExpectQuery(`FROM events e`).WithArgs(runtimeidentity.ForkLineageEventID(f.attachment.evidence.binding.ForkRunID, f.source.SourceEventID)).
 						WillReturnRows(selectedInputRecordRows(f.record, sqlite, test.eventFound))
 				}
 				if test.name == "exact_old_publication" {

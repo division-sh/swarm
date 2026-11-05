@@ -18,10 +18,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -801,16 +800,16 @@ func activityRequestEmitIntentWithParent(intent runtimeengine.ActivityIntent, pa
 
 func activityRequestEventID(intent runtimeengine.ActivityIntent) string {
 	intent = intent.Normalized()
-	return activityidentity.RequestEventID(activityIdentityFact(intent))
+	return runtimeidentity.ActivityRequestEventID(activityIdentityFact(intent))
 }
 
 func activityResultEventID(intent runtimeengine.ActivityIntent, eventType string) string {
 	intent = intent.Normalized()
-	return activityidentity.ResultEventID(activityIdentityFact(intent), eventType)
+	return runtimeidentity.ActivityResultEventID(activityIdentityFact(intent), eventType)
 }
 
-func activityIdentityFact(intent runtimeengine.ActivityIntent) activityidentity.Fact {
-	return activityidentity.Fact{
+func activityIdentityFact(intent runtimeengine.ActivityIntent) runtimeidentity.ActivityFact {
+	return runtimeidentity.ActivityFact{
 		RunID: intent.SourceRunID, SourceEventID: intent.SourceEventID, ParentEventID: intent.ParentEventID,
 		EntityID: intent.EntityID.String(), Owner: intent.Owner, ExecutionFlowID: intent.ExecutionFlowID.String(),
 		HandlerEventKey: intent.HandlerEventKey, ActivityID: intent.ActivityID, Tool: intent.Tool,
@@ -818,7 +817,7 @@ func activityIdentityFact(intent runtimeengine.ActivityIntent) activityidentity.
 	}
 }
 
-func activityEventProducer(owner activityidentity.Owner) events.ProducerClaim {
+func activityEventProducer(owner runtimeidentity.ActivityOwner) events.ProducerClaim {
 	if node, ok := owner.Node(); ok {
 		return events.ProducerClaim{Type: events.EventProducerNode, ID: node.Key()}
 	}
@@ -896,7 +895,7 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	if payload.PlanGeneration != nil {
 		planGeneration = *payload.PlanGeneration
 	}
-	owner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(payload.NodeID)
 	if err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s owner identity: %w", evt.ID(), err)
 	}
@@ -914,9 +913,9 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		FailureEvent:        payload.FailureEvent,
 		RevisionEvent:       payload.RevisionEvent,
 		RejectedEvent:       payload.RejectedEvent,
-		EntityID:            identity.NormalizeEntityID(payload.EntityID),
+		EntityID:            runtimeidentity.NormalizeEntityID(payload.EntityID),
 		Owner:               owner,
-		ExecutionFlowID:     identity.NormalizeFlowID(payload.FlowID),
+		ExecutionFlowID:     runtimeidentity.NormalizeFlowID(payload.FlowID),
 		FlowInstance:        payload.FlowInstance,
 		HandlerEventKey:     payload.HandlerEventKey,
 		SourceEventID:       payload.SourceEventID,

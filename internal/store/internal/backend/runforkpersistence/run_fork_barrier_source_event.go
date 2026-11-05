@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -59,7 +59,7 @@ func (a runForkSourceStateAdmission) publishedBarrier(ctx context.Context, tx *s
 	if err := requireMaterializedBarrierPublication(event, continuation, child); err != nil {
 		return event, err
 	}
-	projected, err := continuation.Event(activityidentity.ForkLineageEventID(a.forkRunID, event.SourceEventID), runfork.RunForkSelectedContractExecutionOwner)
+	projected, err := continuation.Event(runtimeidentity.ForkLineageEventID(a.forkRunID, event.SourceEventID), runfork.RunForkSelectedContractExecutionOwner)
 	if err != nil {
 		return event, err
 	}

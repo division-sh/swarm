@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorchannel"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -126,7 +126,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 			}
 			item := items[0]
 			raw, rawErr := selected.GetMailboxItem(wait, item.MailboxID)
-			if item.Type != tools.NotifyHumanMailboxItemType || item.SourceEventID != activityidentity.ForkLineageEventID(child, initial) ||
+			if item.Type != tools.NotifyHumanMailboxItemType || item.SourceEventID != runtimeidentity.ForkLineageEventID(child, initial) ||
 				item.SourceRunID != child || item.SourceFlow != "worker" || rawErr != nil || raw.FromAgent == "" || raw.Summary != "own selected notice" || item.Status != "pending" ||
 				!reflect.DeepEqual(item.Payload, map[string]any{"proof": "fresh-child-only"}) {
 				t.Fatalf("fresh notice borrowed source ownership/payload: item=%+v raw=%+v error=%v", item, raw, rawErr)

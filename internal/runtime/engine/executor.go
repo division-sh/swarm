@@ -15,11 +15,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -464,13 +463,13 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		SetExecutionFailure(&result, err, "runtime.engine", "validate_request")
 		return result, err
 	}
-	entityID := identity.NormalizeEntityID(firstNonEmpty(
+	entityID := runtimeidentity.NormalizeEntityID(firstNonEmpty(
 		req.EntityID.String(),
 		req.State.EntityID.String(),
 		req.Event.EntityID(),
 	))
 	if entityID.IsZero() {
-		entityID = identity.NormalizeEntityID(req.Event.EntityID())
+		entityID = runtimeidentity.NormalizeEntityID(req.Event.EntityID())
 	}
 	req.EntityID = entityID
 
@@ -2078,10 +2077,10 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	frame.result.StateMutation.NextState = next
 	frame.transitionApplied = true
 	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted,
-		identity.ActionRecordStateChange.String(),
-		identity.ActionUpdateState.String(),
-		identity.ActionCancelStateTimers.String(),
-		identity.ActionStartStateTimers.String(),
+		runtimeidentity.ActionRecordStateChange.String(),
+		runtimeidentity.ActionUpdateState.String(),
+		runtimeidentity.ActionCancelStateTimers.String(),
+		runtimeidentity.ActionStartStateTimers.String(),
 	)
 	return nil
 }
@@ -2401,13 +2400,13 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		return fmt.Errorf("activity input must be a semantic object")
 	}
 	sourceRoute := emitSourceRoute(frame)
-	intentFlowID := identity.NormalizeFlowID(frame.req.ExecutionFlowID.String())
+	intentFlowID := runtimeidentity.NormalizeFlowID(frame.req.ExecutionFlowID.String())
 	if sourceRoute.FlowID != "" {
-		intentFlowID = identity.NormalizeFlowID(sourceRoute.FlowID)
+		intentFlowID = runtimeidentity.NormalizeFlowID(sourceRoute.FlowID)
 	}
 	intentEntityID := frame.req.EntityID
 	if sourceRoute.EntityID != "" {
-		intentEntityID = identity.NormalizeEntityID(sourceRoute.EntityID)
+		intentEntityID = runtimeidentity.NormalizeEntityID(sourceRoute.EntityID)
 	}
 	intent := ActivityIntent{
 		ActivityID:    resultEvents.ActivityID,
@@ -2421,7 +2420,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		RejectedEvent: resultEvents.Rejected,
 
 		EntityID:        intentEntityID,
-		Owner:           activityidentity.MustNodeOwner(frame.req.Node),
+		Owner:           runtimeidentity.MustNodeActivityOwner(frame.req.Node),
 		ExecutionFlowID: intentFlowID,
 		FlowInstance:    sourceRoute.FlowInstance,
 		HandlerEventKey: frame.req.HandlerEventKey,

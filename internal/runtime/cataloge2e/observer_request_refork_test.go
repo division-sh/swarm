@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -63,7 +63,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 		t.Fatalf("activate observer-only child: activation=%+v error=%v", executed.Activation, err)
 	}
-	inputID := activityidentity.ForkLineageEventID(staged.ForkRunID, cut)
+	inputID := runtimeidentity.ForkLineageEventID(staged.ForkRunID, cut)
 	for {
 		input, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
 		if err != nil || (found && len(input.DeliveryRoutes) != 1) {

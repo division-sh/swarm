@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -165,9 +165,9 @@ func createFactoringMailboxCard(t *testing.T, ctx context.Context, selected fact
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := activityidentity.MustNodeOwner(identitytest.RootNode(t, "sender"))
+	owner := runtimeidentity.MustNodeActivityOwner(identitytest.RootNode(t, "sender"))
 	sourceID := uuid.NewString()
-	request := activityidentity.RequestEventID(activityidentity.Fact{RunID: run, SourceEventID: sourceID, EntityID: entity, Owner: owner, ExecutionFlowID: ".", HandlerEventKey: "reply", ActivityID: "send_reply", Tool: "provider_write", Attempt: 1})
+	request := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{RunID: run, SourceEventID: sourceID, EntityID: entity, Owner: owner, ExecutionFlowID: ".", HandlerEventKey: "reply", ActivityID: "send_reply", Tool: "provider_write", Attempt: 1})
 	continuation := decisioncard.ProposedEffectContinuation{CardID: decisioncard.ProposedEffectCardID(request, label), RunID: run, RequestEventID: request, ActivityID: "send_reply", Tool: "provider_write", BundleHash: fact.BundleHash(), WorkflowVersion: "1", Input: input, SuccessEvent: "send_reply.succeeded", FailureEvent: "send_reply.failed", RevisionEvent: "send_reply.revision_requested", RejectedEvent: "send_reply.rejected", EntityID: entity, NodeID: owner.Key(), FlowID: ".", FlowInstance: run, HandlerEventKey: "reply", SourceEventID: sourceID, SourceRunID: run, SourceTaskID: "task", ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now}.Canonical()
 	effect, err := continuation.EffectValue()
 	if err != nil {

@@ -17,8 +17,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -283,8 +283,8 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	now := time.Date(2026, 7, 14, 23, 0, 0, 0, time.UTC)
 	sourceEventID := uuid.NewString()
 	activityNode := identitytest.RootNode(t, "support-agent")
-	activityOwner := activityidentity.MustNodeOwner(activityNode)
-	requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
+	activityOwner := runtimeidentity.MustNodeActivityOwner(activityNode)
+	requestEventID := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 		RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
 		Owner: activityOwner, ExecutionFlowID: ".", HandlerEventKey: "thing.created",
 		ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,

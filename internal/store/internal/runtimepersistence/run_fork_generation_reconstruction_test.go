@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
 
@@ -32,16 +32,16 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 				if err != nil || payload.Generation != want || want.Attempt != 2 {
 					t.Fatalf("loop attempt confused with activity attempt: payload=%#v want=%#v err=%v", payload, want, err)
 				}
-				node, err := activityidentity.ParseOwnerKey(payload.NodeID)
+				node, err := runtimeidentity.ParseActivityOwnerKey(payload.NodeID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				fact := activityidentity.Fact{RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
+				fact := runtimeidentity.ActivityFact{RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
 					EntityID: payload.EntityID, Owner: node, ExecutionFlowID: payload.FlowID, HandlerEventKey: payload.HandlerEventKey,
 					ActivityID: payload.ActivityID, Tool: payload.Tool, Attempt: 1, RevisionID: want.RevisionID}
-				requestID := activityidentity.RequestEventID(fact)
+				requestID := runtimeidentity.ActivityRequestEventID(fact)
 				copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, requestID)
-				if err != nil || !found || copied.Attempt != 1 || copied.Generation != want || copied.Status != status || copied.ResultPayload[want.RevisionField] != want.RevisionID || copied.ResultEventID != activityidentity.ResultEventID(fact, copied.ResultEventType) {
+				if err != nil || !found || copied.Attempt != 1 || copied.Generation != want || copied.Status != status || copied.ResultPayload[want.RevisionField] != want.RevisionID || copied.ResultEventID != runtimeidentity.ActivityResultEventID(fact, copied.ResultEventType) {
 					t.Fatalf("initial exact generation result: %#v found=%v err=%v", copied, found, err)
 				}
 				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")

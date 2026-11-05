@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -342,7 +342,7 @@ func runSelectedHandlerFanOutRecovery(t *testing.T, claimed, live bool) {
 					t.Fatalf("successor never acquired its actual live claim: %v", wait.Err())
 				}
 			}
-			inputID := activityidentity.ForkLineageEventID(checkpoint.ForkRun, original.Request.ForkEventID)
+			inputID := runtimeidentity.ForkLineageEventID(checkpoint.ForkRun, original.Request.ForkEventID)
 			for {
 				select {
 				case result := <-done:

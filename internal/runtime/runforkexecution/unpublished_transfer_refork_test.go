@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -96,7 +96,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			}
 			pending := parent.TransferredJoins[0]
 			if pending.Publication.SourceRunID != ancestor || pending.Publication.SourceEventID != cause.CurrentEventID ||
-				pending.Publication.EventID != activityidentity.ForkLineageEventID(parentRun, cause.CurrentEventID) {
+				pending.Publication.EventID != runtimeidentity.ForkLineageEventID(parentRun, cause.CurrentEventID) {
 				t.Fatal("immediate parent's pending correspondence lost the committed cause")
 			}
 			if _, exists := parent.HistoricalJoinPublication(pending.Publication.EventID); exists {
@@ -147,7 +147,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			if err != nil || binding.SourceRunID != parentRun || binding.ForkPoint.Kind != runfork.RunForkPointRunStart {
 				t.Fatalf("unpublished continuation flattened the parent boundary: %+v error=%v", binding, err)
 			}
-			id := activityidentity.ForkLineageEventID(child, pending.Publication.EventID)
+			id := runtimeidentity.ForkLineageEventID(child, pending.Publication.EventID)
 			waitUnpublishedReforkRunCompletion(t, ctx, selected, owner, child)
 			event := storetest.LoadCanonicalEventRecord(t, ctx, selected, id)
 			lineage, exists := event.SelectedForkLineage()

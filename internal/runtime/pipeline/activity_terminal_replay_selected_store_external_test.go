@@ -17,10 +17,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -576,8 +575,8 @@ func seedSelectedActivitySource(t *testing.T, ctx context.Context, selected gate
 		receipt.WorkflowVersion != source.WorkflowVersion() || receipt.CreatingInput != plan.CreatingInput {
 		t.Fatalf("activity construction receipt: evidence=%+v err=%v", receipt, err)
 	}
-	intent.EntityID = identity.NormalizeEntityID(child.EntityID)
-	actor := activityidentity.MustNodeOwner(externalPipelineSourceNode(t, source, child.TemplateID, "scanner"))
+	intent.EntityID = runtimeidentity.NormalizeEntityID(child.EntityID)
+	actor := runtimeidentity.MustNodeActivityOwner(externalPipelineSourceNode(t, source, child.TemplateID, "scanner"))
 	if actor.Key() != intent.Owner.Key() {
 		t.Fatal("compiled activity owner changed its original node identity")
 	}

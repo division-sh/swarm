@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 )
@@ -45,11 +45,11 @@ func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
 						if err := json.Unmarshal(loaded[0].Payload, &request); err != nil {
 							t.Fatal(err)
 						}
-						fact, err := activityidentity.ParseOwnerKey(request.NodeID)
+						fact, err := runtimeidentity.ParseActivityOwnerKey(request.NodeID)
 						if err != nil {
 							t.Fatal(err)
 						}
-						requestID := activityidentity.RequestEventID(activityidentity.Fact{
+						requestID := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 							RunID: child.ForkRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
 							EntityID: request.EntityID, Owner: fact, ExecutionFlowID: request.FlowID, HandlerEventKey: request.HandlerEventKey,
 							ActivityID: request.ActivityID, Tool: request.Tool, Attempt: 1,

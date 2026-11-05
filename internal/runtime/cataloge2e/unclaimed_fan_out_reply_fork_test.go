@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -120,7 +120,7 @@ func TestIssue642InheritedRequestPublicationReusesBothOpenRowsBothStores(t *test
 
 func waitUnclaimedReplyRequestDelivery(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, child, cut, replyID string) bus.PreparedPublishEvent {
 	t.Helper()
-	inputID := activityidentity.ForkLineageEventID(child, cut)
+	inputID := runtimeidentity.ForkLineageEventID(child, cut)
 	for {
 		input, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
 		if err != nil {
@@ -223,7 +223,7 @@ func requireUnclaimedFanOutReplyStaging(t *testing.T, ctx context.Context, selec
 	if !found || outer.ProviderFlowID != inner.RequesterFlowID || outer.EnclosingReplyContextID != "" {
 		t.Fatalf("inner cut lost its exact child enclosing return: inner=%+v outer=%+v", inner, outer)
 	}
-	for _, id := range []string{inner.RequestEventID, activityidentity.ForkLineageEventID(child, cut)} {
+	for _, id := range []string{inner.RequestEventID, runtimeidentity.ForkLineageEventID(child, cut)} {
 		if _, found, err := selected.LoadPreparedPublishEvent(ctx, id); err != nil || found {
 			t.Fatalf("reply staging fabricated an executable request publication %s: found=%t error=%v", id, found, err)
 		}
@@ -233,7 +233,7 @@ func requireUnclaimedFanOutReplyStaging(t *testing.T, ctx context.Context, selec
 
 func requireUnclaimedFanOutReplyReturn(t *testing.T, ctx context.Context, selected unclaimedFanOutReplyStore, child, cut string, inner replycontext.Record, childRows, sourceRows []replycontext.Record) {
 	t.Helper()
-	inputID := activityidentity.ForkLineageEventID(child, cut)
+	inputID := runtimeidentity.ForkLineageEventID(child, cut)
 	input, found, err := selected.LoadPreparedPublishEvent(ctx, inputID)
 	if err != nil || !found || len(input.DeliveryRoutes) != 1 || input.DeliveryRoutes[0].Context.ReplyContextID() != inner.ID {
 		t.Fatalf("independently owed child input was not published exactly once: routes=%+v found=%t error=%v", input.DeliveryRoutes, found, err)
@@ -282,7 +282,7 @@ func logUnclaimedFanOutReplyFailure(t *testing.T, ctx context.Context, selected 
 	t.Logf("unclaimed-inner child reply rows: %+v error=%v", rows, rowsErr)
 	for _, row := range rows {
 		if row.ProviderFlowID == "t" {
-			inputID = activityidentity.ForkLineageEventID(child, row.SourceRequestEventID)
+			inputID = runtimeidentity.ForkLineageEventID(child, row.SourceRequestEventID)
 		}
 	}
 	intents, intentsErr := selected.ListFanOutIntents(read, fanoutobligation.ListQuery{RunID: child, Limit: 10})

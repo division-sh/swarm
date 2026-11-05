@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -18,7 +18,7 @@ func (a runForkSourceStateAdmission) requireOriginalActivityApproval(ctx context
 	if err := json.Unmarshal(origin.Request.Payload(), &request); err != nil {
 		return false, err
 	}
-	owner, err := activityidentity.ParseOwnerKey(request.NodeID)
+	owner, err := runtimeidentity.ParseActivityOwnerKey(request.NodeID)
 	if err != nil {
 		return false, err
 	}

@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -38,7 +38,7 @@ func TestPublishedBarrierContinuationPreservesOriginalOccurrenceWithoutRearming(
 			if err != nil {
 				t.Fatalf("exact published barrier could not continue: %v", err)
 			}
-			event, err := continued.Event(activityidentity.ForkLineageEventID(child.RunID, original.Event().ID()), "selected-barrier-continuation")
+			event, err := continued.Event(runtimeidentity.ForkLineageEventID(child.RunID, original.Event().ID()), "selected-barrier-continuation")
 			if err != nil {
 				t.Fatal(err)
 			}

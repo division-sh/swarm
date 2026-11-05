@@ -8,8 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -272,7 +272,7 @@ func requireSelectedActivityResultPublishedTx(ctx context.Context, tx *sql.Tx, b
 	if postgres {
 		adapter = postgresDeliveryAdapter
 	}
-	childID := activityidentity.ForkLineageEventID(binding.ForkRunID, sourceID)
+	childID := runtimeidentity.ForkLineageEventID(binding.ForkRunID, sourceID)
 	deliveries, err := adapter.SnapshotsForEvent(ctx, tx, childID)
 	if err != nil {
 		return err

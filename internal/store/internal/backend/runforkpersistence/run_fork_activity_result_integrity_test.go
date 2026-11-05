@@ -8,7 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -79,7 +79,7 @@ func TestPhysicalActivityResultImmediateSourceIntegrityBothStores(t *testing.T) 
 						var exact events.Event
 						for _, fault := range []string{"exact", "business", "activity", "revision", "routing", "crossed_run", "crossed_event", "missing_lineage"} {
 							t.Run(fault, func(t *testing.T) {
-								id := activityidentity.ForkLineageEventID(binding.ForkRunID, parent.ID())
+								id := runtimeidentity.ForkLineageEventID(binding.ForkRunID, parent.ID())
 								stamp, at := "selected-owner", time.Now().UTC().Truncate(time.Microsecond)
 								if fault != "missing_lineage" {
 									if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_executions (fork_run_id,source_run_id,source_event_id,fork_event_id,event_name,selection_authority,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`, binding.ForkRunID, parent.RunID(), parent.ID(), id, string(parent.Type()), stamp, at); err != nil {

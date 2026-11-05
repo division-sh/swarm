@@ -12,8 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -107,7 +107,7 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 		return err
 	}
 	if p.hostileLoop {
-		requestOwner, err := activityidentity.ParseOwnerKey(request.Payload["node_id"].(string))
+		requestOwner, err := runtimeidentity.ParseActivityOwnerKey(request.Payload["node_id"].(string))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -348,7 +348,7 @@ func (p *activityLineageProofStore) remintRequest(ctx context.Context, request o
 	t := p.t
 	t.Helper()
 	str := func(key string) string { value, _ := payload[key].(string); return value }
-	owner, err := activityidentity.ParseOwnerKey(str("node_id"))
+	owner, err := runtimeidentity.ParseActivityOwnerKey(str("node_id"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func (p *activityLineageProofStore) remintRequest(ctx context.Context, request o
 	if err := json.Unmarshal(encoded, &identityFacts); err != nil {
 		t.Fatal(err)
 	}
-	id := activityidentity.RequestEventID(activityidentity.Fact{
+	id := runtimeidentity.ActivityRequestEventID(runtimeidentity.ActivityFact{
 		RunID: str("source_run_id"), SourceEventID: str("source_event_id"), ParentEventID: str("parent_event_id"),
 		EntityID: str("entity_id"), ExecutionFlowID: str("flow_id"), Owner: owner, HandlerEventKey: str("handler_event_key"),
 		ActivityID: str("activity_id"), Tool: str("tool"), Attempt: identityFacts.Attempt, RevisionID: identityFacts.Generation.RevisionID,

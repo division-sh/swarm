@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
-func continuedActivityIdentityFixture(t *testing.T) (selectedInputReadFixture, runfork.RunForkSelectedContractSourceEvent, activityidentity.Fact) {
+func continuedActivityIdentityFixture(t *testing.T) (selectedInputReadFixture, runfork.RunForkSelectedContractSourceEvent, runtimeidentity.ActivityFact) {
 	t.Helper()
 	f := newSelectedInputReadFixture(t)
 	f.record.EventName, f.lineage.EventName = runForkActivityRequestEvent, runForkActivityRequestEvent
 	request := runForkActivityRequestPayload{SourceRunID: f.record.RunID, SourceEventID: f.record.EventID, EntityID: f.record.RunID,
-		FlowID: ".", NodeID: activityidentity.MustAgentOwner("provider").Key(), HandlerEventKey: "request.started", ActivityID: "compute", Tool: "compute",
+		FlowID: ".", NodeID: runtimeidentity.MustAgentActivityOwner("provider").Key(), HandlerEventKey: "request.started", ActivityID: "compute", Tool: "compute",
 		SuccessEvent: "compute.succeeded", FailureEvent: "compute.failed"}
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -39,7 +39,7 @@ func continuedActivityIdentityFixture(t *testing.T) (selectedInputReadFixture, r
 	source := runfork.RunForkSelectedContractSourceEvent{SourceEventID: original.ID(), EventName: string(original.Type()),
 		ExecutionMode: original.ExecutionMode(), RoutingSource: original.RoutingSource(), Payload: original.Payload()}
 	fact, err := runForkActivityFact(request)
-	if err != nil || activityidentity.RequestEventID(fact) == original.ID() {
+	if err != nil || runtimeidentity.ActivityRequestEventID(fact) == original.ID() {
 		t.Fatalf("fixture does not separate physical publication from journal identity: %+v %v", fact, err)
 	}
 	return f, source, fact
@@ -75,7 +75,7 @@ func TestContinuedActivityIdentityRequiresExactCommittedPublication(t *testing.T
 				request, continued, err := admitRunForkActivitySourceIdentity(context.Background(), tx,
 					runForkSourceStateAdmission{postgres: !sqlite, snapshot: &runForkRevisionSnapshot{RunID: f.record.RunID}}, source, fact)
 				if test.name == "exact" {
-					if err != nil || !continued || request != activityidentity.RequestEventID(fact) {
+					if err != nil || !continued || request != runtimeidentity.ActivityRequestEventID(fact) {
 						t.Fatalf("exact evidence did not return only the journal identity: request=%s continued=%t error=%v", request, continued, err)
 					}
 				} else if err == nil || continued || request != "" {
@@ -90,7 +90,7 @@ func TestOrdinaryActivityIdentityStillRequiresExactRequest(t *testing.T) {
 	f, source, fact := continuedActivityIdentityFixture(t)
 	tx, _ := startSnapshotTransaction(t)
 	admission := runForkSourceStateAdmission{snapshot: &runForkRevisionSnapshot{RunID: f.record.RunID}}
-	source.SourceEventID = activityidentity.RequestEventID(fact)
+	source.SourceEventID = runtimeidentity.ActivityRequestEventID(fact)
 	request, continued, err := admitRunForkActivitySourceIdentity(context.Background(), tx, admission, source, fact)
 	if err != nil || continued || request != source.SourceEventID {
 		t.Fatalf("ordinary identity changed: request=%s continued=%t error=%v", request, continued, err)

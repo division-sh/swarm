@@ -9,11 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -83,7 +82,7 @@ func (c StateCarrier) StateBucketsBucket() values.Bucket {
 	return values.Wrap(stateBucketSetAsRaw(c.StateBuckets))
 }
 
-func (c StateCarrier) EntityContext(entityID identity.EntityID, currentState, workflowName, workflowVersion string) map[string]any {
+func (c StateCarrier) EntityContext(entityID runtimeidentity.EntityID, currentState, workflowName, workflowVersion string) map[string]any {
 	out := cloneStringAnyMap(c.Fields)
 	if out == nil {
 		out = map[string]any{}
@@ -145,7 +144,7 @@ func (c StateCarrier) StateBucket(name string) (values.Bucket, bool) {
 }
 
 type StateSnapshot struct {
-	EntityID        identity.EntityID
+	EntityID        runtimeidentity.EntityID
 	Revision        int64
 	WorkflowName    string
 	WorkflowVersion string
@@ -202,11 +201,11 @@ func (s StateSnapshot) StateBucket(name string) (values.Bucket, bool) {
 
 type ExecutionRequest struct {
 	ExecutionID string
-	EntityID    identity.EntityID
-	Node        identity.ExecutableNode
+	EntityID    runtimeidentity.EntityID
+	Node        runtimeidentity.ExecutableNode
 	// ExecutionFlowID is the runtime flow scope selected for this exact node.
 	// Node.FlowPath() remains the filesystem declaration identity, including "." for root.
-	ExecutionFlowID identity.FlowID
+	ExecutionFlowID runtimeidentity.FlowID
 	// Route is the exact workflow-instance persistence identity selected by
 	// the runtime boundary. ProducerSource remains event-source authority.
 	Route runtimeflowidentity.Route
@@ -237,12 +236,12 @@ type ExecutionRequest struct {
 
 func (r ExecutionRequest) StateAddress() StateAddress {
 	return StateAddress{
-		FlowID: identity.NormalizeFlowID(r.ExecutionFlowID.String()),
+		FlowID: runtimeidentity.NormalizeFlowID(r.ExecutionFlowID.String()),
 		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{
 			RunID: strings.TrimSpace(r.Event.RunID()),
 			Route: r.Route,
 		}.Normalize(),
-		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
+		EntityID: runtimeidentity.NormalizeEntityID(r.EntityID.String()),
 	}
 }
 
@@ -342,9 +341,9 @@ type ActivityIntent struct {
 	FailureEvent                string
 	RevisionEvent               string
 	RejectedEvent               string
-	EntityID                    identity.EntityID
-	Owner                       activityidentity.Owner
-	ExecutionFlowID             identity.FlowID
+	EntityID                    runtimeidentity.EntityID
+	Owner                       runtimeidentity.ActivityOwner
+	ExecutionFlowID             runtimeidentity.FlowID
 	FlowInstance                string
 	HandlerEventKey             string
 	SourceEventID               string

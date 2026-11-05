@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -228,7 +228,7 @@ func requireSelectedFanOutRecipientPartition(snapshot *runForkRevisionSnapshot, 
 	event := publication.Event()
 	lineage, ok := event.SelectedForkLineage()
 	if snapshot == nil || !ok || lineage.SourceRunID() != snapshot.RunID || lineage.DestinationRunID() != event.RunID() || lineage.SourceEventID() != replay.SourceEventID ||
-		event.ID() != activityidentity.ForkLineageEventID(event.RunID(), replay.SourceEventID) || len(routes) != len(replay.SourceDeliveryIDs) {
+		event.ID() != runtimeidentity.ForkLineageEventID(event.RunID(), replay.SourceEventID) || len(routes) != len(replay.SourceDeliveryIDs) {
 		return fmt.Errorf("continued fan-out publication lacks its exact source/child recipient partition")
 	}
 	cut, err := newRunForkReplayCut(snapshot)

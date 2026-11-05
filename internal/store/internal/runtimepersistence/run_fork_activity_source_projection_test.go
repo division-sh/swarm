@@ -21,8 +21,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -383,7 +383,7 @@ func TestSelectedContractActivitySourceProjectionBothStores(t *testing.T) {
 					}
 					for field, want := range map[string]string{
 						"flow_instance": wantFlow, "entity_id": wantRoute.EntityID, "source_run_id": child.ForkRunID,
-						"source_event_id": activityidentity.ForkLineageEventID(child.ForkRunID, original.ID()),
+						"source_event_id": runtimeidentity.ForkLineageEventID(child.ForkRunID, original.ID()),
 					} {
 						var actual string
 						if err := json.Unmarshal(payload[field], &actual); err != nil || actual != want {
@@ -487,10 +487,10 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	if wrongFlow {
 		activityFlow = "unrelated/receiver"
 	}
-	fact := activityidentity.Fact{RunID: runID, SourceEventID: parentID, EntityID: entityID,
-		Owner: activityidentity.MustNodeOwner(node), ExecutionFlowID: flowID, HandlerEventKey: "review.inspect",
+	fact := runtimeidentity.ActivityFact{RunID: runID, SourceEventID: parentID, EntityID: entityID,
+		Owner: runtimeidentity.MustNodeActivityOwner(node), ExecutionFlowID: flowID, HandlerEventKey: "review.inspect",
 		ActivityID: "inspect", Tool: "provider.read", Attempt: 1}
-	eventID := activityidentity.RequestEventID(fact)
+	eventID := runtimeidentity.ActivityRequestEventID(fact)
 	results, err := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{Node: node, HandlerEventKey: "review.inspect", Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1, Spec: runtimecontracts.ActivitySpec{ID: "inspect", Tool: "provider.read"}})
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +532,7 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 		t.Fatalf("start original activity projection journal: inserted=%t err=%v", inserted, err)
 	}
 	record.Status, record.ResultEventType = pipeline.ActivityAttemptStatusSucceeded, results.SuccessEvent
-	record.ResultEventID = activityidentity.ResultEventID(fact, record.ResultEventType)
+	record.ResultEventID = runtimeidentity.ActivityResultEventID(fact, record.ResultEventType)
 	record.ResultPayload = map[string]any{"activity_id": fact.ActivityID, "tool": fact.Tool, "result": map[string]any{"value": "recorded-result"}}
 	if _, acknowledged, err := journal.CompleteActivityAttempt(ctx, record); err != nil || !acknowledged {
 		t.Fatalf("settle original activity projection journal: acknowledged=%t err=%v", acknowledged, err)

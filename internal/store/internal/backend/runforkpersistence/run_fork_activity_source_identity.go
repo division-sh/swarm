@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -17,11 +17,11 @@ import (
 // A selected publication and its journal have distinct identities. Historical
 // publication evidence identifies the former; the activity owner identifies the
 // latter. Neither grants this new fork permission to execute.
-func admitRunForkActivitySourceIdentity(ctx context.Context, tx *sql.Tx, admission runForkSourceStateAdmission, source runfork.RunForkSelectedContractSourceEvent, fact activityidentity.Fact) (requestID string, continued bool, err error) {
+func admitRunForkActivitySourceIdentity(ctx context.Context, tx *sql.Tx, admission runForkSourceStateAdmission, source runfork.RunForkSelectedContractSourceEvent, fact runtimeidentity.ActivityFact) (requestID string, continued bool, err error) {
 	if tx == nil || admission.snapshot == nil {
 		return "", false, fmt.Errorf("activity source identity requires its native fixed-cut admission")
 	}
-	requestID = activityidentity.RequestEventID(fact)
+	requestID = runtimeidentity.ActivityRequestEventID(fact)
 	if requestID == source.SourceEventID {
 		return requestID, false, nil
 	}

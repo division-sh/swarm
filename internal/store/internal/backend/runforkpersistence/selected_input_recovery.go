@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -139,7 +139,7 @@ func requireSelectedInputCurrentExecutionTx(ctx context.Context, tx *sql.Tx, aut
 }
 
 func readSelectedForkInputPublishedTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding, sqlite bool) (bool, error) {
-	eventID := activityidentity.ForkLineageEventID(binding.ForkRunID, sourceEvent.SourceEventID)
+	eventID := runtimeidentity.ForkLineageEventID(binding.ForkRunID, sourceEvent.SourceEventID)
 	lineage, lineageFound, err := readSelectedForkInputLineageTx(ctx, tx, binding.ForkRunID, sourceEvent.SourceEventID, eventID)
 	if err != nil {
 		return false, err
@@ -214,7 +214,7 @@ func validateSelectedForkPublishedInput(binding runfork.RunForkSelectedContractB
 }
 
 func validateSelectedForkPublishedInputIdentity(binding runfork.RunForkSelectedContractBinding, lineage runfork.RunForkSelectedContractExecutionLineage, event events.Event, sourceEvent runfork.RunForkSelectedContractSourceEvent) error {
-	eventID := activityidentity.ForkLineageEventID(binding.ForkRunID, sourceEvent.SourceEventID)
+	eventID := runtimeidentity.ForkLineageEventID(binding.ForkRunID, sourceEvent.SourceEventID)
 	if lineage.ForkRunID != binding.ForkRunID || lineage.SourceRunID != binding.SourceRunID || lineage.SourceEventID != sourceEvent.SourceEventID || lineage.ForkEventID != eventID || lineage.EventName != sourceEvent.EventName {
 		return fmt.Errorf("selected input lineage differs from exact source/child/event binding")
 	}

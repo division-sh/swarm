@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -78,7 +78,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 					}
 					record := pipeline.ActivityAttemptRecord{
 						RequestEventID: uuid.NewString(), RunID: run, EntityID: req.Instance.EntityID, FlowInstance: req.Instance.InstancePath,
-						NodeID: activityidentity.MustNodeOwner(mustPersistenceNode(".", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
+						NodeID: runtimeidentity.MustNodeActivityOwner(mustPersistenceNode(".", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
 						Attempt: 1, ExecutionMode: executionmode.Live,
 						SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input", Generation: loop.Generation(), LoopStage: "review",
 					}

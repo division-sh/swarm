@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -183,7 +182,7 @@ func TestPublishedArrivalTransferConsumesExactUnfinishedSourceAtCut(t *testing.T
 						childRef.StageEntry().OriginRunID != source.Command.RunID || childRef.StageEntry().EventID != sourceRef.StageEntry().EventID {
 						t.Fatalf("lost source/child occurrence relation: %+v", child)
 					}
-					id := activityidentity.ForkLineageEventID(childRun, original.ID())
+					id := runtimeidentity.ForkLineageEventID(childRun, original.ID())
 					event, err := continuation.Event(id, "selection:transfer-test")
 					if err != nil || continuation.ValidateEvent(event, "selection:transfer-test") != nil ||
 						!event.Producer().Equal(original.Producer()) || !event.CreatedAt().Equal(original.CreatedAt()) {

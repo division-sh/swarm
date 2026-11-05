@@ -11,7 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 
@@ -132,7 +132,7 @@ func TestRunForkDeploymentContinuedPendingReadbackRejectsUnownedAssociation(t *t
 				pendingDeployment: []runfork.RunForkDeploymentPendingEvent{{Ordinal: pending.Ordinal, SourceEventID: pending.SourceEventID,
 					InheritedDisposition: pending.InheritedDisposition}},
 			}
-			childEvent := activityidentity.ForkLineageEventID(key.RunID, pending.SourceEventID)
+			childEvent := runtimeidentity.ForkLineageEventID(key.RunID, pending.SourceEventID)
 			if test.duplicate {
 				carriage.pendingDeployment = append(carriage.pendingDeployment, carriage.pendingDeployment[0])
 			}

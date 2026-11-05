@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -76,7 +76,7 @@ func TestTransferredJoinOccurrenceProjectsWithoutSourcePublication(t *testing.T)
 						t.Fatal(err)
 					}
 					if projected.Publication.SourceRunID != source.Command.RunID || projected.Publication.SourceEventID != source.Publication.EventID ||
-						projected.Publication.EventID != activityidentity.ForkLineageEventID(child.RunID, source.Publication.EventID) {
+						projected.Publication.EventID != runtimeidentity.ForkLineageEventID(child.RunID, source.Publication.EventID) {
 						t.Fatalf("projection lost immediate source coordinates: %+v", projected.Publication)
 					}
 					if continuation, err := ProjectTransferredJoinContinuation(source, events.Event{}, child); err == nil || continuation.Present() {
@@ -287,7 +287,7 @@ func TestTransferredJoinOccurrenceEvidenceBindsPublicationAndOrdinaryFrame(t *te
 	}
 	changed = source
 	changed.Publication.SourceEventID = uuid.NewString()
-	changed.Publication.EventID = activityidentity.ForkLineageEventID(source.Command.RunID, changed.Publication.SourceEventID)
+	changed.Publication.EventID = runtimeidentity.ForkLineageEventID(source.Command.RunID, changed.Publication.SourceEventID)
 	changed.Publication.CommittedCause.EventID = changed.Publication.SourceEventID
 	if after, err := changed.EvidenceDigest(); err != nil || after == before {
 		t.Fatal("evidence digest omitted immediate source publication")

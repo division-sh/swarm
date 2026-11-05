@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -28,7 +28,7 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(fact), runForkActivityRequestEvent, requestProducer, "", f.record.Payload, 1,
+	original := eventtest.ChildForProducerWithRoutingSource(runtimeidentity.ActivityRequestEventID(fact), runForkActivityRequestEvent, requestProducer, "", f.record.Payload, 1,
 		events.EventLineage{RunID: fact.RunID, ParentEventID: fact.SourceEventID, ExecutionMode: source.ExecutionMode}, request.Event().Envelope(), source.RoutingSource, f.record.CreatedAt)
 	requestAdmission, present := request.Event().PayloadAdmission()
 	if !present {
@@ -40,7 +40,7 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	}
 	f.record = activityPublicationFixtureRecord(t, original)
 	source.SourceEventID = original.ID()
-	resultID := activityidentity.ResultEventID(fact, "compute.succeeded")
+	resultID := runtimeidentity.ActivityResultEventID(fact, "compute.succeeded")
 	raw := []byte(`{"activity_id":"compute","result":{"value":"recorded"},"tool":"compute","effect_class":"read_only","attempt":1}`)
 	producer, err := events.NewProducerIdentity(events.EventProducerAgent, "provider")
 	if err != nil {
