@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -1185,8 +1186,15 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='canceled' THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, summary.RunID).Scan(&summary.Canceled); err != nil {
 		return summary, err
 	}
-	if err := foldFanOutPublicationSettlement(ctx, db, postgres, summary.RunID, &summary); err != nil {
-		return summary, err
+	foldStarted := time.Now()
+	foldErr := foldFanOutPublicationSettlement(ctx, db, postgres, summary.RunID, &summary)
+	foldElapsed := time.Since(foldStarted)
+	slog.InfoContext(ctx, "fan_out_summary_fold_timing",
+		"run_id", summary.RunID, "postgres", postgres, "observation", now,
+		"started", foldStarted, "elapsed", foldElapsed,
+		"population", summary.Intents, "failed", foldErr != nil)
+	if foldErr != nil {
+		return summary, foldErr
 	}
 	barriers, err := summarizeFanOutDeliveryBarriersRun(ctx, db, summary.RunID)
 	if err != nil {
