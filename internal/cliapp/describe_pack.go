@@ -109,7 +109,7 @@ func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (desc
 		return describePackContext{}, err
 	}
 	loaded := describePackContext{config: cfg}
-	if inspectProject && (opts.sourceRoot != "" || cfg.DeploymentConfigured()) {
+	if inspectProject {
 		paths, err := resolvePackInventoryPaths(opts, cfg)
 		if err != nil {
 			return describePackContext{}, err
