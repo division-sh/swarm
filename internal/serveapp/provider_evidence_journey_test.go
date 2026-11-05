@@ -106,7 +106,11 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 			t.Fatal("evidence conversation changed its run")
 		}
 		runID = published.RunID
-		session, refusal := waitProviderEvidenceTurn(t, h, runID, published.EventID, observation, cell == "refusal")
+		predecessor := ""
+		if cell == "instance_life" {
+			predecessor = sessionID
+		}
+		session, refusal := waitProviderEvidenceTurn(t, h, runID, published.EventID, observation, cell == "refusal", predecessor)
 		if cell == "instance_life" && sessionID != "" && sessionID == session {
 			t.Fatal("instance restart reused the preceding life's session")
 		}
@@ -273,7 +277,7 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("emit-%d", request.Number), Name: "emit_evidence_completed", Arguments: args}}}, nil
 }
 
-func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, observation *providerEvidenceObservation, refusal bool) (string, bool) {
+func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, observation *providerEvidenceObservation, refusal bool, predecessor ...string) (string, bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -285,6 +289,27 @@ func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runI
 		}
 		var sessions operatorread.OperatorConversationListResult
 		requireServedJSONRPCResult(t, h.rpcEndpoint(), "conversation.list", map[string]any{"run_id": runID}, &sessions)
+		if len(predecessor) == 1 && predecessor[0] != "" {
+			if len(sessions.Conversations) != 2 {
+				t.Fatalf("instance restart must retain one predecessor and one successor conversation, got %d", len(sessions.Conversations))
+			}
+			var successor []operatorread.OperatorConversationSummary
+			found := false
+			for _, session := range sessions.Conversations {
+				if session.SessionID != predecessor[0] {
+					successor = append(successor, session)
+					continue
+				}
+				found = true
+				if session.Status != "terminated" || session.EndedAt == nil || session.TurnCount != 1 {
+					t.Fatalf("instance restart lost its terminated predecessor history: %+v", session)
+				}
+			}
+			if !found || len(successor) != 1 || successor[0].Status != "active" {
+				t.Fatal("instance restart did not expose its exact sole successor")
+			}
+			sessions.Conversations = successor
+		}
 		if len(sessions.Conversations) == 1 {
 			session := sessions.Conversations[0].SessionID
 			var turns operatorread.OperatorConversationTurnListResult
