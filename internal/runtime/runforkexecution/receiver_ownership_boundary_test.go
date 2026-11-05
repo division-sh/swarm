@@ -371,6 +371,12 @@ func surpriseClock(at *time.Time) f.RunForkMaterializedEntitySnapshotMetadata {
  return f.RunForkMaterializedEntitySnapshotMetadata{Life: 1, DataCreatedAt: at, DataUpdatedAt: at}
 }
 `, []string{"surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.Life", "surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataCreatedAt", "surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataUpdatedAt"}},
+		{"captured_life_cannot_be_reconstructed_from_receiver", "store/internal/backend/runforkpersistence", "run_fork_entity_snapshot_metadata.go", `package runforkpersistence
+import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
+func loadRunForkMaterializedEntitySnapshotMetadata(q e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
+ return f.RunForkMaterializedEntitySnapshotMetadata{Life: int64(len(q.EntityID()))}
+}
+`, []string{"loadRunForkMaterializedEntitySnapshotMetadata/event_receiver_projection_to_owner"}},
 		{"source_carrier_reconstruction", "runtime/runforkexecution", "recipient_planning.go", `package runforkexecution
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func unexpected(a e.Event) f.RunForkSelectedContractSourceEvent {
@@ -389,7 +395,7 @@ func loadRunForkMaterializedEntitySnapshotMetadata(q runForkRevisionEvent) f.Run
 		{"captured_construction_fields_cannot_be_reconstructed", "store/internal/backend/runforkpersistence", "run_fork_entity_snapshot_metadata.go", `package runforkpersistence
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func loadRunForkMaterializedEntitySnapshotMetadata(q e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
- return f.RunForkMaterializedEntitySnapshotMetadata{Life: int64(len(q.EntityID())), ParentInstance: q.FlowInstance(), InstanceKey: q.EntityID(), InitialMaterialization: []byte(q.EntityID()), HistoricalConstruction: &f.RunForkCapturedHistoricalConstruction{SourceRunID: q.EntityID()}}
+ return f.RunForkMaterializedEntitySnapshotMetadata{ParentInstance: q.FlowInstance(), InstanceKey: q.EntityID(), InitialMaterialization: []byte(q.EntityID()), HistoricalConstruction: &f.RunForkCapturedHistoricalConstruction{SourceRunID: q.EntityID()}}
 }
 `, []string{"loadRunForkMaterializedEntitySnapshotMetadata/event_receiver_projection_to_owner"}},
 		{"nested_route_and_defined_type", "runtime/runforkexecution", "workflow_state_projection.go", `package runforkexecution
