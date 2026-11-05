@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
@@ -113,12 +115,15 @@ func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (desc
 		if err != nil {
 			return describePackContext{}, err
 		}
-		artifact, err := sourceartifact.AdmitDirectory(paths.SourceRoot)
-		if err != nil {
-			return describePackContext{}, err
+		_, schemaErr := os.Stat(filepath.Join(paths.SourceRoot, "schema.yaml"))
+		if schemaErr != nil && !os.IsNotExist(schemaErr) {
+			return describePackContext{}, schemaErr
 		}
-		_, hasSchema := artifact.Root().Declaration("schema.yaml")
-		if opts.sourceRoot != "" || hasSchema {
+		if opts.sourceRoot != "" || schemaErr == nil {
+			artifact, err := sourceartifact.AdmitDirectory(paths.SourceRoot)
+			if err != nil {
+				return describePackContext{}, err
+			}
 			rooted, err := artifact.RootedSource()
 			if err != nil {
 				return describePackContext{}, err

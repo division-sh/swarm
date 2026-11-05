@@ -43,6 +43,12 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 		}
 		fragments = append(fragments, PackConsumptionFragment{Scope: component.Scope, File: receiver + "/schema.yaml",
 			Purpose: "receiving flow", RequiresSubstitution: event.AuthorSubject.Type != "chat", YAML: comment + doc})
+		manifest, err := consumptionYAML(map[string]any{"version": "1.0.0", "platform_version": "*"})
+		if err != nil {
+			return nil, err
+		}
+		fragments = append(fragments, PackConsumptionFragment{Scope: component.Scope, File: receiver + "/manifest.yaml",
+			Purpose: "receiving flow manifest; keep your project's version policy", YAML: manifest})
 		if event.AuthorSubject.Type == "chat" {
 			state, err := consumptionYAML(map[string]any{event.AuthorSubject.Field: map[string]any{"type": "text", "indexed": true}})
 			if err != nil {
