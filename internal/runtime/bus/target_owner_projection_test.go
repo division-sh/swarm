@@ -29,18 +29,22 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 		required: true,
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: rootRunID,
 					EntityID: rootOwner},
 			},
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: "review",
 					EntityID: staticOwner},
 			},
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: "portfolio",
 					EntityID: singletonOwner},
 			},
 			{
+				Life: 1,
 				Route: events.RouteIdentity{FlowInstance: "operating/instance-a",
 					EntityID: templateOwner},
 			},
@@ -141,6 +145,7 @@ func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) 
 func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 	blueprint := events.RouteIdentity{FlowID: "parent/child", FlowInstance: "parent/child"}
 	parent := runtimepipeline.DeliveryTargetOwnerCandidate{
+		Life: 1,
 		Route: events.RouteIdentity{FlowInstance: "parent",
 			EntityID: eventtest.UUID("parent-owner")},
 	}
@@ -149,6 +154,7 @@ func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 		t.Fatal("parent descriptor became receiver-owned state")
 	}
 	child := runtimepipeline.DeliveryTargetOwnerCandidate{
+		Life: 1,
 		Route: events.RouteIdentity{FlowInstance: blueprint.FlowInstance,
 			EntityID: eventtest.UUID("child-owner")},
 	}
@@ -730,6 +736,7 @@ func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwne
 		candidates: []runtimepipeline.DeliveryTargetOwnerCandidate{{
 			Route: events.RouteIdentity{FlowInstance: target.FlowInstance,
 				EntityID: target.EntityID},
+			Life:          1,
 			Materializing: true,
 		}},
 		targetsAvailable: true,
