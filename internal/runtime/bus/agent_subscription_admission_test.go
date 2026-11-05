@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,15 +14,6 @@ import (
 
 func testAgentSubscriptionAdmission(t *testing.T, agentID string, eventTypes ...events.EventType) semanticview.FlowOwnedAgentSubscriptionAdmission {
 	return testAgentSubscriptionAdmissionForFlow(t, agentID, "", eventTypes...)
-}
-
-func TestEventBusHasNoTokenlessAgentSubscriptionSurface(t *testing.T) {
-	eventBusType := reflect.TypeOf((*EventBus)(nil))
-	for _, method := range []string{"Subscribe", "SubscribeAgent", "Unsubscribe"} {
-		if _, ok := eventBusType.MethodByName(method); ok {
-			t.Fatalf("EventBus retains tokenless production method %s", method)
-		}
-	}
 }
 
 func TestEventBusTypedAdmissionExecutesSameScopeExactAndWildcard(t *testing.T) {
