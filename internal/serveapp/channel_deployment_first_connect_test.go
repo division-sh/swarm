@@ -501,6 +501,23 @@ service-probe:
 		case <-time.After(5 * time.Second):
 			t.Error("service mock inbound reply did not reach the authored customer flow")
 		}
+		replies := make(map[string]bool)
+		for i := 1; i <= 2; i++ {
+			person := types.NewJID(fmt.Sprintf("1555123458%d", i), types.DefaultUserServer)
+			lid := types.NewJID(fmt.Sprintf("10000000001%d", i), types.HiddenUserServer)
+			other, chat, chatLID := peer.senderFrom(person, lid)
+			text := fmt.Sprintf("Independent sitting customer %d", i)
+			peer.sendEncrypted(other.EncryptText(t, text, fmt.Sprintf("SITTING_CUSTOMER_%d", i)), fmt.Sprintf("SITTING_CUSTOMER_%d", i))
+			select {
+			case reply := <-peer.sent:
+				if reply.To.ToNonAD() != chat && reply.To.ToNonAD() != chatLID || reply.Body.GetConversation() != text || reply.ID == "" || replies[reply.ID] {
+					t.Fatal("independent customer reply crossed chats or reused an effect", i)
+				}
+				replies[reply.ID] = true
+			case <-time.After(5 * time.Second):
+				t.Fatal("independent customer did not receive its authored reply", i)
+			}
+		}
 	}
 	if code := process.stop(); code != 0 {
 		t.Errorf("service mock first serve shutdown exit=%d", code)
