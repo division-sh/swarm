@@ -193,7 +193,7 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 			}
 			// Fault only the native currentness coordinate; this does not claim to
 			// perform the atomic reset or its session lifecycle composition.
-			if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$1`, runID); err != nil {
+			if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$2`, runID, runID); err != nil {
 				t.Fatal(err)
 			}
 			before := snapshotRotationEffects(t, ctx, f.db, runID)
