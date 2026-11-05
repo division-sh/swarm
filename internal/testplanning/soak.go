@@ -15,6 +15,7 @@ const (
 	ServedReporterRun        = "^(TestIssue2394ServedOriginalReporterFiveHundredBothStores|TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores|TestIssue2394ServedReporterTransactionCensusBothStores)$"
 	ServedReporterStressRun  = "^TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores$"
 	ServedReporterGoTimeout  = "15m"
+	ServeappOtherGoTimeout   = "15m"
 	ServedPreservationTest   = "TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores"
 	ServedPreservationRun    = "^" + ServedPreservationTest + "$"
 	PersistenceDebtGoTimeout = "20m"
@@ -45,11 +46,16 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 	if isServedReporterSelection(packages, run, skip, timeout, count, budget) {
 		return nil
 	}
+	if timeout == ServeappOtherGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage &&
+		run == "^Test([ABD-H].*|ContextCompactionPreservesMemoryAcrossRestartBothStores|2376.*)$" &&
+		skip == "" && count == "count-1" && budget == "full" {
+		return nil
+	}
 	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$" && skip == "" && count == "count-1" && budget == "broad" {
 		return nil
 	}
 	if timeout != "" || strings.Contains(run, "/") {
-		return fmt.Errorf("only the exact soak, served reporter or persistence census may set its approved timeout; only the soak may filter a backend")
+		return fmt.Errorf("only the exact soak, served reporter, serveapp-other or persistence census may set its approved timeout; only the soak may filter a backend")
 	}
 	if isPipelineRestSelection(packages, run, skip, count, budget) {
 		return nil
