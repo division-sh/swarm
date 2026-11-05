@@ -21,25 +21,6 @@ var activityApprovalFieldOptions = map[string]struct{}{
 	"decision": {},
 }
 
-func sameStringSet(a, b []string) bool {
-	a = normalizeStrings(a)
-	b = normalizeStrings(b)
-	if len(a) != len(b) {
-		return false
-	}
-	seen := map[string]int{}
-	for _, value := range a {
-		seen[value]++
-	}
-	for _, value := range b {
-		if seen[value] == 0 {
-			return false
-		}
-		seen[value]--
-	}
-	return true
-}
-
 var handlerFieldOptions = map[string]struct{}{
 	"activity":          {},
 	"description":       {},

@@ -406,7 +406,3 @@ func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) 
 	compileRootContractTestFixture(bundle)
 	return bundle
 }
-
-func completeFanOutSemanticsTestIdentity(node runtimeidentity.ExecutableNode, handler SystemNodeEventHandler) (SystemNodeEventHandler, error) {
-	return QualifySystemNodeHandlerRuleRefsForEvent(node, "test.event", handler)
-}
