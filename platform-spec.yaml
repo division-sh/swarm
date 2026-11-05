@@ -14858,7 +14858,7 @@ flow_model:
             A named provider exposes distinct installed and captured receive/send components with their exact scope,
             version, manifest/BODY identity and source provenance. Provider and tool selectors are exact canonical IDs;
             absent providers include candidates and selected search paths, without an additional discovery spine.
-            Human, JSON and YAML views consume one complete typed projection; a compact human overview does not truncate
+            Human and JSON views consume one complete typed projection; a compact human overview does not truncate
             the machine model. Raw events retain advanced-use guidance without inventing normalized fields.
           project_readback: >
             Outside a configured deployment, requirements name their keys and say not evaluated with an action.

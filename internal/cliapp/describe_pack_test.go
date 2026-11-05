@@ -23,7 +23,7 @@ func TestDescribePackOutsideProjectNeedsNoWorkflowOrCredentials(t *testing.T) {
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentials)
 	for _, args := range [][]string{
 		{"describe", "pack"}, {"describe", "pack", "--json"}, {"describe", "pack", "--quiet"},
-		{"describe", "pack", "telegram"}, {"describe", "pack", "telegram", "--json"}, {"describe", "pack", "telegram", "--yaml"},
+		{"describe", "pack", "telegram"}, {"describe", "pack", "telegram", "--json"},
 	} {
 		code, out, diagnostic := runPacksCommand(t, root, args...)
 		if code != 0 || diagnostic != "" || !strings.Contains(out, "telegram") {
@@ -164,10 +164,10 @@ func TestDescribePackChatConsumptionCompilesConcreteSubstitution(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
+	writeDescribeTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	if _, err := packartifact.ImportEmbeddedPack(root, "telegram", packfixture.EmbeddedBase(t)); err != nil {
 		t.Fatal(err)
 	}
-	writeDescribeTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	for _, fragment := range model.Fragments {
 		if fragment.File == "provider setup" {
 			continue
@@ -255,6 +255,7 @@ func TestDescribePackProjectKeepsTargetSpecificCredentialFacts(t *testing.T) {
 	base := packfixture.EmbeddedBase(t)
 	for _, child := range []string{"alpha", "beta"} {
 		directory := filepath.Join(root, child)
+		writeDescribeTestFile(t, filepath.Join(directory, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeDescribeTestFile(t, filepath.Join(directory, "schema.yaml"), "stages: []\ninputs: [inbound.telegram.text_message]\n")
 		if _, err := packartifact.ImportEmbeddedPack(directory, "telegram", base); err != nil {
 			t.Fatal(err)
