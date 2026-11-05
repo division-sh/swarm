@@ -53,7 +53,7 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	if owner, err := base.returnOwner(ctx, event, &plan, record); err != nil || owner.Route() != origin || !owner.ExistingEntity() {
 		t.Fatalf("exact prepared return = %+v, %v", owner, err)
 	}
-	if len(reader.lookups) != 1 || reader.lookups[0].ExactPath() != root.InstancePath {
+	if len(reader.lookups) != 2 || reader.lookups[0].ExactPath() != root.InstancePath || reader.lookups[1].ExactPath() != root.InstancePath {
 		t.Fatalf("covered reply used inventory instead of its live exact reader: %+v", reader.lookups)
 	}
 	readFailure := errors.New("independent covered reply read failure")
