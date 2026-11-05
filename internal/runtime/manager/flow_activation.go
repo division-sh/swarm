@@ -171,7 +171,25 @@ func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 			return fmt.Errorf("finalize flow instance initial lifecycle: %w", err)
 		}
 	}
+	if err := am.finalizeRestartedActors(ctx, committed); err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+		return err
+	}
+	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, committed.ReadinessAttemptOrdinal, am.semanticReadinessSource.source)
+	if err == nil && committed.StartedOver {
+		err = am.finalizeRestartedEntry(ctx, committed)
+	}
+	if err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+	}
+	return err
+}
+
+func (am *AgentManager) finalizeRestartedActors(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 	for _, restarted := range committed.RestartedAgents {
+		if err := am.requireCurrentRestartedInstance(ctx, committed); err != nil {
+			return err
+		}
 		identity := restarted.Token.Identity
 		cell, err := am.lifecycle.lockIdentityOperationMode(identity, true, false)
 		if err != nil {
@@ -186,23 +204,20 @@ func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 			return fmt.Errorf("materialize restarted actor: %w", err)
 		}
 	}
-	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, committed.ReadinessAttemptOrdinal, am.semanticReadinessSource.source)
-	if err == nil && committed.StartedOver {
-		if err = am.requireCurrentRestartedInstance(ctx, committed); err == nil {
-			finalizer, ok := am.workflowInstances.(interface {
-				FinalizeRestartEntryLifecycle(context.Context, runtimepipeline.CommittedWorkflowLifecycleMutation) error
-			})
-			if !ok {
-				err = fmt.Errorf("instance restart requires its existing entry lifecycle finalizer")
-			} else {
-				err = finalizer.FinalizeRestartEntryLifecycle(ctx, committed.Lifecycle)
-			}
-		}
+	return nil
+}
+
+func (am *AgentManager) finalizeRestartedEntry(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	if err := am.requireCurrentRestartedInstance(ctx, committed); err != nil {
+		return err
 	}
-	if err != nil {
-		am.signalDynamicFlowRuntimeReadiness()
+	finalizer, ok := am.workflowInstances.(interface {
+		FinalizeRestartEntryLifecycle(context.Context, runtimepipeline.CommittedWorkflowLifecycleMutation) error
+	})
+	if !ok {
+		return fmt.Errorf("instance restart requires its existing entry lifecycle finalizer")
 	}
-	return err
+	return finalizer.FinalizeRestartEntryLifecycle(ctx, committed.Lifecycle)
 }
 
 func (am *AgentManager) requireCurrentRestartedInstance(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
