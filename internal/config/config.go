@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
@@ -463,12 +462,12 @@ func (c *Config) ValidateExtensions() error {
 }
 
 // Sharding returns the sharding extension config, or zero value if not configured.
-func (c *Config) Sharding() runtimesharding.Config {
+func (c *Config) Sharding() ShardingConfig {
 	if c == nil {
-		return runtimesharding.Config{}
+		return ShardingConfig{}
 	}
 	if err := c.prepareTypedExtensions(); err != nil {
-		return runtimesharding.Config{}
+		return ShardingConfig{}
 	}
 	return c.typedExtensions.Sharding
 }

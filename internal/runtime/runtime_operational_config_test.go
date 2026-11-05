@@ -16,7 +16,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -60,6 +59,10 @@ type recoveryGuardEventStore struct {
 
 type recoveryGuardEventLease struct{}
 
+type recoveryGuardLease interface {
+	Release(context.Context) error
+}
+
 func (s *recoveryGuardEventStore) PipelineObligations() runtimepipelineobligation.Store {
 	return newStartupRecoveryPipelineOwner(s.missing, nil)
 }
@@ -82,10 +85,10 @@ func (*recoveryGuardEventStore) ListSelectedContractRouteRecoveryRecords(context
 func (s *recoveryGuardEventStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
 	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
 }
-func (*recoveryGuardEventStore) ClaimPipelineReplay(context.Context, string) (runtimeownership.Lease, bool, error) {
+func (*recoveryGuardEventStore) ClaimPipelineReplay(context.Context, string) (recoveryGuardLease, bool, error) {
 	return recoveryGuardEventLease{}, true, nil
 }
-func (*recoveryGuardEventStore) ClaimPipelinePublication(context.Context, string) (runtimeownership.Lease, bool, error) {
+func (*recoveryGuardEventStore) ClaimPipelinePublication(context.Context, string) (recoveryGuardLease, bool, error) {
 	return recoveryGuardEventLease{}, true, nil
 }
 func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, time.Time, time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {

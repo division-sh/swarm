@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
-	"github.com/division-sh/swarm/internal/cli/readwindow"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -253,7 +252,7 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts.sinceSet = cmd.Flags().Changed("since")
 			runOpts.untilSet = cmd.Flags().Changed("until")
-			runOpts.reference = readwindow.Reference(runOpts.apiOptions.now)
+			runOpts.reference = cliReadWindowReference(runOpts.apiOptions.now)
 			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
 				return fmt.Errorf("--limit must be between 1 and 500")
 			}
@@ -336,7 +335,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
 			traceOpts.untilSet = cmd.Flags().Changed("until")
-			traceOpts.reference = readwindow.Reference(traceOpts.apiOptions.now)
+			traceOpts.reference = cliReadWindowReference(traceOpts.apiOptions.now)
 			traceOpts.limitSet = cmd.Flags().Changed("limit")
 			traceOpts.cursorSet = cmd.Flags().Changed("cursor")
 			runID := ""
@@ -505,12 +504,12 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 		}
 		params["cursor"] = cursor
 	}
-	until := readwindow.BoundInput{Value: o.until, Set: o.untilSet}
+	until := cliReadWindowBoundInput{Value: o.until, Set: o.untilSet}
 	if o.deliverySummary && !o.untilSet {
-		until = readwindow.BoundInput{Value: o.reference.UTC().Format(time.RFC3339Nano), Set: true}
+		until = cliReadWindowBoundInput{Value: o.reference.UTC().Format(time.RFC3339Nano), Set: true}
 	}
-	window, err := readwindow.Resolve(readwindow.Input{
-		Since:        readwindow.BoundInput{Value: o.since, Set: o.sinceSet},
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: o.since, Set: o.sinceSet},
 		Until:        until,
 		ReferenceUTC: o.reference,
 	})
@@ -1029,9 +1028,9 @@ func (o diagnosticRunListOptions) params() (map[string]any, error) {
 		}
 		params["limit"] = o.limit
 	}
-	window, err := readwindow.Resolve(readwindow.Input{
-		Since:        readwindow.BoundInput{Value: o.since, Set: o.sinceSet},
-		Until:        readwindow.BoundInput{Value: o.until, Set: o.untilSet},
+	window, err := resolveCLIReadWindow(cliReadWindowInput{
+		Since:        cliReadWindowBoundInput{Value: o.since, Set: o.sinceSet},
+		Until:        cliReadWindowBoundInput{Value: o.until, Set: o.untilSet},
 		ReferenceUTC: o.reference,
 	})
 	if err != nil {

@@ -1,14 +1,10 @@
 package cliapp
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/division-sh/swarm/internal/versionmetadata"
-)
-
-func currentTestVersionMetadata(t *testing.T) versionmetadata.Metadata {
+func currentTestVersionMetadata(t *testing.T) versionMetadata {
 	t.Helper()
-	metadata, err := versionmetadata.Resolve(versionmetadata.Injected{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate})
+	metadata, err := resolveLocalVersionMetadata(BuildMetadata{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate})
 	if err != nil {
 		t.Fatalf("resolve version metadata: %v", err)
 	}

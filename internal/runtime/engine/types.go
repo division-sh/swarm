@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
-	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -171,7 +170,18 @@ func (s StateSnapshot) EntityContext() map[string]any {
 }
 
 func (s StateSnapshot) PlatformEntityContext(flowInstance string) map[string]any {
-	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance)
+	return entityMetadata(s.EntityID.String(), s.CurrentState, flowInstance)
+}
+
+func entityMetadata(entityID, currentState, flowInstance string) map[string]any {
+	out := map[string]any{
+		"id":   strings.TrimSpace(entityID),
+		"path": strings.TrimSpace(flowInstance),
+	}
+	if stage := strings.TrimSpace(currentState); stage != "" {
+		out["stage"] = stage
+	}
+	return out
 }
 
 func (s *StateSnapshot) SetField(key string, value any) {

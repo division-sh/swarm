@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 )
 
 func TestLoadRejectsRetiredExecutionPosture(t *testing.T) {
@@ -524,7 +522,7 @@ func TestExtensionsConfig_ApplyDefaultsAndClamps(t *testing.T) {
 	c.Sharding.PerShardBudgetCents = 0
 	c.Sharding.MaxRetriesPerShard = -1
 	c.Sharding.CircuitBreakerThreshold = 2.0
-	c.Sharding.Stages = map[string]runtimesharding.StageConfig{
+	c.Sharding.Stages = map[string]ShardingStageConfig{
 		"default": {MaxShards: 99},
 	}
 

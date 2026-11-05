@@ -1,4 +1,4 @@
-package versionmetadata
+package cliapp
 
 import (
 	goruntime "runtime"
@@ -16,7 +16,7 @@ var (
 	readVersionPlatformDigest  = platform.PlatformSpecDigest
 )
 
-type Metadata struct {
+type versionMetadata struct {
 	BinaryVersion      string
 	ModuleVersion      string
 	PlatformVersion    string
@@ -28,16 +28,10 @@ type Metadata struct {
 	GOARCH             string
 }
 
-type Injected struct {
-	Version string
-	Commit  string
-	Date    string
-}
-
-func Resolve(injected Injected) (Metadata, error) {
+func resolveLocalVersionMetadata(injected BuildMetadata) (versionMetadata, error) {
 	platformVersion, err := readVersionPlatformVersion()
 	if err != nil {
-		return Metadata{}, err
+		return versionMetadata{}, err
 	}
 	buildInfo, ok := readVersionBuildInfo()
 	if !ok {
@@ -49,7 +43,7 @@ func Resolve(injected Injected) (Metadata, error) {
 		vcsRevision += "-modified"
 	}
 	vcsTime := buildInfoSetting(buildInfo, "vcs.time")
-	return Metadata{
+	return versionMetadata{
 		BinaryVersion:      resolvedBinaryVersion(injected.Version, moduleVersion),
 		ModuleVersion:      resolvedOptionalVersion(moduleVersion),
 		PlatformVersion:    strings.TrimSpace(platformVersion),

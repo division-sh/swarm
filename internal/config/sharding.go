@@ -1,25 +1,25 @@
-package sharding
+package config
 
 import "time"
 
-type Config struct {
-	MaxShardsPerJob         int                    `yaml:"max_shards_per_job"`
-	LegacyMaxShards         int                    `yaml:"max_shards_per_scan"`
-	MaxConcurrentShards     int                    `yaml:"max_concurrent_shards"`
-	PerShardTimeout         time.Duration          `yaml:"per_shard_timeout"`
-	StartupGracePeriod      time.Duration          `yaml:"startup_grace_period"`
-	PerShardBudgetCents     int                    `yaml:"per_shard_budget_cents"`
-	MaxRetriesPerShard      int                    `yaml:"max_retries_per_shard"`
-	CircuitBreakerThreshold float64                `yaml:"circuit_breaker_threshold"`
-	Stages                  map[string]StageConfig `yaml:"stages"`
+type ShardingConfig struct {
+	MaxShardsPerJob         int                            `yaml:"max_shards_per_job"`
+	LegacyMaxShards         int                            `yaml:"max_shards_per_scan"`
+	MaxConcurrentShards     int                            `yaml:"max_concurrent_shards"`
+	PerShardTimeout         time.Duration                  `yaml:"per_shard_timeout"`
+	StartupGracePeriod      time.Duration                  `yaml:"startup_grace_period"`
+	PerShardBudgetCents     int                            `yaml:"per_shard_budget_cents"`
+	MaxRetriesPerShard      int                            `yaml:"max_retries_per_shard"`
+	CircuitBreakerThreshold float64                        `yaml:"circuit_breaker_threshold"`
+	Stages                  map[string]ShardingStageConfig `yaml:"stages"`
 }
 
-type StageConfig struct {
+type ShardingStageConfig struct {
 	TargetItemsPerShard int `yaml:"target_items_per_shard"`
 	MaxShards           int `yaml:"max_shards"`
 }
 
-func (c *Config) ApplyDefaults() {
+func (c *ShardingConfig) ApplyDefaults() {
 	if c == nil {
 		return
 	}
@@ -49,7 +49,7 @@ func (c *Config) ApplyDefaults() {
 		c.CircuitBreakerThreshold = 0.5
 	}
 
-	normalizeStage := func(stage *StageConfig, targetItems, maxShards int) {
+	normalizeStage := func(stage *ShardingStageConfig, targetItems, maxShards int) {
 		if stage.TargetItemsPerShard <= 0 {
 			stage.TargetItemsPerShard = targetItems
 		}
@@ -61,9 +61,9 @@ func (c *Config) ApplyDefaults() {
 		}
 	}
 	if c.Stages == nil {
-		c.Stages = map[string]StageConfig{}
+		c.Stages = map[string]ShardingStageConfig{}
 	}
-	defaultStages := map[string]StageConfig{
+	defaultStages := map[string]ShardingStageConfig{
 		"default":  {TargetItemsPerShard: 10, MaxShards: 8},
 		"overflow": {TargetItemsPerShard: 4, MaxShards: 4},
 	}

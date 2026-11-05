@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/spf13/cobra"
 )
 
@@ -34,8 +33,8 @@ func ConfigureBuildMetadata(metadata BuildMetadata) {
 	binaryDate = metadata.Date
 }
 
-func InjectedBuildMetadata() versionmetadata.Injected {
-	return versionmetadata.Injected{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate}
+func InjectedBuildMetadata() BuildMetadata {
+	return BuildMetadata{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate}
 }
 
 func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner, runTest TestSessionRunner, registration ...ChannelRegistrationFactory) int {
@@ -447,7 +446,7 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionCommandOptions) error {
-	metadata, err := versionmetadata.Resolve(versionmetadata.Injected{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate})
+	metadata, err := resolveLocalVersionMetadata(BuildMetadata{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate})
 	if err != nil {
 		return err
 	}
@@ -487,7 +486,7 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 	})
 }
 
-func writeLocalVersion(out io.Writer, metadata versionmetadata.Metadata, embeddedPackInventoryDigest string) {
+func writeLocalVersion(out io.Writer, metadata versionMetadata, embeddedPackInventoryDigest string) {
 	if out == nil {
 		return
 	}
