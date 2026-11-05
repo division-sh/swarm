@@ -302,6 +302,9 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 	if err := validateEntityFullResult("entity.get result", result); err != nil {
 		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
 	}
+	if opts.iterSet && (result.Entity.Life == nil || *result.Entity.Life != opts.iter) {
+		return returnCLIAPIError(errOut, fmt.Errorf("entity.get returned a different instance life"), entityViewAPIErrorClassifier())
+	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
 		writeEntityFullResult(w, result, entityRenderOptions{verbose: opts.output.verbose})
 	}, func() ([]string, error) {
