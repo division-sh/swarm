@@ -324,13 +324,9 @@ func describePackProject(ctx context.Context, loaded describePackContext, provid
 }
 
 func completePackDescriptionRequirements(description *PackDescription) {
-	hasTarget := false
-	for _, subject := range description.Project.Subjects {
-		hasTarget = hasTarget || subject.Kind == packs.SubjectProviderTrigger
-	}
 	seen := map[string]bool{}
 	for _, component := range description.Components {
-		if component.Receive != nil && description.Project.Evaluated && !hasTarget {
+		if component.Receive != nil && description.Project.Evaluated && !packComponentHasTarget(component, description.Project.Subjects) {
 			key := "target:" + component.Scope
 			if !seen[key] {
 				description.Project.Rows = append(description.Project.Rows, PackRequirementRow{Kind: "target", Name: description.ID,
@@ -341,27 +337,47 @@ func completePackDescriptionRequirements(description *PackDescription) {
 		if description.Project.Evaluated {
 			continue
 		}
-		add := func(kind, name string) {
-			key := kind + ":" + name + ":" + component.Scope
-			if seen[key] {
-				return
-			}
-			seen[key] = true
-			description.Project.Rows = append(description.Project.Rows, PackRequirementRow{Kind: kind, Name: name, Scope: component.Scope,
-				Status: "not evaluated", Remediation: "run inside a configured project to check bindings"})
+		appendUnevaluatedPackRequirements(description, component, seen)
+	}
+}
+
+func packComponentHasTarget(component PackComponentDescription, subjects []packs.Subject) bool {
+	for _, subject := range subjects {
+		if subject.Kind != packs.SubjectProviderTrigger || subject.TriggerAdmission == nil || subject.TriggerAdmission.Pack == nil {
+			continue
 		}
-		if component.Receive != nil && component.Receive.RequiresSecret {
-			for _, name := range component.Receive.Secrets {
-				add("secret", name)
-			}
+		if component.Source != "captured" {
+			return true
 		}
-		for _, tool := range component.Tools {
-			for _, name := range tool.Credentials {
-				add("secret", name)
-			}
-			if tool.Managed != "" {
-				add("managed_credential", tool.Managed)
-			}
+		admission := subject.TriggerAdmission
+		if admission.FlowPath == component.Scope && admission.Pack.ManifestHash == component.Receive.Identity.ManifestHash {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUnevaluatedPackRequirements(description *PackDescription, component PackComponentDescription, seen map[string]bool) {
+	add := func(kind, name string) {
+		key := kind + ":" + name + ":" + component.Scope
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		description.Project.Rows = append(description.Project.Rows, PackRequirementRow{Kind: kind, Name: name, Scope: component.Scope,
+			Status: "not evaluated", Remediation: "run inside a configured project to check bindings"})
+	}
+	if component.Receive != nil {
+		for _, name := range component.Receive.Secrets {
+			add("secret", name)
+		}
+	}
+	for _, tool := range component.Tools {
+		for _, name := range tool.Credentials {
+			add("secret", name)
+		}
+		if tool.Managed != "" {
+			add("managed_credential", tool.Managed)
 		}
 	}
 }
