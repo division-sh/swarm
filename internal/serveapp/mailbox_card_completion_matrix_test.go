@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
