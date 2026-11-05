@@ -198,7 +198,7 @@ func rotateInstanceLifeActorsTx(ctx context.Context, attempt *mutationprotocol.A
 			if err != nil {
 				return nil, err
 			}
-			if found && result.Subordinate.Action != sessions.LifecycleMutationRotateCurrentSet {
+			if found && (result.Subordinate.Action != sessions.LifecycleMutationRotateCurrentSet || !result.ProcessBinding.Equal(plan.Restart.ProcessBinding)) {
 				return nil, fmt.Errorf("instance restart operation did not rotate its exact current sessions")
 			}
 			if found && result.TransitionID == actor.LastTransitionID {
