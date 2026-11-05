@@ -308,7 +308,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 				ID: replyContextID, RunID: runID, SourceRunID: runID, RequestEventID: requestEventID, SourceRequestEventID: requestEventID,
 				RequesterFlowID: "requester", RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied",
 				ProviderFlowID: "provider", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
-				Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/a", EntityID: "entity-a"},
+				Origin: events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/a", EntityID: "entity-a"}, OriginLife: 1,
 				RequestCorrelationID: requestEventID, State: replycontext.StateOpen, CreatedAt: at, UpdatedAt: at,
 			})
 		},

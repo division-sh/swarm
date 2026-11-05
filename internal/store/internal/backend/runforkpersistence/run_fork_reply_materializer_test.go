@@ -75,7 +75,7 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 		RunID: sourceRun, RequestEventID: request, RequesterFlowID: owner.ScopeKey, RequestOutputPin: "request", ReplyInputPin: "return",
 		SourceRunID: sourceRun, SourceRequestEventID: request,
 		ProviderFlowID: "worker", ProviderInputPin: "request", ProviderOutputPin: "return",
-		Origin:               events.RouteIdentity{FlowID: owner.ScopeKey, EntityID: owner.EntityID, FlowInstance: owner.InstancePath},
+		Origin: events.RouteIdentity{FlowID: owner.ScopeKey, EntityID: owner.EntityID, FlowInstance: owner.InstancePath}, OriginLife: entry.Life,
 		ReturnJoins:          []events.JoinAdmissionReceipt{{Ref: bound, Disposition: events.JoinAdmissionBound}, {Ref: early, Disposition: events.JoinAdmissionEarly}},
 		RequestCorrelationID: "item-42", CorrelationKey: "item.id", State: state, CreatedAt: born, UpdatedAt: born.Add(time.Second),
 	}
@@ -185,6 +185,7 @@ func TestRunForkReplyProjectionPreservesOpenTerminalAndOldReturn(t *testing.T) {
 						child.SourceRunID != source.SourceRunID || child.SourceRequestEventID != source.SourceRequestEventID ||
 						child.EnclosingReplyContextID != source.EnclosingReplyContextID ||
 						child.RequestCorrelationID != source.RequestCorrelationID || child.CorrelationKey != source.CorrelationKey ||
+						child.OriginLife != source.OriginLife ||
 						child.RequesterFlowID != source.RequesterFlowID || child.ProviderFlowID != source.ProviderFlowID ||
 						child.RequestOutputPin != source.RequestOutputPin || child.ReplyInputPin != source.ReplyInputPin ||
 						child.ProviderInputPin != source.ProviderInputPin || child.ProviderOutputPin != source.ProviderOutputPin ||

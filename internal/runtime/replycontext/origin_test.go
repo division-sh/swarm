@@ -26,6 +26,22 @@ func TestA2ReplyOriginRetainsItsExactJoinObligation(t *testing.T) {
 	if !record.SameIdentity(copy) {
 		t.Fatal("return receipt changed across storage")
 	}
+	unjoined := record
+	unjoined.ReturnJoins, unjoined.OriginLife = nil, 7
+	plain, err := unjoined.EncodeOrigin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := unjoined
+	restored.OriginLife = 0
+	if err := restored.DecodeOrigin(plain); err != nil || !restored.SameIdentity(unjoined) || restored.ID != record.ID {
+		t.Fatalf("plain reply life or stable identity changed: %+v %v", restored, err)
+	}
+	copy.OriginLife++
+	if record.SameIdentity(copy) || copy.Validate() == nil {
+		t.Fatal("another life replaced the retained reply origin")
+	}
+	copy = record
 	copy.ReturnJoins = nil
 	if record.SameIdentity(copy) {
 		t.Fatal("missing return binding retained the same reply authority")
@@ -60,7 +76,7 @@ func a2ReplyOriginRecord(t *testing.T) Record {
 	return Record{
 		ID: "reply", RunID: "run", RequestEventID: "request", RequesterFlowID: "collector", RequestOutputPin: "request", ReplyInputPin: "return", ProviderFlowID: "worker", ProviderInputPin: "request", ProviderOutputPin: "return",
 		SourceRunID: "run", SourceRequestEventID: "request",
-		Origin: events.RouteIdentity{FlowID: "collector", FlowInstance: "collector/one", EntityID: "entity"}, RequestCorrelationID: "correlation", State: StateOpen, CreatedAt: time.Now().UTC(),
+		Origin: events.RouteIdentity{FlowID: "collector", FlowInstance: "collector/one", EntityID: "entity"}, OriginLife: 1, RequestCorrelationID: "correlation", State: StateOpen, CreatedAt: time.Now().UTC(),
 		ReturnJoins: []events.JoinAdmissionReceipt{{Ref: ref, Disposition: events.JoinAdmissionBound}},
 	}
 }
@@ -77,6 +93,8 @@ func TestA2ReplyOriginHostileJSONCannotEraseRetainedEvidence(t *testing.T) {
 		{"escaped_duplicate_reset", objectPrefix + `,"join_\u0061dmissions":null}`},
 		{"case_alias_reset", objectPrefix + `,"JOIN_ADMISSIONS":null}`},
 		{"foreign_field", objectPrefix + `,"unknown":true}`},
+		{"missing_life", strings.Replace(string(raw), `"life":1,`, ``, 1)},
+		{"zero_life", strings.Replace(string(raw), `"life":1`, `"life":0`, 1)},
 		{"nested_duplicate", strings.Replace(string(raw), `"instance_id":"one"`, `"instance_id":"one","instance_id":"foreign"`, 1)},
 		{"trailing_value", string(raw) + `{}`},
 		{"non_object", `null`},

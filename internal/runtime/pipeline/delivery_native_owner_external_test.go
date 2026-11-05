@@ -133,7 +133,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 			ID: reply, RunID: run, RequestEventID: request, RequesterFlowID: ".", ProviderFlowID: ".",
 			SourceRunID: run, SourceRequestEventID: request,
 			RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
-			Origin: events.RouteIdentity{FlowID: ".", FlowInstance: run, EntityID: run}, RequestCorrelationID: request, State: replycontext.StateOpen, CreatedAt: at, UpdatedAt: at,
+			Origin: events.RouteIdentity{FlowID: ".", FlowInstance: run, EntityID: run}, OriginLife: 1, RequestCorrelationID: request, State: replycontext.StateOpen, CreatedAt: at, UpdatedAt: at,
 		})
 	}
 	fixture.AdmitSchedule = selected.(runtimegenericschedule.Store).AdmitGenericScheduleOutcome

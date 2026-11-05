@@ -41,7 +41,7 @@ func historicalReplyRecord(t *testing.T) replycontext.Record {
 		SourceRunID: entry.RunID, SourceRequestEventID: entry.EventID,
 		RequesterFlowID: "collector", RequestOutputPin: "request", ReplyInputPin: "return", ProviderFlowID: "worker",
 		ProviderInputPin: "request", ProviderOutputPin: "return", RequestCorrelationID: "request-42", CorrelationKey: "item.id",
-		Origin:      events.RouteIdentity{FlowID: "collector", FlowInstance: entry.InstancePath, EntityID: entry.EntityID},
+		Origin: events.RouteIdentity{FlowID: "collector", FlowInstance: entry.InstancePath, EntityID: entry.EntityID}, OriginLife: entry.Life,
 		ReturnJoins: []events.JoinAdmissionReceipt{{Ref: bound, Disposition: events.JoinAdmissionBound}, {Ref: early, Disposition: events.JoinAdmissionEarly}},
 		State:       replycontext.StateOpen, CreatedAt: stamp, UpdatedAt: stamp.Add(time.Second),
 	}

@@ -14,6 +14,7 @@ import (
 // inherited by unrelated outputs from the provider.
 type replyOrigin struct {
 	events.RouteIdentity
+	Life  int64                         `json:"life"`
 	Joins []events.JoinAdmissionReceipt `json:"join_admissions,omitempty"`
 }
 
@@ -21,7 +22,7 @@ func (r Record) EncodeOrigin() ([]byte, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(replyOrigin{RouteIdentity: r.Origin, Joins: r.ReturnJoins})
+	return json.Marshal(replyOrigin{RouteIdentity: r.Origin, Life: r.OriginLife, Joins: r.ReturnJoins})
 }
 
 func (r *Record) DecodeOrigin(raw []byte) error {
@@ -35,7 +36,7 @@ func (r *Record) DecodeOrigin(raw []byte) error {
 	}
 	for name := range fields {
 		switch name {
-		case "flow_instance", "entity_id", "flow_id", "join_admissions":
+		case "flow_instance", "entity_id", "flow_id", "life", "join_admissions":
 		default:
 			return fmt.Errorf("reply origin has undeclared field %q", name)
 		}
@@ -49,7 +50,10 @@ func (r *Record) DecodeOrigin(raw []byte) error {
 	if err := (events.DeliveryContext{Joins: origin.Joins}).Validate(); err != nil {
 		return err
 	}
-	r.Origin, r.ReturnJoins = origin.RouteIdentity, origin.Joins
+	if origin.Life <= 0 {
+		return fmt.Errorf("reply origin requires its positive captured life")
+	}
+	r.Origin, r.OriginLife, r.ReturnJoins = origin.RouteIdentity, origin.Life, origin.Joins
 	return nil
 }
 
