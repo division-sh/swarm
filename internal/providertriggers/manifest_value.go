@@ -50,14 +50,15 @@ func (m Manifest) RequiresSecret() bool {
 
 // SignatureInspection is declaration readback, not request or secret authority.
 type SignatureInspection struct {
-	Authentication  RequestAuthentication `json:"authentication"`
-	Header          string                `json:"header,omitempty"`
-	Prefix          string                `json:"prefix,omitempty"`
-	SignedPayload   string                `json:"signed_payload,omitempty"`
-	Encoding        string                `json:"encoding,omitempty"`
-	SignatureParam  string                `json:"signature_param,omitempty"`
-	TimestampHeader string                `json:"timestamp_header,omitempty"`
-	TimestampParam  string                `json:"timestamp_param,omitempty"`
+	Authentication     RequestAuthentication `json:"authentication"`
+	Header             string                `json:"header,omitempty"`
+	Prefix             string                `json:"prefix,omitempty"`
+	SignedPayload      string                `json:"signed_payload,omitempty"`
+	Encoding           string                `json:"encoding,omitempty"`
+	SignatureParam     string                `json:"signature_param,omitempty"`
+	TimestampHeader    string                `json:"timestamp_header,omitempty"`
+	TimestampParam     string                `json:"timestamp_param,omitempty"`
+	TimestampTolerance string                `json:"timestamp_tolerance,omitempty"`
 }
 
 func (m Manifest) InspectSignature() (SignatureInspection, error) {
@@ -71,6 +72,12 @@ func (m Manifest) InspectSignature() (SignatureInspection, error) {
 		Encoding: signature.Encoding, SignatureParam: signature.SignatureParam}
 	if signature.Timestamp != nil {
 		out.TimestampHeader, out.TimestampParam = signature.Timestamp.Header, signature.Timestamp.Param
+		out.TimestampTolerance = signature.Timestamp.Tolerance
+	}
+	if authentication == RequestAuthenticationHMACSHA256 || authentication == RequestAuthenticationHMACSHA1 {
+		out.Encoding = signature.digestEncoding()
+	} else {
+		out.Encoding = ""
 	}
 	return out, nil
 }

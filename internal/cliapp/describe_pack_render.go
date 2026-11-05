@@ -137,6 +137,10 @@ func writePackToolDetail(out io.Writer, tool PackToolDescription) {
 }
 
 func writePackSchemaFields(out io.Writer, label string, schema runtimecontracts.ToolInputSchema) {
+	if schema.IsZero() {
+		fmt.Fprintf(out, "  %s -- no schema declared; result interpretation remains tool-owned\n", label)
+		return
+	}
 	fmt.Fprintf(out, "  %s (%s)\n", label, schema.Kind())
 	for _, name := range schema.PropertyNames() {
 		field, _ := schema.Property(name)
