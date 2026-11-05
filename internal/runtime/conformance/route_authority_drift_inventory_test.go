@@ -686,3 +686,12 @@ func allowedRouteAuthorityDriftClassifications() map[string]struct{} {
 		"split_open_sibling":                    {},
 	}
 }
+
+func routeAuthorityProblemsContain(problems []string, want string) bool {
+	for _, problem := range problems {
+		if strings.Contains(problem, want) {
+			return true
+		}
+	}
+	return false
+}
