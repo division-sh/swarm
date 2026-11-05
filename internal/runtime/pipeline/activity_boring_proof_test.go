@@ -405,9 +405,19 @@ func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBor
 	t.Helper()
 	entity := intent.EntityID.String()
 	constructionCtx := effects.WithExecutionMode(ctx, intent.ExecutionMode)
+	rootFlow := semanticview.RootExecutionFlowID(fixture.pc.SemanticSource())
+	topology, found := semanticview.WorkflowStageTopology(fixture.pc.SemanticSource(), rootFlow)
+	if !found {
+		t.Fatal("activity component parent requires its admitted stage catalog")
+	}
+	stage, err := topology.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	parent := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
 		Life: 1, InstanceID: intent.SourceRunID, StorageRef: intent.SourceRunID, EntityID: intent.SourceRunID,
-		WorkflowName: semanticview.RootExecutionFlowID(fixture.pc.SemanticSource()), WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
+		WorkflowName: rootFlow, WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
+		CurrentState: stage.ID(), StageDefined: !stage.IsStatelessPosture(),
 		CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
 	})
 	if err := fixture.native.Construct(constructionCtx, parent); err != nil {
