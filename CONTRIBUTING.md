@@ -150,10 +150,14 @@ remains the expected small-blast-radius development loop. For a disposable
 Docker-backed suite, omit `SWARM_TEST_POSTGRES_DSN`; package tests never launch
 Docker directly.
 
-`swarm-test` is single-flight per host/account by default. Deliberate local
-experiments may set `SWARM_TEST_RUN_SLOTS` to one positive integer, but every
-live wrapper must agree on that value and capacities above one carry no
-reliability or performance guarantee.
+`swarm-test` computes conservative unit-worker capacity from observable
+host/container resources: at most four, one per four effective CPUs and eight
+GiB RAM, with unknown capacity falling back to one. An explicit shared test DSN
+clamps the ceiling to one; private workers own independent services. The parent
+does not hold an admission slot. `SWARM_TEST_RUN_SLOTS` may reduce the computed
+ceiling, never exceed it or resize an occupied registry; live wrappers must
+agree on the active value. This is not a performance guarantee. See the
+[runner runbook](cmd/swarm-test/README.md) for exact admission and receipt rules.
 
 If you change API/spec authority, update the authoritative root artifact in the
 same pull request as the implementation that makes it true.

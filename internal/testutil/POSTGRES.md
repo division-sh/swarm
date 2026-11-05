@@ -65,7 +65,7 @@ Run tests with an invocation-scoped DSN instead of a persistent shell export:
 
 ```bash
 SWARM_TEST_POSTGRES_DSN='host=127.0.0.1 port=5432 user=swarm_test password=swarm-test dbname=postgres sslmode=disable' \
-  go run ./cmd/swarm-test --full
+  go run ./cmd/swarm-test -- ./internal/testutil
 ```
 
 URL DSNs are equally supported:
@@ -111,22 +111,49 @@ Use port `55432` in `SWARM_TEST_POSTGRES_DSN`. Stop the dedicated instance with:
 
 ## Runner-Owned Docker
 
-When a dedicated host instance is not available, run the suite through the
-single-service owner:
+When a dedicated host instance is not available, omit the explicit DSN and use
+the runner-owned service path:
 
 ```bash
 go run ./cmd/swarm-test
-go run ./cmd/swarm-test --full
 ```
 
-The no-argument command runs the bounded local tier. `--full` runs every
-eligible non-soak root under the same single-service owner.
+The no-argument command is bounded core developer feedback, not full
+qualification. An explicitly selected `--full` plan includes both unchanged
+900-second backend soak cells as well as its other admitted roots; it is not a
+non-soak shortcut. Do not add a whole local tier to focused proof by default.
+See the [canonical runner runbook](../../cmd/swarm-test/README.md) for selected
+tiers, clean-source admission and receipts.
+
+The plan runner launches independent unit workers, not one suite-wide service.
+Without an explicit DSN, each ordinary test-command worker owns its disposable
+PostgreSQL service and passes that connection to its child tests. The parent
+holds no service or admission slot. State and passing test credit are not shared
+between workers; compilation products may be reused under the runner's source
+fences. Canonical local preflight is separate: it does not provision PostgreSQL
+or enter the shared native slot queue.
 
 The runner requires an already-running Docker daemon; it does not start Docker
-Desktop or Colima. It owns exactly one disposable container for the child
-command, uses tmpfs plus `fsync=off`, `synchronous_commit=off`, and
-`full_page_writes=off`, and tears the service down on every observable exit.
-Durable labeled state reconciles a service left by abrupt runner death.
+Desktop or Colima. Each owned service uses one disposable container for its child
+command, tmpfs plus `fsync=off`, `synchronous_commit=off`, and
+`full_page_writes=off`, with teardown on every observable exit. Durable labeled
+state reconciles a service left by abrupt runner death.
+
+### Worker Capacity
+
+Independent workers are bounded by observable host/container resources: at most
+four, with one unit per four effective CPUs and eight GiB RAM. Unknown or
+insufficient capacity falls back to one. An explicit shared
+`SWARM_TEST_POSTGRES_DSN` clamps the ceiling to one worker; the required 300
+server connections are an admission floor, not evidence of parallel headroom.
+
+`SWARM_TEST_RUN_SLOTS` may reduce the computed ceiling, not exceed it or resize
+an occupied host registry. Live wrappers must agree on the active capacity.
+Deliberately omit the shared DSN to use private per-worker services; the runner
+never silently replaces an explicit connection or changes server settings.
+These conservative bounds are not a throughput guarantee.
+
+### Service Ownership And Cleanup
 
 Each state root has a durable `owner-id`; service discovery remains daemon-wide
 by canonical name and management label, then partitions candidates by that owner
@@ -147,3 +174,23 @@ Direct package tests with no explicit DSN fail closed and point to this runner
 or the host setup above. If Docker is missing or unavailable, the runner points
 back to this guide and retains the underlying executable, socket, startup, or
 readiness error.
+
+## Additional Native-Proof Prerequisites
+
+Docker-owned test databases and native PostgreSQL proofs are different owners.
+Some selected proofs start native PostgreSQL to test retained sessions,
+possession or capacity. Those selections require native tools even when ordinary
+package tests use an explicit shared DSN or runner-owned Docker service.
+
+The runner resolves the binary directory from `TEST_POSTGRES_BIN`, or from
+`pg_config --bindir` when that selector is absent. It verifies executable
+`initdb` and `pg_ctl` before starting workers and uses the same resolved tools
+for serve's native probes. Missing tools fail preflight; they are not an excuse
+to skip required native roots or substitute Docker evidence.
+
+Native proofs also need a short writable scratch path for their Unix sockets.
+The runner checks socket geometry and scratch capacity before worker execution;
+an unusable path is not repaired by switching to another server. On server2,
+keep the worktree and a short `TMPDIR` on disk rather than its RAM-backed `/tmp`,
+as described in the runner runbook. These checks do not change the selected
+PostgreSQL server or its administrator-owned configuration.
