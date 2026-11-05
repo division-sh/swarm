@@ -29,14 +29,15 @@ type PackDescription struct {
 }
 
 type PackComponentDescription struct {
-	Scope        string                  `json:"scope"`
-	Directory    string                  `json:"directory"`
-	Source       string                  `json:"source"`
-	Version      string                  `json:"version"`
-	ManifestHash string                  `json:"manifest_hash"`
-	HasChannel   bool                    `json:"has_channel"`
-	Receive      *PackReceiveDescription `json:"receive,omitempty"`
-	Tools        []PackToolDescription   `json:"tools"`
+	Scope         string                  `json:"scope"`
+	Applicability string                  `json:"applicability"`
+	Directory     string                  `json:"directory"`
+	Source        string                  `json:"source"`
+	Version       string                  `json:"version"`
+	ManifestHash  string                  `json:"manifest_hash"`
+	HasChannel    bool                    `json:"has_channel"`
+	Receive       *PackReceiveDescription `json:"receive,omitempty"`
+	Tools         []PackToolDescription   `json:"tools"`
 }
 
 type PackReceiveDescription struct {
@@ -152,7 +153,11 @@ func buildPackDescription(ctx context.Context, loaded describePackContext, provi
 
 func packDescriptionComponent(provider packartifact.AdmittedProvider, source string) PackComponentDescription {
 	_, hasChannel := provider.Body(packmodel.BodyChannel)
-	return PackComponentDescription{Scope: provider.DeclaringFlow(), Directory: provider.Directory(), Source: source,
+	applicability := "installed declaration"
+	if provider.DeclaringFlow() != "" {
+		applicability = "captured declaration"
+	}
+	return PackComponentDescription{Scope: provider.DeclaringFlow(), Applicability: applicability, Directory: provider.Directory(), Source: source,
 		Version: provider.Metadata().Version, ManifestHash: manifesthash.FromBytes(provider.ManifestBody()).String(), HasChannel: hasChannel, Tools: []PackToolDescription{}}
 }
 
@@ -332,8 +337,14 @@ func completePackDescriptionRequirements(description *PackDescription) {
 		if component.Receive != nil && description.Project.Evaluated && !packComponentHasTarget(component, description.Project.Subjects) {
 			key := "target:" + component.Scope
 			if !seen[key] {
+				status := "not declared"
+				remediation := "add the receive block from `swarm describe pack " + description.ID + " --consume`"
+				if component.Source != "captured" {
+					status = "not effective (installed declaration)"
+					remediation = "inspect this project's captured component for bindings; author a holder from the selected provider directory before activation"
+				}
 				description.Project.Rows = append(description.Project.Rows, PackRequirementRow{Kind: "target", Name: description.ID,
-					Scope: component.Scope, Status: "not declared", Remediation: "add the receive block from `swarm describe pack " + description.ID + " --consume`"})
+					Scope: component.Scope, Status: status, Remediation: remediation})
 				seen[key] = true
 			}
 		}
@@ -345,15 +356,17 @@ func completePackDescriptionRequirements(description *PackDescription) {
 }
 
 func packComponentHasTarget(component PackComponentDescription, subjects []packs.Subject) bool {
+	if component.Source != "captured" || component.Receive == nil {
+		return false
+	}
 	for _, subject := range subjects {
 		if subject.Kind != packs.SubjectProviderTrigger || subject.TriggerAdmission == nil || subject.TriggerAdmission.Pack == nil {
 			continue
 		}
-		if component.Source != "captured" {
-			return true
-		}
 		admission := subject.TriggerAdmission
-		if admission.FlowPath == component.Scope && admission.Pack.ManifestHash == component.Receive.Identity.ManifestHash {
+		identity := component.Receive.Identity
+		if admission.FlowPath == component.Scope && admission.Pack.ID == identity.ID && admission.Pack.Version == identity.Version &&
+			admission.Pack.ManifestHash == identity.ManifestHash && admission.Pack.Provenance == identity.Provenance {
 			return true
 		}
 	}
