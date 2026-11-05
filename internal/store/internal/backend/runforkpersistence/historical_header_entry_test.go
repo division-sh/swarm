@@ -78,6 +78,7 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 					Fields: map[string]any{}, Bookkeeping: map[string]any{"stage_entry": entry},
 					Accumulator: engine.NewStateCarrier(nil, buckets).PersistedStateBuckets(),
 					MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+						Life:         construction.State.Life,
 						Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 						Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: path, FlowTemplate: flow, EntityType: entityType, Mode: mode, InstanceKey: instanceKey, StageDefined: true,

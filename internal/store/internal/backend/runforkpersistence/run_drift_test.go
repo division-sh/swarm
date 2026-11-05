@@ -26,7 +26,7 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 	for _, query := range []string{
 		fmt.Sprintf(`CREATE TABLE entity_mutations(mutation_id TEXT PRIMARY KEY,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,new_value %s,created_at TIMESTAMP)`, jsonType),
 		fmt.Sprintf(`CREATE TABLE entity_state(run_id TEXT,entity_id %s,fields %s,flow_instance TEXT,entity_type TEXT,PRIMARY KEY(run_id,entity_id))`, entityIDType, jsonType),
-		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id %s,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, entityIDType, jsonType, jsonType),
+		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id %s,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',life INTEGER NOT NULL DEFAULT 1 CHECK (life > 0),PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, entityIDType, jsonType, jsonType),
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)
@@ -359,7 +359,7 @@ func TestVerifyRunSnapshotIsolationBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			added := uuid.NewString()
-			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,NULL,'worker','done',1,'{}','{}','terminated')`, run, added, added); err != nil {
+			if _, err := writer.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,NULL,'worker','done',1,'{}','{}','terminated',1)`, run, added, added); err != nil {
 				t.Fatal(err)
 			}
 			for _, row := range []runForkRevisionEntityMutation{
