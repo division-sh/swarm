@@ -462,11 +462,19 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 		return followDiagnosticTraceCommand(ctx, out, errOut, client, runID, opts, traceParams)
 	}
 	traceParams["run_id"] = runID
+	instance, err := readDiagnosticTraceInstance(ctx, client, traceParams)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
+	}
 	if opts.deliverySummary {
 		result, err := fetchDiagnosticRunTraceSummary(ctx, client, traceParams)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 		}
+		if err := validateDiagnosticTraceInstance(ctx, client, traceParams, instance); err != nil {
+			return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
+		}
+		writeDiagnosticTraceInstance(out, instance)
 		writeDiagnosticRunTraceDeliverySummary(out, runID, result)
 		return nil
 	}
@@ -477,6 +485,10 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	if err := validateDiagnosticRunTraceResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
+	if err := validateDiagnosticTraceInstance(ctx, client, traceParams, instance); err != nil {
+		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
+	}
+	writeDiagnosticTraceInstance(out, instance)
 	writeDiagnosticRunTrace(out, runID, result, opts.deliveryDetail, opts.verbose)
 	return nil
 }
