@@ -14850,6 +14850,29 @@ flow_model:
         status: merge_bearing_supported_tooling
         implementation_tracker: '#1551'
         command: swarm describe
+        pack_inspection:
+          command: swarm describe pack [provider] [directory]
+          canonical_code_owner: internal/cliapp.PackDescription over admitted pack, trigger, connector and capability owners
+          rule: >
+            Bare listing reads the exact selected installed inventory without inventing a workflow or reading credentials.
+            A named provider exposes distinct installed and captured receive/send components with their exact scope,
+            version, manifest/BODY identity and source provenance. Provider and tool selectors are exact canonical IDs;
+            absent providers include candidates and selected search paths, without an additional discovery spine.
+            Human, JSON and YAML views consume one complete typed projection; a compact human overview does not truncate
+            the machine model. Raw events retain advanced-use guidance without inventing normalized fields.
+          project_readback: >
+            Outside a configured deployment, requirements name their keys and say not evaluated with an action.
+            With an admitted project, existing capability/credential owners evaluate each exact target/tool scope.
+            No global signing status, secret values, native channel activation or live-provider readiness is inferred.
+            Every requirement row includes its remediation or an explicit no-action explanation.
+          consume: >
+            --consume generates current authoring fragments from the same admitted descriptors. The receiver instance
+            is the declared author-subject field only when its type is chat; absent or other subject types omit instance
+            for the author to select. No heuristic, new pack field or routing policy is introduced. Current root/connect,
+            receiver schema/state and deliberately selected tool examples replace retired pin/import/instance_key syntax.
+            Webhook aliases retain their existing admitted-root/flow derivation, not an authored ingress/alias override.
+            Business placeholders are explicitly marked as requiring substitution, never claimed as runnable proof.
+          safety: Read-only metadata; no serve, credential write, model/provider/device call or executable admission.
         canonical_code_owner: internal/runtime/authoringview.Build + internal/cliapp describe
         rule: >
           The supported expanded authoring view is a projection over existing
@@ -44266,6 +44289,7 @@ filesystem_source_model:
       - swarm verify [directory]
       - swarm describe [directory]
       - swarm describe routes [directory]
+      - swarm describe pack [provider] [directory]
       - swarm test [directory] [scenario-label]
       - swarm run start [directory]
       - swarm serve [directory]

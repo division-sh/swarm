@@ -16,6 +16,11 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- `swarm describe pack` lists selected providers and describes their admitted
+  events, connector tools, provenance and target-scoped requirements. Tool detail
+  and consumption fragments share the same typed readback; credentials and live
+  readiness are not inferred from installed declarations. (#1963)
+
 - Directory-owned workflow/provider source and scoped captured declarations retain
   exact source roots and artifacts through restart and fork recovery. This is the
   local pack-source model, not a hosted Hive registry. (#2791)
