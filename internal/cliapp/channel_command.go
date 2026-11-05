@@ -372,6 +372,14 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if (opts.verb == "connect" || opts.verb == "rebind") && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
 		return returnCLIValidationError(errOut, errors.New("channel account confirmation requires a terminal or --yes"))
 	}
+	if !opts.yes {
+		input, closeInput, err := channelConfirmationReader(ctx, opts.apiOptions.input)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		opts.apiOptions.input = input
+		defer func() { resultErr = errors.Join(resultErr, closeInput()) }()
+	}
 	bundleHash := ""
 	if opts.sourceSet {
 		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
@@ -455,7 +463,7 @@ func finishChannelOnboarding(ctx context.Context, client channelControlClient, b
 	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
 
-func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID string, opts channelConnectOptions) error {
+func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID string, opts channelConnectOptions) (resultErr error) {
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -498,6 +506,14 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		}
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
+	}
+	if !opts.yes {
+		input, closeInput, err := channelConfirmationReader(ctx, opts.apiOptions.input)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+		opts.apiOptions.input = input
+		defer func() { resultErr = errors.Join(resultErr, closeInput()) }()
 	}
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
@@ -734,7 +750,7 @@ func confirmCLIAccountPreview(ctx context.Context, client channelControlClient, 
 	fmt.Fprintf(out, "Linked to %s\n", label)
 	approve := opts.yes
 	if !approve {
-		approve, err = confirmChannelAccount(opts.apiOptions.input, errOut, "Is this the right account? [y/N] ")
+		approve, err = confirmChannelAccount(ctx, opts.apiOptions.input, errOut, "Is this the right account? [y/N] ")
 		if err != nil {
 			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
 		}
@@ -788,7 +804,7 @@ func confirmChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	approve := opts.yes
 	var err error
 	if !approve {
-		approve, err = confirmChannelAccount(opts.apiOptions.input, errOut, "Make them the operator? [y/N] ")
+		approve, err = confirmChannelAccount(ctx, opts.apiOptions.input, errOut, "Make them the operator? [y/N] ")
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -961,7 +977,10 @@ func channelOperationRenderers(result channelOperationEnvelope, packID string) (
 	return human, quiet
 }
 
-func confirmChannelAccount(input io.Reader, out io.Writer, prompt string) (bool, error) {
+func confirmChannelAccount(ctx context.Context, input io.Reader, out io.Writer, prompt string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if input == nil {
 		input = strings.NewReader("")
 	}
@@ -971,6 +990,9 @@ func confirmChannelAccount(input io.Reader, out io.Writer, prompt string) (bool,
 		reader = bufio.NewReader(input)
 	}
 	line, err := reader.ReadString('\n')
+	if cancelled := ctx.Err(); cancelled != nil {
+		return false, cancelled
+	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("read claimant confirmation: %w", err)
 	}
