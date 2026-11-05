@@ -31068,6 +31068,12 @@ cli_specification:
           a prior life is finished, so there is nothing to follow. The API subscription retains the same typed
           iter/entity filter without changing its existing stream lifecycle. Prior-life reads use retained rows;
           no header/state-row redesign or prior-life children selector is introduced.
+          A finite single-entity snapshot/summary composes entity.get for life/start-date presentation, with
+          the same exact run/entity and unchanged explicit iter. With iter omitted, current metadata reads
+          bracket the entire finite fetch including every summary page; the exact run/entity/instance, positive
+          life and retained start date must still agree before any output. Changed or unreadable metadata
+          fails read validation, without retry, hidden iter, inferred date or a new response field. This does
+          not apply a stream-wide currentness promise to follow mode.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
         - default trace requests omit include_internal or send false and the API excludes platform.runtime_log; --verbose sends include_internal=true and reveals platform.runtime_log through the API owner
