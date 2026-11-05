@@ -28,7 +28,7 @@ const debtCatalogRuntimeRowsLandedCollectorTo = "1edc5bbde2f1f4200e4b602fb4433e1
 const debtR77PrivateBridgeCollectorTo = "d8059d3ac96421566df4aff1af56127405a60a42332190a0709808f048ebba6a"
 const debtR83FixtureCollectorTo = "daac35b1f038526dbee85cf3e3d6f33015b67c78e8a6f48ace29599f1fc859e7"
 const debtPortableRuntimeRoleCollectorTo = "e48fdea1e811e0b54f246422b22c9b4344a70dc4d92ccf390293a022cd296c06"
-const debtPortableGlobalRoleCollectorTo = "1e4c8857b9ee254e6cd8c01625ce22050fdb07a8ee40dd3d4eb1040dd5726edd"
+const debtPortableGlobalRoleCollectorTo = "8aabc537964b3cbd12f463c9c8d909d6dae5d7f62d024d272e915d323bca31d4"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -47,6 +47,40 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("portable-global-signatures", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := debtPortableGlobalSignatureTransitions()
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+			if pair[0].Kind != pair[1].Kind || pair[0].Family != pair[1].Family || pair[0].Replacement != pair[1].Replacement || pair[0].Multiplicity != pair[1].Multiplicity {
+				t.Fatal("portable global correspondence changed counted family or ownership")
+			}
+		}
+		if len(before) != 308 || len(after) != 308 || authorityDebtCount(before) != 311 || authorityDebtCount(after) != 311 {
+			t.Fatal("portable global comparison must preserve 308 identities and 311 occurrences")
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse portable global correspondence admitted")
+		}
+		for _, pair := range pairs {
+			for _, landed := range []bool{false, true} {
+				t.Run(pair[0].File+"/"+pair[0].Declaration+"/"+pair[0].Operation+map[bool]string{false: "/forward", true: "/landed"}[landed], func(t *testing.T) {
+					debtRunFixtureSignatureHostileControls(t, pair, before, after, landed)
+				})
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("portable global comparison mutated its inputs")
+		}
+	})
 	t.Run("portable-runtime-signatures", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		pairs := debtPortableRuntimeSignatureTransitions()
