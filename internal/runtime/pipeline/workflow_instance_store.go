@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1243,6 +1244,14 @@ func (c WorkflowInstanceRecordedHeader) WorkflowVersion() string {
 func (c WorkflowInstanceRecordedHeader) ParentRoute() runtimeflowidentity.ParentRoute {
 	control := c.projection.Control
 	return runtimeflowidentity.ParentRoute{FlowID: control.ParentFlowID, FlowInstance: control.ParentFlowInstance, EntityID: control.ParentEntityID}
+}
+
+// Status is owned by the authoritative header column. Its optional redundant
+// config spelling may be absent on the original construction record.
+func (c WorkflowInstanceRecordedHeader) SameRestartControl(other WorkflowInstanceRecordedHeader) bool {
+	left, right := c.projection.Control, other.projection.Control
+	left.Status, right.Status = "", ""
+	return reflect.DeepEqual(left, right)
 }
 
 func (c WorkflowInstanceRecordedHeader) Project(route runtimeflowidentity.Route, parent runtimeflowidentity.ParentRoute, workflowVersion string) ([]byte, error) {

@@ -198,6 +198,10 @@ func sameWorkflowEngineTimerCancellationTarget(left, right runtimepipeline.Workf
 }
 
 func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, expected timeridentity.WorkflowTimerActivationRef) (runtimepipeline.WorkflowTimerActivation, bool, error) {
+	return readWorkflowEngineTimerActivation(ctx, tx, postgres, expected, true)
+}
+
+func readWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, expected timeridentity.WorkflowTimerActivationRef, lock bool) (runtimepipeline.WorkflowTimerActivation, bool, error) {
 	expected = expected.Normalize()
 	activationID := expected.ActivationID
 	if !expected.Valid() {
@@ -215,7 +219,10 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 	`
 	args := []any{activationID}
 	if postgres {
-		query = strings.Replace(query, "timer_id = ?", "timer_id = $1::uuid", 1) + " FOR UPDATE"
+		query = strings.Replace(query, "timer_id = ?", "timer_id = $1::uuid", 1)
+		if lock {
+			query += " FOR UPDATE"
+		}
 	}
 	var (
 		taskID, interval, status                                                                            string

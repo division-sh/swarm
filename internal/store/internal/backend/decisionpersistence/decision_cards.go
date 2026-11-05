@@ -1080,6 +1080,18 @@ func (s *DecisionSQLiteOwner) LoadByActivationTx(ctx context.Context, attempt *m
 	})
 }
 
+func (s *DecisionPostgresOwner) ReadByActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, entityID, activationID string) (decisioncard.Card, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
+		return readDecisionCardByActivation(txctx, tx, runID, entityID, activationID, true, false)
+	})
+}
+
+func (s *DecisionSQLiteOwner) ReadByActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, entityID, activationID string) (decisioncard.Card, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
+		return readDecisionCardByActivation(txctx, tx, runID, entityID, activationID, false, false)
+	})
+}
+
 func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
 	if story == nil {
 		return false, fmt.Errorf("decision card supersession requires private story ownership")
@@ -1379,6 +1391,10 @@ func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.
 }
 
 func loadDecisionCardByActivation(ctx context.Context, db decisionCardSQL, runID, entityID, activationID string, postgres bool) (decisioncard.Card, error) {
+	return readDecisionCardByActivation(ctx, db, runID, entityID, activationID, postgres, true)
+}
+
+func readDecisionCardByActivation(ctx context.Context, db decisionCardSQL, runID, entityID, activationID string, postgres, lock bool) (decisioncard.Card, error) {
 	query := decisionCardSelect + ` WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND json_extract(anchor, '$.stage_activation_id') = ?`
 	args := []any{entityID, activationID}
 	if strings.TrimSpace(runID) != "" {
@@ -1388,7 +1404,10 @@ func loadDecisionCardByActivation(ctx context.Context, db decisionCardSQL, runID
 	if postgres {
 		query = strings.ReplaceAll(query, "json_extract(anchor, '$.entity_id')", "anchor->>'entity_id'")
 		query = strings.ReplaceAll(query, "json_extract(anchor, '$.stage_activation_id')", "anchor->>'stage_activation_id'")
-		query = numberPostgresPlaceholders(strings.ReplaceAll(query, "?", "$%d")) + ` FOR UPDATE`
+		query = numberPostgresPlaceholders(strings.ReplaceAll(query, "?", "$%d"))
+		if lock {
+			query += ` FOR UPDATE`
+		}
 	}
 	return scanDecisionCard(db.QueryRowContext(ctx, query, args...))
 }

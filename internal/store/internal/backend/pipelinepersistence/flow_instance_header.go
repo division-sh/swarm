@@ -216,11 +216,30 @@ func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres b
 }
 
 func requireHistoricalWorkflowDescriptor(lifecycle pipeline.WorkflowLifecycleCompanionPersistenceRecord, expected pipeline.WorkflowEngineStateRecord) error {
-	if lifecycle.WorkflowName != expected.WorkflowName || lifecycle.WorkflowVersion != expected.WorkflowVersion ||
-		lifecycle.ParentInstance != expected.ParentInstance || lifecycle.InstanceKey != expected.InstanceKey ||
-		lifecycle.Mode != expected.Mode || lifecycle.Status != expected.Status || lifecycle.StageDefined != expected.StageDefined ||
-		!lifecycle.TerminatedAt.Equal(expected.TerminatedAt) || !workflowCommitJSONEqual(lifecycle.Config, expected.Config) {
+	if !sameWorkflowDescriptor(lifecycle, expected) || !workflowCommitJSONEqual(lifecycle.Config, expected.Config) {
 		return fmt.Errorf("historical workflow header %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
+	}
+	return nil
+}
+
+func sameWorkflowDescriptor(lifecycle pipeline.WorkflowLifecycleCompanionPersistenceRecord, expected pipeline.WorkflowEngineStateRecord) bool {
+	return lifecycle.WorkflowName == expected.WorkflowName && lifecycle.WorkflowVersion == expected.WorkflowVersion &&
+		lifecycle.ParentInstance == expected.ParentInstance && lifecycle.InstanceKey == expected.InstanceKey &&
+		lifecycle.Mode == expected.Mode && lifecycle.Status == expected.Status && lifecycle.StageDefined == expected.StageDefined &&
+		lifecycle.TerminatedAt.Equal(expected.TerminatedAt)
+}
+
+func requireRestartWorkflowDescriptor(lifecycle pipeline.WorkflowLifecycleCompanionPersistenceRecord, expected pipeline.WorkflowEngineStateRecord) error {
+	actual, err := pipeline.DecodeWorkflowInstanceRecordedHeader(expected.Identity.Route, lifecycle.Config)
+	if err != nil {
+		return err
+	}
+	want, err := pipeline.DecodeWorkflowInstanceRecordedHeader(expected.Identity.Route, expected.Config)
+	if err != nil {
+		return err
+	}
+	if !sameWorkflowDescriptor(lifecycle, expected) || !actual.SameRestartControl(want) {
+		return fmt.Errorf("instance restart changed its exact physical descriptor")
 	}
 	return nil
 }
