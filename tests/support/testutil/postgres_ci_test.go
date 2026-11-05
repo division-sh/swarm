@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,7 +76,7 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 			t.Fatalf("job %s does not consume the canonical Postgres runner", jobName)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "internal", "testutil", "start-postgres-ci.sh")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "tests", "support", "testutil", "start-postgres-ci.sh")); !os.IsNotExist(err) {
 		t.Fatalf("legacy CI launcher survives: %v", err)
 	}
 }
@@ -92,7 +92,7 @@ func TestCanonicalTestRunnerHasNoRemovedBinaryAlias(t *testing.T) {
 		t.Fatalf("removed test runner alias survives: %v", err)
 	}
 	oldReference := filepath.ToSlash(oldRel)
-	for _, rel := range []string{"README.md", "CONTRIBUTING.md", ".github/workflows/ci.yml", "internal/testutil/POSTGRES.md"} {
+	for _, rel := range []string{"README.md", "CONTRIBUTING.md", ".github/workflows/ci.yml", "tests/support/testutil/POSTGRES.md"} {
 		raw, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {
 			t.Fatal(err)
@@ -146,7 +146,7 @@ func postgresEnvironmentAuthorityViolations(root string) ([]string, error) {
 				violations = append(violations, fmt.Sprintf("manual Postgres DSN interpreter %q survives in %s", fragment, rel))
 			}
 		}
-		if isProduction && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
+		if isProduction && filepath.ToSlash(rel) != "tests/support/testpostgres/connection.go" {
 			file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
 			if err != nil {
 				return err
@@ -240,7 +240,7 @@ func OpenPostgresReadOnly() { native.NewConfig() }
 				source = strings.Replace(source, `import native "github.com/lib/pq"`, "import (native \"github.com/lib/pq\"; \"os\")", 1)
 			}
 			if strings.Contains(source, "testpostgres.ParseConnection") {
-				source = strings.Replace(source, `import native "github.com/lib/pq"`, "import (native \"github.com/lib/pq\"; \"github.com/division-sh/swarm/internal/testpostgres\")", 1)
+				source = strings.Replace(source, `import native "github.com/lib/pq"`, "import (native \"github.com/lib/pq\"; \"github.com/division-sh/swarm/tests/support/testpostgres\")", 1)
 			}
 			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
 			if err != nil {
@@ -309,7 +309,7 @@ func postgresSourceAuthorityViolations(file *ast.File) []string {
 		if aliases[pkg.Name] == "os" && selector.Sel.Name == "Getenv" && len(call.Args) == 1 && postgresSourceExpression(call.Args[0]) {
 			violations = append(violations, "competing SWARM_TEST_POSTGRES_DSN reader")
 		}
-		if aliases[pkg.Name] == "github.com/division-sh/swarm/internal/testpostgres" && selector.Sel.Name == "ParseConnection" {
+		if aliases[pkg.Name] == "github.com/division-sh/swarm/tests/support/testpostgres" && selector.Sel.Name == "ParseConnection" {
 			violations = append(violations, "competing Postgres source parser")
 		}
 		return true
@@ -333,7 +333,7 @@ func postgresSourceExpression(expression ast.Expr) bool {
 
 func TestPostgresContributorGuideIsCanonicalAndQuarantined(t *testing.T) {
 	root := testRepoRoot(t)
-	guidePath := filepath.Join(root, "internal", "testutil", "POSTGRES.md")
+	guidePath := filepath.Join(root, "tests", "support", "testutil", "POSTGRES.md")
 	violations, err := postgresContributorGuideViolations(guidePath)
 	if err != nil {
 		t.Fatalf("read POSTGRES.md: %v", err)
@@ -345,7 +345,7 @@ func TestPostgresContributorGuideIsCanonicalAndQuarantined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read CONTRIBUTING.md: %v", err)
 	}
-	if !strings.Contains(string(contributing), "internal/testutil/POSTGRES.md") {
+	if !strings.Contains(string(contributing), "tests/support/testutil/POSTGRES.md") {
 		t.Fatal("CONTRIBUTING.md does not link canonical Postgres test guide")
 	}
 	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
@@ -408,7 +408,7 @@ func postgresContributorGuideViolations(path string) ([]string, error) {
 }
 
 func TestPostgresContributorGuideGuardRejectsCapacityDrift(t *testing.T) {
-	guide, err := os.ReadFile(filepath.Join(testRepoRoot(t), "internal", "testutil", "POSTGRES.md"))
+	guide, err := os.ReadFile(filepath.Join(testRepoRoot(t), "tests", "support", "testutil", "POSTGRES.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

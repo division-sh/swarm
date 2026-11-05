@@ -16,8 +16,8 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/stagecatalogfixture"
 )
 
 const semanticRunFixtureFlow = "semantic-run-fixture"

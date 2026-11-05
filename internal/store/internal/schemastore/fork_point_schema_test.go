@@ -9,8 +9,8 @@ import (
 	"time"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 

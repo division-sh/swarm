@@ -9,7 +9,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 type releaseAcknowledgementTestStore interface {

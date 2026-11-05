@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 )
 
 // RequireCorruptRunSnapshot is reserved for hostile persisted-state tests

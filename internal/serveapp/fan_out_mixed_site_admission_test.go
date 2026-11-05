@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 // Invariant: native MockOnly startup refuses competing handler emit sites

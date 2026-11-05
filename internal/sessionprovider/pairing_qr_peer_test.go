@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/whatsappfixture"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types"

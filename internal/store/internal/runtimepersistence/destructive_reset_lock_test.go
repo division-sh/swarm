@@ -3,7 +3,7 @@ package runtimepersistence
 import (
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func TestPostgresStore_AcquireDestructiveResetSerializesOperationLease(t *testing.T) {

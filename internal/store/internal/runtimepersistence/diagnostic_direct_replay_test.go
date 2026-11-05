@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
 

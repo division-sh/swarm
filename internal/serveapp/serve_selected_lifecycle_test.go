@@ -13,7 +13,7 @@ import (
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 type observedTerminalJoinContext struct {

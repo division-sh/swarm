@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {

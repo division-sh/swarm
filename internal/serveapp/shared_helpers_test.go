@@ -12,8 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
 func freeDoctorTCPPort(t *testing.T) string {

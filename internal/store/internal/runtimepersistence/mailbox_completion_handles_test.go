@@ -11,7 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	privateidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
 

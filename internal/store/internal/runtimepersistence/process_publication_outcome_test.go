@@ -14,7 +14,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	storeownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	modernc "modernc.org/sqlite"

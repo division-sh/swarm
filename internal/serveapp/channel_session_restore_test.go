@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
-	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/whatsappfixture"
 	"github.com/google/uuid"
 )
 

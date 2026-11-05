@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 // StartPostgresRuntimeStore constructs one admitted native owner without

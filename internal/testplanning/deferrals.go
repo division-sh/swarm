@@ -64,7 +64,7 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestShopifyLocalProviderToolSmoke":                               "opt-in Shopify provider-tool proof",
 		"TestTypeformManualLiveHTTPSWebhookSmoke":                         "opt-in Typeform live webhook proof",
 	},
-	"internal/testpostgres": {
+	"tests/support/testpostgres": {
 		"TestManagerCreateBeforeMetadataCrashHelper":           "subprocess entry point, not a standalone proof",
 		"TestManagerTemplateCloneProcessHelper":                "subprocess entry point, not a standalone proof",
 		"TestSwarmTestDockerRunnersQueueBeforeSecondProvision": "unwrapped Docker runner topology only",
@@ -76,7 +76,7 @@ func deferredRootReason(unit ProofUnit, root TestRoot, build BuildContext) (reas
 		switch root.Package + "\x00" + root.Name {
 		case "github.com/division-sh/swarm/cmd/swarm-test-changed\x00TestFullSuiteFallbackExecutesCanonicalWrapper":
 			return "Unix-only shell probe", false
-		case "github.com/division-sh/swarm/internal/testpostgres\x00TestRunAndServiceLeasesAttachExactAuthorityToChild":
+		case "github.com/division-sh/swarm/tests/support/testpostgres\x00TestRunAndServiceLeasesAttachExactAuthorityToChild":
 			return "Unix-only process authority proof", false
 		}
 	}

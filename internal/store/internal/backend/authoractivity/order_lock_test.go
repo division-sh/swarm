@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 )
 
 func postgresOrderFixture(t *testing.T) *sql.DB {

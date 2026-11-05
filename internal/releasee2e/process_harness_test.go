@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testplanning"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func buildReleaseBinary(t *testing.T, outputRoot string) string {

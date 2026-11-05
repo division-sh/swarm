@@ -9,7 +9,7 @@ import (
 
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/lib/pq"
 )
 

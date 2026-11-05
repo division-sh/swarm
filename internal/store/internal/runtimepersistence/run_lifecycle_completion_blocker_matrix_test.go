@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegates "github.com/division-sh/swarm/internal/runtime/gateruntime"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 

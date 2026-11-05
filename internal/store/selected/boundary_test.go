@@ -183,7 +183,7 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
 	insideStore := strings.HasPrefix(path, "internal/store/")
-	insideTestSupport := strings.HasPrefix(path, "internal/testutil/") || strings.HasPrefix(path, "internal/testpostgres/")
+	insideTestSupport := strings.HasPrefix(path, "tests/support/testutil/") || strings.HasPrefix(path, "tests/support/testpostgres/")
 
 	var tokens []string
 	if strings.HasPrefix(path, "internal/serveapp/") {

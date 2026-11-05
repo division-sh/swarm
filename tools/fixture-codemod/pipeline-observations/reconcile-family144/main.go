@@ -93,7 +93,7 @@ var files = []string{
 	"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go",
 	"internal/store/internal/runtimepersistence/source_artifact_selected_store_parity_test.go",
 	"internal/store/internal/runtimepersistence/sqlite_run_api_read_surface_test.go",
-	"internal/testutil/runlifecyclefixture/fixture.go",
+	"tests/support/testutil/runlifecyclefixture/fixture.go",
 }
 var renamed = map[string]string{
 	"TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter":                 "VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest",

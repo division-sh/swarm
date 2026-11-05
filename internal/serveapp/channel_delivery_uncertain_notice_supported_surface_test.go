@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/telegramapi"
+	"github.com/division-sh/swarm/tests/support/testutil/telegramapi"
 	"github.com/google/uuid"
 )
 

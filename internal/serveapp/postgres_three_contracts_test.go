@@ -17,7 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
-	"github.com/division-sh/swarm/internal/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 // This private, fsync-enabled cluster is the only server these outage probes

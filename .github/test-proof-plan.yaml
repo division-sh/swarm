@@ -22,7 +22,7 @@ special_packages:
 - github.com/division-sh/swarm/internal/serveapp
 - github.com/division-sh/swarm/internal/store
 - github.com/division-sh/swarm/internal/testcatalog
-- github.com/division-sh/swarm/internal/testpostgres
+- github.com/division-sh/swarm/tests/support/testpostgres
 - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
 - github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations
 profiles:
@@ -1157,7 +1157,7 @@ units:
   store-admission-full:
     packages:
       - github.com/division-sh/swarm/internal/store
-      - github.com/division-sh/swarm/internal/testpostgres
+      - github.com/division-sh/swarm/tests/support/testpostgres
     # Positive RE2 complement: the census unit owns the two exact scan roots.
     run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$'
     count_mode: count-1

@@ -13,8 +13,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 func seedCapturedProviderTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, source semanticview.Source, runID, entityID, flowInstance, slug, provider, secret, agentID string) (context.Context, runtimepkg.InboundTarget) {

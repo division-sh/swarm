@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 )
 
 // AttemptCorruptPostgresSnapshotForTest materializes hostile persisted state

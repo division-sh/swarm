@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testpostgres"
-	"github.com/division-sh/swarm/internal/testutil/testprocess"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
+	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
 )
 
 func TestParseTestArgs(t *testing.T) {
-	if got, err := parseTestArgs([]string{"--", "./internal/testpostgres", "-count=1"}); err != nil || strings.Join(got, " ") != "./internal/testpostgres -count=1" {
+	if got, err := parseTestArgs([]string{"--", "./tests/support/testpostgres", "-count=1"}); err != nil || strings.Join(got, " ") != "./tests/support/testpostgres -count=1" {
 		t.Fatalf("focused selection = %v err=%v", got, err)
 	}
 	for _, args := range [][]string{nil, {"go", "test", "./..."}, {"--"}, {"--", "./..."}} {

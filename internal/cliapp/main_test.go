@@ -28,9 +28,9 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/requiredagentsparentconnect"
+	"github.com/division-sh/swarm/tests/support/testpostgres"
 )
 
 func chdirForTest(t *testing.T, dir string) {

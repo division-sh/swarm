@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 func serveExecutionContextForTest(t *testing.T) runtime.BundleContext {

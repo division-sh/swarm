@@ -696,7 +696,7 @@ jobs:
           test "$(go env GOOS)" = darwin
           test "$(git rev-parse HEAD)" = "$PROOF_SHA"
           printf 'Darwin hard-kill helper proof: source=%s arch=%s\n' "$PROOF_SHA" "$(go env GOARCH)"
-          go test ./internal/testutil/testprocess -run '^TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval$/^false$/^kill$' -count=1 -timeout=30s -v | tee "$RUNNER_TEMP/darwin-testprocess-hard-kill.log"
+          go test ./tests/support/testutil/testprocess -run '^TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval$/^false$/^kill$' -count=1 -timeout=30s -v | tee "$RUNNER_TEMP/darwin-testprocess-hard-kill.log"
           grep -Fq -- '--- PASS: TestParentDeathTerminatesHelperAndCeasesWritesBeforeRemoval/false/kill (' "$RUNNER_TEMP/darwin-testprocess-hard-kill.log"
           printf 'Darwin hard-kill helper proof PASS at `%s`.\n' "$PROOF_SHA" >> "$GITHUB_STEP_SUMMARY"
 
@@ -916,9 +916,9 @@ jobs:
       - name: Prove explicit Postgres opt-in selector
         run: go run ./cmd/swarm-test -- ./internal/serveapp -run '^TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction$' -count=1 -v
       - name: Prove runner-owned Docker service
-        run: go run ./cmd/swarm-test -- ./internal/testutil -run '^TestStartPostgres_Smoke$' -count=1
+        run: go run ./cmd/swarm-test -- ./tests/support/testutil -run '^TestStartPostgres_Smoke$' -count=1
       - name: Prove real Docker queue before second provisioning
-        run: go test ./internal/testpostgres -run '^TestSwarmTestDockerRunnersQueueBeforeSecondProvision$' -count=1 -v
+        run: go test ./tests/support/testpostgres -run '^TestSwarmTestDockerRunnersQueueBeforeSecondProvision$' -count=1 -v
       - name: Prove runner failure, interrupt, and hard-death reconciliation
         shell: bash
         run: |
@@ -926,13 +926,13 @@ jobs:
           runner="$RUNNER_TEMP/swarm-test"
           go build -o "$runner" ./cmd/swarm-test
           set +e
-          SWARM_TEST_PROCESS_FIXTURE_FAIL=1 "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1; child_status=$?
+          SWARM_TEST_PROCESS_FIXTURE_FAIL=1 "$runner" -- ./tests/support/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1; child_status=$?
           set -e
           test "$child_status" -eq 1
           for signal in INT TERM; do
             expected=130; if [ "$signal" = TERM ]; then expected=143; fi
             signal_pid="$RUNNER_TEMP/${signal,,}.pid"
-            SWARM_TEST_PROCESS_FIXTURE_PID="$signal_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
+            SWARM_TEST_PROCESS_FIXTURE_PID="$signal_pid" "$runner" -- ./tests/support/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
             for _ in $(seq 1 120); do test -s "$signal_pid" && break; sleep 0.25; done
             kill -"$signal" "$runner_pid"
             set +e; wait "$runner_pid"; signal_status=$?; set -e
@@ -940,15 +940,15 @@ jobs:
             signal_child=$(cat "$signal_pid")
             for _ in $(seq 1 120); do ! kill -0 "$signal_child" 2>/dev/null && break; sleep 0.25; done
             ! kill -0 "$signal_child" 2>/dev/null
-            "$runner" -- ./internal/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1
+            "$runner" -- ./tests/support/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1
             test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
           done
           hard_pid="$RUNNER_TEMP/hard.pid"
-          SWARM_TEST_PROCESS_FIXTURE_PID="$hard_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
+          SWARM_TEST_PROCESS_FIXTURE_PID="$hard_pid" "$runner" -- ./tests/support/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
           for _ in $(seq 1 120); do test -s "$hard_pid" && break; sleep 0.25; done
           kill -KILL "$runner_pid"; wait "$runner_pid" || true
           contender_log="$RUNNER_TEMP/hard-contender.log"
-          "$runner" -- ./internal/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1 >"$contender_log" 2>&1 & contender_pid=$!
+          "$runner" -- ./tests/support/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1 >"$contender_log" 2>&1 & contender_pid=$!
           for _ in $(seq 1 120); do grep -q 'Test capacity is busy.' "$contender_log" && break; sleep 0.25; done
           grep -q 'Test capacity is busy.' "$contender_log"
           kill -0 "$contender_pid"
