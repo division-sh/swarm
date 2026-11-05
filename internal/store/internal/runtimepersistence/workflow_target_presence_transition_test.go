@@ -177,8 +177,18 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restarta
 		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  active: {}", "  active:\n    timers:\n      - {after: 1h, emit: timer.elapsed}", 1)
 		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  done: {}", "  done: {final: true}", 1)
 		documents["review/events.yaml"] += "timer.elapsed:\ntask.started:\n"
+		documents["review/agents.yaml"] = "reviewer:\n  model: regular\n  memory: true\n  intent: {inline: Review the task.}\n  subscriptions: [task.started]\n"
 	}
-	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, withAgents, documents, nil)
+	var f receiverConfigActivationFixture
+	if withAgents {
+		scheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t))
+		t.Cleanup(scheduler.Stop)
+		f = newReceiverConfigActivationFixtureWithOwnership(t, backend, false, documents, nil, ownStoreTestAgentManager, func(options *runtimepipeline.PipelineCoordinatorOptions) {
+			options.TimerScheduler = scheduler
+		})
+	} else {
+		f = newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
+	}
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))
 	f.constructKeylessRoot(t)
 	runID := runtimecorrelation.RunIDFromContext(f.ctx)
