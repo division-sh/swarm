@@ -65,15 +65,3 @@ func normalizePlatformEventFieldType(raw string) (string, string) {
 	}
 	return raw, ""
 }
-
-func sortedEventFieldNames(fields map[string]EventFieldSpec) []string {
-	names := make([]string, 0, len(fields))
-	for name := range fields {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}

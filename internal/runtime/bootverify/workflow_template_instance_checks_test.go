@@ -101,12 +101,3 @@ tags: [text]
 		})
 	}
 }
-
-func mustBootverifyTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
-	t.Helper()
-	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
-	if err != nil {
-		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
-	}
-	return field
-}
