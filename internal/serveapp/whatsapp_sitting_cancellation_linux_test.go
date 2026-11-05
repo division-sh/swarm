@@ -185,8 +185,11 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				select {
 				case pairing := <-qr:
 					peer.pair(pairing.Pairing.Code)
+				case code := <-done:
+					joined = true
+					t.Fatalf("connect exited before synthetic pairing: exit=%d err=%s", code, errOut.String())
 				case <-ctx.Done():
-					t.Fatal("connect did not reach synthetic pairing")
+					t.Fatalf("connect did not reach synthetic pairing: %s", errOut.String())
 				}
 				select {
 				case <-prompts:
