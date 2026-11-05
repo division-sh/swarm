@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 )
@@ -9,6 +10,11 @@ import (
 // Requires a coordinated >=35m package budget for both stores. Rolling waves
 // retain at least22 durable unfinished intents for the full15m before draining.
 func TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores(t *testing.T) {
+	previousLogLevel := slog.SetLogLoggerLevel(slog.LevelDebug)
+	t.Cleanup(func() {
+		slog.SetLogLoggerLevel(previousLogLevel)
+		t.Logf("fan_out_fold_clock restored_debug_enabled=%t previous=%s", slog.Default().Enabled(t.Context(), slog.LevelDebug), previousLogLevel)
+	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) { proveSupplementalPressureSoak(t, backend, 22, 15*time.Minute, time.Second) })
 	}
@@ -17,6 +23,11 @@ func TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores(t *testing.T) {
 // Sparse staged arrivals are a recovery control, not22-concurrent-intent soak
 // evidence. Keep the previously qualified finite control distinct.
 func TestIssue2394SupplementalSoakFiniteProbeBothStores(t *testing.T) {
+	previousLogLevel := slog.SetLogLoggerLevel(slog.LevelDebug)
+	t.Cleanup(func() {
+		slog.SetLogLoggerLevel(previousLogLevel)
+		t.Logf("fan_out_fold_clock restored_debug_enabled=%t previous=%s", slog.Default().Enabled(t.Context(), slog.LevelDebug), previousLogLevel)
+	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) { proveSupplementalStagedSoak(t, backend, 3, 2, 2200*time.Millisecond) })
 	}
