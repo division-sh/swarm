@@ -172,6 +172,13 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 	}
 	view.payload = clonePayload(payload)
 	view.deliveryContext = route.Context.Normalized()
+	if err := applyDeliveryTarget(&view, route); err != nil {
+		return DeliveryEvent{}, err
+	}
+	return DeliveryEvent{journal: event.Clone(), view: view}, nil
+}
+
+func applyDeliveryTarget(view *Event, route DeliveryRoute) error {
 	target := route.Target.Route()
 	if target.Empty() {
 		if life := view.deliveryContext.Life; life != nil {
@@ -180,19 +187,19 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 				path = route.AgentIdentity.RunID
 			}
 			if !route.Recipient.IsAgent() || life.RunID != view.RunID() || life.RunID != route.AgentIdentity.RunID || life.FlowInstance != path || life.Validate() != nil {
-				return DeliveryEvent{}, fmt.Errorf("targetless delivery life disagrees with its exact actor")
+				return fmt.Errorf("targetless delivery life disagrees with its exact actor")
 			}
 		}
 		view.setEnvelopeClaim(EnvelopeForBroadcast(view.NormalizedEnvelope()))
 	} else if !target.Empty() {
 		life := InstanceLife{RunID: view.RunID(), FlowInstance: target.FlowInstance, Life: route.Target.Life()}
 		if err := life.Validate(); err != nil {
-			return DeliveryEvent{}, err
+			return err
 		}
 		view.deliveryContext.Life = &life
 		view.setEnvelopeClaim(EnvelopeForTargetRoute(view.NormalizedEnvelope(), target))
 	}
-	return DeliveryEvent{journal: event.Clone(), view: view}, nil
+	return nil
 }
 
 func NewContextDeliveryEvent(event Event, deliveryContext DeliveryContext) DeliveryEvent {

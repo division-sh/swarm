@@ -153,6 +153,23 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("workflow engine state record requires exact persisted times")
 	}
+	if err := r.validateRecordedTimes(); err != nil {
+		return err
+	}
+	if !r.Transition.Valid() {
+		return fmt.Errorf("workflow engine state record requires a closed persistence transition")
+	}
+	if r.Transition.CreatesState() {
+		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
+			return fmt.Errorf("workflow engine state creation cannot carry an expected existing revision")
+		}
+	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
+		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
+	}
+	return nil
+}
+
+func (r WorkflowEngineStateRecord) validateRecordedTimes() error {
 	if r.UpdatedAt.Before(r.CreatedAt) {
 		return fmt.Errorf("workflow engine state record update time %s cannot precede creation %s", r.UpdatedAt.Format(time.RFC3339Nano), r.CreatedAt.Format(time.RFC3339Nano))
 	}
@@ -165,16 +182,6 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		}
 	} else if !r.TerminatedAt.IsZero() {
 		return fmt.Errorf("non-terminal workflow engine state cannot carry termination time")
-	}
-	if !r.Transition.Valid() {
-		return fmt.Errorf("workflow engine state record requires a closed persistence transition")
-	}
-	if r.Transition.CreatesState() {
-		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
-			return fmt.Errorf("workflow engine state creation cannot carry an expected existing revision")
-		}
-	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
-		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
 	}
 	return nil
 }

@@ -268,25 +268,7 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 		selectedPlan, plannedTarget = plan, target
 	}
 	if !plannedTarget.Empty() {
-		plan, target := selectedPlan, plannedTarget
-		if !requested.Empty() && requested.Normalized() != target {
-			return events.ReceiverInitialization{}, fmt.Errorf("agent receiver contradicts planned construction")
-		}
-		if plan.CreatingInput.EventID != event.ID() {
-			return events.ReceiverInitialization{}, fmt.Errorf("agent construction belongs to another publication")
-		}
-		if plan.Restart != nil {
-			observed, present := p.observedAgents[actor]
-			if !present || observed.Identity() != plan.Identity {
-				return events.ReceiverInitialization{}, fmt.Errorf("restarting agent requires its original physical construction")
-			}
-			return admitObservedAgentConstructionDependency(actor.RunID, observed, requested, plan.Instance.Life)
-		}
-		receiver, err := plan.Identity.Route().AgentIdentityRoute()
-		if err != nil {
-			return events.ReceiverInitialization{}, err
-		}
-		return events.AdmitFlowReceiverInitialization(event, events.MustMaterializingEntityTarget(target), receiver)
+		return p.plannedAgentConstructionDependency(event, actor, requested, selectedPlan, plannedTarget)
 	}
 	if p.context != nil {
 		scope, _ := p.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
@@ -316,6 +298,27 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 		return events.ReceiverInitialization{}, fmt.Errorf("declared agent has no exact admitted flow construction")
 	}
 	return events.ReceiverInitialization{}, nil
+}
+
+func (p publicationTargetOwnerEvidence) plannedAgentConstructionDependency(event events.Event, actor agentidentity.Identity, requested events.RouteIdentity, plan pipeline.FlowInstanceActivationPlan, target events.RouteIdentity) (events.ReceiverInitialization, error) {
+	if !requested.Empty() && requested.Normalized() != target {
+		return events.ReceiverInitialization{}, fmt.Errorf("agent receiver contradicts planned construction")
+	}
+	if plan.CreatingInput.EventID != event.ID() {
+		return events.ReceiverInitialization{}, fmt.Errorf("agent construction belongs to another publication")
+	}
+	if plan.Restart != nil {
+		observed, present := p.observedAgents[actor]
+		if !present || observed.Identity() != plan.Identity {
+			return events.ReceiverInitialization{}, fmt.Errorf("restarting agent requires its original physical construction")
+		}
+		return admitObservedAgentConstructionDependency(actor.RunID, observed, requested, plan.Instance.Life)
+	}
+	receiver, err := plan.Identity.Route().AgentIdentityRoute()
+	if err != nil {
+		return events.ReceiverInitialization{}, err
+	}
+	return events.AdmitFlowReceiverInitialization(event, events.MustMaterializingEntityTarget(target), receiver)
 }
 
 func admitObservedAgentConstructionDependency(runID string, observation pipeline.FlowInstanceObservation, requested events.RouteIdentity, life int64) (events.ReceiverInitialization, error) {

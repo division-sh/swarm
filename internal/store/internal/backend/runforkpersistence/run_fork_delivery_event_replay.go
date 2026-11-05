@@ -31,37 +31,8 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 	if snapshot == nil || snapshot.RunID != event.RunID() || delivery.RunID != snapshot.RunID || delivery.EventID != event.ID() {
 		return events.DeliveryRoute{}, fmt.Errorf("replay receiver requires exact source-at-revision publication ownership")
 	}
-	sourceID, err := source.Identity()
-	if err != nil {
+	if err := validateReplayReceiverPublication(snapshot, event, delivery, source); err != nil {
 		return events.DeliveryRoute{}, err
-	}
-	publication := make([]events.DeliveryRoute, 0)
-	matched := false
-	for _, fact := range snapshot.Deliveries {
-		candidate := fact.Snapshot
-		if candidate.EventID != event.ID() {
-			continue
-		}
-		if candidate.RunID != snapshot.RunID {
-			return events.DeliveryRoute{}, fmt.Errorf("source publication contains a foreign-run delivery")
-		}
-		publication = append(publication, candidate.Route)
-		id, err := candidate.Route.Identity()
-		if err != nil {
-			return events.DeliveryRoute{}, err
-		}
-		if candidate.DeliveryID == delivery.DeliveryID {
-			if matched || id != sourceID || candidate.RunID != snapshot.RunID {
-				return events.DeliveryRoute{}, fmt.Errorf("replay delivery contradicts fixed-revision route")
-			}
-			matched = true
-		}
-	}
-	if !matched {
-		return events.DeliveryRoute{}, fmt.Errorf("replay delivery is absent from fixed revision")
-	}
-	if err := events.ValidateReceiverMaterializations(event, publication); err != nil {
-		return events.DeliveryRoute{}, fmt.Errorf("source replay publication: %w", err)
 	}
 	if source.Target.Empty() {
 		return projectRunForkReplayDeliveryRoute(source, snapshot.RunID, forkRunID)
@@ -106,6 +77,42 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 		return events.DeliveryRoute{}, err
 	}
 	return projected, nil
+}
+
+func validateReplayReceiverPublication(snapshot *runForkRevisionSnapshot, event events.Event, delivery runtimedelivery.HistoricalFact, source events.DeliveryRoute) error {
+	sourceID, err := source.Identity()
+	if err != nil {
+		return err
+	}
+	publication := make([]events.DeliveryRoute, 0)
+	matched := false
+	for _, fact := range snapshot.Deliveries {
+		candidate := fact.Snapshot
+		if candidate.EventID != event.ID() {
+			continue
+		}
+		if candidate.RunID != snapshot.RunID {
+			return fmt.Errorf("source publication contains a foreign-run delivery")
+		}
+		publication = append(publication, candidate.Route)
+		id, err := candidate.Route.Identity()
+		if err != nil {
+			return err
+		}
+		if candidate.DeliveryID == delivery.DeliveryID {
+			if matched || id != sourceID || candidate.RunID != snapshot.RunID {
+				return fmt.Errorf("replay delivery contradicts fixed-revision route")
+			}
+			matched = true
+		}
+	}
+	if !matched {
+		return fmt.Errorf("replay delivery is absent from fixed revision")
+	}
+	if err := events.ValidateReceiverMaterializations(event, publication); err != nil {
+		return fmt.Errorf("source replay publication: %w", err)
+	}
+	return nil
 }
 
 func replayReceiverConstructionTarget(event events.Event, source events.DeliveryRoute) (events.DeliveryTargetOwnership, error) {
