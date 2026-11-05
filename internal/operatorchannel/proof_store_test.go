@@ -2,8 +2,10 @@ package operatorchannel
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +14,53 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
 )
+
+func TestFileProofStoreRC1RefusalTeachesRepairWithoutRewrite(t *testing.T) {
+	raw, err := os.ReadFile("testdata/rc1-credential-proof-v2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(raw)); got != "c48eec9b6c441ea55608bde1f4d109bfe81b7ce4cb8c0fecd56e8d67054a5747" {
+		t.Fatalf("rc.1 artifact changed: %s", got)
+	}
+	store, err := NewFileProofStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.Path(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"List", "Get"} {
+		t.Run(operation, func(t *testing.T) {
+			var err error
+			if operation == "List" {
+				proofs, listErr := store.List(t.Context())
+				err = listErr
+				if len(proofs) != 0 {
+					t.Fatalf("refused artifact returned proofs: %d", len(proofs))
+				}
+			} else {
+				_, found, getErr := store.Get(t.Context(), testInterfaceIdentity())
+				err = getErr
+				if found {
+					t.Fatal("refused artifact returned a proof")
+				}
+			}
+			for _, want := range []string{`json: unknown field "external_account_reference"`, "If this is an rc.1 proof store, remove it and re-pair the channel before starting v0.7."} {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("%s refusal = %v, want %q", operation, err, want)
+				}
+			}
+			if err == nil || errors.Unwrap(err) == nil || errors.Unwrap(err).Error() != `json: unknown field "external_account_reference"` {
+				t.Errorf("raw decode cause was not preserved: %v", err)
+			}
+			after, readErr := os.ReadFile(store.Path())
+			if readErr != nil || string(after) != string(raw) {
+				t.Fatalf("refusal rewrote rc.1 proof: %v", readErr)
+			}
+		})
+	}
+}
 
 func TestFileProofStoreExactRevisionRevocationAndAdmission(t *testing.T) {
 	ctx := context.Background()
