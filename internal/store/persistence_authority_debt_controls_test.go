@@ -201,7 +201,7 @@ func TestPersistenceAuthorityDebtCensusRetainsNonSQLConstructionAcrossOrdinaryPa
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/authorityprobe\n\ngo 1.25.0\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	for _, directory := range []string{"internal/apiv1", "internal/cliapp", "internal/testutil/ordinaryfixture"} {
+	for _, directory := range []string{"internal/apiv1", "internal/cliapp", "internal/testutil/ordinaryfixture", "tests/support/testutil/ordinaryfixture"} {
 		path := filepath.Join(root, directory)
 		if err := os.MkdirAll(path, 0755); err != nil {
 			t.Fatal(err)
@@ -213,7 +213,7 @@ func TestPersistenceAuthorityDebtCensusRetainsNonSQLConstructionAcrossOrdinaryPa
 	}
 	findings := debtLoadPersistenceAuthorityFindings(t, root)
 	sites := authorityDebtSites(findings)
-	for _, directory := range []string{"internal/apiv1", "internal/cliapp", "internal/testutil/ordinaryfixture"} {
+	for _, directory := range []string{"internal/apiv1", "internal/cliapp", "internal/testutil/ordinaryfixture", "tests/support/testutil/ordinaryfixture"} {
 		found := false
 		for _, site := range sites {
 			found = found || site.File == directory+"/legacy_test.go" && site.Kind == "selected-store-construction"
@@ -258,14 +258,41 @@ func TestPersistenceAuthorityDebtRoleLabelsCannotGrantPermission(t *testing.T) {
 			t.Fatalf("label %s erased runtime debt", label)
 		}
 	}
-	for _, path := range []string{"internal/store/internal/backend/postgres/backend.go", "internal/store/construction/open.go", "internal/testpostgres/connection.go"} {
+	file, err := parser.ParseFile(token.NewFileSet(), "probe.go", `package probe; import native "github.com/division-sh/swarm/internal/store"; var _ *native.PostgresStore`, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path  string
+		owned bool
+	}{
+		{"internal/store/internal/backend/postgres/backend.go", true},
+		{"internal/store/construction/open.go", true},
+		{"internal/testpostgres/connection.go", true},
+		{"tests/support/testpostgres/connection.go", true},
+		{"internal/testutil/postgres.go", true},
+		{"tests/support/testutil/postgres.go", true},
+		{"internal/testutil/ordinaryfixture/probe.go", false},
+		{"tests/support/testutil/ordinaryfixture/probe.go", false},
+		{"tests/support/testpostgres-extra/probe.go", false},
+		{"tests/support/testutil-extra/probe.go", false},
+	} {
+		path := test.path
 		finding := authorityFinding{Kind: "raw-operation", File: path, Enclosing: "owner", Member: "call:Exec#1", Resolved: "owned physical operation", RawSQL: true}
-		if len(authorityDebtSites([]authorityFinding{finding})) != 0 {
-			t.Fatalf("legitimate role became ordinary debt: %s", path)
+		if got := len(authorityDebtSites([]authorityFinding{finding})) == 0; got != test.owned {
+			t.Fatalf("infrastructure role=%v want=%v: %s", got, test.owned, path)
 		}
-		finding.Kind = "raw-authority-export"
-		if len(authorityDebtSites([]authorityFinding{finding})) != 1 {
-			t.Fatalf("private role permitted SQL export: %s", path)
+		if got := debtOwnedNativeFixtureConstruction(path, nil, nil); got != test.owned {
+			t.Fatalf("native constructor role=%v want=%v: %s", got, test.owned, path)
+		}
+		if got := len(debtSelectedBoundarySource(path, file)) == 0; got != test.owned {
+			t.Fatalf("selected infrastructure role=%v want=%v: %s", got, test.owned, path)
+		}
+		for _, kind := range []string{"raw-authority-export", "inactive-raw-source"} {
+			finding.Kind = kind
+			if len(authorityDebtSites([]authorityFinding{finding})) != 1 {
+				t.Fatalf("private role permitted %s: %s", kind, path)
+			}
 		}
 	}
 }
