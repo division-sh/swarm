@@ -184,12 +184,14 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 	// projection. No creating input or delivery precedes this component fixture.
 	// This keyless physical-COMMIT control is not keyed constructor admission.
 	commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
+		Life:       1,
 		InstanceID: "one", StorageRef: path, EntityID: entityID, EntityType: "review_item",
 		WorkflowName: flowID, WorkflowVersion: "1", Mode: "static", StageDefined: true,
 		CurrentState: "active", Fields: map[string]any{"account_id": "preserved"},
 		CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, path, entityID, "active", 1, at)
+	record.Life = 1
 	record.Mode = "static"
 	construction, err := selected.(pipeline.FlowConstructionPublicationReader).LoadFlowConstructionPublication(ctx, record.Identity, entityID)
 	if err != nil || construction.CreatingInput != (pipeline.FlowConstructionInput{}) || construction.Identity.EntityID != entityID || construction.Identity.InstancePath != path {
