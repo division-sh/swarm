@@ -74,6 +74,19 @@ func TestServedReporterTimeoutEnvelopeIsExact(t *testing.T) {
 	if err := validateSoakSelection(packages, ServedReporterStressRun, "", timeout, count, budget); err != nil {
 		t.Fatalf("approved whole stress proof rejected: %v", err)
 	}
+	serveappOtherRun := "^Test([ABD-H].*|ContextCompactionPreservesMemoryAcrossRestartBothStores|2376.*)$"
+	if err := validateSoakSelection(packages, serveappOtherRun, "", ServeappOtherGoTimeout, count, budget); err != nil {
+		t.Fatalf("approved serveapp-other proof rejected: %v", err)
+	}
+	for _, change := range []struct{ run, skip, timeout string }{
+		{serveappOtherRun + "/sqlite", "", ServeappOtherGoTimeout},
+		{serveappOtherRun, "^TestContextCompaction", ServeappOtherGoTimeout},
+		{serveappOtherRun, "", "16m"},
+	} {
+		if err := validateSoakSelection(packages, change.run, change.skip, change.timeout, count, budget); err == nil {
+			t.Fatalf("changed serveapp-other timeout envelope admitted: %+v", change)
+		}
+	}
 	for _, tc := range []struct {
 		name                              string
 		packages                          []string
@@ -127,7 +140,7 @@ func TestServedReporterStressTimeoutEnvelopeIsExact(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			wantPrefix := tc.wantPrefix
 			if wantPrefix == "" {
-				wantPrefix = "only the exact soak, served reporter or persistence census"
+				wantPrefix = "only the exact soak, served reporter, serveapp-other or persistence census"
 			}
 			if err := validateSoakSelection(tc.packages, tc.run, tc.skip, tc.timeout, tc.count, tc.budget); err == nil || !strings.HasPrefix(err.Error(), wantPrefix) {
 				t.Fatalf("changed stress proof envelope error = %v, want prefix %q", err, wantPrefix)
