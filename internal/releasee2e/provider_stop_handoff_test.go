@@ -594,10 +594,10 @@ tool-agent:
 				}
 				resume := settled["resume-agent"]
 				tool := settled["tool-agent"]
-				if resume.Status == "delivered" && resume.Terminal && tool.Status == "dead_letter" && tool.Terminal {
-					if tool.ReasonCode != "effect_recovery_outcome_unconfirmed" {
-						t.Fatalf("counted HTTP unknown settled to wrong class: %+v", tool)
-					}
+				dead := settled["dead-agent"]
+				if resume.Status == "delivered" && resume.Terminal && resume.RetryCount == 1 &&
+					tool.Status == "delivered" && tool.Terminal &&
+					dead.Status == "in_progress" && !dead.Terminal && dead.RetryCount == 1 {
 					break
 				}
 				select {
@@ -605,6 +605,10 @@ tool-agent:
 					t.Fatalf("counted resume/HTTP recovery did not settle: %+v", recovered.Deliveries)
 				case <-time.After(10 * time.Millisecond):
 				}
+			}
+			recoveredClasses := providerCrashRecoveredClasses(t, providerCrashFullRows(t, inspection))
+			if recoveredClasses != [2]int{firstCounts[0], firstCounts[2]} {
+				t.Fatalf("successor settled different provider/HTTP recovery classes: got=%v status=%v", recoveredClasses, firstCounts)
 			}
 			if err := second.killAndWait(5 * time.Second); err != nil {
 				t.Fatal(err)
@@ -734,4 +738,46 @@ func providerCrashFullRows(t *testing.T, selected storetest.ReleaseProcessReadOn
 		t.Fatal(err)
 	}
 	return rows
+}
+
+func providerCrashRecoveredClasses(t *testing.T, snapshot map[string]storetest.SelectedForkStorageTableSnapshot) [2]int {
+	t.Helper()
+	operations, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["runtime_external_effect_operations"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := make(map[string]string, len(operations))
+	for _, operation := range operations {
+		id, idErr := operation["operation_id"].Text()
+		kind, kindErr := operation["effect_kind"].Text()
+		if idErr != nil || kindErr != nil {
+			t.Fatalf("decode recovered effect operation: id=%v kind=%v", idErr, kindErr)
+		}
+		kinds[id] = kind
+	}
+	attempts, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["runtime_external_effect_attempts"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var counts [2]int
+	for _, attempt := range attempts {
+		state, stateErr := attempt["state"].Text()
+		if stateErr != nil {
+			t.Fatal(stateErr)
+		}
+		if state != "outcome_uncertain" {
+			continue
+		}
+		id, idErr := attempt["operation_id"].Text()
+		if idErr != nil {
+			t.Fatal(idErr)
+		}
+		switch kinds[id] {
+		case "provider_turn":
+			counts[0]++
+		case "http_tool_target":
+			counts[1]++
+		}
+	}
+	return counts
 }
