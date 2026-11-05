@@ -362,6 +362,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	if err != nil {
 		t.Fatal(err)
 	}
+	constructGroupProofPublicationSource(t, ctx, f.raw, semanticview.Wrap(bundle), f.seed.runID, route, f.seed.createdAt)
 	producer, err := identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
 	if err != nil {
 		t.Fatal(err)
@@ -477,6 +478,42 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	}
 	return f
 }
+func constructGroupProofPublicationSource(t *testing.T, ctx context.Context, selected selectedFanOutLifecycleOwner, source semanticview.Source, runID string, route events.RouteIdentity, at time.Time) {
+	t.Helper()
+	owner, ok := selected.(bus.FlowInstanceActivationCommitOwner)
+	if !ok {
+		t.Fatal("group fixture requires its native construction owner")
+	}
+	for _, flow := range []string{semanticview.RootExecutionFlowID(source), route.FlowID} {
+		identity, err := flowidentity.StandingForGeneration(source, flow, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema, found := source.FlowSchemaByID(flow)
+		topology, staged := semanticview.WorkflowStageTopology(source, flow)
+		if !found || !staged || !schema.Instance.Empty() {
+			t.Fatal("group fixture requires its admitted keyless source and parent")
+		}
+		initial, err := topology.InitialStoredStage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entityID := identity.EntityID
+		if flow == route.FlowID {
+			if identity.InstancePath != route.FlowInstance {
+				t.Fatal("group fixture source path disagrees with its declaration")
+			}
+			entityID = route.EntityID
+		}
+		commitPreparedWorkflowAggregateFixture(t, ctx, owner, runID, pipeline.WorkflowInstance{
+			Life: 1, InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: entityID,
+			WorkflowName: flow, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(),
+			ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+			CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), CreatedAt: at, EnteredStageAt: at,
+		}, at)
+	}
+}
+
 func (f *groupProofFixture) prepare(t *testing.T) {
 	t.Helper()
 	var requests []pipeline.FanOutPublicationRequest
