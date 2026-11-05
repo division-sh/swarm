@@ -20,7 +20,7 @@ import (
 
 func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, scenario := range []string{"pending", "claimed", "retry", "delivered", "dead_letter", "no_delivery", "different_sender", "missing_receipt"} {
+		for _, scenario := range []string{"pending", "claimed", "retry", "delivered", "dead_letter", "no_delivery", "different_sender", "missing_receipt", "stale_life"} {
 			t.Run(backend+"/"+scenario, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
 				f.constructKeylessRoot(t)
@@ -83,7 +83,12 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				before := loadDeliverySnapshotFixture(t, ctx, store, follower.ID(), route)
-				if scenario == "missing_receipt" {
+				if scenario == "missing_receipt" || scenario == "stale_life" {
+					if scenario == "stale_life" {
+						if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$2`, creator.RunID(), plan.Identity.InstancePath); err != nil {
+							t.Fatal(err)
+						}
+					}
 					err := runDeliveryFixtureAttempt(ctx, store, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 						adapter := sqliteDeliveryAdapter
 						if backend == "postgres" {
@@ -91,6 +96,9 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 						}
 						if err := adapter.CommitPipelineHandoff(txctx, attempt, follower.ID()); err != nil {
 							return err
+						}
+						if scenario == "stale_life" {
+							return nil
 						}
 						return pipelinepersistence.RemoveReceiverConstructionReceiptForTest(txctx, attempt, flowidentity.RunScopedFlowInstance{RunID: creator.RunID(), Route: plan.Identity.Route()}, plan.Identity.EntityID)
 					})
@@ -109,6 +117,13 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 					claim, err := store.ClaimDelivery(ctx, before.Authority, follower, route)
 					if err != nil || claim.Disposition != deliverylifecycle.ClaimInvariantInvalid || claim.Invariant == nil {
 						t.Fatalf("missing native receipt was admitted by direct claim: %+v err=%v", claim, err)
+					}
+					if scenario == "stale_life" {
+						for _, refusal := range []error{batch[0].Invariant, observation.Invariant, claim.Invariant} {
+							if envelope, typed := failures.EnvelopeFromError(refusal); !typed || envelope.Class != failures.ClassStaleArrival || envelope.Detail.Code != "instance_restarted" {
+								t.Fatalf("predecessor read lost captured-life refusal: %v", refusal)
+							}
+						}
 					}
 					page, err := store.ScanDeliveryContinuations(ctx, before.Authority, deliverylifecycle.ContinuationCursor{}, 64)
 					if err != nil {
