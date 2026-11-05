@@ -852,6 +852,18 @@ jobs:
         with:
           path: ${{ runner.temp }}/debt-analysis
           key: ${{ steps.debt-identity.outputs.key }}
+      - name: Capture soak PostgreSQL service log
+        if: matrix.unit == 'conformance-soak-postgres'
+        continue-on-error: true
+        run: |
+          mkdir -p test-results/evidence
+          since=$(date +%s)
+          setsid bash -c '
+            docker events --since "$1" --filter type=container --filter event=start \
+              --filter label=com.division.swarm.test-postgres.managed=1 --format "{{.Actor.ID}}" |
+              while IFS= read -r container; do docker logs --timestamps --follow "$container"; done
+          ' _ "$since" >test-results/evidence/postgres-service.log 2>&1 </dev/null &
+          printf '%s\n' "$!" >"$RUNNER_TEMP/soak-postgres-log.pid"
       - name: Run exact planned proof unit
         shell: bash
         env:
@@ -868,6 +880,14 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-cache-restore.outputs.cache-primary-key }}
+      - name: Stop soak PostgreSQL log observer
+        if: always() && matrix.unit == 'conformance-soak-postgres'
+        continue-on-error: true
+        run: |
+          if [ -f "$RUNNER_TEMP/soak-postgres-log.pid" ]; then
+            observer=$(cat "$RUNNER_TEMP/soak-postgres-log.pid")
+            kill -- "-$observer" 2>/dev/null || true
+          fi
       - name: Upload proof evidence
         if: always()
         uses: actions/upload-artifact@v4
