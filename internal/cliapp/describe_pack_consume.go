@@ -29,10 +29,31 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 			RequiresSubstitution: true, YAML: "# Set the exact account selected by your deployment; no account is inferred or linked here.\n" + policy})
 	}
 	events := consumptionEvents(component.Receive)
+	var example PackEventDescription
+	receiver := ""
 	if len(events) == 0 {
-		return append(fragments, PackConsumptionFragment{Scope: component.Scope, File: "schema.yaml", Purpose: "author-selected input",
-			RequiresSubstitution: true, YAML: "# No fixed normalized input is declared. Author the input event and payload contract before adding an activity.\n"}), nil
+		fragments = append(fragments, PackConsumptionFragment{Scope: component.Scope, File: "schema.yaml", Purpose: "author-selected input",
+			RequiresSubstitution: true, YAML: "# No fixed normalized input is declared. Author the input event and payload contract before adding an activity.\n"})
+	} else {
+		receive, err := packReceiveConsumptionFragments(provider, component, events)
+		if err != nil {
+			return nil, err
+		}
+		fragments = append(fragments, receive...)
+		example, receiver = events[0], provider+"-receiver-1"
 	}
+	for _, tool := range component.Tools {
+		fragment, err := packToolActivityFragment(component.Scope, receiver, example, tool)
+		if err != nil {
+			return nil, err
+		}
+		fragments = append(fragments, fragment)
+	}
+	return fragments, nil
+}
+
+func packReceiveConsumptionFragments(provider string, component PackComponentDescription, events []PackEventDescription) ([]PackConsumptionFragment, error) {
+	var fragments []PackConsumptionFragment
 	var inputs, outputs []string
 	var connections []map[string]any
 	for index, event := range events {
@@ -77,13 +98,6 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 		transport += "# The webhook alias is derived from the admitted root/flow path; renaming that path changes the URL.\n# Current schema has no ingress/alias override.\n"
 	}
 	fragments = append(fragments, PackConsumptionFragment{Scope: component.Scope, File: "schema.yaml", Purpose: "receive/connect fragment; merge with the owning flow schema", YAML: transport + root})
-	for _, tool := range component.Tools {
-		fragment, err := packToolActivityFragment(component.Scope, provider+"-receiver-1", events[0], tool)
-		if err != nil {
-			return nil, err
-		}
-		fragments = append(fragments, fragment)
-	}
 	return fragments, nil
 }
 
@@ -122,16 +136,23 @@ func packToolActivityFragment(scope, receiver string, event PackEventDescription
 		notes = append(notes, fmt.Sprintf("# %s: required %s", name, schema.Kind()))
 	}
 	activity := map[string]any{"id": "consume_event", "tool": tool.ID, "input": input}
-	nodes := map[string]any{"consume": map[string]any{event.Event: map[string]any{"activity": activity}}}
+	var nodes any = map[string]any{"activity": activity}
+	file, purpose := "nodes.yaml", "tool activity fragment: "+tool.ID
+	placement := "# Insert this activity under your author-declared handler; no event or route is supplied.\n"
+	if event.Event != "" {
+		nodes = map[string]any{"consume": map[string]any{event.Event: map[string]any{"activity": activity}}}
+		file, purpose = receiver+"/nodes.yaml", "tool example: "+tool.ID
+		placement = ""
+	}
 	doc, err := consumptionYAML(nodes)
 	if err != nil {
 		return PackConsumptionFragment{}, err
 	}
-	comment := "# Choose this tool example deliberately; do not combine every tool example.\n# Replace REPLACE_* values with your business inputs before execution.\n"
+	comment := placement + "# Choose this tool example deliberately; do not combine every tool example.\n# Replace REPLACE_* values with your business inputs before execution.\n"
 	if len(notes) > 0 {
 		comment += strings.Join(notes, "\n") + "\n"
 	}
-	return PackConsumptionFragment{Scope: scope, File: receiver + "/nodes.yaml", Purpose: "tool example: " + tool.ID,
+	return PackConsumptionFragment{Scope: scope, File: file, Purpose: purpose,
 		RequiresSubstitution: true, YAML: comment + doc}, nil
 }
 

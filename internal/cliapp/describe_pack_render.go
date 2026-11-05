@@ -27,7 +27,7 @@ func writePackDescription(out io.Writer, description PackDescription, opts descr
 	}
 	fmt.Fprintf(out, "%s -- provider pack\n", description.ID)
 	for _, component := range description.Components {
-		fmt.Fprintf(out, "loaded from %s:%s (scope=%s, version=%s)\n", component.Source, component.Directory, packDescriptionScope(component.Scope), component.Version)
+		fmt.Fprintf(out, "loaded from %s:%s (scope=%s, version=%s; %s)\n", component.Source, component.Directory, packDescriptionScope(component.Scope), component.Version, component.Applicability)
 		if opts.tool == "" {
 			writePackReceive(out, component.Receive)
 		}

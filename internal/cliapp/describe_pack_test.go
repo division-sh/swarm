@@ -319,3 +319,132 @@ func TestDescribePackProjectKeepsTargetSpecificCredentialFacts(t *testing.T) {
 		t.Fatalf("missing target secret lacks exact exit: %d %s %s", code, out, diagnostic)
 	}
 }
+
+func TestDescribePackImplicitSourceMatchesDotWithoutConfig(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	t.Setenv("SWARM_CREDENTIALS_FILE", t.TempDir())
+	var projections []any
+	for _, args := range [][]string{
+		{"describe", "pack", "telegram", "--json"},
+		{"describe", "pack", "telegram", ".", "--json"},
+	} {
+		code, out, diagnostic := runPacksCommand(t, root, args...)
+		if code != 0 || diagnostic != "" {
+			t.Fatalf("source-only invocation %v: %d %s %s", args, code, out, diagnostic)
+		}
+		var model any
+		if err := json.Unmarshal([]byte(out), &model); err != nil {
+			t.Fatal(err)
+		}
+		projections = append(projections, model)
+	}
+	if !reflect.DeepEqual(projections[0], projections[1]) {
+		t.Fatal("implicit source and explicit dot describe different admitted components")
+	}
+	model := projections[0].(map[string]any)
+	components := model["components"].([]any)
+	if len(components) != 2 || components[1].(map[string]any)["source"] != "captured" || model["project"].(map[string]any)["evaluated"] != false {
+		t.Fatal("source-only cwd lost captured metadata or read credentials")
+	}
+}
+
+func TestDescribePackTargetRequiresCapturedBodyIdentity(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	path := filepath.Join(root, "telegram", "trigger.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(raw), "telegram update object is required", "local authored Telegram object is required", 1)
+	if changed == string(raw) {
+		t.Fatal("fixture did not change the captured BODY")
+	}
+	writeDescribeTestFile(t, path, changed)
+	writeDescribeTestFile(t, filepath.Join(root, ".swarm", "swarm.yaml"), "runtime:\n  recovery_on_startup: false\n")
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	loaded, err := loadDescribePackContext(packCommandOptions{repoRoot: root}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := buildPackDescription(context.Background(), loaded, "telegram")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.Components) != 2 {
+		t.Fatal("installed and captured component inventory changed")
+	}
+	installed, captured := model.Components[0], model.Components[1]
+	if installed.Receive.Identity.ManifestHash == captured.Receive.Identity.ManifestHash {
+		t.Fatal("different captured BODY lost its identity")
+	}
+	if packComponentHasTarget(installed, model.Project.Subjects) || !packComponentHasTarget(captured, model.Project.Subjects) {
+		t.Fatal("installed declaration borrowed captured target applicability, or exact captured target was lost")
+	}
+	for _, change := range []string{"body", "version", "provenance", "flow"} {
+		candidate := captured
+		receive := *captured.Receive
+		candidate.Receive = &receive
+		switch change {
+		case "body":
+			candidate.Receive.Identity.ManifestHash = installed.Receive.Identity.ManifestHash
+		case "version":
+			candidate.Receive.Identity.Version = "9.0.0"
+		case "provenance":
+			candidate.Receive.Identity.Provenance = "foreign"
+		case "flow":
+			candidate.Scope = "other"
+		}
+		if packComponentHasTarget(candidate, model.Project.Subjects) {
+			t.Fatalf("%s contradiction matched a captured target", change)
+		}
+	}
+	for _, row := range model.Project.Rows {
+		if row.Kind == "target" && row.Scope == "" && row.Status == "not effective (installed declaration)" && row.Remediation != "" {
+			return
+		}
+	}
+	t.Fatal("installed component's missing effective-target explanation was masked")
+}
+
+func TestDescribePackConnectorOnlyKeepsUnqualifiedToolFragments(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_CREDENTIALS_FILE", t.TempDir())
+	loaded, err := loadDescribePackContext(packCommandOptions{repoRoot: t.TempDir()}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := buildPackDescription(context.Background(), loaded, "notion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.Components) != 1 || model.Components[0].Receive != nil || len(model.Components[0].Tools) == 0 {
+		t.Fatal("fixture is not the declared connector-only surface")
+	}
+	for _, tool := range model.Components[0].Tools {
+		found := false
+		for _, fragment := range model.Fragments {
+			if fragment.Purpose != "tool activity fragment: "+tool.ID {
+				continue
+			}
+			found = true
+			if !fragment.RequiresSubstitution || fragment.File != "nodes.yaml" || !strings.Contains(fragment.YAML, "activity:") || !strings.Contains(fragment.YAML, "tool: "+tool.ID) {
+				t.Fatalf("connector tool %s lost its actual unqualified activity: %+v", tool.ID, fragment)
+			}
+			for _, forbidden := range []string{"inbound.", "connect:", "resolution:", "instance:", "payload."} {
+				if strings.Contains(fragment.YAML, forbidden) {
+					t.Fatalf("connector-only fragment invented %s", forbidden)
+				}
+			}
+			for _, name := range tool.Input.RequiredProperties() {
+				if !strings.Contains(fragment.YAML, name+":") {
+					t.Fatalf("descriptor-required input %s missing from %s", name, tool.ID)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("connector-only consumption dropped %s", tool.ID)
+		}
+	}
+}
