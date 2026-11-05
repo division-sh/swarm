@@ -11,7 +11,7 @@ import (
 var packIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 type PackID struct {
-	value string
+	packValue string
 }
 
 func ParsePackID(raw string) (PackID, error) {
@@ -25,7 +25,7 @@ func ParsePackID(raw string) (PackID, error) {
 	if !packIDPattern.MatchString(value) {
 		return PackID{}, fmt.Errorf("pack id %q is invalid", raw)
 	}
-	return PackID{value: value}, nil
+	return PackID{packValue: value}, nil
 }
 
 func MustPackID(raw string) PackID {
@@ -36,14 +36,14 @@ func MustPackID(raw string) PackID {
 	return value
 }
 
-func (i PackID) String() string { return i.value }
-func (i PackID) Valid() bool    { return packIDPattern.MatchString(i.value) }
+func (i PackID) String() string { return i.packValue }
+func (i PackID) Valid() bool    { return packIDPattern.MatchString(i.packValue) }
 func (i PackID) Equal(other PackID) bool {
-	return i.Valid() && other.Valid() && i.value == other.value
+	return i.Valid() && other.Valid() && i.packValue == other.packValue
 }
 
 type PackVersion struct {
-	value string
+	packValue string
 }
 
 func ParsePackVersion(raw string) (PackVersion, error) {
@@ -61,7 +61,7 @@ func ParsePackVersion(raw string) (PackVersion, error) {
 	if parsed.String() != value {
 		return PackVersion{}, fmt.Errorf("pack version %q is not canonical", raw)
 	}
-	return PackVersion{value: value}, nil
+	return PackVersion{packValue: value}, nil
 }
 
 func MustPackVersion(raw string) PackVersion {
@@ -72,14 +72,14 @@ func MustPackVersion(raw string) PackVersion {
 	return value
 }
 
-func (v PackVersion) String() string { return v.value }
+func (v PackVersion) String() string { return v.packValue }
 func (v PackVersion) Valid() bool {
-	if v.value == "" {
+	if v.packValue == "" {
 		return false
 	}
-	parsed, err := semver.StrictNewVersion(v.value)
-	return err == nil && parsed.String() == v.value
+	parsed, err := semver.StrictNewVersion(v.packValue)
+	return err == nil && parsed.String() == v.packValue
 }
 func (v PackVersion) Equal(other PackVersion) bool {
-	return v.Valid() && other.Valid() && v.value == other.value
+	return v.Valid() && other.Valid() && v.packValue == other.packValue
 }
