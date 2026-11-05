@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -149,8 +150,9 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 			mutation.ExpectedRevision, mutation.ExpectedState = 1, mutation.CurrentState
 			mutation.CurrentState = "done"
 			mutation.EnteredStageAt, mutation.UpdatedAt = winner.OccurredAt.Add(time.Second), winner.OccurredAt.Add(time.Second)
-			mutation = workflowTargetMutationEntry(t, f, mutation, "item.finished")
-			if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: mutation}); err != nil {
+			var claim deliverylifecycle.Claim
+			mutation = workflowTargetMutationEntry(t, f, mutation, "item.finished", &claim)
+			if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: mutation, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}}); err != nil {
 				t.Fatal(err)
 			}
 			for _, mode := range []contracts.FlowInputResolutionMode{contracts.FlowInputResolutionModeSelect, contracts.FlowInputResolutionModeCreate, contracts.FlowInputResolutionModeSelectOrCreate} {
