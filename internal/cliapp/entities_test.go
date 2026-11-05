@@ -438,6 +438,7 @@ func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
 			FlowInstance:       "review",
 			EntityType:         "vertical",
 			StageDefined:       entityTestPointer(true),
+			Life:               entityTestPointer(int64(1)),
 			CurrentState:       entityTestPointer("collecting"),
 			Revision:           entityTestPointer(int64(1)),
 			LifecycleCreatedAt: entityTestPointer("2026-05-20T01:00:00Z"),
