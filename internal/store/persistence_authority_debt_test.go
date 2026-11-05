@@ -2376,6 +2376,22 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		}
 	}
 	t.Logf("unforwarded full tuple receipts: test-results/%s", filepath.Base(receipt))
+	if trusted.Collector == debtPortableRuntimeRoleCollectorTo && collector == debtPortableGlobalRoleCollectorTo {
+		for _, pair := range debtPortableGlobalSignatureTransitions() {
+			old, current := pair[0], pair[1]
+			if actual[current.identity()] != current || actual[old.identity()].Multiplicity != 0 {
+				t.Errorf("portable global actual full tuple mismatch: expected=%+v actual=%+v", current, actual[current.identity()])
+			}
+			predecessor := baseActual[old.identity()] == old && baseActual[current.identity()].Multiplicity == 0
+			landed := baseActual[current.identity()] == current && baseActual[old.identity()].Multiplicity == 0
+			if !predecessor && !landed {
+				t.Errorf("portable global trusted full tuple mismatch: old=%+v current=%+v", baseActual[old.identity()], baseActual[current.identity()])
+			}
+		}
+		if t.Failed() {
+			t.FailNow()
+		}
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, comparisonBaseline, comparisonSource)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
