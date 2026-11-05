@@ -44,6 +44,8 @@ type diagnosticRunListOptions struct {
 
 type diagnosticTraceOptions struct {
 	apiOptions       rootCommandOptions
+	iter             int64
+	iterSet          bool
 	follow           bool
 	verbose          bool
 	noRetry          bool
@@ -335,6 +337,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		Args: argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
+			traceOpts.iterSet = cmd.Flags().Changed("iter")
 			traceOpts.untilSet = cmd.Flags().Changed("until")
 			traceOpts.reference = cliReadWindowReference(traceOpts.apiOptions.now)
 			traceOpts.limitSet = cmd.Flags().Changed("limit")
@@ -358,6 +361,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&traceOpts.cursor, "cursor", "", "Snapshot-only pagination cursor")
 	cmd.Flags().StringArrayVar(&traceOpts.eventNames, "event-name", nil, "Event name filter; repeat to match any")
 	cmd.Flags().StringArrayVar(&traceOpts.entityIDs, "entity-id", nil, "Entity id filter; repeat to match any")
+	cmd.Flags().Int64Var(&traceOpts.iter, "iter", 0, "Select one instance life; requires exactly one --entity-id and refuses --follow")
 	cmd.Flags().StringArrayVar(&traceOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
 	cmd.Flags().StringArrayVar(&traceOpts.subscriberIDs, "subscriber-id", nil, "Subscriber id filter; repeat to match any")
 	cmd.Flags().StringArrayVar(&traceOpts.subscriberTypes, "subscriber-type", nil, "Subscriber type filter: node or agent; repeat to match any")
@@ -478,6 +482,9 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 }
 
 func (o diagnosticTraceOptions) traceParams() (map[string]any, error) {
+	if o.iterSet && o.follow {
+		return nil, &operatorread.TraceIterError{Reason: operatorread.TraceIterFollowRefused}
+	}
 	if o.follow {
 		return o.followParams()
 	}
@@ -587,6 +594,13 @@ func (o diagnosticTraceOptions) traceFilter() (map[string]any, error) {
 	}
 	if len(entityIDs) > 0 {
 		filter["entity_id"] = entityIDs
+	}
+	if o.iterSet {
+		selected := operatorread.RunDebugTraceFilter{Iter: &o.iter, EntityIDs: entityIDs}
+		if err := selected.ValidateIter(); err != nil {
+			return nil, err
+		}
+		filter["iter"] = o.iter
 	}
 	deliveryStatuses, err := traceEnumList("--delivery-status", o.deliveryStatuses, eventObservationValidDeliveryStatuses, "pending, in_progress, delivered, failed, dead_letter")
 	if err != nil {

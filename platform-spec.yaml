@@ -31031,7 +31031,7 @@ cli_specification:
         present. Test/internal labels such as test_quiescence_ready, heuristics, blocking_layer, and blocking_reason
         never appear in human output. JSON preserves the exact run.diagnose or run.get result shape.
     trace:
-      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <RFC3339-or-relative-duration>] [--until <RFC3339-or-relative-duration>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <RFC3339-or-relative-duration>] [--until <RFC3339-or-relative-duration>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--iter <n>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       group: run_operate
       tier: must_have
       implementation_status: implemented
@@ -31055,6 +31055,7 @@ cli_specification:
         filter_fields:
           event_name: Repeatable event-name predicate. The CLI sends an array of non-empty names as `filter.event_name` and the server matches any value against RunTraceRow.event_name.
           entity_id: Repeatable entity-id predicate. The CLI sends an array of OpaqueId values as `filter.entity_id` and the server matches any value against RunTraceRow.entity_id.
+          iter: Positive instance life under filter.iter, accepted by run.trace and run.subscribe_trace only with exactly one entity filter. Zero or several entities refuse with trace_iter_one_entity_required. A single-entity instance trace defaults to its current life; explicit iter matches retained captured source life, not a time or cursor cut. Run-owned and imported rows without an instance retain their existing default trace behavior.
           delivery_status: Repeatable delivery-status predicate. The CLI sends an array of DeliveryStatus enum values as `filter.delivery_status` and the server matches any value against RunTraceRow.delivery_status.
           subscriber_id: Repeatable subscriber identity predicate. The CLI sends an array of non-empty subscriber ids as `filter.subscriber_id` and the server matches any value against RunTraceRow.subscriber_id.
           subscriber_type: Repeatable subscriber type predicate. The CLI sends an array of SubscriberType enum values as `filter.subscriber_type` and the server matches any value against RunTraceRow.subscriber_type.
@@ -31093,6 +31094,11 @@ cli_specification:
           and delivery_status, derives queue and execution timing only from same-row RunTraceRow timestamps, treats
           event-only rows as non-delivery trace rows, and renders point-in-time snapshot wording. `--delivery-summary`
           is invalid with `--follow` and is mutually exclusive with `--delivery-detail`.
+          Snapshot and summary `--iter <n>` send filter.iter unchanged on every page and require exactly one
+          --entity-id. CLI --follow with --iter refuses before requests with trace_iter_follow_refused:
+          a prior life is finished, so there is nothing to follow. The API subscription retains the same typed
+          iter/entity filter without changing its existing stream lifecycle. Prior-life reads use retained rows;
+          no header/state-row redesign or prior-life children selector is introduced.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
         - default trace requests omit include_internal or send false and the API excludes platform.runtime_log; --verbose sends include_internal=true and reveals platform.runtime_log through the API owner
@@ -36895,7 +36901,7 @@ api_specification:
           next_cursor:
             $ref: '#/components/schemas/Cursor'
       RunTraceFilter:
-        description: Typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.
+        description: Typed predicates for the canonical composed RunTraceRow owner. List fields are OR-lists; different fields compose with AND. The scalar iter selects one positive captured instance life and requires exactly one entity_id. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.
         type: object
         additionalProperties: false
         properties:
@@ -36912,6 +36918,10 @@ api_specification:
             uniqueItems: true
             items:
               $ref: '#/components/schemas/OpaqueId'
+          iter:
+            type: integer
+            minimum: 1
+            description: Selected instance life; requires exactly one entity_id filter, otherwise trace_iter_one_entity_required.
           delivery_status:
             type: array
             minItems: 1
@@ -40101,7 +40111,7 @@ api_specification:
           $ref: '#/components/schemas/Timestamp'
       - name: filter
         required: false
-        description: Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
+        description: Typed predicates over canonical RunTraceRow facts. List fields are OR-lists within the field and AND-composed across fields; scalar iter requires exactly one entity_id and selects its captured instance life.
         schema:
           $ref: '#/components/schemas/RunTraceFilter'
       - name: include_internal
@@ -40221,7 +40231,7 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: filter
         required: false
-        description: Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
+        description: Typed predicates over canonical RunTraceRow facts. List fields are OR-lists within the field and AND-composed across fields; scalar iter requires exactly one entity_id and selects its captured instance life.
         schema:
           $ref: '#/components/schemas/RunTraceFilter'
       - name: include_internal
