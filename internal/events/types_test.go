@@ -234,19 +234,25 @@ func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		captured, err := producer.WithInstanceLife(runID, want)
-		if err != nil || captured.Life() != want.Life || captured.Route() != producer.Route() || producer.Life() != 1 {
-			t.Fatalf("source did not capture exact delivery life: %+v %v", captured, err)
+		rootProducer, err := NewRootRoutingSource("d377e4d2-1cff-47b3-b9b5-ccf5ca1a96a2")
+		if err != nil {
+			t.Fatal(err)
 		}
 		foreign := want
-		foreign.FlowInstance = "sibling"
-		if _, err := producer.WithInstanceLife(runID, foreign); err == nil {
-			t.Fatal("source accepted a sibling's life")
-		}
-		foreign = want
 		foreign.RunID = "306f59ef-0909-4909-a596-fdf212eb20b2"
-		if _, err := producer.WithInstanceLife(runID, foreign); err == nil {
-			t.Fatal("source accepted a foreign run's life")
+		for _, producer := range []RoutingSource{producer, rootProducer} {
+			captured, err := producer.WithInstanceLife(runID, want)
+			if err != nil || captured.Life() != want.Life || captured.Route() != producer.Route() || producer.Life() != 1 {
+				t.Fatalf("source did not capture exact delivery life: %+v %v", captured, err)
+			}
+			sibling := want
+			sibling.FlowInstance = "sibling"
+			if _, err := producer.WithInstanceLife(runID, sibling); err == nil {
+				t.Fatal("source accepted a sibling's life")
+			}
+			if _, err := producer.WithInstanceLife(runID, foreign); err == nil {
+				t.Fatal("source accepted a foreign run's life")
+			}
 		}
 		if _, err := NewDeliveryEvent(platform, DeliveryRoute{Target: target, Context: DeliveryContext{RunID: runID, Life: &foreign}}); err == nil {
 			t.Fatal("delivery accepted life across its selected run")
