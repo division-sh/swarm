@@ -91,6 +91,7 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.ParentInstance":                 {1, "retain the exact captured parent coordinate from the fixed-revision metadata owner"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.InstanceKey":                    {1, "retain the exact captured constructor key from the fixed-revision metadata owner"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.StageDefined":                   {1, "copy exact constructed stage-topology evidence from the fixed revision"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Life":                           {1, "copy exact validated life from fixed-revision metadata; constructed life is positive and imported state has none"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.FlowTemplate":                   {1, "copy validated constructor declaration, never infer from the event receiver"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Mode":                           {1, "copy closed constructed mode from the paired fixed-revision header"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Status":                         {1, "copy exact lifecycle status with termination consistency checked"},
@@ -367,9 +368,9 @@ func alternate(p *runForkEntityMetadata) { p.RemovedArrivalRefs = true }
 		{"data_clocks_have_only_the_fixed_revision_owner", "store/internal/backend/runforkpersistence", "run_fork_entity_snapshot_metadata.go", `package runforkpersistence
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; "time")
 func surpriseClock(at *time.Time) f.RunForkMaterializedEntitySnapshotMetadata {
- return f.RunForkMaterializedEntitySnapshotMetadata{DataCreatedAt: at, DataUpdatedAt: at}
+ return f.RunForkMaterializedEntitySnapshotMetadata{Life: 1, DataCreatedAt: at, DataUpdatedAt: at}
 }
-`, []string{"surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataCreatedAt", "surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataUpdatedAt"}},
+`, []string{"surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.Life", "surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataCreatedAt", "surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataUpdatedAt"}},
 		{"source_carrier_reconstruction", "runtime/runforkexecution", "recipient_planning.go", `package runforkexecution
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func unexpected(a e.Event) f.RunForkSelectedContractSourceEvent {
@@ -388,7 +389,7 @@ func loadRunForkMaterializedEntitySnapshotMetadata(q runForkRevisionEvent) f.Run
 		{"captured_construction_fields_cannot_be_reconstructed", "store/internal/backend/runforkpersistence", "run_fork_entity_snapshot_metadata.go", `package runforkpersistence
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func loadRunForkMaterializedEntitySnapshotMetadata(q e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
- return f.RunForkMaterializedEntitySnapshotMetadata{ParentInstance: q.FlowInstance(), InstanceKey: q.EntityID(), InitialMaterialization: []byte(q.EntityID()), HistoricalConstruction: &f.RunForkCapturedHistoricalConstruction{SourceRunID: q.EntityID()}}
+ return f.RunForkMaterializedEntitySnapshotMetadata{Life: int64(len(q.EntityID())), ParentInstance: q.FlowInstance(), InstanceKey: q.EntityID(), InitialMaterialization: []byte(q.EntityID()), HistoricalConstruction: &f.RunForkCapturedHistoricalConstruction{SourceRunID: q.EntityID()}}
 }
 `, []string{"loadRunForkMaterializedEntitySnapshotMetadata/event_receiver_projection_to_owner"}},
 		{"nested_route_and_defined_type", "runtime/runforkexecution", "workflow_state_projection.go", `package runforkexecution
