@@ -477,7 +477,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	}
 	return f
 }
-func constructGroupProofPublicationSource(t *testing.T, ctx context.Context, selected selectedFanOutLifecycleOwner, source semanticview.Source, runID, sourceFlow string, at time.Time) events.RouteIdentity {
+func constructGroupProofPublicationSource(t *testing.T, ctx context.Context, selected selectedFanOutOwner, source semanticview.Source, runID, sourceFlow string, at time.Time) events.RouteIdentity {
 	t.Helper()
 	owner, ok := selected.(bus.FlowInstanceActivationCommitOwner)
 	if !ok {
