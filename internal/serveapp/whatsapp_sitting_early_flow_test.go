@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/testutil"
+	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -174,6 +175,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				t.Fatal("QR output did not precede pairing and approval")
 			}
 			peer.pair(pairing.Pairing.Code)
+			sender, _, _ := peer.senderFrom(types.NewJID("15551234590", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
 			for _, stage := range []string{"preview", "challenge", "confirmation"} {
 				var wait sittingWait
 				select {
@@ -189,8 +191,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				}
 				before := sittingCaptureRows(t, ctx, opts.SwarmDir, wait.op.SessionConnectionID)
 				id := "SITTING_PENDING_" + stage
-				frame, _, _ := peer.customerMessage("ordinary traffic during "+stage, id)
-				peer.sendEncryptedFrame(frame)
+				peer.sendEncryptedFrame(sender.EncryptText(t, "ordinary traffic during "+stage, id))
 				select {
 				case observed := <-completed:
 					if observed != id {
