@@ -78,7 +78,7 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if err != nil {
 		return false, empty, nil, err
 	}
-	if err := requireHistoricalWorkflowDescriptor(target.Lifecycle, record.State); err != nil {
+	if err := requireRestartWorkflowDescriptor(target.Lifecycle, record.State); err != nil {
 		return false, empty, nil, err
 	}
 	if !target.Lifecycle.CreatedAt.Equal(record.CreatedAt) {

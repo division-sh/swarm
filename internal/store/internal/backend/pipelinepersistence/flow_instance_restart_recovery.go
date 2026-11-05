@@ -20,7 +20,7 @@ func recoverInstanceRestartLifecycleTx(ctx context.Context, tx *sql.Tx, attempt 
 		if timer.Kind != pipeline.WorkflowTimerMutationInsert {
 			return result, fmt.Errorf("instance restart replay cannot repeat timer cancellation")
 		}
-		actual, found, err := loadWorkflowEngineTimerActivation(ctx, tx, postgres, timer.Activation.Ref)
+		actual, found, err := readWorkflowEngineTimerActivation(ctx, tx, postgres, timer.Activation.Ref, false)
 		if err != nil {
 			return result, err
 		}
@@ -49,7 +49,7 @@ func recoverInstanceRestartLifecycleTx(ctx context.Context, tx *sql.Tx, attempt 
 		if err != nil {
 			return result, err
 		}
-		actual, err := store.workflowDecisionLifecycleOwner().LoadByActivationTx(ctx, attempt, gate.Card.RunID, gate.EntityID, anchor.StageActivationID)
+		actual, err := store.workflowDecisionLifecycleOwner().ReadByActivationTx(ctx, attempt, gate.Card.RunID, gate.EntityID, anchor.StageActivationID)
 		if err != nil {
 			return result, err
 		}

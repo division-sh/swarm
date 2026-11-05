@@ -87,6 +87,7 @@ type workflowDecisionLifecycleTxOwner interface {
 	InsertTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card) (bool, error)
 	InsertProposedEffectTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card, decisioncard.ProposedEffectContinuation) (bool, error)
 	LoadByActivationTx(context.Context, *mutationprotocol.Attempt, string, string, string) (decisioncard.Card, error)
+	ReadByActivationTx(context.Context, *mutationprotocol.Attempt, string, string, string) (decisioncard.Card, error)
 	SupersedeStageTx(context.Context, *mutationprotocol.Attempt, string, string, string, string, time.Time) (bool, error)
 }
 
