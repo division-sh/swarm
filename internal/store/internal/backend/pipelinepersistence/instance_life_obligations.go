@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
@@ -62,4 +63,63 @@ func (s *PipelinePostgresOwner) ReadUnsettledInstanceLifeEventsTx(ctx context.Co
 
 func (s *PipelineSQLiteOwner) ReadUnsettledInstanceLifeEventsTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]string, error) {
 	return readUnsettledInstanceLifeEventsTx(ctx, tx, false, life)
+}
+
+func readPendingInstanceLifeFanOutTx(ctx context.Context, tx *sql.Tx, postgres bool, life events.InstanceLife) (int, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("instance fan-out census requires its native transaction")
+	}
+	if err := life.Validate(); err != nil {
+		return 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
+		WHERE run_id=$1 AND origin_kind='handler' ORDER BY triggering_delivery_id,flow_path,declaration_family,semantic_path`, life.RunID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var intents []fanoutobligation.Intent
+	for rows.Next() {
+		intent, err := scanFanOutIntent(rows)
+		if err != nil {
+			return 0, err
+		}
+		capsule := intent.Request.Capsule
+		if capsule.Route.InstancePath == life.FlowInstance && capsule.ProducerSource.Life() == life.Life {
+			intents = append(intents, intent)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	// Finish the source read before reusing the native transaction connection.
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	pending := 0
+	for _, intent := range intents {
+		if intent.Status == fanoutobligation.StatusOpen || intent.Status == fanoutobligation.StatusBlocked {
+			pending += intent.Request.Cardinality - intent.Cursor
+		}
+		fold, err := foldFanOutIntentTerminalDispositions(ctx, tx, postgres, intent.Request.Key)
+		if err != nil {
+			return 0, err
+		}
+		pending += fold.PendingCommitted
+		key := intent.Request.Key
+		barriers, err := summarizeFanOutDeliveryBarriers(ctx, tx, life.RunID, &key)
+		if err != nil {
+			return 0, err
+		}
+		pending += barriers.Armed + barriers.ClosedPending
+	}
+	return pending, nil
+}
+
+func (s *PipelinePostgresOwner) ReadPendingInstanceLifeFanOutTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) (int, error) {
+	return readPendingInstanceLifeFanOutTx(ctx, tx, true, life)
+}
+
+func (s *PipelineSQLiteOwner) ReadPendingInstanceLifeFanOutTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) (int, error) {
+	return readPendingInstanceLifeFanOutTx(ctx, tx, false, life)
 }
