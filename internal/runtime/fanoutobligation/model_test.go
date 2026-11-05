@@ -87,6 +87,7 @@ func TestMarshalCapsulePreservesEveryDynamicNumericCarrier(t *testing.T) {
 func TestIntentRequestRejectsContradictoryDurableIdentityAndCapsuleFacts(t *testing.T) {
 	valid := validIntentRequest(t)
 	valid.Capsule.Context.Life = &events.InstanceLife{RunID: valid.Key.RunID, FlowInstance: valid.Capsule.Route.InstancePath, Life: valid.Capsule.ProducerSource.Life()}
+	valid.Capsule.Lineage.RunID = uuid.NewString()
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
 	}

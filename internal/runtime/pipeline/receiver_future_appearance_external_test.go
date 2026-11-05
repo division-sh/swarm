@@ -66,6 +66,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					construction58Ctx := ctx
 					construction58At := time.Now().UTC()
 					construction58Instance, construction58Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction58Ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
+						Life:       1,
 						InstanceID: unrelatedRoute.InstanceID, InstanceKey: unrelatedKey, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
 						ParentFlowID: unrelatedConstructed.ParentRoute.FlowID, ParentFlowInstance: unrelatedConstructed.ParentRoute.FlowInstance, ParentEntityID: unrelatedConstructed.ParentEntityID,
 						WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "state",
@@ -115,7 +116,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					Identity: constructed,
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
-				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, InstanceKey: instanceKey, StorageRef: instancePath, EntityID: entityID,
+				instance := runtimepipeline.WorkflowInstance{Life: 1, InstanceID: route.InstanceID, InstanceKey: instanceKey, StorageRef: instancePath, EntityID: entityID,
 					ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "state",
 					Fields: map[string]any{"receiver_id": receiverKey, "account_id": "stored-business-key", "owner": "appeared"}, RuntimeReadiness: &readiness}
