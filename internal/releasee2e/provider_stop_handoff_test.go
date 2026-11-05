@@ -578,6 +578,9 @@ tool-agent:
 			case <-ctx.Done():
 				t.Fatalf("successor did not launch the retained provider retry\n%s", second.output.String())
 			}
+			if err := second.waitReady(ctx); err != nil {
+				t.Fatalf("successor readiness during retained retry: %v\n%s", err, second.output.String())
+			}
 			for {
 				var recovered goldenEvent
 				if err := second.rpc.call(ctx, "event.get", map[string]any{"event_id": business.EventID}, &recovered); err != nil {
@@ -721,7 +724,12 @@ func providerCrashFullRows(t *testing.T, selected storetest.ReleaseProcessReadOn
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	rows, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	var rows map[string]storetest.SelectedForkStorageTableSnapshot
+	err := selected.InspectSnapshot(ctx, func(scoped context.Context) error {
+		var err error
+		rows, err = storetest.ReadSelectedForkApplicationStorageSnapshot(scoped, selected)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
