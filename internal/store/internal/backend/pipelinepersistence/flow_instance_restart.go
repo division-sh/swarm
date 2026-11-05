@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
@@ -27,6 +29,13 @@ import (
 func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, plan pipeline.FlowInstanceActivationPlan, record pipeline.FlowInstanceActivationRecord) (bool, pipeline.CommittedWorkflowLifecycleMutation, []agentidentity.Identity, error) {
 	var empty pipeline.CommittedWorkflowLifecycleMutation
 	if err := record.Validate(); err != nil {
+		return false, empty, nil, err
+	}
+	if postgres {
+		if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
+			return false, empty, nil, err
+		}
+	} else if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 		return false, empty, nil, err
 	}
 	if err := requireFlowInstanceConstructionSelector(ctx, tx, postgres, record); err != nil {
@@ -38,23 +47,35 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return false, empty, nil, err
 	}
 	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, life.RunID, record.EntityID, life.FlowInstance)
-	if err != nil || !found {
-		return false, empty, nil, fmt.Errorf("instance restart requires its retained header: found=%t: %w", found, err)
+	if err != nil {
+		return false, empty, nil, err
+	}
+	if !found {
+		return false, empty, nil, fmt.Errorf("instance restart requires its retained header")
 	}
 	if header.Life != life.Life {
+		if header.Life >= record.State.Life {
+			equal, err := committedInstanceLifeRestartEqual(ctx, tx, record)
+			if err != nil {
+				return false, empty, nil, err
+			}
+			if equal {
+				return false, empty, nil, nil
+			}
+		}
 		return false, empty, nil, pipeline.InstanceRestarted(record.Identity, life.Life, header.Life)
 	}
-	if header.Revision != plan.Restart.Revision || header.CurrentState != plan.Restart.FinalStage.ID() {
+	if header.Revision != plan.Restart.Revision || header.Stage != plan.Restart.FinalStage.ID() {
 		return false, empty, nil, workflowEngineStateRevisionConflict(record.State)
 	}
-	target, err := loadWorkflowTargetPersistence(ctx, tx, record.Identity, record.EntityID, !postgres)
+	target, err := loadWorkflowTargetPersistence(ctx, tx, record.Identity, identity.NormalizeEntityID(record.EntityID), !postgres)
 	if err != nil {
 		return false, empty, nil, err
 	}
 	if err := requireHistoricalWorkflowDescriptor(target.Lifecycle, record.State); err != nil {
 		return false, empty, nil, err
 	}
-	if !header.CreatedAt.Equal(record.CreatedAt) {
+	if !target.Lifecycle.CreatedAt.Equal(record.CreatedAt) {
 		return false, empty, nil, fmt.Errorf("instance restart cannot replace physical birth")
 	}
 	if err := requireInstanceLifeQuiescentTx(ctx, tx, store, postgres, life, time.Now().UTC()); err != nil {
@@ -79,6 +100,31 @@ func commitFlowInstanceRestart(ctx context.Context, tx *sql.Tx, attempt *mutatio
 		return false, empty, nil, err
 	}
 	return true, lifecycle, restarted, nil
+}
+
+func committedInstanceLifeRestartEqual(ctx context.Context, tx *sql.Tx, record pipeline.FlowInstanceActivationRecord) (bool, error) {
+	metadata, projection, found, err := runforkrevision.ReadEntityLife(ctx, tx, record.Identity.RunID, record.EntityID, record.State.Life, true)
+	if err != nil || !found {
+		return false, err
+	}
+	if metadata.FlowInstance != record.Identity.Route.InstancePath || metadata.EntityType != record.EntityType ||
+		metadata.FlowTemplate != record.WorkflowName || metadata.Mode != record.Mode ||
+		metadata.ParentInstance != record.State.ParentInstance || metadata.InstanceKey != record.State.InstanceKey ||
+		metadata.Slug != record.Slug || metadata.Name != record.Name || metadata.CurrentState != record.CurrentState ||
+		!metadata.CreatedAt.Equal(record.CreatedAt) || !metadata.EnteredStateAt.Equal(record.EnteredStageAt) ||
+		!metadata.UpdatedAt.Equal(record.State.UpdatedAt) || !workflowCommitJSONEqual(metadata.FlowConfig, record.Config) {
+		return false, nil
+	}
+	want, err := workflowEngineStateProjection(record.State)
+	if err != nil {
+		return false, err
+	}
+	actualRaw, err := json.Marshal(projection)
+	if err != nil {
+		return false, err
+	}
+	wantRaw, err := json.Marshal(want)
+	return err == nil && workflowCommitJSONEqual(actualRaw, wantRaw), err
 }
 
 func requireInstanceLifeQuiescentTx(ctx context.Context, tx *sql.Tx, store eventCommitTxStore, postgres bool, life events.InstanceLife, observedAt time.Time) error {
