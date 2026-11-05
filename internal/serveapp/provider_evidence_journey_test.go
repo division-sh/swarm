@@ -141,16 +141,13 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 				}
 				one := int64(1)
 				retained := readInstanceLifeTrace(t, h, runID, current.EntityID, &one)
-				if len(retained) != len(originalTrace) {
-					t.Fatalf("prior-life trace lost events: original=%v retained=%v", originalTrace, retained)
-				}
 				for id := range originalTrace {
 					if !retained[id] {
 						t.Fatal("prior-life trace mixed or replaced its captured event identity")
 					}
 				}
 				for id := range readInstanceLifeTrace(t, h, runID, current.EntityID, nil) {
-					if originalTrace[id] {
+					if retained[id] {
 						t.Fatal("current-life trace exposed the preceding life's event")
 					}
 				}

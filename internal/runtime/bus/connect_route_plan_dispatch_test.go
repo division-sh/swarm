@@ -761,7 +761,7 @@ func connectRoutePlanRootProducerEvent(id string, eventType events.EventType, so
 	if strings.TrimSpace(runID) == "" {
 		runID = busInternalTestRunID
 	}
-	source, err := events.NewRootRoutingSource(eventtest.UUID("root-source-entity"))
+	source, err := events.NewRootRoutingSource(runID)
 	if err != nil {
 		panic(err)
 	}
@@ -1522,6 +1522,7 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstructionForRun(t, eb, source, semanticview.RootExecutionFlowID(source), runID)
+	installConnectionSourceConstructionForRun(t, eb, source, "scout", runID)
 	singletonEntityID := runtimeflowidentity.EntityID("scout")
 	if singletonEntityID == rootEntityID {
 		t.Fatal("test identities must distinguish singleton source from root receiver owner")
@@ -3743,6 +3744,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,

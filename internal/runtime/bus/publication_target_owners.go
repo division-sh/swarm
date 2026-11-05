@@ -26,6 +26,7 @@ type publicationTargetOwnerEvidence struct {
 	present            bool
 	origins            map[string]events.RouteIdentity
 	prospective        pipeline.PreparedWorkflowPublicationState
+	runProposal        pipeline.FlowInstanceRunProposal
 	context            context.Context
 	instances          pipeline.FlowInstanceIndexReader
 	agents             map[agentidentity.Identity]ActiveAgentDescriptor
@@ -421,7 +422,7 @@ func (p deliveryRecipientPolicy) loadPublicationTargetOwners(ctx context.Context
 		if err := p.runProposal.Validate(event.RunID(), fact); err != nil {
 			return publicationTargetOwnerEvidence{}, err
 		}
-		return publicationTargetOwnerEvidence{prospective: p.prospective, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, targetsAvailable: true}, nil
+		return publicationTargetOwnerEvidence{prospective: p.prospective, runProposal: p.runProposal, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, targetsAvailable: true}, nil
 	}
 	agents, agentsAvailable, err := p.loadActiveAgentDescriptors(ctx)
 	if err != nil {

@@ -27,6 +27,10 @@ func (p publicationTargetOwnerEvidence) requireCurrentSourceLife(event events.Ev
 		fact, _ := correlation.SourceArtifactFactFromContext(p.context)
 		return p.prospective.ValidatePublication(fact, event)
 	}
+	if p.runProposal.Present() && source.Kind() == events.RoutingSourceRoot {
+		fact, _ := correlation.SourceArtifactFactFromContext(p.context)
+		return p.runProposal.ValidateRootPublication(fact, event)
+	}
 	selected, err := p.sourceLifeObservation(route)
 	if err != nil {
 		return err

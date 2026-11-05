@@ -183,6 +183,23 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := proposal.ValidateRootPublication(fact, event); err != nil {
+		t.Fatalf("new run's exact root source requires no invented instance: %v", err)
+	}
+	for _, wrongLife := range []int64{2, 3} {
+		routing, err := event.RoutingSource().WithLife(wrongLife)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign := eventtest.RunCreatingRootIngressWithRoutingSource(event.ID(), event.Type(), "operator", "", event.Payload(), 0, event.RunID(), "", events.EventEnvelope{}, routing, event.CreatedAt())
+		if err := proposal.ValidateRootPublication(fact, foreign); err == nil {
+			t.Fatal("new run proposal authorized a later captured source life")
+		}
+	}
+	foreign := eventtest.RunCreatingRootIngress(eventtest.UUID("foreign-proposed-source"), event.Type(), "operator", "", event.Payload(), 0, event.RunID(), "", events.EventEnvelope{}, event.CreatedAt())
+	if err := proposal.ValidateRootPublication(fact, foreign); err == nil {
+		t.Fatal("new run proposal authorized another publication")
+	}
 	root := flowidentity.Stored(source, ".", event.RunID(), event.RunID(), event.RunID(), "")
 	child, err := flowidentity.KeylessChild(source, root, "producer")
 	if err != nil {
