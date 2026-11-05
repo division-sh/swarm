@@ -16,8 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) {

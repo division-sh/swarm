@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestTransitionReceiverOrdinaryCrossFlowMaterialization(t *testing.T) {
