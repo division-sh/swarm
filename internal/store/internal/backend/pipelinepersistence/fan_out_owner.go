@@ -1189,7 +1189,7 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	foldStarted := time.Now()
 	foldErr := foldFanOutPublicationSettlement(ctx, db, postgres, summary.RunID, &summary)
 	foldElapsed := time.Since(foldStarted)
-	slog.InfoContext(ctx, "fan_out_summary_fold_timing",
+	slog.DebugContext(ctx, "fan_out_summary_fold_timing",
 		"run_id", summary.RunID, "postgres", postgres, "observation", now,
 		"started", foldStarted, "elapsed", foldElapsed,
 		"population", summary.Intents, "failed", foldErr != nil)
