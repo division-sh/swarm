@@ -10,7 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
 
 func TestTelegramPlatformReadsUseCompiledOperationPolicy(t *testing.T) {

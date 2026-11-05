@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 // This is a real process kill after the gate transaction and before its final

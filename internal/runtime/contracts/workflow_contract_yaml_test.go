@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestStructuralReadersShareAdmittedSource(t *testing.T) {

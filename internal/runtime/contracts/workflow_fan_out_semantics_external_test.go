@@ -7,7 +7,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/notifyallchildren"
 )
 
 func TestFanOutEffectiveSemantics_DerivesScalarIdentityAndBoundOnce(t *testing.T) {

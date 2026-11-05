@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
 func TestCommandMockStartupDoesNotRequireLiveCredential(t *testing.T) {

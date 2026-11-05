@@ -10,10 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templatereply"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateselectexisting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateselectorcreate"
 )
 
 func TestRootExportHasNoSyntheticDeliveryEdge(t *testing.T) {

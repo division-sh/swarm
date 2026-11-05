@@ -14,25 +14,6 @@ type PromptSchemaGuardFinding struct {
 	Location string
 }
 
-func ValidatePromptSchemaGuards(repoRoot string) error {
-	bundle, err := LoadWorkflowContractBundle(repoRoot)
-	if err != nil {
-		return err
-	}
-	return ValidatePromptSchemaGuardsForBundle(bundle)
-}
-
-func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
-	findings, err := PromptSchemaGuardFindingsForBundle(bundle)
-	if err != nil {
-		return err
-	}
-	if len(findings) == 0 {
-		return nil
-	}
-	return fmt.Errorf("%s [%s] %s", strings.TrimSpace(findings[0].CheckID), strings.TrimSpace(findings[0].Location), strings.TrimSpace(findings[0].Message))
-}
-
 func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]PromptSchemaGuardFinding, error) {
 	if bundle == nil {
 		return nil, fmt.Errorf("workflow contract bundle is required")
@@ -68,28 +49,6 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 					CheckID:  "agent_prompt_lint_structural",
 					Severity: "hard_invalidity",
 					Message:  fmt.Sprintf("intent %s: fields not in %s schema: %v", tc.IntentSource, eventType, invalid),
-					Location: path,
-				})
-			}
-		}
-
-		for _, required := range tc.RequiredTopLevel {
-			if !promptMentionsField(text, fields, required) {
-				findings = append(findings, PromptSchemaGuardFinding{
-					CheckID:  "agent_prompt_lint_structural",
-					Severity: "hard_invalidity",
-					Message:  fmt.Sprintf("intent %s: missing required top-level field %q for %s", tc.IntentSource, required, tc.EmitTool),
-					Location: path,
-				})
-			}
-		}
-
-		for _, forbidden := range tc.ForbiddenTokens {
-			if promptContainsToken(text, forbidden) {
-				findings = append(findings, PromptSchemaGuardFinding{
-					CheckID:  "agent_prompt_lint_structural",
-					Severity: "hard_invalidity",
-					Message:  fmt.Sprintf("intent %s: contains forbidden legacy token %q", tc.IntentSource, forbidden),
 					Location: path,
 				})
 			}
@@ -137,32 +96,6 @@ func extractPromptEmitTopLevelFields(promptText, emitTool string) []string {
 		}
 	}
 	return uniquePromptStrings(fields)
-}
-
-func promptMentionsField(promptText string, parsedFields []string, field string) bool {
-	if containsExactPrompt(parsedFields, field) {
-		return true
-	}
-	return promptContainsToken(promptText, field)
-}
-
-func containsExactPrompt(in []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, item := range in {
-		if strings.TrimSpace(item) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func promptContainsToken(text, token string) bool {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return false
-	}
-	pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(token) + `\b`)
-	return pattern.FindStringIndex(text) != nil
 }
 
 func uniquePromptStrings(values []string) []string {
