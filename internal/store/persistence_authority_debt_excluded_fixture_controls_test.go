@@ -30,8 +30,12 @@ func debtExcludedFixtureControlSource(t *testing.T, path, source string) *ast.Fi
 func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	classified := 0
-	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go"} {
-		data, err := os.ReadFile(filepath.Join(root, path))
+	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go"} {
+		current := path
+		if path == "internal/testutil/testprocess/process_darwin.go" {
+			current = "tests/support/testutil/testprocess/process_darwin.go"
+		}
+		data, err := os.ReadFile(filepath.Join(root, current))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,15 +65,19 @@ func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 			t.Fatal("restored historical findings no longer enter the ratchet")
 		}
 	}
-	if classified != 6 {
-		t.Fatalf("classified %d declarations, want three retained and three Darwin", classified)
+	if classified != 9 {
+		t.Fatalf("classified %d declarations, want three retained and both exact three-declaration Darwin homes", classified)
 	}
 }
 
 func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go"} {
-		data, err := os.ReadFile(filepath.Join(root, path))
+	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go"} {
+		current := path
+		if path == "internal/testutil/testprocess/process_darwin.go" {
+			current = "tests/support/testutil/testprocess/process_darwin.go"
+		}
+		data, err := os.ReadFile(filepath.Join(root, current))
 		if err != nil {
 			t.Fatal(err)
 		}

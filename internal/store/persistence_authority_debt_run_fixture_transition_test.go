@@ -28,6 +28,7 @@ const debtCatalogRuntimeRowsLandedCollectorTo = "1edc5bbde2f1f4200e4b602fb4433e1
 const debtR77PrivateBridgeCollectorTo = "d8059d3ac96421566df4aff1af56127405a60a42332190a0709808f048ebba6a"
 const debtR83FixtureCollectorTo = "daac35b1f038526dbee85cf3e3d6f33015b67c78e8a6f48ace29599f1fc859e7"
 const debtPortableRuntimeRoleCollectorTo = "e48fdea1e811e0b54f246422b22c9b4344a70dc4d92ccf390293a022cd296c06"
+const debtPortableGlobalRoleCollectorTo = "1e4c8857b9ee254e6cd8c01625ce22050fdb07a8ee40dd3d4eb1040dd5726edd"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -531,7 +532,22 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 		})
 	}
 	t.Run("w1-comparison-metadata-only", func(t *testing.T) {
-		for _, edge := range [][2]string{{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo}, {debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo}, {debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo}, {debtS1CollectorTo, debtProviderSourceCollectorTo}, {debtProviderSourceCollectorTo, debtS3AccountCollectorTo}, {debtS3AccountCollectorTo, debtDeploymentHandlerLandedCollectorTo}, {debtDeploymentHandlerLandedCollectorTo, debtRetiredSourceFreezeCollectorTo}, {debtRetiredSourceFreezeCollectorTo, debtR52LiveFixtureCollectorTo}, {debtW4ComparisonCollectorTo, debtCatalogRuntimeRowsLandedCollectorTo}, {debtCatalogRuntimeRowsLandedCollectorTo, debtTestProcessCollectorTo}, {debtTestProcessCollectorTo, debtR77PrivateBridgeCollectorTo}, {debtS2OriginalContextCollectorTo, debtR83FixtureCollectorTo}, {debtR83FixtureCollectorTo, debtPortableRuntimeRoleCollectorTo}} {
+		for _, edge := range [][2]string{
+			{debtCompletedSelectedFixturePinCollectorTo, debtW1ComparisonCollectorTo},
+			{debtW3LandedFixtureCollectorTo, debtW1RebasedComparisonCollectorTo},
+			{debtW1RebasedComparisonCollectorTo, debtSourceLoaderCollectorTo},
+			{debtS1CollectorTo, debtProviderSourceCollectorTo},
+			{debtProviderSourceCollectorTo, debtS3AccountCollectorTo},
+			{debtS3AccountCollectorTo, debtDeploymentHandlerLandedCollectorTo},
+			{debtDeploymentHandlerLandedCollectorTo, debtRetiredSourceFreezeCollectorTo},
+			{debtRetiredSourceFreezeCollectorTo, debtR52LiveFixtureCollectorTo},
+			{debtW4ComparisonCollectorTo, debtCatalogRuntimeRowsLandedCollectorTo},
+			{debtCatalogRuntimeRowsLandedCollectorTo, debtTestProcessCollectorTo},
+			{debtTestProcessCollectorTo, debtR77PrivateBridgeCollectorTo},
+			{debtS2OriginalContextCollectorTo, debtR83FixtureCollectorTo},
+			{debtR83FixtureCollectorTo, debtPortableRuntimeRoleCollectorTo},
+			{debtPortableRuntimeRoleCollectorTo, debtPortableGlobalRoleCollectorTo},
+		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
 					t.Run(mutation, func(t *testing.T) {
