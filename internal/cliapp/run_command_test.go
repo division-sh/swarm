@@ -1189,6 +1189,35 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 			}
 		})
 	}
+
+	setCLIAPITestToken(t, "test-token")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{"duplicate payload key", `{"value":1,"value":2}`, "duplicate JSON object key"},
+		{"escaped duplicate payload key", `{"a":1,"\u0061":2}`, "duplicate JSON object key"},
+		{"underflow payload", `{"value":1e-4000}`, "underflows binary64"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "payload.json")
+			if err := os.WriteFile(path, []byte(tc.raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			calls.Store(0)
+			var stdout, stderr bytes.Buffer
+			args := []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", path, "--no-follow"}
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRunCommandOptions(server))
+			if code != 2 || !strings.Contains(stderr.String(), tc.want) || calls.Load() != 0 {
+				t.Fatalf("code=%d calls=%d stdout=%s stderr=%s; want validation refusal %q before any request", code, calls.Load(), stdout.String(), stderr.String(), tc.want)
+			}
+		})
+	}
 }
 
 func TestRunCommandMapsRPCAndMalformedFailures(t *testing.T) {
