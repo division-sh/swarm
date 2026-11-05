@@ -403,6 +403,15 @@ func newActivityBoringFixture(t *testing.T, backend, serverURL string, open func
 func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBoringFixture, ctx context.Context, intent runtimeengine.ActivityIntent, request events.Event) {
 	t.Helper()
 	entity := intent.EntityID.String()
+	instance := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
+		Life: 1, InstanceID: entity, StorageRef: intent.FlowInstance, EntityID: entity,
+		WorkflowName: "research", WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
+		CurrentState: "pending", CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
+		Fields: map[string]any{"marker": entity}, EntityType: "state",
+	})
+	if err := fixture.native.Construct(ctx, instance); err != nil {
+		t.Fatal(err)
+	}
 	source := eventtest.ExistingRunRootIngressWithRoutingSource(intent.SourceEventID, "research/source.requested", "", intent.SourceTaskID,
 		[]byte(`{}`), intent.ChainDepth, intent.SourceRunID, events.EventEnvelope{}, testWorkflowRoutingSource("research", intent.FlowInstance, entity), request.CreatedAt())
 	fixture.native.Publish(ctx, source)
