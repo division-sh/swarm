@@ -585,10 +585,10 @@ seam_families:
       - internal/runtime/pipeline/workflow_nodes.go
       - internal/runtime/pipeline/workflow_nodes_test.go
       - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
-      - internal/runtime/testfixtures/canonicalrouting/negative.go
-      - internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go
-      - internal/runtime/testfixtures/canonicalrouting/remaining_variants.go
-      - internal/runtime/testfixtures/canonicalrouting/resolution_variants.go
+      - tests/support/runtime/testfixtures/canonicalrouting/negative.go
+      - tests/support/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go
+      - tests/support/runtime/testfixtures/canonicalrouting/remaining_variants.go
+      - tests/support/runtime/testfixtures/canonicalrouting/resolution_variants.go
     search_dimensions: [connect_route_plan, delivery_route_model, route_plan]
     invalid_authority:
       - distinct receiver pins collapsing onto one event x subscriber delivery identity
@@ -716,7 +716,7 @@ seam_families:
       - internal/runtime/bootverify/workflow_event_topology_checks.go
       - internal/runtime/bootverify/workflow_stage_timer_checks_test.go
       - internal/runtime/bootverify/workflow_timer_checks.go
-      - internal/runtime/bus/bustest/routes.go
+      - tests/support/runtime/bus/bustest/routes.go
       - internal/runtime/bus/event_identity_dispatch_surface_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/outbox_test.go
@@ -1356,7 +1356,7 @@ seam_families:
     layer: test_fixture_semantics
     classification: valid_consumer
     paths:
-      - internal/runtime/bus/bustest/routes.go
+      - tests/support/runtime/bus/bustest/routes.go
       - internal/runtime/bus/eventbus_exact_target_obligations_test.go
       - internal/runtime/bus/pipeline_terminal_release_test.go
       - internal/runtime/bus/test_routes_test.go
@@ -1436,15 +1436,15 @@ seam_families:
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
-      - internal/runtime/testfixtures/canonicalrouting/receiver_initialization.go
-      - internal/runtime/testfixtures/canonicalrouting/receiver_config_history.go
-      - internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go
+      - tests/support/runtime/testfixtures/canonicalrouting/receiver_initialization.go
+      - tests/support/runtime/testfixtures/canonicalrouting/receiver_config_history.go
+      - tests/support/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go
       - internal/store/internal/runtimepersistence/receiver_config_composed_owner_test.go
-      - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go
-      - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_ingress.go
-      - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go
-      - internal/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go
-      - internal/runtime/testfixtures/canonicalrouting/typed_receiver_fork_refusal.go
+      - tests/support/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go
+      - tests/support/runtime/testfixtures/canonicalrouting/receiver_initialization_ingress.go
+      - tests/support/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go
+      - tests/support/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go
+      - tests/support/runtime/testfixtures/canonicalrouting/typed_receiver_fork_refusal.go
       - internal/serveapp/receiver_initialization_test.go
       - internal/serveapp/receiver_initialization_ingress_test.go
       - internal/serveapp/receiver_initialization_release_test.go
@@ -1555,7 +1555,7 @@ seam_families:
       - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
       - internal/runtime/conformance/canonical_forms_registry_test.go
-      - internal/runtime/testfixtures/canonicalrouting/artifact_registry.yaml
+      - tests/support/runtime/testfixtures/canonicalrouting/artifact_registry.yaml
     search_dimensions: [route_plan, event_deliveries, workflow_runtime_carrier, connect_route_plan, event_delivery_plan_compatibility]
     notes: >
       The matrix proves selected route-authority rows. This inventory proves

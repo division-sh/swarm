@@ -8,6 +8,11 @@ import (
 // IsTestFixturePackage classifies source roles, not permission to construct
 // storage or export authority. It accepts repository and module import paths.
 func IsTestFixturePackage(path string) bool {
+	support := strings.TrimPrefix(path, "github.com/division-sh/swarm/")
+	if support == "tests/support/runtime/bus/bustest" || support == "tests/support/runtime/effects/effecttest" ||
+		support == "tests/support/runtime/testfixtures" || strings.HasPrefix(support, "tests/support/runtime/testfixtures/") {
+		return true
+	}
 	const module = "github.com/division-sh/swarm/internal/"
 	internal := strings.HasPrefix(path, module) || strings.HasPrefix(path, "internal/")
 	path = strings.TrimPrefix(path, module)

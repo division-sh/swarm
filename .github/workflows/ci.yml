@@ -468,7 +468,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SWARM_CANONICAL_ROUTING_VERIFY_TRACKER_REMOTE: "1"
-        run: go test ./internal/runtime/testfixtures/canonicalrouting -run '^TestCanonicalRoutingTrackedSplitsRemainOpen$' -count=1
+        run: go test ./tests/support/runtime/testfixtures/canonicalrouting -run '^TestCanonicalRoutingTrackedSplitsRemainOpen$' -count=1
       - name: Vet
         run: go vet ./...
       - name: Disk usage at end

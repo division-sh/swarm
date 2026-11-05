@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
 
 type mcpEffectRoundTripper struct {

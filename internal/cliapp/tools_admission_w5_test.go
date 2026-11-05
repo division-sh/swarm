@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/templateflowpilot"
 )
 
 func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {

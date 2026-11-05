@@ -10,6 +10,6 @@ import (
 func CopyIssue2564FinalEntryCompletion(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	copyTree(t, filepath.Join(RepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion"), root)
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion"), root)
 	return root
 }

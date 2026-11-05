@@ -131,7 +131,7 @@ func retiredHandlerInterpreterViolations(path string, raw []byte) ([]string, err
 				}
 				// This test-source ownership detector classifies retired routing as
 				// authored too; it neither decodes nor executes the action.
-				if path == "internal/runtime/testfixtures/canonicalrouting/fixture.go" && owner == "yamlNodeContainsAuthoredRoutingAt" && text == "create_flow_instance" {
+				if path == "tests/support/runtime/testfixtures/canonicalrouting/fixture.go" && owner == "yamlNodeContainsAuthoredRoutingAt" && text == "create_flow_instance" {
 					break
 				}
 				report(value, "retired action identity "+text)
@@ -227,7 +227,7 @@ func TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration(t *testing.
 		"renamed_option":   "type NewOptions struct { Bindings any `yaml:\"config_from\"` }",
 	} {
 		t.Run(name, func(t *testing.T) {
-			for _, path := range []string{"internal/runtime/nested/new.go", "cmd/newowner/main.go", "internal/runtime/testfixtures/new.go"} {
+			for _, path := range []string{"internal/runtime/nested/new.go", "cmd/newowner/main.go", "tests/support/runtime/testfixtures/new.go"} {
 				found, err := retiredHandlerInterpreterViolations(path, []byte("package probe\n"+source))
 				if err != nil || len(found) == 0 {
 					t.Fatalf("%s escaped repository guard: findings=%v err=%v", path, found, err)

@@ -761,7 +761,7 @@ decode_bypasses:
     # Its lexical admission consumes yamlsource and existing shared schema leaves.
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 7, direct_decode_roots: 0}
-    internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
+    tests/support/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
     internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
     internal/testplanning/execution.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
     internal/testplanning/policy.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
@@ -838,22 +838,22 @@ wave_1:
       internal/cliapp/describe.go: non_authoring_text
       internal/cliapp/describe_test.go: non_authoring_text
       internal/cliapp/local_context_registry.go: non_authoring_text
-      internal/runtime/testfixtures/canonicalrouting/composition_connect_variants.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/nested_package_connect.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go: non_authoring_text
-      internal/runtime/testfixtures/canonicalrouting/parser_snippets.go: positive_producer_and_explicit_retired_negative
-      internal/runtime/testfixtures/canonicalrouting/remaining_variants.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/receiver_config_history.go: positive_producer
-      internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go: positive_producer
-      internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go: positive_producer
-      internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go: positive_producer
-      internal/runtime/testfixtures/canonicalrouting/resolution_variants.go: mutation_base
-      internal/runtime/testfixtures/canonicalrouting/root_connect.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/sealed_package.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go: positive_producer
-      internal/runtime/testfixtures/canonicalrouting/select_entity_demotion.go: positive_producer_and_explicit_retired_negative
-      internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go: positive_producer
-      internal/runtime/testfixtures/canonicalrouting/target_owner_diamond.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/composition_connect_variants.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/import_boundary_variants.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/nested_package_connect.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/ownership_guard_test.go: non_authoring_text
+      tests/support/runtime/testfixtures/canonicalrouting/parser_snippets.go: positive_producer_and_explicit_retired_negative
+      tests/support/runtime/testfixtures/canonicalrouting/remaining_variants.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/receiver_config_history.go: positive_producer
+      tests/support/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go: positive_producer
+      tests/support/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go: positive_producer
+      tests/support/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go: positive_producer
+      tests/support/runtime/testfixtures/canonicalrouting/resolution_variants.go: mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/root_connect.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/sealed_package.go: positive_producer_and_mutation_base
+      tests/support/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go: positive_producer
+      tests/support/runtime/testfixtures/canonicalrouting/select_entity_demotion.go: positive_producer_and_explicit_retired_negative
+      tests/support/runtime/testfixtures/canonicalrouting/supported_surface_routing.go: positive_producer
+      tests/support/runtime/testfixtures/canonicalrouting/target_owner_diamond.go: positive_producer_and_mutation_base
   closure: "all three rows reject retired spellings and admit only canonical forms"

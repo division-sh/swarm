@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 )
 
 func testActiveAgentDescriptor(t testing.TB, agentID, entityID, flowInstance string) runtimebus.ActiveAgentDescriptor {
