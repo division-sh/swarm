@@ -369,21 +369,11 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if provider == "" {
 		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
 	}
-	if (opts.verb == "connect" || opts.verb == "rebind") && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
-		return returnCLIValidationError(errOut, errors.New("channel account confirmation requires a terminal or --yes"))
+	closeInput, err := opts.prepareConfirmationInput(ctx)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
 	}
-	if !opts.yes {
-		input, closeInput, err := channelConfirmationReader(ctx, opts.apiOptions.input)
-		if err != nil {
-			return returnCLIValidationError(errOut, err)
-		}
-		opts.apiOptions.input = input
-		defer func() {
-			if err := closeInput(); err != nil {
-				resultErr = errors.Join(resultErr, err)
-			}
-		}()
-	}
+	defer finishChannelConfirmationInput(closeInput, &resultErr)
 	bundleHash := ""
 	if opts.sourceSet {
 		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
@@ -511,18 +501,11 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
 	}
-	if !opts.yes {
-		input, closeInput, err := channelConfirmationReader(ctx, opts.apiOptions.input)
-		if err != nil {
-			return returnCLIValidationError(errOut, err)
-		}
-		opts.apiOptions.input = input
-		defer func() {
-			if err := closeInput(); err != nil {
-				resultErr = errors.Join(resultErr, err)
-			}
-		}()
+	closeInput, err := opts.prepareConfirmationInput(ctx)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
 	}
+	defer finishChannelConfirmationInput(closeInput, &resultErr)
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
 		progressOut = io.Discard
