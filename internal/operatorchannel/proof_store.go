@@ -233,7 +233,7 @@ func (s *FileProofStore) loadLocked() (proofDocument, error) {
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&doc); err != nil {
-		return proofDocument{}, fmt.Errorf("parse operator channel proof store %s: %w", s.path, err)
+		return proofDocument{}, fmt.Errorf("parse operator channel proof store %s: %w. If this is an rc.1 proof store, remove it and re-pair the channel before starting v0.7.", s.path, err)
 	}
 	if doc.Version != proofDocumentVersion || doc.Entries == nil {
 		return proofDocument{}, fmt.Errorf("operator channel proof store %s has unsupported or incomplete format", s.path)

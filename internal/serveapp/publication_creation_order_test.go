@@ -22,6 +22,7 @@ import (
 // The public ACK is not a handler-completion fence. DC-6 protects the exact
 // constructed instance while permitting another instance in the run to advance.
 func TestPublicPublicationCreatingTurnOrderBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			probe := lifecycleprobe.New()
@@ -206,6 +207,7 @@ func TestPublicPublicationCreatingTurnOrderBothStores(t *testing.T) {
 }
 
 func TestPublicPublicationCreatingTurnRestartBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			opts, start := creatingTurnOrderHarness(t, backend)

@@ -27,6 +27,7 @@ import (
 // These are NEW served H3/M33 fixtures, not the unavailable archived H1/H2
 // workloads. All writes use generated tools on real managed provider turns.
 func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, order := range []string{"a_then_b", "b_then_a"} {
 			for _, indices := range []string{"distinct", "same"} {
@@ -114,6 +115,7 @@ func TestIssue2564ServedH3CollectionOperationsBothStores(t *testing.T) {
 }
 
 func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, order := range []string{"timer_then_save", "save_then_timer"} {
 			t.Run(backend+"/"+order, func(t *testing.T) {

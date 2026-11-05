@@ -6590,6 +6590,7 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 }
 
 func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -6653,6 +6654,7 @@ func TestServeCancellationExitCodeDistinguishesOwnershipLoss(t *testing.T) {
 }
 
 func TestNonDevServeOwnershipParity(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	base := func(configPath, backend string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
