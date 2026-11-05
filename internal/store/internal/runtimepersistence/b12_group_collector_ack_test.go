@@ -176,6 +176,7 @@ func newCollectorFixtureWithCardinality(t *testing.T, backend string, cardinalit
 	if err != nil {
 		t.Fatal(err)
 	}
+	constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), seed.runID, f.sourceRoute, seed.createdAt)
 	f.producer, err = identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
 	if err != nil {
 		t.Fatal(err)

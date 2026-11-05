@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -254,6 +255,8 @@ func prepareP16PublicationGroup(t *testing.T, raw selectedFanOutLifecycleOwner, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))
+	constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), fixture.runID, route, fixture.createdAt)
 	producer, err := identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
 	if err != nil {
 		t.Fatal(err)
