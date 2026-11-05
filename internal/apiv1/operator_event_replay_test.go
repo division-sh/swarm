@@ -1758,8 +1758,8 @@ func assertNoReplayEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery) {
 func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, eventtest.ExistingRunRootIngress(uuid.NewString(),
-			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
+		err := bus.PublishDirect(ctx, eventtest.OperatorInjected(uuid.NewString(),
+			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, operatorReplayRunID, nil, events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)
 		}

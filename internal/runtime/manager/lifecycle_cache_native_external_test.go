@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -181,7 +182,7 @@ func proveNativeAgentRowCAS(t *testing.T, ctx context.Context, coordinate agentt
 		ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
 		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation, TargetPhase: manager.AgentLifecycleRegistered,
 		ConfigRevision: before.ConfigRevision, RunMode: manager.AgentRunModeStopped, Topology: before.Topology,
-		DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation}, Now: time.Now().UTC(),
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}, Now: time.Now().UTC(),
 	}
 	if _, err := grant.CommitAgentLifecycleTransition(ctx, initialRelease); err != nil {
 		t.Fatal(err)
@@ -199,7 +200,7 @@ func proveNativeAgentRowCAS(t *testing.T, ctx context.Context, coordinate agentt
 		ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
 		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation + 1, TargetPhase: manager.AgentLifecycleRunning,
 		ConfigRevision: before.ConfigRevision, RunMode: manager.AgentRunModeStandard, Topology: before.Topology,
-		DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation}, Now: time.Now().UTC(),
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}, Now: time.Now().UTC(),
 	}
 	type outcome struct {
 		request manager.AgentLifecycleTransition

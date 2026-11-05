@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
@@ -127,7 +128,7 @@ func TestPostgresInstanceResetAndLifecycleAcquireActorsBeforeSourceHead(t *testi
 					return ctx.Err()
 				}
 				_, err = pg.agentPostgresOwner.CommitAgentLifecycleTransitionTx(ctx, attempt, manager.AgentLifecycleTransition{
-					DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
+					DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
 					OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: "native-reset-interleave", Identity: actor, AgentID: actor.AgentID(), Trigger: "start",
 					ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
 					TargetEpoch: state.RuntimeEpoch + 1, TargetGeneration: state.Generation + 1, TargetPhase: state.Phase, ConfigRevision: state.ConfigRevision,

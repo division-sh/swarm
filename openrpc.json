@@ -19104,13 +19104,18 @@
             ],
             "type": "string"
           },
+          "life": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "route": {
             "$ref": "#/components/schemas/DecisionCardRoutingSourceRoute"
           }
         },
         "required": [
           "kind",
-          "route"
+          "route",
+          "life"
         ],
         "type": "object"
       },

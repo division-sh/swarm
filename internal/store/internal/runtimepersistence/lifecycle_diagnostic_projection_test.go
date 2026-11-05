@@ -8,6 +8,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -83,7 +84,7 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 				}
 			}
 			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), first)
-			origin := runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+			origin := runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}
 			left := enqueueDiagnosticTestIdentity(t, first, mustTestAgentIdentityForRun(uuid.NewString(), "same-worker", "left/one"), origin, executionmode.Live)
 			right := enqueueDiagnosticTestIdentity(t, first, mustTestAgentIdentityForRun(uuid.NewString(), "same-worker", "right/two"), origin, executionmode.Live)
 			second, db, closeSecond := open()
@@ -270,7 +271,7 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 				}
 				op := uuid.NewString()
 				result, err := agentfixture.CommitStatic(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
-					DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticAcceptedEvent, ParentEventID: parent},
+					DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticAcceptedEvent, ParentEventID: parent},
 					OperationID:      op, OperationKind: "start", RequestHash: op, Identity: first.Identity, AgentID: first.AgentID, Trigger: "start",
 					ExpectedEpoch: 11, ExpectedGeneration: 1, ExpectedPhase: runtimemanager.AgentLifecycleRegistered, TargetEpoch: 11, TargetGeneration: 2, TargetPhase: runtimemanager.AgentLifecycleRunning,
 					ConfigRevision: "r1", RunMode: runtimemanager.AgentRunModeStandard, Now: time.Now().UTC(),
@@ -309,10 +310,10 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 func enqueueDiagnosticTestAgent(t *testing.T, selected diagnosticProjectionTestStore, slug string) diaglog.LifecycleDiagnostic {
 	t.Helper()
 	identity := testAgentIdentity(t, slug, "global")
-	return enqueueDiagnosticTestIdentity(t, selected, identity, runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}, executionmode.Live)
+	return enqueueDiagnosticTestIdentity(t, selected, identity, runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}, executionmode.Live)
 }
 
-func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTestStore, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) diaglog.LifecycleDiagnostic {
+func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTestStore, identity agentidentity.Identity, origin runfork.LifecycleDiagnosticOrigin, mode executionmode.Mode) diaglog.LifecycleDiagnostic {
 	t.Helper()
 	req := diagnosticTestTransition(t, identity, origin, mode)
 	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
@@ -327,7 +328,7 @@ func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTe
 	return diagnosticTestOperation(t, selected, req.OperationID)
 }
 
-func diagnosticTestTransition(t *testing.T, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) runtimemanager.AgentLifecycleTransition {
+func diagnosticTestTransition(t *testing.T, identity agentidentity.Identity, origin runfork.LifecycleDiagnosticOrigin, mode executionmode.Mode) runtimemanager.AgentLifecycleTransition {
 	t.Helper()
 	slug := identity.AgentID()
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -370,7 +371,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 	if scenario == "mock_mode" {
 		mode = executionmode.Mock
 	}
-	first := enqueueDiagnosticTestIdentity(t, selected, testAgentIdentity(t, "diagnostic-worker", "global"), runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}, mode)
+	first := enqueueDiagnosticTestIdentity(t, selected, testAgentIdentity(t, "diagnostic-worker", "global"), runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}, mode)
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 	var cleanup func()
 	switch scenario {

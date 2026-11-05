@@ -18,6 +18,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -1148,7 +1149,7 @@ func lifecycleDiagnosticProducerPayload(ctx context.Context, runID string, resul
 		}
 		payload.ProducerLineage = &lineage
 	}
-	if origin := result.DiagnosticProvenance.Origin; origin.Causality == runtimemanager.LifecycleDiagnosticAcceptedEvent {
+	if origin := result.DiagnosticProvenance.Origin; origin.Causality == runfork.LifecycleDiagnosticAcceptedEvent {
 		if payload.ProducerLineage == nil {
 			payload.ProducerLineage = &runtimecorrelation.RuntimeLineage{RunID: runID, ParentEventID: origin.ParentEventID}
 		} else {

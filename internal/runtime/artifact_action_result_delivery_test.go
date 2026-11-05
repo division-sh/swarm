@@ -273,6 +273,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				}
 				fields, _ := entityruntime.ResolveForFlow(source, coordinate.TemplateID)
 				seedRuntimeTestPreparedInstance(t, ctx, pg, pc, runtimepipeline.WorkflowInstance{
+					Life:       1,
 					InstanceID: coordinate.InstanceID, StorageRef: coordinate.InstancePath, EntityID: coordinate.EntityID,
 					EntityType: fields.EntityType, Fields: map[string]any{},
 					ParentFlowID: coordinate.ParentRoute.FlowID, ParentFlowInstance: coordinate.ParentRoute.FlowInstance, ParentEntityID: coordinate.ParentEntityID,
@@ -367,6 +368,7 @@ func artifactActionResultWorkflowInstance(source semanticview.Source) runtimepip
 		fields = map[string]any{}
 	}
 	return runtimepipeline.WorkflowInstance{
+		Life:            1,
 		InstanceID:      "inst-1",
 		StorageRef:      "repo-scaffold/inst-1",
 		EntityID:        artifactActionResultEntityID,

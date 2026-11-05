@@ -289,6 +289,7 @@ func (s *templateFlowPilotMemoryStore) addObservation(t testing.TB, source seman
 	}
 	at := time.Unix(1700000000, 0).UTC()
 	header := runtimepipeline.WorkflowInstance{
+		Life:         1,
 		WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, InstanceKey: key,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
