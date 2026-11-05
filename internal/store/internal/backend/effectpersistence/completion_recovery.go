@@ -165,6 +165,15 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 		return nil, err
 	}
 	args = append([]any{now, selectedExecutionID, prospective, recoveryAvailable(mode)}, args...)
+	projectedGeneration := `COALESCE((SELECT next_agent.generation
+		FROM jsonb_to_recordset($3::jsonb) AS next_agent(
+			run_id text, agent_id text, name_owner text, name_source text, route_presence text,
+			scope_key text, instance_id text, instance_path text, generation bigint)
+		WHERE next_agent.run_id=o.agent_run_id::text AND next_agent.agent_id=o.agent_id
+			AND next_agent.name_owner=o.agent_name_owner AND next_agent.name_source=o.agent_name_source
+			AND next_agent.route_presence=o.agent_route_presence AND next_agent.scope_key=o.flow_scope_key
+			AND next_agent.instance_id=o.flow_instance_id AND next_agent.instance_path=o.flow_instance
+		), g.lifecycle_generation)`
 	query := postgresCompletionRecoverySelect + storeagent.CompletionRecoveryAgentJoinSQL() + `
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
@@ -173,17 +182,7 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
-		      ` + storeagent.CompletionRecoveryAgentStaleSQL(false) + `
-		    )) OR
-		    (o.authority_kind='normal_agent' AND EXISTS (
-		      SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS next_agent(
-		        run_id text, agent_id text, name_owner text, name_source text, route_presence text,
-		        scope_key text, instance_id text, instance_path text, generation bigint)
-		      WHERE next_agent.run_id=o.agent_run_id::text AND next_agent.agent_id=o.agent_id
-		        AND next_agent.name_owner=o.agent_name_owner AND next_agent.name_source=o.agent_name_source
-		        AND next_agent.route_presence=o.agent_route_presence AND next_agent.scope_key=o.flow_scope_key
-		        AND next_agent.instance_id=o.flow_instance_id AND next_agent.instance_path=o.flow_instance
-		        AND next_agent.generation IS DISTINCT FROM o.generation
+		      ` + storeagent.CompletionRecoveryAgentStaleSQL(false, projectedGeneration) + `
 		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
@@ -223,6 +222,17 @@ func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now t
 		return nil, err
 	}
 	args = append([]any{selectedExecutionID, selectedExecutionID, now, prospective, recoveryAvailable(mode)}, args...)
+	projectedGeneration := `COALESCE((SELECT json_extract(next_agent.value,'$.generation')
+		FROM json_each(?) next_agent
+		WHERE json_extract(next_agent.value,'$.run_id')=o.agent_run_id
+			AND json_extract(next_agent.value,'$.agent_id')=o.agent_id
+			AND json_extract(next_agent.value,'$.name_owner')=o.agent_name_owner
+			AND json_extract(next_agent.value,'$.name_source')=o.agent_name_source
+			AND json_extract(next_agent.value,'$.route_presence')=o.agent_route_presence
+			AND json_extract(next_agent.value,'$.scope_key')=o.flow_scope_key
+			AND json_extract(next_agent.value,'$.instance_id')=o.flow_instance_id
+			AND json_extract(next_agent.value,'$.instance_path')=o.flow_instance
+		), g.lifecycle_generation)`
 	rows, err := tx.QueryContext(ctx, sqliteCompletionRecoverySelect+storeagent.CompletionRecoveryAgentJoinSQL()+`
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
@@ -231,19 +241,7 @@ func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now t
 		  AND (
 		    a.lease_expires_at <= ? OR
 		    (o.authority_kind='normal_agent' AND (
-		      `+storeagent.CompletionRecoveryAgentStaleSQL(true)+`
-		    )) OR
-		    (o.authority_kind='normal_agent' AND EXISTS (
-		      SELECT 1 FROM json_each(?) next_agent
-		      WHERE json_extract(next_agent.value,'$.run_id')=o.agent_run_id
-		        AND json_extract(next_agent.value,'$.agent_id')=o.agent_id
-		        AND json_extract(next_agent.value,'$.name_owner')=o.agent_name_owner
-		        AND json_extract(next_agent.value,'$.name_source')=o.agent_name_source
-		        AND json_extract(next_agent.value,'$.route_presence')=o.agent_route_presence
-		        AND json_extract(next_agent.value,'$.scope_key')=o.flow_scope_key
-		        AND json_extract(next_agent.value,'$.instance_id')=o.flow_instance_id
-		        AND json_extract(next_agent.value,'$.instance_path')=o.flow_instance
-		        AND json_extract(next_agent.value,'$.generation') IS NOT o.generation
+		      `+storeagent.CompletionRecoveryAgentStaleSQL(true, projectedGeneration)+`
 		    )) OR
 		    (o.authority_kind='normal_agent' AND NOT EXISTS (
 		      SELECT 1 FROM runs run
