@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -477,7 +478,18 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Loops == nil {
 		return fmt.Errorf("malformed %s: constructed loops must be an array", prefix)
 	}
+	if _, err := entityLifeStartedAt(result); err != nil {
+		return fmt.Errorf("malformed %s: %w", prefix, err)
+	}
 	return nil
+}
+
+func entityLifeStartedAt(result entityFull) (time.Time, error) {
+	if result.Entity.Life == nil {
+		return time.Time{}, nil
+	}
+	birth, _ := time.Parse(time.RFC3339Nano, *result.Entity.LifecycleCreatedAt)
+	return pipeline.InstanceLifeStartedAt(*result.Entity.Life, birth, result.Bookkeeping)
 }
 
 func validateEntitySummary(prefix string, entity entitySummary) error {
@@ -636,9 +648,15 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	}
 	if entity.StageDefined != nil {
 		header = append(header,
+			cliLabeledDetailRow{Label: "life", Value: fmt.Sprintf("%d", *entity.Life)},
 			cliLabeledDetailRow{Label: "revision", Value: fmt.Sprintf("%d", *entity.Revision)},
 			cliLabeledDetailRow{Label: "lifecycle created", Value: entityTimestampText(now, *entity.LifecycleCreatedAt, opts.verbose)},
 			cliLabeledDetailRow{Label: "lifecycle updated", Value: entityTimestampText(now, *entity.LifecycleUpdatedAt, opts.verbose)})
+		if *entity.Life > 1 {
+			if started, err := entityLifeStartedAt(result); err == nil {
+				header = append(header, cliLabeledDetailRow{Label: "history", Value: "started over on " + started.UTC().Format(time.RFC3339Nano)})
+			}
+		}
 	}
 	header = append(header,
 		cliLabeledDetailRow{Label: "slug", Value: entityDash(entityOneLine(entity.Slug))},
