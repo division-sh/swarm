@@ -91,6 +91,28 @@ func TestOutcomeConstructedMutationRetainsExactRecordedHeader(t *testing.T) {
 	if mutation.Address.FlowInstance != command.State.Identity {
 		t.Fatalf("mutation changed the constructed receiver: %+v", mutation.Address)
 	}
+	var controls map[string]any
+	if err := json.Unmarshal(command.State.Config, &controls); err != nil {
+		t.Fatal(err)
+	}
+	controls["status"] = "active"
+	withStatus, err := json.Marshal(controls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusHeader, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, withStatus)
+	if err != nil || !header.SameRestartControl(statusHeader) {
+		t.Fatalf("redundant status changed physical control: %v", err)
+	}
+	controls["workflow_version"] = "foreign"
+	foreign, err := json.Marshal(controls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignHeader, err := DecodeWorkflowInstanceRecordedHeader(command.State.Identity.Route, foreign)
+	if err != nil || header.SameRestartControl(foreignHeader) {
+		t.Fatalf("restart control accepted changed workflow version: %v", err)
+	}
 	invalid := command
 	invalid.State.Config = json.RawMessage(`{}`)
 	if err := invalid.Validate(); err == nil {
