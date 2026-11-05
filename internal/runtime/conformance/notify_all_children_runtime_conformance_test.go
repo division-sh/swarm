@@ -2983,35 +2983,53 @@ func waitNotifyAllChildrenRuntime(t *testing.T, runtime notifyAllChildrenRuntime
 
 func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenRuntime, runID string, timeout time.Duration) {
 	t.Helper()
+	budgetStarted := time.Now()
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), timeout)
 	defer cancel()
+	settled := false
+	defer func() {
+		if !settled {
+			logNotifyAllChildrenDrainCounts(t, runtime.db, runID)
+		}
+	}()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	pass := 0
+	logStep := func(step string, started time.Time, err error) {
+		t.Logf("fan_out_drain_step pass=%d step=%s elapsed=%s budget_elapsed=%s budget=%s error=%v", pass, step, time.Since(started), time.Since(budgetStarted), timeout, err)
+	}
 	for {
-		if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+		pass++
+		stepStarted := time.Now()
+		err := runtime.bus.WaitForQuiescence(ctx)
+		logStep("first_bus_wait", stepStarted, err)
+		if err != nil {
 			logNotifyAllChildrenDrainFailure(t, runtime.db, runID)
-			readCtx, stopRead := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Second)
-			if summary, readErr := runtime.selected.FanOutRunSummary(readCtx, runID, time.Now().UTC()); readErr == nil {
-				t.Logf("quiescence failure durable fan-out summary=%#v active_work=%d", summary, runtime.workOwner.ActiveCount())
-			} else {
-				t.Logf("quiescence failure durable summary unavailable: %v active_work=%d", readErr, runtime.workOwner.ActiveCount())
-			}
-			stopRead()
 			t.Fatalf("WaitForQuiescence: %v", err)
 		}
+		stepStarted = time.Now()
 		summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+		logStep("first_summary", stepStarted, err)
+		t.Logf("fan_out_drain_summary pass=%d step=first_summary population=%d settled_outcomes=%d unsettled_publications=%d error=%v", pass, summary.Intents, summary.Settled, summary.Unsettled, err)
 		if err != nil {
 			t.Fatalf("FanOutRunSummary(%s): %v", runID, err)
 		}
 		if summary.Owed == 0 && summary.Open == 0 && summary.Blocked == 0 && summary.Unsettled == 0 && summary.BarrierArmed == 0 && summary.BarrierPending == 0 {
-			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+			stepStarted = time.Now()
+			err := runtime.bus.WaitForQuiescence(ctx)
+			logStep("second_bus_wait", stepStarted, err)
+			if err != nil {
 				t.Fatalf("WaitForQuiescence after fan-out settlement: %v", err)
 			}
+			stepStarted = time.Now()
 			confirmed, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			logStep("confirm_summary", stepStarted, err)
+			t.Logf("fan_out_drain_summary pass=%d step=confirm_summary population=%d settled_outcomes=%d unsettled_publications=%d error=%v", pass, confirmed.Intents, confirmed.Settled, confirmed.Unsettled, err)
 			if err != nil {
 				t.Fatalf("confirm FanOutRunSummary(%s): %v", runID, err)
 			}
 			if confirmed.Owed == 0 && confirmed.Open == 0 && confirmed.Blocked == 0 && confirmed.Unsettled == 0 && confirmed.BarrierArmed == 0 && confirmed.BarrierPending == 0 {
+				settled = true
 				return
 			}
 		}

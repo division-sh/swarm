@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+// This single read follows the failed verdict, outside its exhausted budget.
+func logNotifyAllChildrenDrainCounts(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	var owed, open, blocked int
+	err := db.QueryRowContext(ctx, `SELECT
+		COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0)
+		FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&owed, &open, &blocked)
+	t.Logf("fan_out_drain_after_failure run=%s observed=%s elapsed=%s owed=%d open=%d blocked=%d error=%v", runID, started.UTC().Format(time.RFC3339Nano), time.Since(started), owed, open, blocked, err)
+}
+
 // Observe after the original timeout. Never print payload, SQL text, claim
 // tokens, credentials or effect bodies, and never alter the settlement verdict.
 func logNotifyAllChildrenDrainFailure(t *testing.T, db *sql.DB, runID string) {
