@@ -91,6 +91,9 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				command, cancel := context.WithCancel(ctx)
 				defer cancel()
 				directory := t.TempDir()
+				if err := os.Chmod(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
 				var config string
 				if backend == "sqlite" {
 					config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, filepath.Join(t.TempDir(), "sitting.sqlite"), channelOnboardingHostWorkspaceFields())
