@@ -12,6 +12,7 @@ func TestFixturePackageRoleUsesCanonicalInternalPaths(t *testing.T) {
 		{"internal/store/testsql", true},
 		{"internal/store/eventfixture", true},
 		{"internal/store/testutil/nested", true},
+		{"internal/testutil/nested", true},
 		{"tests/support/testutil/nested", true},
 		{"tests/support/testutil", false},
 		{"tests/support/testutilextra/nested", false},
