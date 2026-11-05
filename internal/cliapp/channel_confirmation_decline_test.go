@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChannelCLIClaimantNoAndEOFPreserveDecline(t *testing.T) {
@@ -31,6 +32,7 @@ func TestChannelCLIClaimantNoAndEOFPreserveDecline(t *testing.T) {
 			setCLIAPITestToken(t, operatorChannelCLIToken)
 			opts := testRootCommandOptions(server)
 			opts.input, opts.stdinIsTerminal = strings.NewReader(input), func() bool { return true }
+			opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 			var out, errOut bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"channel", "resume", operatorChannelCLIOperation}, &out, &errOut, opts)
 			if code != CLIExitValidation || !strings.Contains(errOut.String(), "claimant was rejected") ||
