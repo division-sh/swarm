@@ -173,6 +173,9 @@ func TestDescribePackChatConsumptionCompilesConcreteSubstitution(t *testing.T) {
 		if fragment.File == "provider setup" {
 			continue
 		}
+		if fragment.File == "policy.yaml" && !strings.Contains(fragment.YAML, `operator_account: "REPLACE_OPERATOR_ACCOUNT"`) {
+			t.Fatal("account placeholder must retain string typing after a numeric-looking substitution")
+		}
 		if strings.HasSuffix(fragment.File, "/nodes.yaml") && fragment.Purpose != "tool example: telegram.send_message" {
 			continue
 		}

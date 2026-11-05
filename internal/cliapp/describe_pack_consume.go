@@ -19,7 +19,9 @@ func packConsumptionFragments(provider string, component PackComponentDescriptio
 	}
 	fragments := []PackConsumptionFragment{{Scope: component.Scope, File: "provider setup", Purpose: "selected provider provenance", YAML: setup}}
 	if component.HasChannel {
-		policy, err := consumptionYAML(map[string]any{"operator_account": "REPLACE_OPERATOR_ACCOUNT"})
+		policy, err := consumptionYAML(map[string]any{"operator_account": &yaml.Node{
+			Kind: yaml.ScalarNode, Tag: "!!str", Value: "REPLACE_OPERATOR_ACCOUNT", Style: yaml.DoubleQuotedStyle,
+		}})
 		if err != nil {
 			return nil, err
 		}
