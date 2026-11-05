@@ -70,7 +70,6 @@ search_dimensions:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/runforkadmission/recipient_authority_test.go
       - internal/runtime/bus/route_plan.go
-      - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/conformance/canonical_forms_registry_test.go
       - internal/runtime/semantic_ownership_guard_test.go
     canonical_layer: route_plan_authority
@@ -431,8 +430,6 @@ seam_families:
     classification: canonical_owner
     paths:
       - platform-spec.yaml
-      - internal/apispec/platform_spec_flow_instance_authoring_test.go
-      - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
       - internal/runtime/core/pinrouting/consumer_relation_test.go
@@ -700,7 +697,6 @@ seam_families:
     classification: canonical_owner
     paths:
       - platform-spec.yaml
-      - internal/apispec/platform_spec_composition_routing_test.go
       - internal/apiv1/operator_event_publish_test.go
       - internal/apiv1/operator_event_replay_test.go
       - internal/runtime/semanticview/agent_subscription_admission.go
