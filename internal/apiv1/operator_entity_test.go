@@ -54,10 +54,10 @@ func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts 
 
 func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	stageDefined, currentState, revision := true, "collecting", int64(2)
+	stageDefined, currentState, revision, life := true, "collecting", int64(2), int64(1)
 	summary := operatorread.OperatorEntitySummary{
 		EntityID: "entity-1", RunID: "run-1", FlowInstance: "review/primary", EntityType: "mvp_spec",
-		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision,
+		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision, Life: &life,
 		EnteredStateAt: &now, LifecycleCreatedAt: &now, LifecycleUpdatedAt: &now,
 		CreatedAt: now, UpdatedAt: now,
 	}
