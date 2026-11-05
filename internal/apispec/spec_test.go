@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 func TestPlatformAPISpecValidationCoverage(t *testing.T) {
@@ -716,77 +714,6 @@ func repoRoot(t *testing.T) string {
 			t.Fatal("repo root with go.mod not found")
 		}
 		dir = parent
-	}
-}
-
-func loadPlatformSpecYAMLNode(t *testing.T) *yaml.Node {
-	t.Helper()
-	source, err := yamlsource.LoadFile(platform.DefaultPlatformSpecFile(repoRoot(t)))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	doc := source.NodeCopy()
-	if len(doc.Content) != 1 {
-		t.Fatalf("platform spec yaml document content count = %d, want 1", len(doc.Content))
-	}
-	return doc.Content[0]
-}
-
-func mustMappingValue(t *testing.T, node *yaml.Node, key string) *yaml.Node {
-	t.Helper()
-	value := mappingValue(node, key)
-	if value == nil {
-		t.Fatalf("mapping key %q not found", key)
-	}
-	return value
-}
-
-func mappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1]
-		}
-	}
-	return nil
-}
-
-func hasMappingKey(node *yaml.Node, key string) bool {
-	return mappingValue(node, key) != nil
-}
-
-func sequenceContainsScalar(node *yaml.Node, want string) bool {
-	if node == nil || node.Kind != yaml.SequenceNode {
-		return false
-	}
-	for _, item := range node.Content {
-		if scalarValue(item) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func scalarValue(node *yaml.Node) string {
-	if node == nil {
-		return ""
-	}
-	return strings.TrimSpace(node.Value)
-}
-
-func assertScalarValue(t *testing.T, node *yaml.Node, want string) {
-	t.Helper()
-	if got := scalarValue(node); got != want {
-		t.Fatalf("scalar value = %q, want %q", got, want)
-	}
-}
-
-func assertScalarContains(t *testing.T, node *yaml.Node, want string) {
-	t.Helper()
-	if got := scalarValue(node); !strings.Contains(got, want) {
-		t.Fatalf("scalar value = %q, want substring %q", got, want)
 	}
 }
 
