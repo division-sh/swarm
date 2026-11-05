@@ -553,6 +553,23 @@ func EncodeSourceRoute(source events.RoutingSource) []byte {
 	return raw
 }
 
+// DecodeRoutingSource reads just the recorded source coordinate without
+// granting event admission or replacing the full record's validation.
+func (r Record) DecodeRoutingSource() (events.RoutingSource, error) {
+	fact, err := unmarshalSourceRoute(r.SourceRoute)
+	if err != nil {
+		return events.RoutingSource{}, Corrupt(r.EventID, err)
+	}
+	source, err := events.RestoreRoutingSource(r.RoutingSourceKind, fact.RouteIdentity, r.RoutingSourceAuthority, fact.Life)
+	if err != nil {
+		return events.RoutingSource{}, Corrupt(r.EventID, err)
+	}
+	if !jsonEqual(r.SourceRoute, EncodeSourceRoute(source)) {
+		return events.RoutingSource{}, Corrupt(r.EventID, fmt.Errorf("recorded routing source changed its durable facts"))
+	}
+	return source, nil
+}
+
 func unmarshalSourceRoute(raw []byte) (sourceRouteFact, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return sourceRouteFact{}, fmt.Errorf("source_route is required")
