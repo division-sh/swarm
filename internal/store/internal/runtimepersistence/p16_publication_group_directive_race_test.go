@@ -250,13 +250,12 @@ func prepareP16PublicationGroup(t *testing.T, raw selectedFanOutLifecycleOwner, 
 	ctx := testAuthorActivityContextForBundle(artifact.BundleHash())
 	ctx = originalStoreFixtureContext(t, ctx, raw)
 	fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, backend == "postgres", cardinality, time.Now().UTC(), artifact)
-	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))
+	route := constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), fixture.runID, "producer", fixture.createdAt)
 	source, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))
-	constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), fixture.runID, route, fixture.createdAt)
 	producer, err := identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
 	if err != nil {
 		t.Fatal(err)

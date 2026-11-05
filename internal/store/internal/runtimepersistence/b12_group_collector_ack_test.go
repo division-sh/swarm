@@ -170,13 +170,13 @@ func newCollectorFixtureWithCardinality(t *testing.T, backend string, cardinalit
 	ctx = originalStoreFixtureContext(t, ctx, raw)
 	seed := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, backend == "postgres", cardinality, time.Now().UTC(), artifact)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, seed.runID), mustStoreTestSourceArtifactFact(seed.bundleHash))
-	f := &fanOutGroupHistoryFixture{ctx: ctx, raw: raw, db: db, observer: db, postgres: backend == "postgres", runID: seed.runID, sourceRoute: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()}
+	f := &fanOutGroupHistoryFixture{ctx: ctx, raw: raw, db: db, observer: db, postgres: backend == "postgres", runID: seed.runID,
+		sourceRoute: constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), seed.runID, "producer", seed.createdAt)}
 	var err error
 	f.source, err = events.NewStaticFlowRoutingSource(f.sourceRoute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), seed.runID, f.sourceRoute, seed.createdAt)
 	f.producer, err = identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
 	if err != nil {
 		t.Fatal(err)

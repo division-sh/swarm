@@ -357,12 +357,11 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash))
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, f.seed.runID), mustStoreTestSourceArtifactFact(f.seed.bundleHash))
-	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+	route := constructGroupProofPublicationSource(t, ctx, f.raw, semanticview.Wrap(bundle), f.seed.runID, "producer", f.seed.createdAt)
 	source, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	constructGroupProofPublicationSource(t, ctx, f.raw, semanticview.Wrap(bundle), f.seed.runID, route, f.seed.createdAt)
 	producer, err := identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
 	if err != nil {
 		t.Fatal(err)
@@ -478,13 +477,14 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 	}
 	return f
 }
-func constructGroupProofPublicationSource(t *testing.T, ctx context.Context, selected selectedFanOutLifecycleOwner, source semanticview.Source, runID string, route events.RouteIdentity, at time.Time) {
+func constructGroupProofPublicationSource(t *testing.T, ctx context.Context, selected selectedFanOutLifecycleOwner, source semanticview.Source, runID, sourceFlow string, at time.Time) events.RouteIdentity {
 	t.Helper()
 	owner, ok := selected.(bus.FlowInstanceActivationCommitOwner)
 	if !ok {
 		t.Fatal("group fixture requires its native construction owner")
 	}
-	for _, flow := range []string{semanticview.RootExecutionFlowID(source), route.FlowID} {
+	var route events.RouteIdentity
+	for _, flow := range []string{semanticview.RootExecutionFlowID(source), sourceFlow} {
 		identity, err := flowidentity.StandingForGeneration(source, flow, runID)
 		if err != nil {
 			t.Fatal(err)
@@ -498,20 +498,17 @@ func constructGroupProofPublicationSource(t *testing.T, ctx context.Context, sel
 		if err != nil {
 			t.Fatal(err)
 		}
-		entityID := identity.EntityID
-		if flow == route.FlowID {
-			if identity.InstancePath != route.FlowInstance {
-				t.Fatal("group fixture source path disagrees with its declaration")
-			}
-			entityID = route.EntityID
+		if flow == sourceFlow {
+			route = events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 		}
 		commitPreparedWorkflowAggregateFixture(t, ctx, owner, runID, pipeline.WorkflowInstance{
-			Life: 1, InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: entityID,
+			Life: 1, InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
 			WorkflowName: flow, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(),
 			ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
 			CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), CreatedAt: at, EnteredStageAt: at,
 		}, at)
 	}
+	return route
 }
 
 func (f *groupProofFixture) prepare(t *testing.T) {

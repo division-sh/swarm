@@ -47,6 +47,9 @@ func TestB10GroupRetirementJoinsResetReleaseAlreadyEntered(t *testing.T) {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				f := newGroupProofFixture(t, backend, 1)
 				releases := &b10EnteredRelease{Store: f.store(), entered: make(chan pipelineobligation.Claim, 2), resume: make(chan struct{})}
+				var once sync.Once
+				resume := func() { once.Do(func() { close(releases.resume) }) }
+				t.Cleanup(resume)
 				if phase == "release_cleanup_error" {
 					releases.fault = errors.New("b10 exact release cleanup failure")
 				}
@@ -64,9 +67,6 @@ func TestB10GroupRetirementJoinsResetReleaseAlreadyEntered(t *testing.T) {
 				}
 				values := stageB10RetirementGroup(t, f)
 				before := f.snapshot(t)
-				var once sync.Once
-				resume := func() { once.Do(func() { close(releases.resume) }) }
-				t.Cleanup(resume)
 				reset := make(chan error, 1)
 				go func() { reset <- f.bus.ResetInMemoryState() }()
 				select {
