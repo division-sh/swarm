@@ -182,10 +182,10 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restarta
 	var f receiverConfigActivationFixture
 	if withAgents {
 		scheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t))
-		t.Cleanup(scheduler.Stop)
 		f = newReceiverConfigActivationFixtureWithOwnership(t, backend, false, documents, nil, ownStoreTestAgentManager, func(options *runtimepipeline.PipelineCoordinatorOptions) {
 			options.TimerScheduler = scheduler
 		})
+		t.Cleanup(scheduler.Stop)
 	} else {
 		f = newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 	}
