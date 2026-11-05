@@ -108,6 +108,7 @@ func committedInstanceLifeRestartEqual(ctx context.Context, tx *sql.Tx, record p
 		return false, err
 	}
 	if metadata.FlowInstance != record.Identity.Route.InstancePath || metadata.EntityType != record.EntityType ||
+		metadata.InstanceRevision != record.State.ExpectedRevision+1 ||
 		metadata.FlowTemplate != record.WorkflowName || metadata.Mode != record.Mode ||
 		metadata.ParentInstance != record.State.ParentInstance || metadata.InstanceKey != record.State.InstanceKey ||
 		metadata.Slug != record.Slug || metadata.Name != record.Name || metadata.CurrentState != record.CurrentState ||

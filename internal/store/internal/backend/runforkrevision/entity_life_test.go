@@ -89,7 +89,7 @@ func TestEntityLifeReadReconstructsExactRetainedCuts(t *testing.T) {
 	if _, _, _, err := ReadEntityLife(context.Background(), db, runID, entityID, 0, false); err == nil {
 		t.Fatal("nonpositive life was accepted")
 	}
-	bad, _ := json.Marshal(EntityMetadataFact{EntityID: entityID, ConstructionKind: "constructed", Life: 1, CurrentState: "foreign"})
+	bad, _ := json.Marshal(EntityMetadataFact{EntityID: entityID, ConstructionKind: "constructed", Life: 1, InstanceRevision: 8, CurrentState: "foreign"})
 	if _, err := db.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND family=$3 AND fact_key=$4 AND revision=2`, string(bad), runID, FamilyEntityMetadata, entityID); err != nil {
 		t.Fatal(err)
 	}
