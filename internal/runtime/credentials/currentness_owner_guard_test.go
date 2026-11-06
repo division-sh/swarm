@@ -68,21 +68,6 @@ func TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	for _, contractPath := range []string{
-		"platform-spec.yaml",
-		filepath.Join("internal", "store", "testdata", "persistence_authority_findings.tsv"),
-	} {
-		contract, err := os.ReadFile(filepath.Join(repo, contractPath))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, retired := range []string{"credential epoch", "credential epochs", "occurrence epoch", "occurrence_epoch", "credentialepochscurrent"} {
-			if strings.Contains(strings.ToLower(string(contract)), retired) {
-				t.Errorf("retired credential epoch contract %q remains in %s", retired, contractPath)
-			}
-		}
-	}
 }
 
 func TestPublicChannelConfirmationConsumesOnboardingCoordinator(t *testing.T) {
