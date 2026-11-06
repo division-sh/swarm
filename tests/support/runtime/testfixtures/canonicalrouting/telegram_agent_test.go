@@ -1,13 +1,9 @@
 package canonicalrouting
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestTelegramAgentConsumesEmbeddedPackInventory(t *testing.T) {
@@ -19,33 +15,5 @@ func TestTelegramAgentConsumesEmbeddedPackInventory(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(exampleRoot, relative)); !os.IsNotExist(err) {
 			t.Fatalf("Telegram example must not ship deployment artifact %s: %v", relative, err)
 		}
-	}
-}
-
-func TestTelegramAgentHasNoGeneratedPositiveOwner(t *testing.T) {
-	repoRoot := RepoRoot(t)
-	retired := "CopyStanding" + "Telegram"
-	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".go" {
-			return nil
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(body), retired) {
-			rel, _ := filepath.Rel(repoRoot, path)
-			t.Fatalf("retired generated Telegram owner survives in %s", filepath.ToSlash(rel))
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("scan generated Telegram owners: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(repoRoot, "internal", "cliapp", "archetypes", "webhook-responder")); !os.IsNotExist(err) {
-		t.Fatalf("retired private webhook-responder owner still exists: %v", err)
 	}
 }

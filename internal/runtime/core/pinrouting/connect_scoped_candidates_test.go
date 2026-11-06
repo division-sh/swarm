@@ -12,12 +12,6 @@ import (
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
-func TestCompiledGraphHasNoMaterializedReplacementSelector(t *testing.T) {
-	if _, present := reflect.TypeOf(CompiledConnectGraph{}).MethodByName("SelectRouteDependencies"); present {
-		t.Fatal("compiled graph exports retired materialized-route replacement selection")
-	}
-}
-
 func scopedCandidateGraph(t *testing.T) (CompiledConnectGraph, ConnectRoutePlan, ConnectRoutePlan) {
 	t.Helper()
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{

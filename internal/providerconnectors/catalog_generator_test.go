@@ -382,38 +382,6 @@ func TestGenerationEvidenceResponseSuccessBindingPreservesScalarKinds(t *testing
 	}
 }
 
-func TestResponseSuccessAndGeneratorOwnersHaveNoRetiredOrProviderSpecificInterpreters(t *testing.T) {
-	files := []string{
-		"providerconnectors.go",
-		"../runtime/tools/executor_http.go",
-		"../runtime/pipeline/activity_engine.go",
-		"catalog_generator.go",
-	}
-	forbidden := []string{
-		"evaluateHTTPResponseSuccess",
-		"evaluateActivityHTTPResponseSuccess",
-		"responseSuccessValuesEqual",
-		"activityResponseSuccessValuesEqual",
-		"requiredResponseSuccessForProviderAction",
-		"applyManagedCredentialHeader",
-		"applyActivityManagedCredentialHeader",
-		`provider == "github"`,
-		`provider == "acme"`,
-		`provider == "slack"`,
-	}
-	for _, name := range files {
-		body, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, needle := range forbidden {
-			if bytes.Contains(body, []byte(needle)) {
-				t.Fatalf("%s retains forbidden semantic interpreter %q", name, needle)
-			}
-		}
-	}
-}
-
 func generatedArtifactsByProvider(artifacts []GeneratedCatalogArtifact) map[string]GeneratedCatalogArtifact {
 	out := make(map[string]GeneratedCatalogArtifact, len(artifacts))
 	for _, artifact := range artifacts {

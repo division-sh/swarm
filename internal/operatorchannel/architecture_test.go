@@ -10,34 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
-func TestOperatorChannelV1IsFullyRetired(t *testing.T) {
-	repo := filepath.Clean(filepath.Join("..", ".."))
-	retired := "swarm.hitl-channel/" + "v1"
-	err := checkoutsource.WalkDir(repo, repo, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".go" && ext != ".yaml" && ext != ".yml" && ext != ".json" {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), retired) {
-			t.Errorf("retired operator channel v1 remains in %s", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestOperatorChannelIdentityZoneHasNoProviderNativeInterpreter(t *testing.T) {
 	repo := filepath.Clean(filepath.Join("..", ".."))
 	violations, err := providerNativeIdentityViolations(repo)

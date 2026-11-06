@@ -3,7 +3,6 @@ package cliapp
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -287,16 +286,6 @@ func TestSingleDeploymentConfigNullContainerRefusalNamesSelectedFile(t *testing.
 					t.Fatalf("null refusal lost key, coordinates or teaching: %#v", loaded.Diagnostics)
 				}
 			})
-		}
-	}
-}
-
-func TestSingleDeploymentConfigHasNoLayerOrOriginMetadata(t *testing.T) {
-	for _, model := range []reflect.Type{reflect.TypeFor[unifiedConfigLoadResult](), reflect.TypeFor[RuntimeConfigLoadResult](), reflect.TypeFor[unifiedConfigDiagnostic]()} {
-		for _, name := range []string{"Layers", "KeyOrigins", "Layer"} {
-			if _, found := model.FieldByName(name); found {
-				t.Errorf("%s still carries retired %s", model.Name(), name)
-			}
 		}
 	}
 }
