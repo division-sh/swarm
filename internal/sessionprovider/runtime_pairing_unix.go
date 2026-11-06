@@ -153,6 +153,22 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 	return result, nil
 }
 
+// SessionPreviewConnected observes login without admitting an unapproved account.
+func (c *RuntimeConnection) SessionPreviewConnected(ctx context.Context, expected channelonboarding.Operation) (connected bool, err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	op, err := c.currentOperation(work.Context())
+	if err != nil || !op.DeploymentRegistration || op.AccountConfirmed || op.OperationID != expected.OperationID ||
+		op.Revision != expected.Revision || op.PrincipalID != expected.PrincipalID ||
+		op.SessionAccount != expected.SessionAccount || op.AccountReference != expected.AccountReference {
+		return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	return c.state.ownsConnectedOccurrence(work.Context(), c.state.currentOccurrence()), nil
+}
+
 func (c *RuntimeConnection) AccountPresentation(ctx context.Context) (phone, name string, err error) {
 	work, err := c.begin(ctx)
 	if err != nil {
