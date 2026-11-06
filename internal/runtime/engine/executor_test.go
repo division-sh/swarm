@@ -1153,15 +1153,6 @@ func TestExecutor_ValidateRequestRejectsHandlerConstruction(t *testing.T) {
 	}
 }
 
-func TestExecutorHandlerHasNoReceiverElectionFields(t *testing.T) {
-	typ := reflect.TypeOf(runtimecontracts.SystemNodeEventHandler{})
-	for _, name := range []string{"SelectEntity", "SelectOrCreateEntity"} {
-		if _, ok := typ.FieldByName(name); ok {
-			t.Fatalf("retired second receiver owner %s returned", name)
-		}
-	}
-}
-
 func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),

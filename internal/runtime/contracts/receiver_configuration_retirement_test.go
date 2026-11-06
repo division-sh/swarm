@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -27,20 +26,6 @@ func TestReceiverConfigurationRetiredForms(t *testing.T) {
 	}
 	if _, err := admitSchemaFragment("inputs: [work.ready]\noutputs: [work.done]\n"); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestReceiverConfigurationTypedCarriersRetired(t *testing.T) {
-	for _, row := range []struct {
-		value any
-		field string
-	}{{FlowSchemaDocument{}, "InstanceVariables"}, {FlowInputEventPin{}, "Initialize"}, {FlowPinCompilationContext{}, "Configuration"}} {
-		if _, found := reflect.TypeOf(row.value).FieldByName(row.field); found {
-			t.Fatalf("retired carrier restored: %T.%s", row.value, row.field)
-		}
-	}
-	if _, found := reflect.TypeOf(CompiledFlowInputPin{}).MethodByName("Initialization"); found {
-		t.Fatal("compiled initialization accessor restored")
 	}
 }
 

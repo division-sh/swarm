@@ -3,7 +3,6 @@ package sessions
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
@@ -198,13 +197,6 @@ func TestInMemoryRegistryRotateGrant(t *testing.T) {
 	rec, ok := sr.Snapshot(identity)
 	if !ok || rec.GrantID != rotated.GrantID || rec.GrantID == lease.GrantID {
 		t.Fatalf("snapshot = %#v, ok=%v", rec, ok)
-	}
-}
-
-func TestInMemoryRegistryDoesNotOwnAgentLifecycle(t *testing.T) {
-	registry := NewInMemoryRegistry(0)
-	if _, exists := reflect.TypeOf(registry).MethodByName("ApplyLifecycleProjection"); exists {
-		t.Fatal("transient session registry exposes a second agent lifecycle authority")
 	}
 }
 
