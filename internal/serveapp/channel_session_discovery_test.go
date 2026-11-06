@@ -51,7 +51,7 @@ func TestServeSessionDiscoveryRetainsDeclarationWithoutAuthority(t *testing.T) {
 	}
 }
 
-func sessionDiscoveryCapturedProvider(t *testing.T, flow string) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan, sourceartifact.RootedSource) {
+func sessionDiscoveryCapturedProvider(t *testing.T, flow string, operatorAccount ...string) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan, sourceartifact.RootedSource) {
 	t.Helper()
 	standalone, _ := sessionDiscoveryProvider(t)
 	entry, present := standalone.EntryByProvider("whatsapp")
@@ -65,6 +65,9 @@ func sessionDiscoveryCapturedProvider(t *testing.T, flow string) (*providertrigg
 	members[filepath.ToSlash(filepath.Join(flow, "manifest.yaml"))] = members["manifest.yaml"]
 	members[filepath.ToSlash(filepath.Join(flow, "schema.yaml"))] = []byte("stages: []\ninputs: [inbound.whatsapp.raw, inbound.whatsapp.message]\n")
 	members[filepath.ToSlash(filepath.Join(flow, "policy.yaml"))] = []byte("operator_account: '+15551234567'\n")
+	if len(operatorAccount) == 1 {
+		members[filepath.ToSlash(filepath.Join(flow, "policy.yaml"))] = []byte("operator_account: '" + operatorAccount[0] + "'\n")
+	}
 	for name, body := range packfixture.WhatsAppSessionProviderMembers(t, entry.Manifest.SourceBytes(), []string{"raw", "message"}) {
 		members[filepath.ToSlash(filepath.Join(flow, "whatsapp", name))] = body
 	}
