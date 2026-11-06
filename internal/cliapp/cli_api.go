@@ -88,7 +88,6 @@ type rootCommandOptions struct {
 	channelRegistration    ChannelRegistrationFactory
 	runStatusPoll          time.Duration
 	runTraceAttachTimeout  time.Duration
-	channelConnectWait     time.Duration
 	channelConnectPoll     time.Duration
 	now                    func() time.Time
 }
@@ -100,7 +99,6 @@ func defaultRootCommandOptions() rootCommandOptions {
 		stdinIsTerminal:       processStdinIsTerminal,
 		runStatusPoll:         time.Second,
 		runTraceAttachTimeout: 5 * time.Second,
-		channelConnectWait:    2 * time.Minute,
 		channelConnectPoll:    500 * time.Millisecond,
 		now:                   time.Now,
 	}

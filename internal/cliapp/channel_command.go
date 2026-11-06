@@ -490,7 +490,7 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	if opts.apiOptions.now != nil {
 		now = opts.apiOptions.now()
 	}
-	if channelClaimantConfirmationRequired(current, now) && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
+	if current.Operation.Provider != "whatsapp" && channelClaimantConfirmationRequired(current, now) && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
 	if opts.credentialStdin {
@@ -583,7 +583,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 				if result.Operation.DeploymentRegistration {
 					fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
 				}
-				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339))
+				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
 				var err error
 				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
 				if err != nil {
@@ -802,7 +802,7 @@ func confirmChannelOnboardingClaim(ctx context.Context, client channelControlCli
 		fmt.Fprintln(progressOut, "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.")
 		*sharedAudienceAnnounced = true
 	}
-	approve := opts.yes
+	approve := opts.yes || result.Operation.Provider == "whatsapp"
 	var err error
 	if !approve {
 		approve, err = confirmChannelAccount(ctx, opts.apiOptions.input, errOut, "Make them the operator? [y/N] ")
@@ -840,34 +840,41 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	if begun.Operation.Provider != "whatsapp" {
 		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
 	}
-	wait := opts.channelConnectWait
-	if wait <= 0 {
-		wait = 2 * time.Minute
+	if begun.IdentityOperation == nil || begun.IdentityOperation.ExpiresAt.IsZero() {
+		return channelOnboardingResult{}, errors.New("operator code has no authoritative expiry")
 	}
+	expires := begun.IdentityOperation.ExpiresAt
+	waitCtx, cancel := context.WithDeadline(ctx, expires)
+	defer cancel()
 	poll := opts.channelConnectPoll
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
 	}
-	deadline := time.NewTimer(wait)
-	defer deadline.Stop()
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
-	for {
+	for waitCtx.Err() == nil {
 		var current channelOnboardingResult
-		if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": begun.Operation.OperationID}, &current); err != nil {
+		if err := client.call(waitCtx, "channel.onboarding_get", map[string]any{"operation_id": begun.Operation.OperationID}, &current); err != nil {
+			if waitCtx.Err() != nil {
+				break
+			}
 			return channelOnboardingResult{}, err
+		}
+		if waitCtx.Err() != nil {
+			break
 		}
 		if current.IdentityOperation == nil || current.IdentityOperation.State != "awaiting_claim" {
 			return current, nil
 		}
 		select {
-		case <-ctx.Done():
-			return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
-		case <-deadline.C:
-			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for the operator's code%s", continuation)
+		case <-waitCtx.Done():
 		case <-ticker.C:
 		}
 	}
+	if ctx.Err() != nil {
+		return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
+	}
+	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", expires.Local().Format(time.RFC3339Nano), continuation)
 }
 
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {

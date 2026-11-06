@@ -170,15 +170,23 @@ func TestWhatsAppRuntimeClaimDoesNotAutoBindFirstSenderBothStores(t *testing.T) 
 		for _, cell := range []string{"ordinary_text", "unknown_challenge"} {
 			t.Run(backend+"/"+cell, func(t *testing.T) {
 				f := newActiveInputFixture(t, backend)
-				beginRuntimeClaimFixture(t, f)
+				identity := beginRuntimeClaimFixture(t, f)
 				c := openRuntimeIncomingFixture(t, f)
 				connectRuntimeConnectionFixture(t, f, c)
 				text := "ordinary first sender"
 				if cell == "unknown_challenge" {
-					var err error
-					text, err = operatorchannel.NewChallenge()
+					text = "00000"
+					if identity.Challenge == text {
+						text = "00001"
+					}
+					rows, err := f.selected.ListOperatorChannelOperations(f.ctx, f.operation.PrincipalID)
 					if err != nil {
 						t.Fatal(err)
+					}
+					for _, row := range rows {
+						if row.Challenge == text {
+							t.Fatal("unknown-code fixture is already allocated")
+						}
 					}
 				}
 				id := uuid.NewString()

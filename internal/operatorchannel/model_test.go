@@ -51,9 +51,13 @@ func TestChallengeGrammarIsClosed(t *testing.T) {
 		t.Fatalf("generated challenge %q is invalid", challenge)
 	}
 	for _, invalid := range []string{
-		strings.ToLower(challenge),
+		"1234",
+		"123456",
+		"12 34",
+		"12a45",
+		"\uff11\uff12\uff13\uff14\uff15",
+		"+1234",
 		challenge + "A",
-		strings.TrimPrefix(challenge, ChallengePrefix),
 		"SWARM-AAAAAAAAAAAAAAA0",
 		"prefix " + challenge,
 	} {
