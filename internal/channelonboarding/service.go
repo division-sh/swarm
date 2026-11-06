@@ -246,6 +246,17 @@ type RetryInput struct {
 	ApproveAccount         bool
 }
 
+func (input RetryInput) validateForOperation(op Operation) error {
+	if input.ApproveAccount && !op.DeploymentRegistration {
+		return ErrInvalidRequest
+	}
+	if input.CheckpointOnly && (!op.UsesPairingCheckpoint() || op.Phase != PhaseActivatingProvider || input.ApproveAccount ||
+		input.ProviderCredential != "" || input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 type Result struct {
 	Status            *AccountStatus             `json:"status,omitempty"`
 	Operation         Operation                  `json:"operation"`
@@ -722,12 +733,8 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if input.ApproveAccount && !op.DeploymentRegistration {
-		return Result{}, ErrInvalidRequest
-	}
-	if input.CheckpointOnly && (!op.UsesPairingCheckpoint() || op.Phase != PhaseActivatingProvider || input.ApproveAccount ||
-		input.ProviderCredential != "" || input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
-		return Result{}, ErrInvalidRequest
+	if err := input.validateForOperation(op); err != nil {
+		return Result{}, err
 	}
 	if op.Phase == PhaseFailed || op.Phase == PhaseRetired {
 		if input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0 {
