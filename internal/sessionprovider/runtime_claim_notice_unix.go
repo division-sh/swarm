@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -42,6 +43,9 @@ func (c *RuntimeConnection) ReadClaimCodeNotice(ctx context.Context, expected ch
 		return nil, nil
 	}
 	if err := c.CheckBootstrap(work.Context()); err != nil {
+		if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == errClientOccurrenceFenced }) {
+			return nil, work.Context().Err()
+		}
 		return nil, err
 	}
 	if c.incoming == nil {
