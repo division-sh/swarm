@@ -205,6 +205,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 				case 3:
 					result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
+					result["connection"] = map[string]any{"state": "connected", "linked": true, "account_presentation": "+15550000001"}
 					result["identity_operation"] = operatorChannelCLIOperationResult("awaiting_claim", 1, 0)
 					result["identity_operation"].(map[string]any)["expires_at"] = time.Now().Add(time.Minute)
 				case 4:
