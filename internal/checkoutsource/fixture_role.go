@@ -9,7 +9,8 @@ import (
 // storage or export authority. It accepts repository and module import paths.
 func IsTestFixturePackage(path string) bool {
 	support := strings.TrimPrefix(path, "github.com/division-sh/swarm/")
-	if support == "tests/support/runtime/bus/bustest" || support == "tests/support/runtime/effects/effecttest" ||
+	if support == "tests/support/store/testutil/agentfixture" ||
+		support == "tests/support/runtime/bus/bustest" || support == "tests/support/runtime/effects/effecttest" ||
 		support == "tests/support/runtime/testfixtures" || strings.HasPrefix(support, "tests/support/runtime/testfixtures/") ||
 		strings.HasPrefix(support, "tests/support/testutil/") {
 		return true

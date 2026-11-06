@@ -22,7 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"

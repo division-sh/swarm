@@ -275,7 +275,7 @@
     "github.com/division-sh/swarm/internal/store/sessionstate": 0,
     "github.com/division-sh/swarm/internal/store/storetest": 2.239,
     "github.com/division-sh/swarm/internal/store/testsql": 0,
-    "github.com/division-sh/swarm/internal/store/testutil/agentfixture": 0,
+    "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture": 0,
     "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture": 0,
     "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture": 0,
     "github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture": 0,

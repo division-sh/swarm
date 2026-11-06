@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 )
 
 func TestCommandDescriptorBothStoresPreserveSelectionAndRefuseCorruption(t *testing.T) {
