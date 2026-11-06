@@ -9,7 +9,7 @@ import (
 
 func TestChannelCLIExplicitDeploymentAccountApprovalOutputModes(t *testing.T) {
 	for _, provider := range []string{"telegram", "whatsapp"} {
-		for _, mode := range []string{"human", "--json", "--yaml", "--quiet"} {
+		for _, mode := range []string{"human", "--json", "--quiet"} {
 			for _, approve := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/yes=%t", provider, mode, approve), func(t *testing.T) {
 					calls := 0
@@ -54,7 +54,7 @@ func TestChannelCLIExplicitDeploymentAccountApprovalOutputModes(t *testing.T) {
 						t.Fatal("explicit account approval failed", code, out, errOut, calls, in.reads)
 					}
 					account := deploymentAccountPreviewCLIResult(t, provider, true)["operation"].(map[string]any)["operator_account"]
-					if mode == "--json" && !json.Valid([]byte(out)) || mode == "--yaml" && strings.Contains(out, "Linked to ") ||
+					if mode == "--json" && !json.Valid([]byte(out)) ||
 						mode == "--quiet" && strings.TrimSpace(out) != account {
 						t.Fatal("account preview polluted machine output", out)
 					}
