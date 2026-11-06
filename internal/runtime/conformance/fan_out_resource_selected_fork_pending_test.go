@@ -50,7 +50,7 @@ func (p *selectedDeploymentRollbackPublication) CommitSelectedForkEvent(ctx cont
 			return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("real continued publication rollback: %w", err)
 		}
 		want := storetest.SelectedFanOutPublicationCounts{Events: 1, Deliveries: len(req.Commit.DeliveryRoutes), Lineages: 1, Continued: 1}
-		if proof.Drafted != want || proof.AfterRollback != (storetest.SelectedFanOutPublicationCounts{}) {
+		if proof.Drafted != want || proof.AfterRollback != (storetest.SelectedFanOutPublicationCounts{}) || proof.DraftedSettlement.Unsettled != 1 {
 			return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("partial continued publication escaped rollback: %+v", proof)
 		}
 		p.receipt <- proof
@@ -285,9 +285,6 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				currentReader := f.selected.(interface {
 					ReadFanOutSettlement(context.Context, string, time.Time) (fanoutobligation.RunSettlement, error)
 				})
-				if current, err := currentReader.ReadFanOutSettlement(f.ctx, result.ForkRunID, time.Now().UTC()); err != nil || current.Unsettled < 1 || (!changedPin && current.Unsettled != 1) {
-					t.Fatalf("continued/deployment publication lost its held child: %+v err=%v", current, err)
-				}
 				drainDeadline := time.Now().Add(3 * time.Minute)
 				drainCtx, stopDrain := context.WithDeadline(f.ctx, drainDeadline)
 				defer stopDrain()
