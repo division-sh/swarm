@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -38,7 +39,7 @@ func (s sittingReentryObserver) ReadSessionConnection(ctx context.Context, op ch
 
 // Extend the same signed pairing and cancelled PTY invocation, not a paired-state
 // fixture. Only the external peer's authenticated login response is held.
-func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, directory, backend string, terminal *os.File, peer *serveNativeProtocolPeer, retained sittingCancellationState) {
+func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, directory, backend string, terminal *os.File, peer *serveNativeProtocolPeer, retained sittingCancellationState, mode string) {
 	t.Helper()
 	login := &servedNativeLoginGate{held: make(chan struct{}), release: make(chan bool, 1)}
 	defer func() {
@@ -48,6 +49,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		}
 	}()
 	peer.mu.Lock()
+	connectionsBefore := peer.connections
 	peer.nextLogin = login
 	peer.mu.Unlock()
 	completed := make(chan string, 1)
@@ -57,13 +59,19 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	views := make(chan sittingReentryObservation, 16)
 	var native *deploymentChannelSession
 	var operations channelonboarding.OperationStore
+	var final sittingCancellationState
 	factory := func(call context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 		session, err := OpenChannelRegistration(call, options)
 		if err != nil {
 			return nil, err
 		}
 		native, operations = session.(*deploymentChannelSession), options.Operations
-		return sittingReentryObserver{session, views}, nil
+		observed := sittingReentryObserver{session, views}
+		return sittingCloseObserver{ChannelRegistrationSession: observed, observe: func(read context.Context) error {
+			var err error
+			final, err = readSittingCancellationState(read, options, retained.operation.OperationID, peer.account.ToNonAD().String())
+			return err
+		}}, nil
 	}
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
 	prompts := make(chan string, 2)
@@ -112,6 +120,66 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 			t.Fatal("retained connection never reported honest login progress")
 		}
 		break
+	}
+	if mode != "account" {
+		if _, err := native.connection.AdmitSessionAccount(ctx, retained.operation.SessionAccount); err == nil {
+			t.Fatal("login-pending unapproved account acquired authority")
+		}
+		if mode == "restored_login_cancel" {
+			cancel()
+		} else {
+			// Close the controlled provider socket before login succeeds, not a
+			// revocation/401 that could legitimately invalidate device material.
+			login.release <- false
+		}
+		select {
+		case code := <-done:
+			joined = true
+			if code == 0 {
+				t.Fatal("unfinished restored login succeeded")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("unfinished restored login did not return and join")
+		}
+		if mode == "restored_login_cancel" {
+			// Cancellation can win the current readback or the existing poll wait.
+			if !strings.Contains(errOut.String(), "context canceled") && !strings.Contains(errOut.String(), "channel connection stopped") {
+				t.Fatal("pending-login cancellation failed at a different owner", errOut.String())
+			}
+		}
+		if mode == "restored_login_disconnect" && !strings.Contains(errOut.String(), "WhatsApp disconnected:") {
+			t.Fatal("pending-login disconnect failed at a different owner", errOut.String())
+		}
+		if !reflect.DeepEqual(final, retained) {
+			t.Fatal("unfinished restored login changed operation, claims, binding, captures or pairing")
+		}
+		select {
+		case <-writer.qrRendered:
+			t.Fatal("unfinished restored login offered a new QR")
+		default:
+		}
+		select {
+		case <-prompts:
+			t.Fatal("unfinished restored login reached account approval")
+		default:
+		}
+		select {
+		case <-challenges:
+			t.Fatal("unfinished restored login began operator enrollment")
+		default:
+		}
+		select {
+		case <-peer.logouts:
+			t.Fatal("unfinished restored login sent a logout")
+		default:
+		}
+		peer.mu.Lock()
+		connectionsAfter := peer.connections
+		peer.mu.Unlock()
+		if connectionsAfter != connectionsBefore+1 {
+			t.Fatalf("unfinished restored login retried automatically: before=%d after=%d", connectionsBefore, connectionsAfter)
+		}
+		return
 	}
 	login.release <- true
 	select {

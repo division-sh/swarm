@@ -51,6 +51,36 @@ type sittingCancellationState struct {
 	identity  [32]byte
 }
 
+func readSittingCancellationState(ctx context.Context, options cliapp.ChannelRegistrationOptions, operationID, account string) (state sittingCancellationState, err error) {
+	state.operation, err = options.Operations.GetChannelOnboarding(ctx, operationID)
+	if err != nil {
+		return state, err
+	}
+	state.claims, err = options.Identities.ListOperatorChannelOperations(ctx, options.Principal.ID)
+	if err != nil {
+		return state, err
+	}
+	state.bindings, err = options.Identities.ListOperatorChannelBindings(ctx, options.Principal.ID)
+	if err != nil {
+		return state, err
+	}
+	fixture, owner, err := sessionstate.OpenSDKFixture(ctx, filepath.Join(options.Directory, state.operation.SessionConnectionID, "provider.db"))
+	if err != nil {
+		return state, err
+	}
+	defer func() { err = errors.Join(err, fixture.Close()) }()
+	state.captures, err = fixture.CaptureRawRows(ctx)
+	if err != nil {
+		return state, err
+	}
+	device, err := owner.CurrentDevice(ctx, account)
+	if err != nil {
+		return state, err
+	}
+	state.account, state.identity = device.ID.String(), *device.IdentityKey.Pub
+	return state, nil
+}
+
 func sittingTerminal(t *testing.T) *os.File {
 	t.Helper()
 	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
@@ -80,7 +110,7 @@ func sittingTerminal(t *testing.T) *os.File {
 // a physical device. Cancellation must join without sending an answer or unlink.
 func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, stage := range []string{"account", "claimant"} {
+		for _, stage := range []string{"account", "claimant", "restored_login_cancel", "restored_login_disconnect"} {
 			t.Run(backend+"/"+stage, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
@@ -106,38 +136,10 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				}
 				writeStandingCandidateFile(t, config, string(content)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n", directory))
 				qr := make(chan channelonboarding.Result, 1)
-				var operations channelonboarding.OperationStore
-				var identities operatorchannel.Store
-				var principal operatorchannel.Principal
+				var registration cliapp.ChannelRegistrationOptions
 				var operationID string
-				snapshot := func(read context.Context) (state sittingCancellationState, err error) {
-					state.operation, err = operations.GetChannelOnboarding(read, operationID)
-					if err != nil {
-						return state, err
-					}
-					state.claims, err = identities.ListOperatorChannelOperations(read, principal.ID)
-					if err != nil {
-						return state, err
-					}
-					state.bindings, err = identities.ListOperatorChannelBindings(read, principal.ID)
-					if err != nil {
-						return state, err
-					}
-					fixture, owner, err := sessionstate.OpenSDKFixture(read, filepath.Join(directory, state.operation.SessionConnectionID, "provider.db"))
-					if err != nil {
-						return state, err
-					}
-					defer func() { err = errors.Join(err, fixture.Close()) }()
-					state.captures, err = fixture.CaptureRawRows(read)
-					if err != nil {
-						return state, err
-					}
-					device, err := owner.CurrentDevice(read, peer.account.ToNonAD().String())
-					if err != nil {
-						return state, err
-					}
-					state.account, state.identity = device.ID.String(), *device.IdentityKey.Pub
-					return state, nil
+				snapshot := func(read context.Context) (sittingCancellationState, error) {
+					return readSittingCancellationState(read, registration, operationID, peer.account.ToNonAD().String())
 				}
 				var after sittingCancellationState
 				factory := func(call context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
@@ -145,8 +147,8 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					operations, identities, principal = options.Operations, options.Identities, options.Principal
-					observed := firstConnectPairingObserver{ChannelRegistrationSession: session, principal: principal,
+					registration = options
+					observed := firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal,
 						observe: func(result channelonboarding.Result, _ bool) {
 							if result.Pairing != nil && result.Pairing.Code != "" {
 								select {
@@ -226,7 +228,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if stage == "account" && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
+				if stage != "claimant" && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
 					before.operation.AccountConfirmed || before.operation.AccountReference != "+15551234567" ||
 					before.operation.SessionAccount.Validate() != nil || before.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity) {
 					t.Fatal("first preview lacks the original canonical unapproved account checkpoint")
@@ -249,8 +251,8 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					t.Fatal("cancel logged out the paired account")
 				default:
 				}
-				if stage == "account" {
-					requireSittingPreviewReentry(t, ctx, config, directory, backend, terminal, peer, after)
+				if stage != "claimant" {
+					requireSittingPreviewReentry(t, ctx, config, directory, backend, terminal, peer, after, stage)
 				}
 			})
 		}
