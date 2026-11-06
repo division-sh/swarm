@@ -57,6 +57,7 @@ type RuntimeConnection struct {
 	operations         channelonboarding.OperationStore
 	operation          channelonboarding.Operation
 	account            atomic.Pointer[operatorchannel.SessionAccountAdmission]
+	claimCodeNotice    atomic.Pointer[claimCodeObservation]
 	incoming           *runtimeIncoming
 	registeredBusiness RegisteredBusinessSelector
 	plan               packs.SatisfactionPlan

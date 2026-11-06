@@ -78,7 +78,7 @@ func TestWhatsAppClaimProbeChecksEnvelopeBeforeContent(t *testing.T) {
 	event := incomingMessageFixture()
 	event.Info.ID = ""
 	event.Message = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}
-	if claim, err := (&runtimeIncoming{}).pendingOperatorClaim(context.Background(), channelonboarding.Operation{}, event); claim || !errors.Is(err, errIncomingMalformed) {
+	if claim, err := (&runtimeIncoming{}).pendingOperatorClaim(context.Background(), channelonboarding.Operation{}, event, false); claim || !errors.Is(err, errIncomingMalformed) {
 		t.Fatal("unsupported content hid a malformed claim envelope", claim, err)
 	}
 }

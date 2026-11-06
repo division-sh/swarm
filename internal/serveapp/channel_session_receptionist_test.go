@@ -235,14 +235,24 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 						if i == 3 {
 							message = customer.sender.EncryptReply(t, text, messageID, originalReply.ID, originalReply.Body.GetConversation())
 						}
-						peer.sendEncrypted(message, messageID)
-						sent := awaitServedNativeProcessSend(t, peer, text)
-						if sent.Body.GetConversation() != text || sent.To.ToNonAD() != originalReply.To.ToNonAD() && sent.To.ToNonAD() != customer.lid {
-							t.Fatal("pending operator enrollment changed the exact customer reply", sent)
+						deliver := func() {
+							peer.sendEncrypted(message, messageID)
+							sent := awaitServedNativeProcessSend(t, peer, text)
+							if sent.Body.GetConversation() != text || sent.To.ToNonAD() != originalReply.To.ToNonAD() && sent.To.ToNonAD() != customer.lid {
+								t.Fatal("pending operator enrollment changed the exact customer reply", sent)
+							}
+						}
+						if i == 2 {
+							requireServedClaimCodeNoticeTerminal(t, endpoint, id, deliver)
+						} else {
+							deliver()
 						}
 						requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 						if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.IdentityOperation == nil || result.IdentityOperation.State != operatorchannel.StateAwaitingClaim {
 							t.Fatal("ordinary customer traffic was consumed as an operator claim", result)
+						}
+						if i >= 2 && (result.Connection == nil || result.Connection.ClaimCodeNotice == nil || result.Connection.ClaimCodeNotice.IdentityOperationID != result.IdentityOperation.OperationID) {
+							t.Fatal("numeric customer miss lacked the scoped public notice", result.Connection)
 						}
 					}
 					peer.claimMessage(result.IdentityOperation.Challenge, "ROLLOVER_OPERATOR")
@@ -253,6 +263,9 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 					}
 					if result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation || result.IdentityOperation == nil || result.IdentityOperation.State != operatorchannel.StateAwaitingConfirmation {
 						t.Fatal("exact operator claim did not reach separate confirmation", result)
+					}
+					if result.Connection != nil && result.Connection.ClaimCodeNotice != nil {
+						t.Fatal("accepted claim retained a bad-code notice")
 					}
 					const awaitingConfirmation = "Customer service continues before the operator is confirmed"
 					peer.sendEncrypted(customer.sender.EncryptText(t, awaitingConfirmation, "ROLLOVER_BEFORE_CONFIRM"), "ROLLOVER_BEFORE_CONFIRM")

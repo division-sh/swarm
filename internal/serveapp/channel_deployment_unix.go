@@ -381,6 +381,11 @@ func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op
 		return view, nil
 	}
 	view.Reason = c.connection.DisconnectionReason()
+	notice, err := c.connection.ReadClaimCodeNotice(ctx, op)
+	if err != nil {
+		return view, err
+	}
+	view.ClaimCodeNotice = notice
 	count, err := c.connection.UnclaimedCount(ctx)
 	if err != nil {
 		return view, err
