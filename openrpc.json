@@ -15747,6 +15747,25 @@
             "minimum": 0,
             "type": "integer"
           },
+          "claim_code_notice": {
+            "additionalProperties": false,
+            "properties": {
+              "identity_operation_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "observation": {
+                "description": "Transient coalesced wrong-code observation; not a claim or an attempt count.",
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "identity_operation_id",
+              "observation"
+            ],
+            "type": "object"
+          },
           "linked": {
             "description": "Retained paired account exists; not operator identity or execution authority.",
             "type": "boolean"
