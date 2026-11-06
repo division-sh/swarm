@@ -317,7 +317,18 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					}
 					return
 				}
-				registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
+				for _, input := range []channelonboarding.RetryInput{{OperationID: checkpoint.OperationID}, {OperationID: checkpoint.OperationID, ApproveAccount: false}} {
+					unapproved, err := service.Retry(ctx, input)
+					if err != nil || !reflect.DeepEqual(unapproved.Operation, preview.Operation) || unapproved.IdentityOperation != nil || unapproved.Binding != nil {
+						t.Fatal("retry without an affirmative answer approved or changed the account", err)
+					}
+				}
+				for _, answer := range []bool{false, true} {
+					if _, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID, CheckpointOnly: true, ApproveAccount: answer}); err == nil {
+						t.Fatal("checkpoint-only retry accepted an account preview outside pairing")
+					}
+				}
+				registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID, ApproveAccount: true})
 				if hitl {
 					if err != nil || !registered.Operation.AccountConfirmed || registered.IdentityOperation == nil ||
 						registered.IdentityOperation.State != operatorchannel.StateAwaitingClaim ||

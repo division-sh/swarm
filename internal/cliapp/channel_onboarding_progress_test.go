@@ -29,19 +29,25 @@ func TestChannelCLIRetainedPreviewWaitPreservesExactAccount(t *testing.T) {
 		SessionAccount: operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
 			AccountRef: "15551234567@s.whatsapp.net", AdmissionID: "00000000-0000-4000-8000-000000000279", Revision: 1}},
 		Connection: &channelonboarding.SessionConnectionReadback{Linked: true, State: "connecting"}}
+	raw, err := json.Marshal(base)
+	var wire channelOnboardingResult
+	if err != nil || json.Unmarshal(raw, &wire) != nil {
+		t.Fatal("preview fixture did not cross its actual public JSON boundary", err)
+	}
+	base = wire
 	if !retainedChannelPreviewPending(base) || validateCLIChannelProgressReadback(base, base) != nil {
 		t.Fatal("exact retained preview did not remain pending without a revision advance")
 	}
 	for name, change := range map[string]func(*channelonboarding.Operation){
-		"operation":  func(o *channelonboarding.Operation) { o.OperationID += "foreign" },
-		"revision":   func(o *channelonboarding.Operation) { o.Revision++ },
-		"principal":  func(o *channelonboarding.Operation) { o.PrincipalID += "foreign" },
-		"provider":   func(o *channelonboarding.Operation) { o.Provider = "telegram" },
-		"connection": func(o *channelonboarding.Operation) { o.SessionConnectionID += "foreign" },
-		"account":    func(o *channelonboarding.Operation) { o.AccountReference = "+15551234599" },
-		"admission":  func(o *channelonboarding.Operation) { o.SessionAccount.Revision++ },
-		"scope":      func(o *channelonboarding.Operation) { o.DeploymentRegistration = false },
-		"approval":   func(o *channelonboarding.Operation) { o.AccountConfirmed = true },
+		"operation": func(o *channelonboarding.Operation) { o.OperationID += "foreign" },
+		"revision":  func(o *channelonboarding.Operation) { o.Revision++ },
+		"principal": func(o *channelonboarding.Operation) { o.PrincipalID += "foreign" },
+		"provider":  func(o *channelonboarding.Operation) { o.Provider = "telegram" },
+		"interface": func(o *channelonboarding.Operation) { o.Interface.ChannelManifestHash += "foreign" },
+		"account":   func(o *channelonboarding.Operation) { o.AccountReference = "+15551234599" },
+		"posture":   func(o *channelonboarding.Operation) { o.Posture = channelonboarding.ActivationWebhookRegistration },
+		"scope":     func(o *channelonboarding.Operation) { o.DeploymentRegistration = false },
+		"approval":  func(o *channelonboarding.Operation) { o.AccountConfirmed = true },
 	} {
 		t.Run(name, func(t *testing.T) {
 			next := base
