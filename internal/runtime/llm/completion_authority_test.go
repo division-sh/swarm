@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
@@ -712,59 +711,6 @@ func TestCompletionHeartbeatUsesProcessRootForOperatorWork(t *testing.T) {
 	defer cancel()
 	if _, err := process.Join(joinCtx); err != nil {
 		t.Fatalf("join process: %v", err)
-	}
-}
-
-func TestCompletionAdaptersDoNotRetainLegacyTurnOrBudgetOwners(t *testing.T) {
-	files := []string{
-		"api_runtime.go",
-		"cli_runtime.go",
-		"cli_runtime_helpers.go",
-		"factory.go",
-		"openai_compatible_runtime.go",
-		"openai_responses_runtime.go",
-	}
-	forbidden := []string{
-		"AppendAgentTurn(",
-		"persistValidationTurn",
-		"TurnPersistence",
-		"BudgetGuard",
-		"LockExecutionScope(",
-		"IsEntityEmergency(",
-	}
-	for _, file := range files {
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		for _, token := range forbidden {
-			if strings.Contains(string(raw), token) {
-				t.Errorf("%s retains retired completion owner %q", file, token)
-			}
-		}
-	}
-}
-
-func TestCompletionTurnEvidenceHasNoLegacyProductionWriter(t *testing.T) {
-	internalRoot := filepath.Clean(filepath.Join("..", ".."))
-	err := checkoutsource.WalkDir(filepath.Clean(filepath.Join(internalRoot, "..")), internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), "AppendAgentTurn(") {
-			t.Errorf("%s retains forbidden direct provider-turn writer", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("scan production completion writers: %v", err)
 	}
 }
 

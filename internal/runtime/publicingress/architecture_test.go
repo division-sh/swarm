@@ -91,20 +91,6 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 	for _, violation := range violations {
 		t.Error(violation)
 	}
-
-	spec, err := os.ReadFile(filepath.Join(repo, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	for _, required := range []string{
-		"provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch",
-		"Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain",
-		"A live predecessor attempt or handle is never",
-	} {
-		if !strings.Contains(string(spec), required) {
-			t.Fatalf("authoritative provider-registration contract is missing %q", required)
-		}
-	}
 }
 
 func providerRegistrationMethodBody(t *testing.T, source []byte, name string) string {

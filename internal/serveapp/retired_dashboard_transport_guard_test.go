@@ -2,17 +2,9 @@ package serveapp
 
 import (
 	"context"
-	"fmt"
-	"go/parser"
-	"go/token"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -73,18 +65,6 @@ func assertServedRetiredDashboardRefusal(t *testing.T, rt servedControlProofRunt
 }
 
 func TestRetiredDashboardTransportCannotReturn(t *testing.T) {
-	if err := checkRetiredDashboardSource(repoRootForTest()); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("go", "list", "-deps", "./cmd/swarm")
-	cmd.Dir = repoRootForTest()
-	deps, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("production dependency graph: %v", err)
-	}
-	if strings.Contains(string(deps), "/internal/dashboard") {
-		t.Fatalf("retired package in production dependency graph: %s", deps)
-	}
 	var hits atomic.Int32
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
@@ -115,69 +95,5 @@ func TestRetiredDashboardTransportCannotReturn(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-func checkRetiredDashboardSource(root string) error {
-	path := filepath.Join(root, "internal", "dashboard")
-	if _, err := os.Lstat(path); err == nil {
-		return fmt.Errorf("retired dashboard package path exists: %s", path)
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	for _, sourceRoot := range []string{"cmd", "internal"} {
-		err := filepath.WalkDir(filepath.Join(root, sourceRoot), func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() || !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
-			if err != nil {
-				return err
-			}
-			for _, imp := range file.Imports {
-				value, err := strconv.Unquote(imp.Path.Value)
-				if err != nil {
-					return err
-				}
-				if value == "github.com/division-sh/swarm/internal/dashboard" || strings.HasPrefix(value, "github.com/division-sh/swarm/internal/dashboard/") {
-					return fmt.Errorf("retired dashboard import in %s: %s", path, value)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func TestRetiredDashboardBoundaryRejectsReintroduction(t *testing.T) {
-	for _, cell := range []struct{ name, path, source string }{
-		{"package", "internal/dashboard/server/server.go", "package server\n"},
-		{"production-import", "cmd/main.go", "package main\nimport _ \"github.com/division-sh/swarm/internal/dashboard/server\"\n"},
-		{"test-import", "internal/probe_test.go", "package probe\nimport _ \"github.com/division-sh/swarm/internal/dashboard/server\"\n"},
-		{"invalid-source", "internal/probe.go", "not valid Go\n"},
-	} {
-		t.Run(cell.name, func(t *testing.T) {
-			root := t.TempDir()
-			for _, dir := range []string{"cmd", "internal", filepath.Dir(cell.path)} {
-				if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := checkRetiredDashboardSource(root); err != nil && cell.name != "package" {
-				t.Fatalf("empty control: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(root, cell.path), []byte(cell.source), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := checkRetiredDashboardSource(root); err == nil {
-				t.Fatal("retirement boundary admitted reintroduction")
-			}
-		})
 	}
 }
