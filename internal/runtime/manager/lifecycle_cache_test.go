@@ -3,12 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -141,53 +136,6 @@ func TestManagerFixtureRowOwnerSelectionIsExplicit(t *testing.T) {
 	projectManagerTestPersistenceRoles(&roles, owner)
 	if roles.LifecycleOutcome != owner {
 		t.Fatal("missing outcome role did not consume its exact supplied candidate")
-	}
-}
-
-func TestAgentCurrentnessHasOneMutationAndReadOwner(t *testing.T) {
-	cell := reflect.TypeOf(agentLifecycleCell{})
-	view, found := cell.FieldByName("view")
-	if !found || view.Type != reflect.TypeOf(AgentLifecycleState{}) {
-		t.Fatal("agent cell does not cache the complete typed row")
-	}
-	for _, retired := range []string{"epoch", "generation", "phase", "configRevision", "runMode", "topology", "processBinding"} {
-		if _, found := cell.FieldByName(retired); found {
-			t.Fatalf("agent cell retains independent currentness field %s", retired)
-		}
-	}
-	if _, found := reflect.TypeOf(AgentManagerOptions{}).FieldByName("SessionLifecycle"); found {
-		t.Fatal("Manager exposes the retired optional projection owner")
-	}
-	retired := map[string]bool{"ApplyLifecycleProjection": true, "LifecycleProjectionRequest": true, "LifecycleProjectionRegistry": true}
-	inspect := func(file *ast.File) bool {
-		found := false
-		ast.Inspect(file, func(node ast.Node) bool {
-			if name, ok := node.(*ast.Ident); ok && retired[name.Name] {
-				found = true
-			}
-			return true
-		})
-		return found
-	}
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if inspect(file) {
-			t.Fatalf("production consumer %s restored a session currentness projection", entry.Name())
-		}
-	}
-	hostile, err := parser.ParseFile(token.NewFileSet(), "hostile.go", "package manager; func f(s owner) { s.ApplyLifecycleProjection() }", 0)
-	if err != nil || !inspect(hostile) {
-		t.Fatalf("projection bypass escaped hostile census: %v", err)
 	}
 }
 

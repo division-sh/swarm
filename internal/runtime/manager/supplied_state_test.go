@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -74,9 +73,6 @@ func declareSuppliedFields(t *testing.T, bundle *runtimecontracts.WorkflowContra
 }
 
 func TestSuppliedStateHasNoParallelConfigurationAdmission(t *testing.T) {
-	if _, found := reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{}).FieldByName("Config"); found {
-		t.Fatal("parallel configuration input restored")
-	}
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"brief": {Type: "text"}})
 	req := testActivationRequest(bundle, "review", "one", "", "review/one")

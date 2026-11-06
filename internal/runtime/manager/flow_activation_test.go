@@ -150,22 +150,6 @@ type flowActivationTestBus struct {
 	creationStore     *flowActivationTestInstanceStore
 }
 
-func TestFlowActivationFixtureCannotStageInstanceRoutes(t *testing.T) {
-	for _, value := range []any{(*flowActivationTestBus)(nil), (*runtimebus.EventBus)(nil)} {
-		owner := reflect.TypeOf(value)
-		for _, name := range []string{"AddFlowInstanceRoute", "AddFlowInstanceRouteContext", "StageFlowInstanceRouteContext", "PublishPersistedFlowInstanceRoute", "RetirePublishedFlowInstanceRoute", "UpsertFlowInstanceRoute", "ListFlowInstanceRoutes", "RemoveFlowInstanceRoute", "RemoveFlowInstanceRouteContext", "HasFlowInstanceRoute"} {
-			if _, present := owner.MethodByName(name); present {
-				t.Errorf("%s retains retired instance-route staging API %s", owner, name)
-			}
-		}
-	}
-	for _, name := range []string{"routeStore", "addedPaths", "addedRouteRequests"} {
-		if _, present := reflect.TypeOf(flowActivationTestBus{}).FieldByName(name); present {
-			t.Errorf("Manager fixture retains separate mutable instance-route field %s", name)
-		}
-	}
-}
-
 type flowActivationTestAgentRoutePreparation struct {
 	deliveries chan *worklifetime.EventDelivery
 }

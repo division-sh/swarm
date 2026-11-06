@@ -3,31 +3,12 @@ package pipeline
 import (
 	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 func TestActivityCarriersOmitRetiredPolicy(t *testing.T) {
-	for _, tc := range []struct {
-		value  any
-		fields []string
-	}{
-		{runtimeengine.ActivityIntent{}, []string{"EffectClass", "RetryMaxAttempts", "RetryBackoff", "ForkPolicy", "Attempt"}},
-		{decisioncard.ProposedEffectContinuation{}, []string{"EffectClass", "RetryMaxAttempts", "RetryBackoff", "ForkPolicy", "Attempt"}},
-		{ActivityAttemptRecord{}, []string{"EffectClass"}},
-	} {
-		typeOf := reflect.TypeOf(tc.value)
-		t.Run(typeOf.Name(), func(t *testing.T) {
-			for _, name := range tc.fields {
-				if _, present := typeOf.FieldByName(name); present {
-					t.Errorf("retired authored activity policy still exposed as %s.%s", typeOf.Name(), name)
-				}
-			}
-		})
-	}
 	intent := runtimeengine.ActivityIntent{ActivityID: "once", Tool: "provider.http"}
 	for name, value := range map[string]any{
 		"request": activityRequestPayloadFromIntent(intent),

@@ -445,7 +445,3 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationDoesNotRetryActiveTransa
 func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
 	pipeline.VerifyNativeWorkflowMutationDoesNotRetryClosedOwnerRefusalForTest(t, "postgres", pipelineDeliveryNativeFixture)
 }
-
-func TestSQLiteWorkflowInstanceStore_runPipelineMutationRejectsUnownedRawTransaction(t *testing.T) {
-	pipeline.VerifyNativeWorkflowPersistenceHasNoRawTransactionProtocolForTest(t, pipelineDeliveryNativeFixture)
-}

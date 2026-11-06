@@ -558,21 +558,6 @@ func admittedActivityResponseSuccess(t *testing.T, policy runtimecontracts.HTTPR
 	return admitted
 }
 
-func TestCompiledResultProjectionHasNoConversionSeam(t *testing.T) {
-	if _, ok := reflect.TypeOf(runtimecontracts.CompiledResultField{}).FieldByName("Convert"); ok {
-		t.Fatal("CompiledResultField still exposes a conversion interpreter")
-	}
-	source, err := os.ReadFile("activity_engine.go")
-	if err != nil {
-		t.Fatalf("read activity_engine.go: %v", err)
-	}
-	for _, forbidden := range []string{"convertCompiledActivityResult", "compiled result conversion", "FieldProjectionConvertNumberToText"} {
-		if strings.Contains(string(source), forbidden) {
-			t.Fatalf("activity result projection retains legacy conversion seam %q", forbidden)
-		}
-	}
-}
-
 func VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {

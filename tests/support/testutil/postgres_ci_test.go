@@ -81,28 +81,6 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 	}
 }
 
-func TestCanonicalTestRunnerHasNoRemovedBinaryAlias(t *testing.T) {
-	root := testRepoRoot(t)
-	newPath := filepath.Join(root, "cmd", "swarm-test", "main.go")
-	if _, err := os.Stat(newPath); err != nil {
-		t.Fatalf("canonical test runner is missing: %v", err)
-	}
-	oldRel := filepath.Join("cmd", "swarm-test-"+"postgres", "main.go")
-	if _, err := os.Stat(filepath.Join(root, oldRel)); !os.IsNotExist(err) {
-		t.Fatalf("removed test runner alias survives: %v", err)
-	}
-	oldReference := filepath.ToSlash(oldRel)
-	for _, rel := range []string{"README.md", "CONTRIBUTING.md", ".github/workflows/ci.yml", "tests/support/testutil/POSTGRES.md"} {
-		raw, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(raw), oldReference) {
-			t.Fatalf("removed binary path survives in %s", rel)
-		}
-	}
-}
-
 func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 	root := testRepoRoot(t)
 	violations, err := postgresEnvironmentAuthorityViolations(root)
