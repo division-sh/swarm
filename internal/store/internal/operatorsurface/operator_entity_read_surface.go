@@ -16,10 +16,10 @@ import (
 )
 
 type entityPositionCursor struct {
-	Kind      string `json:"kind"`
-	UpdatedAt string `json:"updated_at"`
-	EntityID  string `json:"entity_id"`
-	RunID     string `json:"run_id"`
+	Kind      string     `json:"kind"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	EntityID  string     `json:"entity_id"`
+	RunID     string     `json:"run_id"`
 }
 
 type entityAggregateGroup struct {
@@ -52,15 +52,15 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 	}
 	if opts.RunID != "" {
 		n := add(opts.RunID)
-		where = append(where, fmt.Sprintf("es.run_id = $%d::uuid", n))
+		where = append(where, fmt.Sprintf("fi.run_id = $%d::uuid", n))
 	}
 	if opts.EntityID != "" {
 		n := add(opts.EntityID)
-		where = append(where, fmt.Sprintf("es.entity_id = $%d::uuid", n))
+		where = append(where, fmt.Sprintf("fi.entity_id = $%d::uuid", n))
 	}
 	if opts.Flow != "" {
 		n := add(opts.Flow)
-		where = append(where, fmt.Sprintf("(es.flow_instance = $%d OR es.flow_instance LIKE $%d || '/%%')", n, n))
+		where = append(where, fmt.Sprintf("(fi.instance_path = $%d OR fi.instance_path LIKE $%d || '/%%')", n, n))
 	}
 	if opts.CurrentState != "" {
 		n := add(opts.CurrentState)
@@ -71,8 +71,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, err
 		}
-		updatedAt, err := time.Parse(time.RFC3339Nano, cursor.UpdatedAt)
-		if err != nil || strings.TrimSpace(cursor.EntityID) == "" || strings.TrimSpace(cursor.RunID) == "" {
+		if strings.TrimSpace(cursor.EntityID) == "" || strings.TrimSpace(cursor.RunID) == "" {
 			return operatorread.OperatorEntityListResult{}, operatorread.ErrInvalidEntityCursor
 		}
 		if _, err := uuid.Parse(cursor.EntityID); err != nil {
@@ -81,24 +80,23 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 		if _, err := uuid.Parse(cursor.RunID); err != nil {
 			return operatorread.OperatorEntityListResult{}, operatorread.ErrInvalidEntityCursor
 		}
-		nTime := add(updatedAt.UTC())
+		nTime := 0
+		if cursor.UpdatedAt != nil {
+			nTime = add(cursor.UpdatedAt.UTC())
+		}
 		nEntity := add(cursor.EntityID)
 		nRun := add(cursor.RunID)
-		where = append(where, fmt.Sprintf(`(
-			es.updated_at < $%d
-			OR (
-				es.updated_at = $%d
-				AND (
-					es.entity_id::text > $%d
-					OR (es.entity_id::text = $%d AND es.run_id::text > $%d)
-				)
-			)
-		)`, nTime, nTime, nEntity, nEntity, nRun))
+		afterIdentity := fmt.Sprintf("(fi.entity_id::text > $%d OR (fi.entity_id::text = $%d AND fi.run_id::text > $%d))", nEntity, nEntity, nRun)
+		if cursor.UpdatedAt == nil {
+			where = append(where, "(es.updated_at IS NULL AND "+afterIdentity+")")
+		} else {
+			where = append(where, fmt.Sprintf("(es.updated_at IS NULL OR es.updated_at < $%d OR (es.updated_at = $%d AND %s))", nTime, nTime, afterIdentity))
+		}
 	}
 	limitArg := add(opts.Limit + 1)
-	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.PublicReadColumns+` `+workflowheader.PublicReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+fmt.Sprintf(`
-		ORDER BY es.updated_at DESC, es.entity_id::text ASC, es.run_id::text ASC
+		ORDER BY (es.updated_at IS NULL), es.updated_at DESC, fi.entity_id::text ASC, fi.run_id::text ASC
 		LIMIT $%d
 	`, limitArg), args...)
 	if err != nil {
@@ -107,7 +105,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 	defer rows.Close()
 	entities := []operatorread.OperatorEntitySummary{}
 	for rows.Next() {
-		item, err := workflowheader.ScanData(rows, sqliteTimeValue)
+		item, err := workflowheader.ScanPublic(rows, sqliteTimeValue)
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, fmt.Errorf("scan operator entity summary: %w", err)
 		}
@@ -122,7 +120,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 		last := entities[len(entities)-1]
 		nextCursor = encodeEntityPositionCursor(entityPositionCursor{
 			Kind:      "entity.list",
-			UpdatedAt: last.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt: last.UpdatedAt,
 			EntityID:  last.EntityID,
 			RunID:     last.RunID,
 		})
@@ -148,16 +146,16 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 	}
 	if opts.RunID != "" {
 		add(opts.RunID)
-		where = append(where, "es.run_id = ?")
+		where = append(where, "fi.run_id = ?")
 	}
 	if opts.EntityID != "" {
 		add(opts.EntityID)
-		where = append(where, "es.entity_id = ?")
+		where = append(where, "fi.entity_id = ?")
 	}
 	if opts.Flow != "" {
 		add(opts.Flow)
 		add(opts.Flow + "/%")
-		where = append(where, "(es.flow_instance = ? OR es.flow_instance LIKE ?)")
+		where = append(where, "(fi.instance_path = ? OR fi.instance_path LIKE ?)")
 	}
 	if opts.CurrentState != "" {
 		add(opts.CurrentState)
@@ -168,8 +166,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, err
 		}
-		updatedAt, err := time.Parse(time.RFC3339Nano, cursor.UpdatedAt)
-		if err != nil || strings.TrimSpace(cursor.EntityID) == "" || strings.TrimSpace(cursor.RunID) == "" {
+		if strings.TrimSpace(cursor.EntityID) == "" || strings.TrimSpace(cursor.RunID) == "" {
 			return operatorread.OperatorEntityListResult{}, operatorread.ErrInvalidEntityCursor
 		}
 		if _, err := uuid.Parse(cursor.EntityID); err != nil {
@@ -178,26 +175,24 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 		if _, err := uuid.Parse(cursor.RunID); err != nil {
 			return operatorread.OperatorEntityListResult{}, operatorread.ErrInvalidEntityCursor
 		}
-		add(updatedAt.UTC())
-		add(updatedAt.UTC())
+		if cursor.UpdatedAt != nil {
+			add(cursor.UpdatedAt.UTC())
+			add(cursor.UpdatedAt.UTC())
+		}
 		add(cursor.EntityID)
 		add(cursor.EntityID)
 		add(cursor.RunID)
-		where = append(where, `(
-			es.updated_at < ?
-			OR (
-				es.updated_at = ?
-				AND (
-					es.entity_id > ?
-					OR (es.entity_id = ? AND es.run_id > ?)
-				)
-			)
-		)`)
+		afterIdentity := "(fi.entity_id > ? OR (fi.entity_id = ? AND fi.run_id > ?))"
+		if cursor.UpdatedAt == nil {
+			where = append(where, "(es.updated_at IS NULL AND "+afterIdentity+")")
+		} else {
+			where = append(where, "(es.updated_at < ? OR es.updated_at IS NULL OR (es.updated_at = ? AND "+afterIdentity+"))")
+		}
 	}
 	add(opts.Limit + 1)
-	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.PublicReadColumns+` `+workflowheader.PublicReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY es.updated_at DESC, es.entity_id ASC, es.run_id ASC
+		ORDER BY (es.updated_at IS NULL), es.updated_at DESC, fi.entity_id ASC, fi.run_id ASC
 		LIMIT ?
 	`, args...)
 	if err != nil {
@@ -206,7 +201,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 	defer rows.Close()
 	entities := []operatorread.OperatorEntitySummary{}
 	for rows.Next() {
-		item, err := workflowheader.ScanData(rows, sqliteTimeValue)
+		item, err := workflowheader.ScanPublic(rows, sqliteTimeValue)
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, fmt.Errorf("scan sqlite operator entity summary: %w", err)
 		}
@@ -221,7 +216,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 		last := entities[len(entities)-1]
 		nextCursor = encodeEntityPositionCursor(entityPositionCursor{
 			Kind:      "entity.list",
-			UpdatedAt: last.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt: last.UpdatedAt,
 			EntityID:  last.EntityID,
 			RunID:     last.RunID,
 		})
@@ -251,10 +246,10 @@ func (s *EntityPostgres) LoadOperatorEntity(ctx context.Context, entityID, runID
 		return s.loadOperatorEntityRow(ctx, entityID, runID)
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.run_id::text
-		FROM entity_state es
-		WHERE es.entity_id = $1::uuid
-		ORDER BY es.updated_at DESC, es.run_id::text ASC
+		SELECT fi.run_id::text
+		FROM flow_instances fi
+		WHERE fi.entity_id = $1::uuid
+		ORDER BY fi.run_id::text ASC
 		LIMIT 2
 	`, entityID)
 	if err != nil {
@@ -301,10 +296,10 @@ func (s *EntitySQLite) LoadOperatorEntity(ctx context.Context, entityID, runID s
 		return s.loadSQLiteOperatorEntityRow(ctx, entityID, runID)
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT COALESCE(es.run_id, '')
-		FROM entity_state es
-		WHERE es.entity_id = ?
-		ORDER BY es.updated_at DESC, es.run_id ASC
+		SELECT fi.run_id
+		FROM flow_instances fi
+		WHERE fi.entity_id = ?
+		ORDER BY fi.run_id ASC
 		LIMIT 2
 	`, entityID)
 	if err != nil {
@@ -348,7 +343,7 @@ func (s *EntityPostgres) AggregateOperatorEntities(ctx context.Context, opts ope
 	}
 	if opts.RunID != "" {
 		n := add(opts.RunID)
-		where = append(where, fmt.Sprintf("es.run_id = $%d::uuid", n))
+		where = append(where, fmt.Sprintf("fi.run_id = $%d::uuid", n))
 	}
 	group, err := operatorEntityAggregateGroup(opts.GroupBy, add)
 	if err != nil {
@@ -356,8 +351,8 @@ func (s *EntityPostgres) AggregateOperatorEntities(ctx context.Context, opts ope
 	}
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT grouped.*, COUNT(*) OVER (PARTITION BY bucket) AS bucket_count
-		FROM (SELECT `+workflowheader.DataReadColumns+`, `+group.Expr+` AS bucket
-		`+workflowheader.DataReadFrom+`
+		FROM (SELECT `+workflowheader.PublicReadColumns+`, `+group.Expr+` AS bucket
+		`+workflowheader.PublicReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+`
 		) grouped
 		ORDER BY bucket_count DESC, (bucket IS NULL), bucket ASC
@@ -389,12 +384,12 @@ func (s *EntitySQLite) AggregateOperatorEntities(ctx context.Context, opts opera
 	where := []string{"1=1"}
 	if opts.RunID != "" {
 		args = append(args, opts.RunID)
-		where = append(where, "es.run_id = ?")
+		where = append(where, "fi.run_id = ?")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT grouped.*, COUNT(*) OVER (PARTITION BY bucket) AS bucket_count
-		FROM (SELECT `+workflowheader.DataReadColumns+`, `+group.Expr+` AS bucket
-		`+workflowheader.DataReadFrom+`
+		FROM (SELECT `+workflowheader.PublicReadColumns+`, `+group.Expr+` AS bucket
+		`+workflowheader.PublicReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+`
 		) grouped
 		ORDER BY bucket_count DESC, (bucket IS NULL), bucket ASC
@@ -407,8 +402,8 @@ func (s *EntitySQLite) AggregateOperatorEntities(ctx context.Context, opts opera
 }
 
 func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
-	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
-		WHERE es.entity_id = $1::uuid AND es.run_id = $2::uuid`, entityID, runID)
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.PublicReadColumns+` `+workflowheader.PublicReadFrom+`
+		WHERE fi.entity_id = $1::uuid AND fi.run_id = $2::uuid`, entityID, runID)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("load operator entity: %w", err)
 	}
@@ -417,8 +412,8 @@ func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, ru
 }
 
 func (s *EntitySQLite) loadSQLiteOperatorEntityRow(ctx context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
-	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
-		WHERE es.entity_id = ? AND es.run_id = ?`, entityID, runID)
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.PublicReadColumns+` `+workflowheader.PublicReadFrom+`
+		WHERE fi.entity_id = ? AND fi.run_id = ?`, entityID, runID)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("load sqlite operator entity: %w", err)
 	}
@@ -433,7 +428,7 @@ func scanOperatorEntityRow(rows *sql.Rows) (operatorread.OperatorEntityFull, err
 		}
 		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
 	}
-	item, err := workflowheader.ScanData(rows, sqliteTimeValue)
+	item, err := workflowheader.ScanPublic(rows, sqliteTimeValue)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}
@@ -453,7 +448,7 @@ func scanOperatorEntityAggregateRows(rows *sql.Rows) (operatorread.OperatorEntit
 		var count int
 		// Window counts retain SQL grouping while every member consumes exact
 		// companion admission in the same query snapshot.
-		if _, err := workflowheader.ScanData(rows, sqliteTimeValue, &key, &count); err != nil {
+		if _, err := workflowheader.ScanPublic(rows, sqliteTimeValue, &key, &count); err != nil {
 			return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("scan operator entity aggregate: %w", err)
 		}
 		if key.Valid {
@@ -512,7 +507,7 @@ func operatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggr
 	case "current_state":
 		return entityAggregateGroup{Expr: "CASE WHEN fi.stage_defined THEN fi.current_state END"}, nil
 	case "flow", "flow_instance":
-		return entityAggregateGroup{Expr: "NULLIF(es.flow_instance, '')"}, nil
+		return entityAggregateGroup{Expr: "NULLIF(fi.instance_path, '')"}, nil
 	case "workflow_name":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.flow_template, '')",
@@ -539,7 +534,7 @@ func sqliteOperatorEntityAggregateGroup(groupBy string, add func(any) int) (enti
 	case "current_state":
 		return entityAggregateGroup{Expr: "CASE WHEN fi.stage_defined THEN fi.current_state END"}, nil
 	case "flow", "flow_instance":
-		return entityAggregateGroup{Expr: "NULLIF(es.flow_instance, '')"}, nil
+		return entityAggregateGroup{Expr: "NULLIF(fi.instance_path, '')"}, nil
 	case "workflow_name":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.flow_template, '')",
@@ -573,6 +568,10 @@ func decodeEntityPositionCursor(raw string, kind string) (entityPositionCursor, 
 	}
 	var cursor entityPositionCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
+		return entityPositionCursor{}, operatorread.ErrInvalidEntityCursor
+	}
+	var properties map[string]json.RawMessage
+	if err := json.Unmarshal(decoded, &properties); err != nil || len(properties["updated_at"]) == 0 {
 		return entityPositionCursor{}, operatorread.ErrInvalidEntityCursor
 	}
 	if strings.TrimSpace(cursor.Kind) != kind {

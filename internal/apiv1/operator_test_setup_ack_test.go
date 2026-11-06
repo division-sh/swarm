@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ type scenarioSetupAckSelectedStore interface {
 	sourceartifactfixture.Writer
 	sourceartifactfixture.RootedWriter
 	EntityReadStore
+	LoadEntityState(context.Context, tools.EntityIdentity) (map[string]any, bool, error)
 	runtimepipeline.WorkflowInstancePersistenceReader
 }
 
