@@ -25,6 +25,14 @@ No operator/business/reset/next-day physical credit follows from the linked
 preview. Read the [transition coverage map](issue-2577-sitting-transition-coverage.md)
 with its exact-head qualification packet; a green root count alone is not READY.
 
+The [retained-preview decision](https://github.com/division-sh/swarm/issues/2577#issuecomment-6673738657)
+requires the next explicit same-account connect to restore an unapproved preview
+without another QR or implicit approval. The [approval bound](https://github.com/division-sh/swarm/issues/2577#issuecomment-6673799042)
+requires the existing affirmative answer to be carried on retry; resume alone is
+not that answer. These source repairs and their merged-head preparation must be
+cleared before invitation. Preserve the retained pairing; neither reset mode nor
+an unapproved logout is a qualified substitute for this re-entry.
+
 The current-source binary passed CLI help, portable verification of the existing
 authored-reply fixture, and public scaffold generation without starting a QR
 operation. This is not a rehearsal with the private device fixture. A development

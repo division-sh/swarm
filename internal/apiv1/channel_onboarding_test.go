@@ -158,7 +158,11 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 			t.Fatal("retry changed the supplied account answer", answer, response.Error)
 		}
 	}
-	for _, value := range []string{`null`, `"true"`, `1`} {
+	unset := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unset-answer","method":"channel.onboarding_retry","params":{"operation_id":%q,"approve_account":null}}`, operationID))
+	if unset.Error != nil || lifecycle.retry.ApproveAccount {
+		t.Fatal("optional null answer became approval", unset.Error)
+	}
+	for _, value := range []string{`"true"`, `1`} {
 		response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"invalid-answer","method":"channel.onboarding_retry","params":{"operation_id":%q,"approve_account":%s}}`, operationID, value))
 		if response.Error == nil || response.Error.Code != -32602 {
 			t.Fatal("retry accepted a malformed account answer", value, response)
