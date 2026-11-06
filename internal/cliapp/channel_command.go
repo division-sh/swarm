@@ -632,8 +632,9 @@ func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResul
 		return errors.New("operator code requires its exact WhatsApp destination and expiry")
 	}
 	identity := result.IdentityOperation
-	fmt.Fprintf(out, "FROM your operator phone TO %s\nSend the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		destination.Account, identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
+	fmt.Fprintf(out, "FROM your operator phone TO %s\n", destination.Account)
+	fmt.Fprintf(out, "Send the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
+		identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
 	return nil
 }
 
