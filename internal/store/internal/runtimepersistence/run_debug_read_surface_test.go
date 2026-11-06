@@ -20,7 +20,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"

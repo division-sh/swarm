@@ -31,8 +31,8 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
+	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )

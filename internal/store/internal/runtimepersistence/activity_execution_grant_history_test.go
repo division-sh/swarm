@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 

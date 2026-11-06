@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	replycontextstore "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 

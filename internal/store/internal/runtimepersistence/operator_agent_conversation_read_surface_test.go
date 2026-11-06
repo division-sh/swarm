@@ -23,7 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
