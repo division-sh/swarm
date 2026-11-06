@@ -2457,6 +2457,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtPortableGlobalRoleCollectorTo && trusted.Collector == base &&
+		current == debtPortableAgentFixtureCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2409/6674839308: exact portable agentfixture role; baseline sites are unchanged.
+	}
 	if base == debtPortableRuntimeRoleCollectorTo && trusted.Collector == base &&
 		current == debtPortableGlobalRoleCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
