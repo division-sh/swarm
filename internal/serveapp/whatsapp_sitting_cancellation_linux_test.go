@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"golang.org/x/sys/unix"
 )
 

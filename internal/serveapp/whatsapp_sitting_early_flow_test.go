@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
