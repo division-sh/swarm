@@ -307,8 +307,56 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 					if _, err := summaryOwner.SummarizeFanOutRunTx(ctx, tx, fixture.runID, base.Add(time.Second)); !errors.Is(err, sentinel) {
 						t.Fatalf("actual fold hid hostile direct member: %v", err)
 					}
+					if _, err := summaryOwner.ReadFanOutSettlementTx(ctx, tx, fixture.runID, base.Add(time.Second)); !errors.Is(err, sentinel) {
+						t.Fatalf("current settlement hid hostile direct member: %v", err)
+					}
 				})
 			}
+			for _, corrupt := range []string{"missing_sibling", "all_foreign", "missing_event"} {
+				t.Run(corrupt, func(t *testing.T) {
+					tx, err := db.BeginTx(ctx, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE event_deliveries AS SELECT * FROM event_deliveries`); err != nil {
+						t.Fatal(err)
+					}
+					query, args := `DELETE FROM event_deliveries WHERE delivery_id=$1`, []any{baseline[1].DeliveryID}
+					if corrupt == "all_foreign" {
+						query, args = `UPDATE event_deliveries SET run_id=$1 WHERE event_id=$2`, []any{other.runID, event.ID()}
+					}
+					if corrupt == "missing_event" {
+						if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE events AS SELECT * FROM events`); err != nil {
+							t.Fatal(err)
+						}
+						query, args = `DELETE FROM events WHERE event_id=$1`, []any{event.ID()}
+					}
+					if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := summaryOwner.ReadFanOutSettlementTx(ctx, tx, fixture.runID, base.Add(time.Second)); err == nil {
+						t.Fatal("current recipient discovery erased missing or entirely foreign membership")
+					}
+				})
+			}
+			t.Run("current_foreign_publication", func(t *testing.T) {
+				foreign := fanOutBarrierChildEvent(t, other, 1, base)
+				if err := commitSemanticEventFixtureWithRoutes(ctx, owner, foreign, []events.DeliveryRoute{fanOutBarrierRoute("foreign")}); err != nil {
+					t.Fatal(err)
+				}
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback()
+				if _, err := tx.ExecContext(ctx, `UPDATE fan_out_outcomes SET event_id=$1 WHERE run_id=$2`, foreign.ID(), fixture.runID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := summaryOwner.ReadFanOutSettlementTx(ctx, tx, fixture.runID, base.Add(time.Second)); err == nil {
+					t.Fatal("current settlement erased a foreign publication through its run join")
+				}
+			})
 			t.Run("cross_run_outcome_event", func(t *testing.T) {
 				foreign := fanOutBarrierChildEvent(t, other, 0, base)
 				if err := commitSemanticEventFixtureWithRoutes(ctx, owner, foreign, nil); err != nil {

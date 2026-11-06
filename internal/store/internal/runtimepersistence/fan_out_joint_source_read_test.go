@@ -170,6 +170,10 @@ func TestFanOutJointSourceReadAdmissionAndFreshnessBothStores(t *testing.T) {
 					if !strings.Contains(err.Error(), "load fan-out ordinal 0 settlement") {
 						t.Fatalf("public summary did not reach exact source read: %v", err)
 					}
+					current, err := owner.ReadFanOutSettlement(ctx, fixture.runID, observedAt)
+					if err != nil || current.RunID != fixture.runID || current.BlocksCompletion() {
+						t.Fatalf("closed hostile history changed current obligations: %+v err=%v", current, err)
+					}
 				}
 				writeJointSourceReadRecord(t, ctx, db, postgres, original)
 				assertRestored(t)

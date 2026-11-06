@@ -230,7 +230,7 @@ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, obs
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
-	fanOut, err := s.pipeline.FanOutRunSummary(ctx, runID, observedAt)
+	fanOut, err := s.pipeline.ReadFanOutSettlement(ctx, runID, observedAt)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence fan-out obligations: %w", err)
 	}

@@ -18,10 +18,11 @@ import (
 
 type foldJoinQueryCount struct {
 	pipelineQueryer
-	compact, joined, maxArgs int
+	compact, joined, maxArgs, total int
 }
 
 func (q *foldJoinQueryCount) count(query string, args []any) {
+	q.total++
 	if strings.Contains(query, "FROM fan_out_intents") || strings.Contains(query, "FROM fan_out_outcomes") {
 		q.compact++
 		q.maxArgs = max(q.maxArgs, len(args))

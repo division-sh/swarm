@@ -21,6 +21,7 @@ import (
 type PipelineObligationSource interface {
 	PipelineObligations() runtimepipelineobligation.Store
 	FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error)
+	ReadFanOutSettlement(context.Context, string, time.Time) (fanoutobligation.RunSettlement, error)
 	ListFanOutIntents(context.Context, fanoutobligation.ListQuery) (fanoutobligation.ListPage, error)
 	ListFlowInstances(context.Context, pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error)
 	ReadWorkflowPublicationStages(context.Context, string, flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error)

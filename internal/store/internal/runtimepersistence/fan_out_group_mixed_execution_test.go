@@ -64,6 +64,12 @@ func TestFanOutGroupMixedExecutionBothStores(t *testing.T) {
 			if err != nil || len(committed.Publications) != 4 || committed.Intent.Cursor != 4 || committed.Intent.Status != fanoutobligation.StatusClosed {
 				t.Fatalf("one exact mixed range: %+v err=%v", committed, err)
 			}
+			currentReader := f.raw.(interface {
+				ReadFanOutSettlement(context.Context, string, time.Time) (fanoutobligation.RunSettlement, error)
+			})
+			if current, err := currentReader.ReadFanOutSettlement(f.ctx, f.seed.runID, time.Now().UTC()); err != nil || current.Open != 0 || current.Owed != 0 || current.Unsettled != 3 {
+				t.Fatalf("closed committed issuance lost its three unfinished ordinals: %+v err=%v", current, err)
+			}
 			for i, plan := range f.plans {
 				read, found, err := f.raw.(storeTestDurableEventBusStore).LoadPreparedPublishEvent(f.ctx, f.events[i].ID())
 				want := plan.(bus.EnginePublicationPlan).PublicationCommand().Commit.DeliveryRoutes
@@ -105,6 +111,9 @@ func TestFanOutGroupMixedExecutionBothStores(t *testing.T) {
 				}
 			}
 			mixedAwaitDeliveries(t, f, 6)
+			if current, err := currentReader.ReadFanOutSettlement(f.ctx, f.seed.runID, time.Now().UTC()); err != nil || current.BlocksCompletion() {
+				t.Fatalf("actual mixed settlement did not release current obligations: %+v err=%v", current, err)
+			}
 			for i, event := range f.events {
 				mixedAssertReceipt(t, f, event.ID(), "success", "pipeline_persisted")
 				public, err := f.raw.(interface {

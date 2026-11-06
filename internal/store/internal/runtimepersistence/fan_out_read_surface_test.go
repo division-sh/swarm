@@ -204,6 +204,9 @@ func TestFanOutReadLeaseRetryAndRestartBothStores(t *testing.T) {
 			if row.DurableState != "leased" || row.ClaimOwner != claim.Owner || row.ClaimGeneration != claim.Generation || row.LeaseExpiresAt == nil {
 				t.Fatalf("lease=%+v", row)
 			}
+			if current, err := restarted.ReadFanOutSettlement(ctx, base.runID, claim.LeaseUntil.Add(time.Second)); err != nil || current.Open != 1 || current.Owed != 64 {
+				t.Fatalf("observation after lease expiry erased owed work: %+v err=%v", current, err)
+			}
 			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
 				t.Fatal(err)
 			}
@@ -214,6 +217,9 @@ func TestFanOutReadLeaseRetryAndRestartBothStores(t *testing.T) {
 			row = page.Intents[0]
 			if row.DurableState != "retry_wait" || row.Status != fanoutobligation.StatusOpen || row.Retry == nil || row.LeaseExpiresAt != nil || row.NextChunkSize != 16 || row.Owed != 64 || row.Failure != nil {
 				t.Fatalf("retry=%+v", row)
+			}
+			if current, err := restarted.ReadFanOutSettlement(ctx, base.runID, time.Now().UTC()); err != nil || current.Open != 1 || current.Owed != 64 {
+				t.Fatalf("future retry erased owed work: %+v err=%v", current, err)
 			}
 			if remaining := time.Until(row.Retry.ReadyAt.Add(time.Millisecond)); remaining > 0 {
 				time.Sleep(remaining)

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	runtimefanoutbarrier "github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	deliverystore "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -45,8 +44,7 @@ type RunLifecycleSQLiteOwner struct {
 type pipelineTerminalizer interface {
 	TerminalizeRunTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
 	SummarizeRunTx(context.Context, *sql.Tx, string) (runtimepipelineobligation.RunSummary, error)
-	SummarizeFanOutRunTx(context.Context, *sql.Tx, string, time.Time) (runtimefanout.RunSummary, error)
-	SummarizeFanOutDeliveryBarriersRunTx(context.Context, *sql.Tx, string) (runtimefanoutbarrier.RunSummary, error)
+	ReadFanOutSettlementTx(context.Context, *sql.Tx, string, time.Time) (runtimefanout.RunSettlement, error)
 }
 
 type decisionCardTerminalizer interface {

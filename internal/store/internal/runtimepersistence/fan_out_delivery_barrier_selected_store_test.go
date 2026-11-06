@@ -67,6 +67,15 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 				eventsByOrdinal[ordinal] = event
 			}
 			seedFanOutBarrierOutcomes(t, ctx, db, fixture, []string{eventsByOrdinal[0].ID(), eventsByOrdinal[1].ID(), eventsByOrdinal[2].ID()}, true, base.Add(5*time.Second))
+			assertCurrent := func(want int) {
+				t.Helper()
+				current, err := owner.ReadFanOutSettlement(ctx, fixture.runID, base.Add(10*time.Second))
+				full, fullErr := owner.FanOutRunSummary(ctx, fixture.runID, base.Add(10*time.Second))
+				if err != nil || fullErr != nil || current.Unsettled != want || current.Unsettled != full.Unsettled || current.Owed != full.Owed || current.Open != full.Open || current.Blocked != full.Blocked || current.BarrierArmed != full.BarrierArmed || current.BarrierPending != full.BarrierPending {
+					t.Fatalf("current/full settlement differs: current=%+v full=%+v err=%v/%v", current, full, err, fullErr)
+				}
+			}
+			assertCurrent(2)
 
 			advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(6*time.Second))
 			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
@@ -82,10 +91,12 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[1], routes[1][0])
 			settleFanOutBarrierRouteDeadLetter(t, ctx, selected, eventsByOrdinal[2], routes[2][0])
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[2], routes[2][1])
+			assertCurrent(1)
 			advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(7*time.Second))
 			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[2], routes[2][2])
+			assertCurrent(0)
 			advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(8*time.Second))
 			want := fanoutbarrier.Summary{Total: 4, Succeeded: 1, DeadLettered: 1, NoRoute: 1, SemanticRejected: 1}
 			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())

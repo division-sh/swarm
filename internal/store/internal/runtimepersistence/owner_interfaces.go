@@ -376,6 +376,7 @@ type pipelineOwnerMethods interface {
 	CommitWorkflowTimerReconciliation(ctx context.Context, command pipeline.WorkflowTimerReconciliationCommand) (pipeline.CommittedWorkflowLifecycleMutation, error)
 	CountWorkflowEntities(ctx context.Context, request entityquery.Request) (int, error)
 	FanOutRunSummary(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSummary, error)
+	ReadFanOutSettlement(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSettlement, error)
 	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.SourceArtifactFact) ([]pipeline.DynamicFlowRuntimeReadiness, error)
 	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error)
 	ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error)
