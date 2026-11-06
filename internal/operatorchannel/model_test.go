@@ -66,6 +66,20 @@ func TestChallengeGrammarIsClosed(t *testing.T) {
 	}
 }
 
+func TestNewOperatorChallengeUsesFiveDigits(t *testing.T) {
+	for range 32 {
+		challenge, err := NewChallenge()
+		if err != nil || len(challenge) != 5 || strings.Trim(challenge, "0123456789") != "" {
+			t.Fatalf("challenge %q is not five ASCII digits: %v", challenge, err)
+		}
+	}
+	for _, challenge := range []string{"00000", "00001", "15000", "99999", "SWARM-AAAAAAAAAAAAAAAA"} {
+		if !ValidChallenge(challenge) {
+			t.Fatal("new digits or exact retained challenge lost validity", challenge)
+		}
+	}
+}
+
 func TestProjectOperationReadbackMasksAndFallsBackToExternalAccountReference(t *testing.T) {
 	projected := ProjectOperationReadback(Operation{
 		ExternalAccountRef: "123456789", ConversationRef: "987654321", AccountPresentation: "",
