@@ -250,10 +250,4 @@ groups:
     proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCanonicalRoutingOwnership
     roots:
       - tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow
-sources:
-  - id: tests/support/runtime/testfixtures/canonicalrouting/fixture_test.go:canonicalRoutingTeachingContractSource
-    file: tests/support/runtime/testfixtures/canonicalrouting/fixture_test.go
-    function: canonicalRoutingTeachingContractSource
-    disposition: parser-only
-    owner: examples.routing.teaching_contract
-    proof: tests/support/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExampleInventoryAndTeachingContract
+sources: []

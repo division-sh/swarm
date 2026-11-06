@@ -39,18 +39,6 @@ type ArtifactID string
 // an exception from that boundary.
 type SourceID string
 
-// SourceToken proves that ExecuteSource ran inside a classified source
-// constructor. Its fields are private so a test cannot replace execution with
-// a bare ID claim.
-type SourceToken struct {
-	id   SourceID
-	seal *sourceTokenSeal
-}
-
-type sourceTokenSeal struct{}
-
-var executedSourceTokenSeal = &sourceTokenSeal{}
-
 // RetiredStaticMutation identifies one deliberately invalid legacy routing
 // shape. The closed set prevents negative tests from becoming an arbitrary
 // positive bundle-construction API.
@@ -151,36 +139,6 @@ func Prove(t testing.TB, ids ...ArtifactID) {
 		root := checkedArtifactRoot(t, id)
 		if _, err := sourceartifact.AdmitDirectory(root); err != nil {
 			t.Fatalf("admit routing artifact %q: %v", id, err)
-		}
-	}
-}
-
-// ExecuteSource runs a classified non-bundle source constructor body and
-// returns its sealed token. The source function must return this token; proof
-// tests directly execute that source function before calling ProveSource.
-func ExecuteSource(t testing.TB, id SourceID, constructor func()) SourceToken {
-	t.Helper()
-	if strings.TrimSpace(string(id)) == "" {
-		t.Fatal("canonical routing source ID must not be empty")
-	}
-	if constructor == nil {
-		t.Fatal("canonical routing source constructor must not be nil")
-	}
-	constructor()
-	return SourceToken{id: id, seal: executedSourceTokenSeal}
-}
-
-// ProveSource accepts only tokens returned by executed source constructors.
-// The ownership guard binds each token to one exact source function and one
-// direct executable TestXxx consumer.
-func ProveSource(t testing.TB, tokens ...SourceToken) {
-	t.Helper()
-	if len(tokens) == 0 {
-		t.Fatal("canonical routing source proof must name at least one source")
-	}
-	for _, token := range tokens {
-		if token.seal != executedSourceTokenSeal || strings.TrimSpace(string(token.id)) == "" {
-			t.Fatal("canonical routing source proof requires an executed source token")
 		}
 	}
 }
