@@ -488,30 +488,8 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 	if err := validateEntityOpaqueIDField(prefix+".run_id", entity.RunID); err != nil {
 		return fmt.Errorf("malformed %s: %w", prefix, err)
 	}
-	if entity.EntityType == "" {
-		if entity.StageDefined == nil || entity.CreatedAt != nil || entity.UpdatedAt != nil || entity.Slug != "" || entity.Name != "" {
-			return fmt.Errorf("malformed %s: fieldless instance requires lifecycle and null data clocks", prefix)
-		}
-	} else {
-		if strings.TrimSpace(entity.EntityType) == "" {
-			return fmt.Errorf("malformed %s: entity_type is required", prefix)
-		}
-		for _, clock := range []struct {
-			name  string
-			value *string
-		}{{"created_at", entity.CreatedAt}, {"updated_at", entity.UpdatedAt}} {
-			if clock.value == nil {
-				return fmt.Errorf("malformed %s: %s is required", prefix, clock.name)
-			}
-			if err := validateRequiredTimestamp(prefix+"."+clock.name, *clock.value); err != nil {
-				return err
-			}
-		}
-		created, _ := time.Parse(time.RFC3339Nano, *entity.CreatedAt)
-		updated, _ := time.Parse(time.RFC3339Nano, *entity.UpdatedAt)
-		if updated.Before(created) {
-			return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
-		}
+	if err := validateEntityDataPresence(prefix, entity); err != nil {
+		return err
 	}
 	if entity.StageDefined == nil {
 		if entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
@@ -547,6 +525,35 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 	}
 	if entity.CurrentState != nil || entity.EnteredStateAt != nil {
 		return fmt.Errorf("malformed %s: no-stage entity cannot carry a named stage or entry time", prefix)
+	}
+	return nil
+}
+
+func validateEntityDataPresence(prefix string, entity entitySummary) error {
+	if entity.EntityType == "" {
+		if entity.StageDefined == nil || entity.CreatedAt != nil || entity.UpdatedAt != nil || entity.Slug != "" || entity.Name != "" {
+			return fmt.Errorf("malformed %s: fieldless instance requires lifecycle and null data clocks", prefix)
+		}
+		return nil
+	}
+	if strings.TrimSpace(entity.EntityType) == "" {
+		return fmt.Errorf("malformed %s: entity_type is required", prefix)
+	}
+	for _, clock := range []struct {
+		name  string
+		value *string
+	}{{"created_at", entity.CreatedAt}, {"updated_at", entity.UpdatedAt}} {
+		if clock.value == nil {
+			return fmt.Errorf("malformed %s: %s is required", prefix, clock.name)
+		}
+		if err := validateRequiredTimestamp(prefix+"."+clock.name, *clock.value); err != nil {
+			return err
+		}
+	}
+	created, _ := time.Parse(time.RFC3339Nano, *entity.CreatedAt)
+	updated, _ := time.Parse(time.RFC3339Nano, *entity.UpdatedAt)
+	if updated.Before(created) {
+		return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
 	}
 	return nil
 }

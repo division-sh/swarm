@@ -122,7 +122,12 @@ func scanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), pu
 		EntityID: entityForRead, RunID: runID, FlowInstance: pathForRead, EntityType: state.EntityType,
 		Slug: state.Slug, Name: state.Name,
 	}}
-	if stateID.Valid {
+	return projectDataRead(out, target, route, entityID)
+}
+
+func projectDataRead(out operatorread.OperatorEntityFull, target pipeline.WorkflowTargetPersistenceRecord, route flowidentity.Route, entityID identity.EntityID) (operatorread.OperatorEntityFull, error) {
+	state, header := target.State, target.Lifecycle.State
+	if target.Presence.HasState() {
 		out.Entity.CreatedAt, out.Entity.UpdatedAt = &state.CreatedAt, &state.UpdatedAt
 		if err := canonicaljson.DecodePreservingNumberLexemes(state.Fields, &out.Fields); err != nil {
 			return operatorread.OperatorEntityFull{}, err
@@ -130,7 +135,7 @@ func scanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), pu
 	} else {
 		out.Fields = map[string]any{}
 	}
-	if !headerID.Valid {
+	if !target.Presence.HasLifecycleCompanion() {
 		return out, nil
 	}
 	instance, err := target.DecodeComplete(route, entityID)
