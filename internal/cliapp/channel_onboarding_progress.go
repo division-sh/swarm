@@ -193,6 +193,9 @@ func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions
 			verb = "Reverified"
 		}
 		fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
+		if result.Operation.Provider == "whatsapp" && result.Binding != nil {
+			fmt.Fprintln(w, whatsAppReadyTeaching)
+		}
 		writeChannelAccountNextSteps(w)
 	}, func() ([]string, error) { return []string{result.Operation.AccountReference}, nil })
 }
@@ -204,7 +207,7 @@ func writeChannelAccountNextSteps(out io.Writer) {
 
 func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.SessionConnectionReadback, ready bool) {
 	if ready {
-		fmt.Fprintln(out, "WhatsApp: READY")
+		fmt.Fprintln(out, whatsAppReadyTeaching)
 		return
 	}
 	state, reason, account := "disconnected", "Not linked: run swarm channel connect whatsapp", ""
@@ -233,6 +236,8 @@ func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.Sessio
 		fmt.Fprintln(out, reason)
 	}
 }
+
+const whatsAppReadyTeaching = "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`."
 
 func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
 	if result.Operation.DeploymentRegistration {

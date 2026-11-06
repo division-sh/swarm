@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -15,8 +16,45 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
+
+const whatsAppAccountMismatchWarning = "This flow's operator_account does not match the registered WhatsApp account; customer messages on the unmatched account will not reach this flow. Check the configured account."
+
+func whatsAppAccountMismatch(contexts []runtime.BundleContext, operations []channelonboarding.Operation) (bool, error) {
+	registered := channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp")
+	if len(registered) == 0 {
+		return false, nil
+	}
+	for _, contextDef := range contexts {
+		declarations, err := contextDef.StandingTargetDeclarations()
+		if err != nil {
+			return false, err
+		}
+		candidates, err := serveChannelContextCandidates(contextDef, declarations)
+		if err != nil {
+			return false, err
+		}
+		bundle, ok := semanticview.Bundle(contextDef.Source)
+		if !ok || bundle == nil {
+			return false, channelonboarding.ErrInvalidRequest
+		}
+		for _, candidate := range candidates {
+			if candidate.Provider != "whatsapp" {
+				continue
+			}
+			account, err := bundle.ResolveFlowOperatorAccount(candidate.Target.FlowPath)
+			if err != nil {
+				return false, err
+			}
+			if account.FromPolicy && !slices.ContainsFunc(registered, func(op channelonboarding.Operation) bool { return op.AccountReference == account.Policy }) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
 
 func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboarding.Operation, read apiv1.MethodHandler, holder any) ([]channelonboarding.AccountStatus, error) {
 	var rows []channelonboarding.AccountStatus

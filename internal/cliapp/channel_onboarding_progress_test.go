@@ -251,7 +251,7 @@ func TestChannelCLIExplicitSessionPreparationProgress(t *testing.T) {
 				}
 				out, errOut, code := runChannelProgressCLI(t, server, in, args...)
 				if verb == "connect" && mode == "human" {
-					if code != 0 || errOut != "" || !strings.Contains(out, "READY") || strings.Contains(out, operatorChannelCLIOperation) {
+					if code != 0 || errOut != "" || !strings.Contains(out, whatsAppReadyTeaching) || strings.Contains(out, operatorChannelCLIOperation) {
 						t.Fatal("connect did not wait for READY without exposing an operation ID", code, out, errOut)
 					}
 				} else {
@@ -282,7 +282,7 @@ func TestChannelCLIPendingResumeCanReachGenuineReady(t *testing.T) {
 		return sessionProgressCLIResult("whatsapp", "", "succeeded", true)
 	})
 	out, errOut, code := runChannelProgressCLI(t, server, &channelCredentialInput{}, "channel", "resume", operatorChannelCLIOperation)
-	if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: READY") {
+	if code != 0 || errOut != "" || !strings.Contains(out, whatsAppReadyTeaching) {
 		t.Fatal("genuine READY was not preserved", code, out, errOut)
 	}
 	if !strings.Contains(out, "Next: swarm channel list") {
@@ -370,7 +370,7 @@ func TestChannelCLIRejectsInapplicableCredentialBeforeInput(t *testing.T) {
 				args[2] = operatorChannelCLIOperation
 			}
 			out, errOut, code := runChannelProgressCLI(t, server, in, args...)
-			if code != CLIExitValidation || in.reads != 0 || !strings.Contains(errOut, "no provider credential") || strings.Contains(out, "READY") {
+			if code != CLIExitValidation || in.reads != 0 || !strings.Contains(errOut, "no provider credential") || strings.Contains(out, "READY") || strings.Contains(out, whatsAppReadyTeaching) {
 				t.Fatal("inapplicable credential was read or ignored", code, out, errOut, in.reads)
 			}
 		})
@@ -437,7 +437,7 @@ func TestChannelCLIRefusesMalformedPendingAndGenuineBlockage(t *testing.T) {
 			server := newOperatorChannelCLIServer(t, func(t *testing.T, _ jsonRPCRequest, _ int) map[string]any { return result })
 			in := &channelCredentialInput{}
 			out, errOut, code := runChannelProgressCLI(t, server, in, "channel", "connect", "whatsapp", "--yes", "--json")
-			if code == 0 || in.reads != 0 || strings.Contains(out, "READY") || strings.Contains(out+errOut, "must-not-disclose") {
+			if code == 0 || in.reads != 0 || strings.Contains(out, "READY") || strings.Contains(out, whatsAppReadyTeaching) || strings.Contains(out+errOut, "must-not-disclose") {
 				t.Fatal("invalid or genuinely blocked state gained progress/READY", code, out, errOut, in.reads)
 			}
 		})

@@ -312,7 +312,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				}
 				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
 				if mode == "human-expired-banned" || mode == "human-network-failure" {
-					if code != 2 || strings.Contains(out.String(), "READY") || strings.Contains(errOut.String(), "[y/N]") ||
+					if code != 2 || strings.Contains(out.String(), "READY") || strings.Contains(out.String(), whatsAppReadyTeaching) || strings.Contains(errOut.String(), "[y/N]") ||
 						!strings.Contains(errOut.String(), "WhatsApp disconnected:") {
 						t.Fatal("unrelated SDK failure did not refuse", code, out.String(), errOut.String())
 					}
@@ -321,7 +321,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				if mode == "human-login-disconnected" {
 					if code != 2 || checkpoints != 1 || loginReads != 0 ||
 						!strings.Contains(errOut.String(), "WhatsApp disconnected: network unreachable") ||
-						strings.Contains(out.String(), "READY") || strings.Contains(errOut.String(), "[y/N]") ||
+						strings.Contains(out.String(), "READY") || strings.Contains(out.String(), whatsAppReadyTeaching) || strings.Contains(errOut.String(), "[y/N]") ||
 						strings.Count(out.String(), "Connecting to whatsapp...") != 1 ||
 						// One exhausted QR refresh precedes the one login handoff.
 						strings.Count(strings.Join(methods, ","), "channel.onboarding_retry") != 2 {
@@ -329,7 +329,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 					return
 				}
-				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "\x1b[J") ||
+				if code != 0 || !strings.Contains(out.String(), whatsAppReadyTeaching) || !reentry && (!strings.Contains(out.String(), "\x1b[J") ||
 					!strings.Contains(out.String(), "Linked Devices")) ||
 					strings.Contains(out.String(), "Native inbox") ||
 					!strings.Contains(errOut.String(), "[y/N]") || strings.Contains(out.String()+errOut.String(), operatorChannelCLIOperation) ||

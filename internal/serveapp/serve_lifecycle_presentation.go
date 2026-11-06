@@ -321,6 +321,12 @@ func (p *serveLifecyclePresenter) recordDefaultAPITokenWarning() {
 	p.operatorWarnings = append(p.operatorWarnings, "using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener")
 }
 
+func (p *serveLifecyclePresenter) recordWhatsAppAccountMismatch() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.operatorWarnings = append(p.operatorWarnings, whatsAppAccountMismatchWarning)
+}
+
 func (p *serveLifecyclePresenter) recordPublicIngressDisabledHint() {
 	if p == nil {
 		return
