@@ -23,8 +23,8 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 				rows                                  string
 				wantRows, wantEntities, wantInstances int
 			}{
-				{"connected-child", canonicalrouting.DeploymentFeedConnectedRoot, "{\"item_id\":\"one\"}\n{\"item_id\":\"two\"}\n", 2, 2, 3},
-				{"same-flow", canonicalrouting.DeploymentFeedSameFlowRoot, "{\"item_id\":\"one\"}\n", 1, 0, 1},
+				{"connected-child", canonicalrouting.DeploymentFeedConnectedRoot, "{\"item_id\":\"one\"}\n{\"item_id\":\"two\"}\n", 2, 3, 3},
+				{"same-flow", canonicalrouting.DeploymentFeedSameFlowRoot, "{\"item_id\":\"one\"}\n", 1, 1, 1},
 				{"keyed-root-opening-event", canonicalrouting.DeploymentFeedKeyedRoot, "{\"item_id\":\"one\"}\n", 1, 1, 1},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -82,6 +82,16 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 					for _, entity := range entities.Entities {
 						if entity.CurrentState == nil || *entity.CurrentState != "done" || entity.RunID != runID {
 							t.Fatalf("feed receiver did not reach its lawful final state: %+v", entity)
+						}
+						if entity.EntityType == "" {
+							if tc.kind == canonicalrouting.DeploymentFeedKeyedRoot || entity.EntityID != runID || entity.FlowInstance != runID || entity.CreatedAt != nil || entity.UpdatedAt != nil {
+								t.Fatalf("feed invented a fieldless receiver: %+v", entity)
+							}
+							var full operatorread.OperatorEntityFull
+							requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &full)
+							if full.Entity.EntityID != runID || full.Entity.RunID != runID || full.Fields == nil || len(full.Fields) != 0 || full.Entity.CreatedAt != nil || full.Entity.UpdatedAt != nil {
+								t.Fatalf("fieldless feed root lost identity or invented data: %+v", full)
+							}
 						}
 					}
 					var report struct {
