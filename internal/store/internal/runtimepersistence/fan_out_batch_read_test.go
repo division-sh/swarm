@@ -312,7 +312,7 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 					}
 				})
 			}
-			for _, corrupt := range []string{"missing_sibling", "all_foreign", "missing_event"} {
+			for _, corrupt := range []string{"all_foreign", "missing_event", "missing_intent"} {
 				t.Run(corrupt, func(t *testing.T) {
 					tx, err := db.BeginTx(ctx, nil)
 					if err != nil {
@@ -322,15 +322,18 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 					if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE event_deliveries AS SELECT * FROM event_deliveries`); err != nil {
 						t.Fatal(err)
 					}
-					query, args := `DELETE FROM event_deliveries WHERE delivery_id=$1`, []any{baseline[1].DeliveryID}
-					if corrupt == "all_foreign" {
-						query, args = `UPDATE event_deliveries SET run_id=$1 WHERE event_id=$2`, []any{other.runID, event.ID()}
-					}
+					query, args := `UPDATE event_deliveries SET run_id=$1 WHERE event_id=$2`, []any{other.runID, event.ID()}
 					if corrupt == "missing_event" {
 						if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE events AS SELECT * FROM events`); err != nil {
 							t.Fatal(err)
 						}
 						query, args = `DELETE FROM events WHERE event_id=$1`, []any{event.ID()}
+					}
+					if corrupt == "missing_intent" {
+						if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE fan_out_intents AS SELECT * FROM fan_out_intents`); err != nil {
+							t.Fatal(err)
+						}
+						query, args = `DELETE FROM fan_out_intents WHERE run_id=$1`, []any{fixture.runID}
 					}
 					if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 						t.Fatal(err)

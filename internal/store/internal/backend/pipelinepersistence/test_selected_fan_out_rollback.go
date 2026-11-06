@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
@@ -16,13 +17,14 @@ type SelectedFanOutPublicationCounts struct {
 
 type SelectedFanOutPublicationRollbackProof struct {
 	Drafted, AfterRollback SelectedFanOutPublicationCounts
+	DraftedSettlement      fanoutobligation.RunSettlement
 }
 
 var errSelectedFanOutProofRollback = errors.New("selected fan-out publication proof rollback")
 
 // This fixed fault executes the real publication owner under its original
 // claim, then forces rollback after all four facts have been drafted.
-func draftSelectedFanOutRollbackProof(ctx context.Context, attempt *mutationprotocol.Attempt, writer SelectedForkCommitTxOwner, request runtimebus.CommitSelectedForkEventRequest, proof *SelectedFanOutPublicationRollbackProof) (runtimebus.CommittedSelectedForkEvent, error) {
+func draftSelectedFanOutRollbackProof(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, writer SelectedForkCommitTxOwner, request runtimebus.CommitSelectedForkEventRequest, proof *SelectedFanOutPublicationRollbackProof) (runtimebus.CommittedSelectedForkEvent, error) {
 	result, err := writer.CommitSelectedForkTx(ctx, attempt, request)
 	if err != nil {
 		return result, err
@@ -33,6 +35,9 @@ func draftSelectedFanOutRollbackProof(ctx context.Context, attempt *mutationprot
 	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		proof.Drafted, err = readSelectedFanOutPublicationCountsTx(ctx, tx, request)
+		if err == nil {
+			proof.DraftedSettlement, err = readFanOutSettlement(ctx, tx, postgres, request.Commit.Event.Event().RunID(), request.Commit.Event.Event().CreatedAt())
+		}
 		return err
 	}); err != nil {
 		return result, err
@@ -71,7 +76,7 @@ func (s *PipelinePostgresOwner) ProveSelectedFanOutPublicationRollbackForTest(ct
 	}
 	defer state.operationMu.Unlock()
 	outcome := mutationprotocol.RunRetainedPostgresWithOptions(ctx, state.postgresLease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedSelectedForkEvent, error) {
-		return draftSelectedFanOutRollbackProof(ctx, attempt, s.selectedFork, request, &proof)
+		return draftSelectedFanOutRollbackProof(ctx, attempt, true, s.selectedFork, request, &proof)
 	})
 	if outcome.Acknowledged() || outcome.Err() != errSelectedFanOutProofRollback {
 		return proof, fmt.Errorf("rollback proof acknowledgment=%t: %w", outcome.Acknowledged(), outcome.Err())
@@ -99,7 +104,7 @@ func (s *PipelineSQLiteOwner) ProveSelectedFanOutPublicationRollbackForTest(ctx 
 	}
 	defer state.operationMu.Unlock()
 	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected fan-out publication rollback proof", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedSelectedForkEvent, error) {
-		return draftSelectedFanOutRollbackProof(ctx, attempt, s.selectedFork, request, &proof)
+		return draftSelectedFanOutRollbackProof(ctx, attempt, false, s.selectedFork, request, &proof)
 	})
 	if outcome.Acknowledged() || outcome.Err() != errSelectedFanOutProofRollback {
 		return proof, fmt.Errorf("rollback proof acknowledgment=%t: %w", outcome.Acknowledged(), outcome.Err())
