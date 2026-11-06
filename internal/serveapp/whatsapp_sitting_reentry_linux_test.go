@@ -8,9 +8,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -57,12 +59,15 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	views := make(chan sittingReentryObservation, 16)
 	var native *deploymentChannelSession
 	var operations channelonboarding.OperationStore
+	var registration cliapp.ChannelRegistrationOptions
+	var invocation context.Context
 	factory := func(call context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 		session, err := OpenChannelRegistration(call, options)
 		if err != nil {
 			return nil, err
 		}
 		native, operations = session.(*deploymentChannelSession), options.Operations
+		registration, invocation = options, call
 		return sittingReentryObserver{session, views}, nil
 	}
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
@@ -92,7 +97,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		joined = true
 		t.Fatalf("retained connect exited before restoring login: exit=%d err=%s", code, errOut.String())
 	case <-ctx.Done():
-		t.Fatal("retained connect did not restore its signed SDK login")
+		t.Fatalf("retained connect did not restore its signed SDK login: out=%s err=%s", out.String(), errOut.String())
 	}
 	for {
 		select {
@@ -137,6 +142,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	if _, err := native.connection.AdmitSessionAccount(ctx, before.SessionAccount); err == nil {
 		t.Fatal("restored unapproved preview acquired native authority")
 	}
+	requireSittingRetryAnswerBound(t, invocation, registration, native, before)
 	sender, _, _ := peer.senderFrom(types.NewJID("15551234590", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
 	const id = "SITTING_PENDING_restored_preview"
 	peer.sendEncryptedFrame(sender.EncryptText(t, "ordinary input at restored preview", id))
@@ -217,4 +223,52 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	t.Logf("restored same-account public journey completed on %s", backend)
 	requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, registered.Operation)
+}
+
+func requireSittingRetryAnswerBound(t *testing.T, ctx context.Context, options cliapp.ChannelRegistrationOptions, native *deploymentChannelSession, retained channelonboarding.Operation) {
+	t.Helper()
+	proofs, err := operatorchannel.NewFileProofStore(options.Directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := operatorchannel.NewService(options.Identities, proofs, native, []operatorchannel.InterfaceIdentity{retained.Interface}, options.Principal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identities.PreparePrincipal(ctx, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	file, err := cliapp.CredentialFileStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := channelonboarding.NewCredentialWriter(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := channelonboarding.Candidate{DeploymentRegistration: true, Provider: retained.Provider,
+		Interface: retained.Interface, Plan: options.Plan, Posture: retained.Posture, Ceremony: retained.Ceremony}
+	service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true,
+		Store: options.Store, Operations: options.Operations, Identities: identities, Credentials: writer, Sessions: native,
+		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
+			return channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []channelonboarding.RetryInput{{OperationID: retained.OperationID}, {OperationID: retained.OperationID, ApproveAccount: false}} {
+		result, err := service.Retry(ctx, input)
+		if err != nil || !reflect.DeepEqual(result.Operation, retained) || result.IdentityOperation != nil || result.Binding != nil {
+			t.Fatal("retry without an affirmative answer changed the account preview", err)
+		}
+	}
+	for _, answer := range []bool{false, true} {
+		if _, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: retained.OperationID, CheckpointOnly: true, ApproveAccount: answer}); err == nil {
+			t.Fatal("checkpoint-only retry admitted an already retained preview")
+		}
+	}
+	current, err := options.Operations.GetChannelOnboarding(ctx, retained.OperationID)
+	if err != nil || !reflect.DeepEqual(current, retained) {
+		t.Fatal("refused checkpoint mutated the retained account", err)
+	}
 }

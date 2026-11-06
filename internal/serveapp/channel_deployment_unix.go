@@ -395,7 +395,18 @@ func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op
 	}
 	if view.Reason == "" {
 		view.State = "connecting"
-		if view.Linked && c.connection.CheckBootstrap(ctx) == nil {
+		connected := false
+		if view.Linked {
+			if op.DeploymentRegistration && !op.AccountConfirmed {
+				connected, err = c.connection.SessionPreviewConnected(ctx, op)
+				if err != nil {
+					return view, err
+				}
+			} else {
+				connected = c.connection.CheckBootstrap(ctx) == nil
+			}
+		}
+		if connected {
 			view.State = "connected"
 		}
 	}
