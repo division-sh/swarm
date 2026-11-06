@@ -2863,6 +2863,15 @@
           }
         },
         {
+          "name": "approve_account",
+          "required": false,
+          "description": "Carry the affirmative answer from the existing deployment account preview. Absent or false never confirms an unapproved account; invalid with checkpoint_only or outside deployment registration.",
+          "schema": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
