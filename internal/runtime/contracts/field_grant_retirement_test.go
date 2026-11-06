@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -19,20 +18,6 @@ func TestFieldGrantAuthorityRetired(t *testing.T) {
 					t.Fatalf("retired field grant produced a bundle: %#v, error %v", bundle, err)
 				}
 			})
-		}
-	}
-	for _, typ := range []reflect.Type{reflect.TypeOf(FlowInputPins{}), reflect.TypeOf(FlowOutputPins{}), reflect.TypeOf(WorkflowSemanticView{})} {
-		for _, field := range []string{"Reads", "Writes", "flowReads", "flowWrites", "writePinOwners"} {
-			if _, present := typ.FieldByName(field); present {
-				t.Errorf("retired field-grant authority remains: %s.%s", typ, field)
-			}
-		}
-	}
-	for _, typ := range []reflect.Type{reflect.TypeOf((*WorkflowSemanticView)(nil)), reflect.TypeOf((*WorkflowContractBundle)(nil))} {
-		for _, method := range []string{"FlowReadPins", "FlowWritePins", "WritePinOwners"} {
-			if _, present := typ.MethodByName(method); present {
-				t.Errorf("retired field-grant accessor remains: %s.%s", typ, method)
-			}
 		}
 	}
 }

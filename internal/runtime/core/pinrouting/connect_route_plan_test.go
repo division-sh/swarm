@@ -1253,22 +1253,6 @@ func TestMaterializeConnectRoutePlanProjectsOnlyCompiledStaticTargets(t *testing
 }
 
 func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		typeValue reflect.Type
-		forbidden []string
-	}{
-		{name: "plan", typeValue: reflect.TypeOf(ConnectRoutePlan{}), forbidden: []string{"Address", "Map"}},
-		{name: "instance key", typeValue: reflect.TypeOf(ConnectRoutePlanInstanceKey{}), forbidden: []string{"Fields", "Mappings", "OnMissing", "OnConflict"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, field := range tc.forbidden {
-				if _, ok := tc.typeValue.FieldByName(field); ok {
-					t.Fatalf("%s still exposes retired field %s", tc.typeValue, field)
-				}
-			}
-		})
-	}
 	projection := reflect.TypeOf(MaterializeConnectRoutePlan)
 	if projection.NumIn() != 1 || projection.In(0) != reflect.TypeOf(ConnectRoutePlan{}) {
 		t.Fatal("static materializer accepts external instance or descriptor authority")

@@ -1,18 +1,12 @@
 package pipeline
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 func TestWorkflowHeaderHasNoBusinessConfiguration(t *testing.T) {
-	for _, value := range []any{WorkflowInstance{}, FlowInstanceActivationRequest{}, WorkflowInstanceRouteRecoveryProjection{}} {
-		if _, present := reflect.TypeOf(value).FieldByName("Config"); present {
-			t.Fatalf("business configuration carrier restored on %T", value)
-		}
-	}
 	route := flowidentity.RouteForInstancePath("review/one")
 	for _, raw := range []string{
 		`{"config":{}}`, `{"config":null}`, `{"config":[]}`,

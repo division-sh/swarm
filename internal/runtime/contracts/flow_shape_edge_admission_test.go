@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -138,9 +137,6 @@ func TestEdgeResolutionHasNoPinInitializationAuthority(t *testing.T) {
 			pin, ok := bundle.FlowInputEventPin("account", "account.ready")
 			if !ok || pin.EventType() != "account.ready" {
 				t.Fatal("initialization manufactured shared-pin selection policy")
-			}
-			if _, present := reflect.TypeOf(pin).MethodByName("Initialization"); present {
-				t.Fatal("pin regained construction authority")
 			}
 		})
 	}

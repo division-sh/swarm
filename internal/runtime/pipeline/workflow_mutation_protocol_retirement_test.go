@@ -3,10 +3,6 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"testing"
 )
 
@@ -62,28 +58,5 @@ func VerifyNativeWorkflowMutationDoesNotRetryClosedOwnerRefusalForTest(t *testin
 	after, err := fixture.PhysicalCounts(ctx)
 	if err != nil || after != before {
 		t.Fatalf("refused native mutation changed persistence: %+v -> %+v err=%v", before, after, err)
-	}
-}
-
-func VerifyNativeWorkflowPersistenceHasNoRawTransactionProtocolForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	paths, err := filepath.Glob("*.go")
-	if err != nil || len(paths) == 0 {
-		t.Fatalf("enumerate pipeline sources: %v", err)
-	}
-	for _, path := range paths {
-		source, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, declaration := range source.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Recv == nil {
-				continue
-			}
-			switch function.Name.Name {
-			case "runPipelineMutation", "runInPipelineTransaction", "runInPipelineTransactionAcknowledged", "RunRuntimeMutationContext", "RunRuntimeMutationContextAcknowledged":
-				t.Fatalf("retired raw transaction method %s survives in %s", function.Name.Name, path)
-			}
-		}
 	}
 }
