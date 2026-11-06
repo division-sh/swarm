@@ -595,13 +595,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		if err != nil {
 			return channelOnboardingResult{}, err
 		}
-		params := map[string]any{"operation_id": result.Operation.OperationID}
-		if result.Operation.DeploymentRegistration && acceptedAccount != "" && acceptedAccount == result.Operation.AccountReference {
-			params["approve_account"] = true
-		}
-		if opts.resumeCredential != "" {
-			params["provider_credential"] = opts.resumeCredential
-		}
+		params := channelRetryParameters(result, acceptedAccount, opts.resumeCredential)
 		var next channelOnboardingResult
 		if err := client.call(ctx, "channel.onboarding_retry", params, &next); err != nil {
 			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
@@ -617,6 +611,17 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		}
 		result = next
 	}
+}
+
+func channelRetryParameters(result channelOnboardingResult, acceptedAccount, credential string) map[string]any {
+	params := map[string]any{"operation_id": result.Operation.OperationID}
+	if result.Operation.DeploymentRegistration && acceptedAccount != "" && acceptedAccount == result.Operation.AccountReference {
+		params["approve_account"] = true
+	}
+	if credential != "" {
+		params["provider_credential"] = credential
+	}
+	return params
 }
 
 func channelPairingWaitRequired(result channelOnboardingResult, pending bool) bool {
