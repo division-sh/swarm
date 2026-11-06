@@ -20,6 +20,13 @@ func TestDeploymentFanOutSummaryUsesFeedIdentityBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := context.Background()
 			db := fanOutReadbackTestDB(t, backend)
+			idType := "TEXT"
+			if backend == "postgres" {
+				idType = "UUID"
+			}
+			if _, err := db.Exec(`CREATE TABLE event_deliveries (run_id TEXT,event_id ` + idType + `,status TEXT)`); err != nil {
+				t.Fatal(err)
+			}
 			request := deploymentStoreRequest(1)
 			feed := durabledata.DeploymentFeed{RunID: request.Key.RunID, Declaration: request.Deployment.Declaration, SourceInvocationID: uuid.NewString()}
 			firstID := deploymentFeedID(feed)
@@ -57,6 +64,27 @@ func TestDeploymentFanOutSummaryUsesFeedIdentityBothStores(t *testing.T) {
 				summary.BlockedIntents[0].DeploymentFeedID != request.Key.DeploymentFeedID ||
 				summary.BlockedIntents[0].TriggeringDeliveryID != "" {
 				t.Fatalf("blocked deployment summary: %+v err=%v", summary, err)
+			}
+			for _, history := range []int{0, 256} {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for range history {
+					closed := deploymentStoreRequest(0)
+					closed.Key.RunID = request.Key.RunID
+					if err := insertDeploymentFanOutIntentRowTx(ctx, tx, closed, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+				reads := &foldJoinQueryCount{pipelineQueryer: tx}
+				current, err := readFanOutSettlement(ctx, reads, backend == "postgres", request.Key.RunID, now)
+				if err != nil || current.Blocked != 1 || current.Owed != 1 || current.Open != 0 || current.Unsettled != 0 || reads.total != 3 {
+					t.Fatalf("current settlement with %d terminal intents: %+v queries=%d err=%v", history, current, reads.total, err)
+				}
+				if err := tx.Rollback(); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET status='closed',cursor=1,blocked_reason=NULL WHERE run_id=$1 AND deployment_feed_id=$2`,
 				request.Key.RunID, request.Key.DeploymentFeedID); err != nil {

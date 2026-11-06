@@ -52,6 +52,7 @@ import (
 
 type selectedFanOutOwner interface {
 	pipeline.FanOutObligationOwner
+	ReadFanOutSettlement(context.Context, string, time.Time) (fanoutobligation.RunSettlement, error)
 }
 
 type selectedFanOutResourceOwner interface {
@@ -81,6 +82,7 @@ type selectedFanOutMixedRouteOwner interface {
 
 type selectedFanOutTxSummaryOwner interface {
 	SummarizeFanOutRunTx(context.Context, *sql.Tx, string, time.Time) (fanoutobligation.RunSummary, error)
+	ReadFanOutSettlementTx(context.Context, *sql.Tx, string, time.Time) (fanoutobligation.RunSettlement, error)
 }
 
 type fanOutOwnerFixture struct {

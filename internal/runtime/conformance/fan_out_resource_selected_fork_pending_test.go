@@ -282,12 +282,21 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				// Activation acknowledgment precedes retained publication. Observe
 				// that publication before inspecting its final ordinal settlement.
 				_ = waitDeploymentForkRowEvent(t, f.ctx, f.selected, result.ForkRunID, f.runtime.fanOutServing.Wake)
+				currentReader := f.selected.(interface {
+					ReadFanOutSettlement(context.Context, string, time.Time) (fanoutobligation.RunSettlement, error)
+				})
+				if current, err := currentReader.ReadFanOutSettlement(f.ctx, result.ForkRunID, time.Now().UTC()); err != nil || current.Unsettled < 1 || (!changedPin && current.Unsettled != 1) {
+					t.Fatalf("continued/deployment publication lost its held child: %+v err=%v", current, err)
+				}
 				drainDeadline := time.Now().Add(3 * time.Minute)
 				drainCtx, stopDrain := context.WithDeadline(f.ctx, drainDeadline)
 				defer stopDrain()
 				gate.held.Store(false)
 				f.runtime.bus.SignalDeliveryContinuations()
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, result.ForkRunID, time.Until(drainDeadline))
+				if current, err := currentReader.ReadFanOutSettlement(f.ctx, result.ForkRunID, time.Now().UTC()); err != nil || current.BlocksCompletion() {
+					t.Fatalf("continued/deployment settlement remains owed: %+v err=%v", current, err)
+				}
 				if !changedPin {
 					// Ordinal settlement does not join the authored follow-up or the
 					// selected executor retired by the live handoff.

@@ -41,6 +41,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -76,6 +77,7 @@ type notifyAllChildrenStore interface {
 	storetest.AgentFixtureStore
 	runtimemanager.AgentLifecycleStateReader
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
+	ReadFanOutSettlement(context.Context, string, time.Time) (fanoutobligation.RunSettlement, error)
 }
 
 type failingNotifyAllChildrenPostgresStore struct {
@@ -3008,9 +3010,9 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 			t.Fatalf("WaitForQuiescence: %v", err)
 		}
 		stepStarted = time.Now()
-		summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+		summary, err := runtime.selected.ReadFanOutSettlement(ctx, runID, time.Now().UTC())
 		logStep("first_summary", stepStarted, err)
-		t.Logf("fan_out_drain_summary pass=%d step=first_summary population=%d settled_outcomes=%d unsettled_publications=%d error=%v", pass, summary.Intents, summary.Settled, summary.Unsettled, err)
+		t.Logf("fan_out_drain_settlement pass=%d step=first_summary open=%d blocked=%d owed=%d unsettled_publications=%d error=%v", pass, summary.Open, summary.Blocked, summary.Owed, summary.Unsettled, err)
 		if err != nil {
 			t.Fatalf("FanOutRunSummary(%s): %v", runID, err)
 		}
@@ -3022,9 +3024,9 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 				t.Fatalf("WaitForQuiescence after fan-out settlement: %v", err)
 			}
 			stepStarted = time.Now()
-			confirmed, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			confirmed, err := runtime.selected.ReadFanOutSettlement(ctx, runID, time.Now().UTC())
 			logStep("confirm_summary", stepStarted, err)
-			t.Logf("fan_out_drain_summary pass=%d step=confirm_summary population=%d settled_outcomes=%d unsettled_publications=%d error=%v", pass, confirmed.Intents, confirmed.Settled, confirmed.Unsettled, err)
+			t.Logf("fan_out_drain_settlement pass=%d step=confirm_summary open=%d blocked=%d owed=%d unsettled_publications=%d error=%v", pass, confirmed.Open, confirmed.Blocked, confirmed.Owed, confirmed.Unsettled, err)
 			if err != nil {
 				t.Fatalf("confirm FanOutRunSummary(%s): %v", runID, err)
 			}
