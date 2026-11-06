@@ -191,7 +191,14 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				}
 				before := sittingCaptureRows(t, ctx, opts.SwarmDir, wait.op.SessionConnectionID)
 				id := "SITTING_PENDING_" + stage
-				peer.sendEncryptedFrame(sender.EncryptText(t, "ordinary traffic during "+stage, id))
+				text := "ordinary traffic during " + stage
+				if stage == "challenge" {
+					text = "15000"
+					if strings.HasPrefix(wait.text, "Send the code 15000 ") {
+						text = "15001"
+					}
+				}
+				peer.sendEncryptedFrame(sender.EncryptText(t, text, id))
 				select {
 				case observed := <-completed:
 					if observed != id {
@@ -225,6 +232,13 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 					challenge, _, found := strings.Cut(strings.TrimPrefix(wait.text, "Send the code "), " from your operator phone")
 					if !found || challenge == "" {
 						t.Fatal("public CLI challenge is missing")
+					}
+					deadline := time.Now().Add(2 * time.Second)
+					for !strings.Contains(errOut.String(), "error: bad code\n") && time.Now().Before(deadline) {
+						time.Sleep(time.Millisecond)
+					}
+					if strings.Count(errOut.String(), "error: bad code\n") != 1 {
+						t.Fatal("local public connect did not print the nonfatal numeric miss", errOut.String())
 					}
 					peer.claim(challenge)
 				}
