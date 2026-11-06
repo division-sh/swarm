@@ -21710,7 +21710,7 @@
             "type": "integer"
           },
           "challenge": {
-            "pattern": "^SWARM-[A-Z2-7]{16}$",
+            "pattern": "^([0-9]{5}|SWARM-[A-Z2-7]{16})$",
             "type": "string"
           },
           "claim_disposition": {
@@ -21838,7 +21838,7 @@
             "type": "string"
           },
           "challenge": {
-            "pattern": "^SWARM-[A-Z2-7]{16}$",
+            "pattern": "^([0-9]{5}|SWARM-[A-Z2-7]{16})$",
             "type": "string"
           },
           "consent_scopes": {
