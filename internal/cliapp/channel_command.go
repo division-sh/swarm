@@ -558,6 +558,8 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 					return channelOnboardingResult{}, err
 				}
 			}
+		}
+		if opts.waitForPairing || opts.yes && !pending {
 			var previewPending bool
 			result, previewPending, err = confirmCLIChannelAccount(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
 			if err != nil {
