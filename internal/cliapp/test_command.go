@@ -1956,7 +1956,7 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scen
 	if count != 1 {
 		return fmt.Errorf("entity detail expectation for flow %s returned %d entities, want exactly one", expect.Flow, count)
 	}
-	return r.assertEntityDetailExpectation(ctx, runID, entities[0].EntityID, "state", evaluator, expect)
+	return r.assertEntityDetailExpectation(ctx, runID, entities[0].EntityID, entities[0].EntityType, evaluator, expect)
 }
 
 func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID string, entityID string, entityType string, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {

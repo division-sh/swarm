@@ -123,13 +123,36 @@ func loadNumericFeedCorpus(t *testing.T, source string) (numericFeedExpectations
 func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, expected numericFeedExpectations, rows map[string]map[string]any) map[string]goldenEntitySummary {
 	t.Helper()
 	entities := listGoldenEntities(t, ctx, rpc, runID)
-	if len(entities) != expected.Feed.Rows {
-		t.Fatalf("numeric entities=%d, want %d", len(entities), expected.Feed.Rows)
+	if len(entities) != expected.Feed.Rows+1 {
+		t.Fatalf("numeric instances=%d, want one root plus %d receivers", len(entities), expected.Feed.Rows)
 	}
 	byID := map[string]goldenEntitySummary{}
 	byKey := map[string]goldenEntitySummary{}
 	paths := map[string]bool{}
+	rootSeen := false
 	for _, entity := range entities {
+		if entity.EntityID == runID {
+			if rootSeen || entity.RunID != runID || entity.FlowInstance != runID || entity.EntityType != "" || entity.CurrentState != "done" {
+				t.Fatalf("wrong or duplicate numeric fieldless root: %+v", entity)
+			}
+			var detail struct {
+				Entity struct {
+					goldenEntitySummary
+					CreatedAt json.RawMessage `json:"created_at"`
+					UpdatedAt json.RawMessage `json:"updated_at"`
+				} `json:"entity"`
+				Fields map[string]any    `json:"fields"`
+				Loops  []json.RawMessage `json:"loops"`
+			}
+			if err := rpc.call(ctx, "entity.get", map[string]any{"entity_id": runID, "run_id": runID}, &detail); err != nil {
+				t.Fatal(err)
+			}
+			if detail.Entity.goldenEntitySummary != entity || detail.Fields == nil || len(detail.Fields) != 0 || detail.Loops == nil || len(detail.Loops) != 0 || string(detail.Entity.CreatedAt) != "null" || string(detail.Entity.UpdatedAt) != "null" {
+				t.Fatalf("numeric root invented data or lost public identity: %+v", detail)
+			}
+			rootSeen = true
+			continue
+		}
 		if entity.EntityType != expected.Feed.ReceiverType || entity.CurrentState != expected.Feed.ReceiverStage || entity.FlowInstance == "" || paths[entity.FlowInstance] {
 			t.Fatalf("wrong or shared numeric receiver: %+v", entity)
 		}
@@ -153,6 +176,24 @@ func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCC
 			t.Fatalf("event-only note leaked into state for %s", key)
 		}
 		byID[entity.EntityID], byKey[key], paths[entity.FlowInstance] = entity, entity, true
+	}
+	if !rootSeen || len(byKey) != expected.Feed.Rows {
+		t.Fatalf("numeric root present=%t receivers=%d, want root plus %d", rootSeen, len(byKey), expected.Feed.Rows)
+	}
+	var aggregate struct {
+		Counts      map[string]int `json:"counts"`
+		AbsentCount int            `json:"absent_count"`
+	}
+	if err := rpc.call(ctx, "entity.aggregate", map[string]any{"run_id": runID, "group_by": "fields.item_id"}, &aggregate); err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.AbsentCount != 1 || len(aggregate.Counts) != len(byKey) {
+		t.Fatalf("numeric aggregate lost root or exact receiver keys: %+v", aggregate)
+	}
+	for key := range byKey {
+		if aggregate.Counts[key] != 1 {
+			t.Fatalf("numeric aggregate key %s=%d, want 1", key, aggregate.Counts[key])
+		}
 	}
 	observed := map[string]bool{}
 	receiver := base64.RawURLEncoding.EncodeToString([]byte(expected.Feed.ReceiverFlow)) + "." + base64.RawURLEncoding.EncodeToString([]byte(expected.Feed.ReceiverNode))
