@@ -1159,8 +1159,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store
       - github.com/division-sh/swarm/tests/support/testpostgres
-    # Positive RE2 complement: the census unit owns the two exact scan roots.
-    run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$'
+    # Positive RE2 complement: the census unit owns the four exact accounting roots.
+    run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^NR].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^E].*|E($|[^x].*|x($|[^a].*|a($|[^c].*|c($|[^t].*|t($|[^C].*|C($|[^l].*|l($|[^a].*|a($|[^s].*|s($|[^s].*|s($|[^i].*|i($|[^f].*|f($|[^i].*|i($|[^c].*|c($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^o].*|o($|[^n].*|n($|[^D].*|D($|[^e].*|e($|[^l].*|l($|[^t].*|t($|[^a].*|a.+))))))))))))))))))))))))))))))))))))|R($|[^au].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))|u($|[^n].*|n($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^S].*|S($|[^i].*|i($|[^g].*|g($|[^n].*|n($|[^a].*|a($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^T].*|T($|[^r].*|r($|[^a].*|a($|[^n].*|n($|[^s].*|s($|[^i].*|i($|[^t].*|t($|[^i].*|i($|[^o].*|o($|[^n].*|n($|[^I].*|I($|[^s].*|s($|[^E].*|E($|[^x].*|x($|[^a].*|a($|[^c].*|c($|[^t].*|t.+))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -1168,7 +1168,7 @@ units:
     go_timeout: 20m
     packages:
       - github.com/division-sh/swarm/internal/store
-    run: '^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$'
+    run: '^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtNativeFixtureExactClassificationDelta|TestPersistenceAuthorityDebtRatchet|TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact)$'
     required_children:
       TestNativeFixtureFamiliesDoNotReceiveRawAuthority:
         - TestInboundSetupSeedDoesNotReceiveRawAuthority
