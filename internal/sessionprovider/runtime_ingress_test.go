@@ -74,6 +74,15 @@ func waitRuntimeIncomingReceipt(t *testing.T, f *activeInputFixture, c *RuntimeC
 	}
 }
 
+func TestWhatsAppClaimProbeChecksEnvelopeBeforeContent(t *testing.T) {
+	event := incomingMessageFixture()
+	event.Info.ID = ""
+	event.Message = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}
+	if claim, err := (&runtimeIncoming{}).pendingOperatorClaim(context.Background(), channelonboarding.Operation{}, event); claim || !errors.Is(err, errIncomingMalformed) {
+		t.Fatal("unsupported content hid a malformed claim envelope", claim, err)
+	}
+}
+
 func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend+"/registered", func(t *testing.T) {

@@ -158,7 +158,10 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 		{"outgoing_echo", func(e *events.Message) { e.Info.IsFromMe = true }, errIncomingUnsupported},
 		{"view_once", func(e *events.Message) { e.IsViewOnce = true }, errIncomingUnsupported},
 		{"re_request", func(e *events.Message) { e.UnavailableRequestID = "old history" }, errIncomingUnsupported},
-		{"status_chat", func(e *events.Message) { e.Info.Chat = types.NewJID("status", types.BroadcastServer) }, errIncomingUnsupported},
+		{"status_chat", func(e *events.Message) {
+			e.Info.Chat = types.NewJID("status", types.BroadcastServer)
+			e.Info.IsGroup = true
+		}, errIncomingUnsupported},
 		{"protocol_no_type", func(e *events.Message) {
 			e.Message = &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Key: &waCommon.MessageKey{ID: proto.String("ORIGINAL")}}}
 		}, errIncomingMalformed},
@@ -170,6 +173,45 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 				t.Fatalf("wrong refusal: %v", err)
 			}
 		})
+	}
+}
+
+func TestWhatsAppUnsupportedContentStillRequiresExactEnvelope(t *testing.T) {
+	for _, variant := range []string{"image", "voice", "status"} {
+		for _, malformed := range []string{"none", "id", "time", "sender", "chat", "group"} {
+			t.Run(variant+"/"+malformed, func(t *testing.T) {
+				event := incomingMessageFixture()
+				switch variant {
+				case "image":
+					event.Message = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}}
+				case "voice":
+					event.Message = &waE2E.Message{AudioMessage: &waE2E.AudioMessage{PTT: proto.Bool(true)}}
+				case "status":
+					event.Info.Chat = types.NewJID("status", types.BroadcastServer)
+					event.Info.IsGroup = true
+				}
+				switch malformed {
+				case "id":
+					event.Info.ID = ""
+				case "time":
+					event.Info.Timestamp = time.Time{}
+				case "sender":
+					event.Info.Sender = types.EmptyJID
+				case "chat":
+					event.Info.Chat = types.EmptyJID
+				case "group":
+					event.Info.IsGroup = !event.Info.IsGroup
+				}
+				want := errIncomingUnsupported
+				if malformed != "none" {
+					want = errIncomingMalformed
+				}
+				if _, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source,
+					uuid.NewString(), event, captureFixture(t).ReceivedAt); !errors.Is(err, want) {
+					t.Fatal("unsupported content hid a different refusal", err)
+				}
+			})
+		}
 	}
 }
 

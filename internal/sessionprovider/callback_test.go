@@ -3,6 +3,7 @@ package sessionprovider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -65,6 +66,76 @@ func TestWhatsAppCallbackFailureAndSuccessStatus(t *testing.T) {
 		if !errors.Is(guard.currentFailure(), failure) {
 			t.Fatalf("failure evidence lost: %v", guard.currentFailure())
 		}
+	}
+}
+
+func TestWhatsAppUnsupportedContentDispositionKeepsHealthyCallback(t *testing.T) {
+	for _, row := range []struct {
+		name string
+		err  error
+	}{
+		{"single", errIncomingUnsupported},
+		{"wrapped", fmt.Errorf("content: %w", errIncomingUnsupported)},
+		{"joined_content_only", errors.Join(errIncomingUnsupported, errIncomingUnsupported)},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			recorded, handled := 0, 0
+			guard, err := newCallbackGuard(context.Background(), uuid.NewString(), uuid.NewString(),
+				func(context.Context, any) error {
+					handled++
+					if handled == 1 {
+						return row.err
+					}
+					return nil
+				}, func(context.Context, callbackFailure) error { recorded++; return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !guard.receive(&events.Message{}) || !guard.receive(&events.Message{}) ||
+				guard.currentFailure() != nil || guard.fenced || recorded != 0 || handled != 2 {
+				t.Fatal("content refusal lost the healthy callback", handled, recorded, guard.currentFailure())
+			}
+		})
+	}
+}
+
+func TestWhatsAppUnsupportedContentCannotHideCallbackFailure(t *testing.T) {
+	for _, failure := range []error{errIncomingMalformed, errCaptureScopeChanged, errSessionAccount,
+		errClientOccurrenceFenced, errRuntimeConnection, context.Canceled, context.DeadlineExceeded, errors.New("capture write failed")} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			recorded := 0
+			guard, err := newCallbackGuard(context.Background(), uuid.NewString(), uuid.NewString(),
+				func(context.Context, any) error { return errors.Join(errIncomingUnsupported, failure) },
+				func(_ context.Context, row callbackFailure) error {
+					if row.Reason != "capture_failed" {
+						t.Error("real failure changed its reason", row.Reason)
+					}
+					recorded++
+					return nil
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if guard.receive(&events.Message{}) || !guard.fenced || recorded != 1 || !errors.Is(guard.currentFailure(), failure) {
+				t.Fatal("unsupported branch swallowed a real failure", recorded, guard.currentFailure())
+			}
+		})
+	}
+}
+
+func TestWhatsAppUnsupportedDispositionDoesNotOverrideCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	guard, err := newCallbackGuard(ctx, uuid.NewString(), uuid.NewString(),
+		func(context.Context, any) error { cancel(); return errIncomingUnsupported },
+		func(context.Context, callbackFailure) error {
+			t.Error("content refusal recorded a fatal failure")
+			return nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guard.receive(&events.Message{}) {
+		t.Fatal("canceled callback granted the SDK an acknowledgment")
 	}
 }
 
