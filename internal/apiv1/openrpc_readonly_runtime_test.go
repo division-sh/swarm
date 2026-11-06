@@ -510,7 +510,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 		EntityID: "entity-1", RunID: runID, FlowInstance: "review/primary", EntityType: "mvp_spec",
 		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision,
 		EnteredStateAt: &now, LifecycleCreatedAt: &now, LifecycleUpdatedAt: &now,
-		CreatedAt: now, UpdatedAt: now,
+		CreatedAt: &now, UpdatedAt: &now,
 	}
 	eventID := "evt-1"
 	sessionID := "sess-1"

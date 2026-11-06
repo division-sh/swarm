@@ -15,9 +15,11 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/tests/support/testutil/flowactivationfixture"
 )
 
 // Real construction/setup and mutation owners feed authenticated HTTP readback.
@@ -64,11 +66,28 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					entities = append(entities, pipeline.ScenarioSetupEntityRequest{Alias: "tail", EntityID: tail, FlowInstance: "imports/tail", EntityType: "state", Fields: map[string]any{"item_id": "tail", "count": int64(4)}})
 				}
 				command := runtimebus.ScenarioSetupCommand{
-					Setup:       pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: entities},
+					Setup:       pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: entities[:1]},
 					Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}},
 				}
 				if result, err := f.store.(runtimebus.ScenarioSetupCommitOwner).CommitScenarioSetup(ctx, command); err != nil || !result.Acknowledged {
 					t.Fatalf("cursor cohort setup: %+v %v", result, err)
+				}
+				for i := 1; i < len(entities); i++ {
+					seed := &entities[i]
+					flowID, key, _ := strings.Cut(seed.FlowInstance, "/")
+					child, err := flowactivationfixture.Command(effects.WithExecutionMode(ctx, effects.ExecutionModeLive), pipeline.WorkflowInstance{
+						InstanceID: key, StorageRef: seed.FlowInstance, EntityID: seed.EntityID, InstanceKey: key,
+						WorkflowName: flowID, WorkflowVersion: "1", Mode: "template", EntityType: seed.EntityType,
+						CurrentState: "pending", CreatedAt: at, EnteredStageAt: at, Fields: seed.Fields,
+					}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if result, err := f.store.(interface {
+						CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimebus.CommittedFlowInstanceActivation, error)
+					}).CommitFlowInstanceActivation(ctx, child); err != nil || !result.Acknowledged {
+						t.Fatalf("cursor component construction: %+v %v", result, err)
+					}
 				}
 				persisted, err := plan.PersistenceRecord()
 				if err != nil {
@@ -160,8 +179,8 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 						t.Fatalf("data origin changed: %+v", row)
 					}
 					if row.EntityID == shared || row.EntityID == tail || row.EntityID == other {
-						if row.StageDefined != nil || row.CurrentState != nil || row.Revision != nil || row.EnteredStateAt != nil || row.LifecycleCreatedAt != nil || row.LifecycleUpdatedAt != nil || !row.UpdatedAt.Equal(at) {
-							t.Fatalf("import acquired lifecycle or moved data clock: %+v", row)
+						if row.StageDefined == nil || *row.StageDefined || row.CurrentState != nil || row.Revision == nil || row.EnteredStateAt != nil || row.LifecycleCreatedAt == nil || row.LifecycleUpdatedAt == nil || !row.UpdatedAt.Equal(at) {
+							t.Fatalf("constructed no-stage member lost lifecycle or moved data clock: %+v", row)
 						}
 					}
 				}

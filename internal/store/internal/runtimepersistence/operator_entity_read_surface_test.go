@@ -1,11 +1,13 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -162,6 +164,14 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if _, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority->unsafe"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
 		t.Fatalf("AggregateOperatorEntities unsafe group = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
+	importedEntity := uuid.NewString()
+	seedEntity(runA, importedEntity, "review/imported", "mvp_spec", `{"priority":"high"}`, base)
+	for _, requestedRun := range []string{runA, ""} {
+		if _, err := pg.LoadOperatorEntity(ctx, importedEntity, requestedRun); !errors.Is(err, operatorread.ErrEntityNotFound) {
+			t.Fatalf("state-only public get run=%q = %v, want missing header refusal", requestedRun, err)
+		}
+	}
+	assertOperatorFieldlessReadback(t, ctx, db, pg, runA, base)
 }
 
 func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
@@ -333,6 +343,118 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	}
 	if _, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: "not-a-uuid"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
 		t.Fatalf("AggregateOperatorEntities invalid run id = %v, want operatorread.ErrInvalidEntityReadParam", err)
+	}
+	importedEntity := uuid.NewString()
+	seedEntity(runA, importedEntity, "review/imported", "mvp_spec", `{"priority":"high"}`, base)
+	for _, requestedRun := range []string{runA, ""} {
+		if _, err := sqliteStore.LoadOperatorEntity(ctx, importedEntity, requestedRun); !errors.Is(err, operatorread.ErrEntityNotFound) {
+			t.Fatalf("state-only public get run=%q = %v, want missing header refusal", requestedRun, err)
+		}
+	}
+	assertOperatorFieldlessReadback(t, ctx, db, sqliteStore, runA, base)
+}
+
+func assertOperatorFieldlessReadback(t *testing.T, ctx context.Context, db flowRouteTestExecutor, selected apiv1.EntityReadStore, runID string, at time.Time) {
+	t.Helper()
+	ids := []string{"f0000000-0000-4000-8000-000000000001", "f0000000-0000-4000-8000-000000000002"}
+	for i, id := range ids {
+		seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, id, "review/fieldless-"+id, "review", "", "collecting", operatorLoopAccumulatedJSON(t, runID, id, at), at)
+		full, err := selected.LoadOperatorEntity(ctx, id, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if full.Entity.EntityID != id || full.Entity.EntityType != "" || full.Fields == nil || len(full.Fields) != 0 || full.Bookkeeping == nil || full.Entity.Revision == nil || *full.Entity.Revision != 1 || full.Entity.CurrentState == nil || *full.Entity.CurrentState != "collecting" || full.Entity.LifecycleCreatedAt == nil || !full.Entity.LifecycleCreatedAt.Equal(at) {
+			t.Fatalf("fieldless envelope %d: %+v", i, full)
+		}
+		assertOperatorLoopProjection(t, full)
+		for _, key := range []string{"created_at", "updated_at"} {
+			wire, err := json.Marshal(full.Entity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var properties map[string]json.RawMessage
+			if err := json.Unmarshal(wire, &properties); err != nil || string(properties[key]) != "null" {
+				t.Fatalf("fieldless %s must be explicit null: %s %v", key, wire, err)
+			}
+		}
+	}
+	var order []string
+	for cursor := ""; ; {
+		page, err := selected.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{RunID: runID, Limit: 1, Cursor: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range page.Entities {
+			order = append(order, row.EntityID)
+		}
+		cursor = page.NextCursor
+		if cursor == "" {
+			break
+		}
+		if len(order) > 5 {
+			t.Fatal("nullable cursor repeated members")
+		}
+	}
+	if len(order) != 5 || order[3] != ids[0] || order[4] != ids[1] {
+		t.Fatalf("fieldless rows must follow data clocks with exact identity ties: %v", order)
+	}
+	groups, err := selected.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runID, GroupBy: "fields.priority"})
+	if err != nil || groups.AbsentCount != 2 || groups.Counts["high"] != 2 || groups.Counts["low"] != 1 {
+		t.Fatalf("header aggregate included import or invented fields: %+v %v", groups, err)
+	}
+	for _, cut := range []struct{ name, update, restore string }{
+		{"missing required fields", "entity_type='state'", "entity_type=NULL"},
+		{"invalid header map", "bookkeeping='[]'", "bookkeeping='{}'"},
+	} {
+		if _, err := db.ExecContext(ctx, "UPDATE flow_instances SET "+cut.update+" WHERE run_id=$1 AND entity_id=$2", runID, ids[0]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := selected.LoadOperatorEntity(ctx, ids[0], runID); err == nil {
+			t.Fatalf("public get accepted %s", cut.name)
+		}
+		if _, err := selected.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{RunID: runID}); err == nil {
+			t.Fatalf("public list accepted %s", cut.name)
+		}
+		if _, err := selected.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runID}); err == nil {
+			t.Fatalf("public aggregate accepted %s", cut.name)
+		}
+		if _, err := db.ExecContext(ctx, "UPDATE flow_instances SET "+cut.restore+" WHERE run_id=$1 AND entity_id=$2", runID, ids[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := "review/fieldless-" + ids[0]
+	if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1,$2,$3,'state','{}',$4,$4)`, runID, ids[0], path, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.LoadOperatorEntity(ctx, ids[0], runID); err == nil {
+		t.Fatal("fieldless header accepted an unexpected field companion")
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE flow_instances SET entity_type='state' WHERE run_id=$1 AND entity_id=$2", runID, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selected.LoadOperatorEntity(ctx, ids[0], runID); err != nil {
+		t.Fatalf("valid paired fields refused: %v", err)
+	}
+	for _, cut := range []struct{ name, update, restore string }{
+		{"crossed path", "flow_instance='review/foreign'", "flow_instance='" + path + "'"},
+		{"crossed type", "entity_type='foreign'", "entity_type='state'"},
+		{"invalid fields", "fields='[]'", "fields='{}'"},
+	} {
+		if _, err := db.ExecContext(ctx, "UPDATE entity_state SET "+cut.update+" WHERE run_id=$1 AND entity_id=$2", runID, ids[0]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := selected.LoadOperatorEntity(ctx, ids[0], runID); err == nil {
+			t.Fatalf("public get accepted %s", cut.name)
+		}
+		if _, err := selected.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{RunID: runID}); err == nil {
+			t.Fatalf("public list accepted %s", cut.name)
+		}
+		if _, err := selected.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runID}); err == nil {
+			t.Fatalf("public aggregate accepted %s", cut.name)
+		}
+		if _, err := db.ExecContext(ctx, "UPDATE entity_state SET "+cut.restore+" WHERE run_id=$1 AND entity_id=$2", runID, ids[0]); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

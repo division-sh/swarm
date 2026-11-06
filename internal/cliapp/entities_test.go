@@ -381,6 +381,30 @@ func TestEntityViewJSONIsDataComplete(t *testing.T) {
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+	t.Run("fieldless", func(t *testing.T) {
+		result := validEntityFullResult("fieldless-1")
+		entity := result["entity"].(map[string]any)
+		entity["entity_type"], entity["created_at"], entity["updated_at"] = "", nil, nil
+		delete(entity, "slug")
+		delete(entity, "name")
+		result["fields"], result["loops"] = map[string]any{}, []any{}
+		peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request jsonRPCRequest
+			_ = json.NewDecoder(r.Body).Decode(&request)
+			writeJSONRPCResult(t, w, request.ID, result)
+		}))
+		defer peer.Close()
+		for _, mode := range [][]string{{"--json"}, {"--verbose"}} {
+			var out, errOut bytes.Buffer
+			args := append([]string{"entity", "view", "fieldless-1", "--run-id", "run-1"}, mode...)
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &errOut, testRootCommandOptions(peer)); code != 0 {
+				t.Fatalf("fieldless view: code=%d output=%s error=%s", code, out.String(), errOut.String())
+			}
+			if mode[0] == "--json" && (!strings.Contains(out.String(), `"created_at":null`) || !strings.Contains(out.String(), `"updated_at":null`) || !strings.Contains(out.String(), `"fields":{}`)) {
+				t.Fatalf("fieldless JSON fabricated data: %s", out.String())
+			}
+		}
+	})
 }
 
 func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
@@ -396,8 +420,8 @@ func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
 			Revision:           entityTestPointer(int64(1)),
 			LifecycleCreatedAt: entityTestPointer("2026-05-20T01:00:00Z"),
 			LifecycleUpdatedAt: entityTestPointer("2026-05-20T01:05:00Z"),
-			CreatedAt:          "2026-05-20T01:00:00Z",
-			UpdatedAt:          "2026-05-20T01:05:00Z",
+			CreatedAt:          entityTestPointer("2026-05-20T01:00:00Z"),
+			UpdatedAt:          entityTestPointer("2026-05-20T01:05:00Z"),
 		},
 		Fields:      map[string]any{},
 		Accumulated: map[string]any{},
@@ -959,8 +983,8 @@ func TestEntityListFlowIdentifiersRemainExactAndDistinct(t *testing.T) {
 	flowB := "scope/" + sharedPrefix + "2"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
-		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
-		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: entityTestPointer("2026-05-20T01:05:00Z")},
+		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: entityTestPointer("2026-05-20T01:05:00Z")},
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
@@ -983,7 +1007,7 @@ func TestEntityListFlowIdentifierSanitizesControlsWithoutTruncation(t *testing.T
 	want := "scope/" + strings.Repeat("b", 64) + " terminal segment"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
-		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: entityTestPointer("2026-05-20T01:05:00Z")},
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
