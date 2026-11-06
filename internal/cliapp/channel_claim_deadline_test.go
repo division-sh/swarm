@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestChannelClaimWaitUsesStoredExpiry(t *testing.T) {
 				Operation:         channelonboarding.Operation{Provider: "whatsapp"},
 				IdentityOperation: &operatorchannel.Operation{State: operatorchannel.StateAwaitingClaim, ExpiresAt: expires},
 			}
-			_, err := waitForChannelOnboardingClaim(ctx, client, begun, defaultRootCommandOptions())
+			_, err := waitForChannelOnboardingClaim(ctx, client, begun, defaultRootCommandOptions(), io.Discard)
 			if client.calls != 1 || err == nil {
 				t.Fatal("pending RPC did not stop at its only deadline", client.calls, err)
 			}
@@ -65,7 +66,7 @@ func TestChannelClaimWaitRefusesAbsentOrExpiredDeadline(t *testing.T) {
 			Operation:         channelonboarding.Operation{Provider: "whatsapp"},
 			IdentityOperation: &operatorchannel.Operation{State: operatorchannel.StateAwaitingClaim, ExpiresAt: expires},
 		}
-		if _, err := waitForChannelOnboardingClaim(t.Context(), client, begun, defaultRootCommandOptions()); err == nil || client.calls != 0 {
+		if _, err := waitForChannelOnboardingClaim(t.Context(), client, begun, defaultRootCommandOptions(), io.Discard); err == nil || client.calls != 0 {
 			t.Fatal("missing/expired deadline performed another claim read", expires, client.calls, err)
 		}
 	}

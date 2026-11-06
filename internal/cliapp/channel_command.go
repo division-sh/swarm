@@ -592,7 +592,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 					fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
 				}
 				var err error
-				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
+				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions, errOut)
 				if err != nil {
 					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
 				}
@@ -857,7 +857,7 @@ func channelClaimantConfirmationRequired(result channelOnboardingResult, now tim
 	return identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)
 }
 
-func waitForChannelOnboardingClaim(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
+func waitForChannelOnboardingClaim(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts rootCommandOptions, noticeOut io.Writer) (channelOnboardingResult, error) {
 	continuation := ""
 	if begun.Operation.Provider != "whatsapp" {
 		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
@@ -874,6 +874,10 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	}
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	lastNotice := ""
+	if begun.Connection != nil && begun.Connection.ClaimCodeNotice != nil {
+		lastNotice = begun.Connection.ClaimCodeNotice.Observation
+	}
 	for waitCtx.Err() == nil {
 		var current channelOnboardingResult
 		if err := client.call(waitCtx, "channel.onboarding_get", map[string]any{"operation_id": begun.Operation.OperationID}, &current); err != nil {
@@ -887,6 +891,12 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 		}
 		if current.IdentityOperation == nil || current.IdentityOperation.State != "awaiting_claim" {
 			return current, nil
+		}
+		if current.Connection != nil && current.Operation.OperationID == begun.Operation.OperationID && current.IdentityOperation.ExpiresAt.After(time.Now()) {
+			if notice := current.Connection.ClaimCodeNotice; notice != nil && notice.IdentityOperationID == current.IdentityOperation.OperationID && notice.Observation != "" && notice.Observation != lastNotice {
+				fmt.Fprintln(noticeOut, "error: bad code")
+				lastNotice = notice.Observation
+			}
 		}
 		select {
 		case <-waitCtx.Done():

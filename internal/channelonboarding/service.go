@@ -270,12 +270,19 @@ type Result struct {
 }
 
 type SessionConnectionReadback struct {
-	Unclaimed           *int64 `json:"account_unclaimed,omitempty"`
-	State               string `json:"state"`
-	Reason              string `json:"reason,omitempty"`
-	Linked              bool   `json:"linked"`
-	AccountPresentation string `json:"account_presentation,omitempty"`
-	AccountName         string `json:"account_name,omitempty"`
+	ClaimCodeNotice     *ClaimCodeNotice `json:"claim_code_notice,omitempty"`
+	Unclaimed           *int64           `json:"account_unclaimed,omitempty"`
+	State               string           `json:"state"`
+	Reason              string           `json:"reason,omitempty"`
+	Linked              bool             `json:"linked"`
+	AccountPresentation string           `json:"account_presentation,omitempty"`
+	AccountName         string           `json:"account_name,omitempty"`
+}
+
+// ClaimCodeNotice is transient display evidence, never a claim or an attempt count.
+type ClaimCodeNotice struct {
+	IdentityOperationID string `json:"identity_operation_id"`
+	Observation         string `json:"observation"`
 }
 
 func NewService(opts ServiceOptions) (*Service, error) {

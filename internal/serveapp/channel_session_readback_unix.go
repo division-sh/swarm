@@ -35,6 +35,10 @@ func (s *serveSessionBootstrap) ReadSessionConnection(ctx context.Context, op ch
 	if err != nil {
 		return view, err
 	}
+	view.ClaimCodeNotice, err = connection.ReadClaimCodeNotice(ctx, op)
+	if err != nil {
+		return view, err
+	}
 	view.State, view.Reason = "connected", ""
 	return view, nil
 }

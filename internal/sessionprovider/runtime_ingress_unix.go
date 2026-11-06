@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,7 +103,7 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	}
 	incoming := c.incoming
 	if c.operation.DeploymentRegistration {
-		claim, err := incoming.pendingOperatorClaim(work.Context(), op, message)
+		claim, err := incoming.pendingOperatorClaim(work.Context(), op, message, true)
 		if err != nil {
 			return err
 		}
@@ -247,7 +248,7 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 			return scope, captureSource{DeploymentRegistration: true, Coordinate: binding.Coordinate,
 				CatalogGeneration: binding.Incoming.Trigger.Generation()}, scope.Validate()
 		}
-		claim, err := i.pendingOperatorClaim(ctx, op, message)
+		claim, err := i.pendingOperatorClaim(ctx, op, message, false)
 		if err != nil {
 			return captureScope{}, captureSource{}, err
 		}
@@ -275,7 +276,7 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 		return i.businessScope(ctx)
 	}
 	if op.ActivationRevision > 0 {
-		claim, err := i.pendingOperatorClaim(ctx, op, message)
+		claim, err := i.pendingOperatorClaim(ctx, op, message, true)
 		if err != nil {
 			return captureScope{}, captureSource{}, err
 		}
@@ -286,10 +287,18 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 	scope := captureScope{Kind: channelonboarding.SessionInputOnboarding, Session: op.SessionAccount,
 		Source: op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID, OperationRevision: op.Revision,
 		TargetSelector: op.TargetSelector, PrincipalID: op.PrincipalID, BindingRevision: op.BindingRevision}
-	return scope, captureSource{Coordinate: op.Coordinate, CatalogGeneration: i.handoff.trigger.Generation()}, scope.Validate()
+	if err := scope.Validate(); err != nil {
+		return captureScope{}, captureSource{}, err
+	}
+	if op.ActivationRevision == 0 {
+		// This additional observation cannot fail the normal capture/claim path;
+		// that path keeps its own durable authority and publication checks below.
+		_, _ = i.pendingOperatorClaim(ctx, op, message, true)
+	}
+	return scope, captureSource{Coordinate: op.Coordinate, CatalogGeneration: i.handoff.trigger.Generation()}, nil
 }
 
-func (i *runtimeIncoming) pendingOperatorClaim(ctx context.Context, op channelonboarding.Operation, message *events.Message) (bool, error) {
+func (i *runtimeIncoming) pendingOperatorClaim(ctx context.Context, op channelonboarding.Operation, message *events.Message, recordMiss bool) (bool, error) {
 	if message == nil || message.Message == nil || message.Info.IsFromMe {
 		return false, nil
 	}
@@ -308,21 +317,29 @@ func (i *runtimeIncoming) pendingOperatorClaim(ctx context.Context, op channelon
 	if err != nil {
 		return false, err
 	}
+	for _, identity := range operations {
+		if pendingClaimIdentityMatches(op, identity) {
+			if identity.Challenge == challenge {
+				return true, nil
+			}
+			if recordMiss && identity.State == operatorchannel.StateAwaitingClaim && len(challenge) == 5 && strings.Trim(challenge, "0123456789") == "" {
+				i.connection.observeClaimCodeMiss(identity)
+			}
+		}
+	}
+	return false, nil
+}
+
+func pendingClaimIdentityMatches(op channelonboarding.Operation, identity operatorchannel.Operation) bool {
 	parentScope := authority.RuntimeParent
 	if op.DeploymentRegistration {
 		parentScope = authority.DeploymentParent
 	}
-	for _, identity := range operations {
-		if identity.OperationID == op.IdentityOperationID && identity.OnboardingOperationID == op.OperationID &&
-			identity.ProviderAuthority.Scope == parentScope &&
-			identity.PrincipalID == op.PrincipalID && identity.Interface.Normalized() == op.Interface.Normalized() &&
-			identity.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession && identity.ProviderAuthority.Session == op.SessionAccount &&
-			(identity.State == operatorchannel.StateAwaitingClaim || identity.State == operatorchannel.StateAwaitingConfirmation) &&
-			identity.ExpiresAt.After(time.Now().UTC()) && identity.Challenge == challenge {
-			return true, nil
-		}
-	}
-	return false, nil
+	return identity.OperationID == op.IdentityOperationID && identity.OnboardingOperationID == op.OperationID &&
+		identity.ProviderAuthority.Scope == parentScope && identity.PrincipalID == op.PrincipalID &&
+		identity.Interface.Normalized() == op.Interface.Normalized() &&
+		identity.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession && identity.ProviderAuthority.Session == op.SessionAccount &&
+		(identity.State == operatorchannel.StateAwaitingClaim || identity.State == operatorchannel.StateAwaitingConfirmation) && identity.ExpiresAt.After(time.Now().UTC())
 }
 
 func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, captureSource, error) {

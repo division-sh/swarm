@@ -37316,6 +37316,13 @@ api_specification:
         additionalProperties: false
         required: [state, linked]
         properties:
+          claim_code_notice:
+            type: object
+            additionalProperties: false
+            required: [identity_operation_id, observation]
+            properties:
+              identity_operation_id: {type: string, format: uuid}
+              observation: {type: string, format: uuid, description: Transient coalesced wrong-code observation; not a claim or an attempt count.}
           account_unclaimed: {type: integer, minimum: 0}
           state: {type: string, enum: [pairing, connecting, connected, disconnected]}
           reason: {type: string, description: Display-only finite SDK disconnect reason; not execution or retry authority.}

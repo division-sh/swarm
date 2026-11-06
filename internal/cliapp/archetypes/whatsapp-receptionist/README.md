@@ -33,6 +33,11 @@ This echo scaffold handles new supported text, not edits/revokes. An earlier
 echo is not withdrawn. Swarm makes no read-receipt call; the delivered/read
 indicators shown by your phone are not qualified.
 
+During operator setup, a five-digit customer message that is not the open code
+can print `error: bad code` on the setup terminal; it still follows the flow's
+normal customer route and receives no platform error reply. Wrong-code notices
+coalesce between polls; they are not an attempt count or a delivery guarantee.
+
 Typing from another linked device does not take over the conversation: those
 self echoes are discarded, and the receptionist keeps answering. The owner can
 read the chat in their own WhatsApp app. For intervention, an integrating app
