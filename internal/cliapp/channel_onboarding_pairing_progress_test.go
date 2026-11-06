@@ -341,8 +341,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					if strings.Contains(out.String(), "operator") || strings.Count(errOut.String(), "[y/N]") != 1 {
 						t.Fatal("receptionist asked for operator authority", out.String(), errOut.String())
 					}
-				} else if !strings.Contains(out.String(), "Code received from") || strings.Count(errOut.String(), "[y/N]") != 2 {
-					t.Fatal("HITL connect lost either account or claimant confirmation", out.String(), errOut.String())
+				} else if !strings.Contains(out.String(), "Code received from") || strings.Count(errOut.String(), "[y/N]") != 1 ||
+					strings.Contains(errOut.String(), "Make them the operator?") {
+					t.Fatal("HITL connect lost account approval or repeated claimant confirmation", out.String(), errOut.String())
 				}
 			} else {
 				for call := 0; call < 4; call++ {

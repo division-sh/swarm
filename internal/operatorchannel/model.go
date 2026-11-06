@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -19,7 +20,6 @@ const (
 	ProofFormat                = "swarm-verified-account-proof-v3"
 	ChallengePrefix            = "SWARM-"
 	DefaultChallengeTTL        = 10 * time.Minute
-	DefaultConnectWait         = 2 * time.Minute
 	InterfaceHITLChannelV2     = "swarm.hitl-channel/v2"
 	DispositionConsumedBinding = "consumed_by_binding"
 	DispositionRejectedClaim   = "rejected_binding_claim"
@@ -565,15 +565,24 @@ func ProofIDForInterface(identity InterfaceIdentity) string {
 }
 
 func NewChallenge() (string, error) {
-	var raw [10]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	value, err := rand.Int(rand.Reader, big.NewInt(100000))
+	if err != nil {
 		return "", fmt.Errorf("generate operator channel challenge: %w", err)
 	}
-	return ChallengePrefix + base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:]), nil
+	return fmt.Sprintf("%05d", value.Int64()), nil
 }
 
 func ValidChallenge(raw string) bool {
 	raw = strings.TrimSpace(raw)
+	if len(raw) == 5 {
+		for _, digit := range raw {
+			if digit < '0' || digit > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	// Retained proofs and exact in-flight ceremonies keep their original code.
 	if !strings.HasPrefix(raw, ChallengePrefix) || len(raw) != len(ChallengePrefix)+16 {
 		return false
 	}

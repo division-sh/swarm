@@ -37000,7 +37000,7 @@ api_specification:
           kind: {type: string, enum: [connect, reconnect, rebind, unbind]}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
-          challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
+          challenge: {type: string, pattern: '^([0-9]{5}|SWARM-[A-Z2-7]{16})$'}
           state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, credential_stale, expired, unbound]}
           revision: {type: integer, minimum: 1}
           binding_revision: {type: integer, minimum: 1}
@@ -37050,7 +37050,7 @@ api_specification:
           conversation_scope: {type: string, enum: [direct, shared]}
           account_presentation: {type: string}
           method: {type: string, enum: [connect, reconnect, rebind]}
-          challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
+          challenge: {type: string, pattern: '^([0-9]{5}|SWARM-[A-Z2-7]{16})$'}
           original_operation_id: {$ref: '#/components/schemas/OpaqueId'}
           minting_store_id: {$ref: '#/components/schemas/OpaqueId'}
           minting_deployment_id: {$ref: '#/components/schemas/OpaqueId'}

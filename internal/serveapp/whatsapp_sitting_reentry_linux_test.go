@@ -238,18 +238,10 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		t.Fatal("explicit account approval did not reach operator enrollment")
 	}
 	challenge, _, ok := strings.Cut(strings.TrimPrefix(text, "Send the code "), " from your operator phone")
-	if !ok || challenge == "" {
+	if !ok || len(challenge) != 5 || strings.Trim(challenge, "0123456789") != "" {
 		t.Fatal("restored enrollment has no exact challenge")
 	}
 	peer.claim(challenge)
-	select {
-	case <-prompts:
-	case <-ctx.Done():
-		t.Fatal("restored enrollment has no claimant confirmation")
-	}
-	if _, err := terminal.WriteString("y\n"); err != nil {
-		t.Fatal(err)
-	}
 	select {
 	case code := <-done:
 		joined = true
@@ -258,6 +250,11 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		}
 	case <-ctx.Done():
 		t.Fatal("restored public enrollment did not join")
+	}
+	select {
+	case prompt := <-prompts:
+		t.Fatal("correct code asked for a second operator answer", prompt)
+	default:
 	}
 	var listing struct {
 		Accounts []channelonboarding.Result `json:"accounts"`

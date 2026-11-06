@@ -225,10 +225,14 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 					if previous.Coordinate.MatchesDurableIdentity(result.Operation.Coordinate) {
 						t.Fatal("source rollover treated the previous source as current authority")
 					}
-					for i, text := range []string{"Customer service continues during operator enrollment", "SWARM-AAAAAAAAAAAAAAAA", "A quoted customer reply is not operator input"} {
-						messageID := []string{"ROLLOVER_CUSTOMER", "ROLLOVER_NOT_OPERATOR", "ROLLOVER_CUSTOMER_QUOTE"}[i]
+					number := "15000"
+					if result.IdentityOperation.Challenge == number {
+						number = "15001"
+					}
+					for i, text := range []string{"Customer service continues during operator enrollment", "SWARM-AAAAAAAAAAAAAAAA", number, "A quoted customer reply is not operator input"} {
+						messageID := []string{"ROLLOVER_CUSTOMER", "ROLLOVER_NOT_OPERATOR", "ROLLOVER_NUMBER", "ROLLOVER_CUSTOMER_QUOTE"}[i]
 						message := customer.sender.EncryptText(t, text, messageID)
-						if i == 2 {
+						if i == 3 {
 							message = customer.sender.EncryptReply(t, text, messageID, originalReply.ID, originalReply.Body.GetConversation())
 						}
 						peer.sendEncrypted(message, messageID)

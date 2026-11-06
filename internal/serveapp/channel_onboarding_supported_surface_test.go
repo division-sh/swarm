@@ -31,7 +31,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var channelOnboardingChallengePattern = regexp.MustCompile(`SWARM-[A-Z2-7]{16}`)
+var channelOnboardingChallengePattern = regexp.MustCompile(`\b[0-9]{5}\b`)
 var channelOnboardingOperationIDPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`)
 
 const channelSharedConfirmationText = "Swarm channel connected. Future notices, decision cards, and updates sent here will be visible to this group."

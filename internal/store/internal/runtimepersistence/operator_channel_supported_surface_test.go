@@ -166,6 +166,23 @@ func TestOperatorChannelBeginReplayPrecedesCredentialCurrentnessSelectedStorePar
 				t.Fatal(err)
 			}
 
+			replayResults := make(chan error, 2)
+			for range 2 {
+				go func() {
+					replayed, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
+						requestKey, requestHash, parentID, operatorChannelProviderAuthority(), false, now.Add(time.Second))
+					if err == nil && replayed != committed {
+						err = fmt.Errorf("concurrent replay changed the allocated operation: %#v", replayed)
+					}
+					replayResults <- err
+				}()
+			}
+			for range 2 {
+				if err := <-replayResults; err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			current = false
 			replayed, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0,
 				requestKey, requestHash, parentID, operatorChannelProviderAuthority(), false, now.Add(time.Second))

@@ -110,7 +110,7 @@ func sittingTerminal(t *testing.T) *os.File {
 // a physical device. Cancellation must join without sending an answer or unlink.
 func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, stage := range []string{"account", "claimant", "restored_login_cancel", "restored_login_disconnect"} {
+		for _, stage := range []string{"account", "claim_wait", "restored_login_cancel", "restored_login_disconnect"} {
 			t.Run(backend+"/"+stage, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
@@ -203,7 +203,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal("account prompt missing")
 				}
-				if stage == "claimant" {
+				if stage == "claim_wait" {
 					if _, err := terminal.WriteString("y\n"); err != nil {
 						t.Fatal(err)
 					}
@@ -214,21 +214,15 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 						t.Fatal("operator challenge missing")
 					}
 					challenge, _, ok := strings.Cut(strings.TrimPrefix(text, "Send the code "), " from your operator phone")
-					if !ok || challenge == "" {
+					if !ok || len(challenge) != 5 || strings.Trim(challenge, "0123456789") != "" {
 						t.Fatal("operator challenge malformed")
-					}
-					peer.claim(challenge)
-					select {
-					case <-prompts:
-					case <-ctx.Done():
-						t.Fatal("claimant prompt missing")
 					}
 				}
 				before, err := snapshot(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if stage != "claimant" && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
+				if stage != "claim_wait" && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
 					before.operation.AccountConfirmed || before.operation.AccountReference != "+15551234567" ||
 					before.operation.SessionAccount.Validate() != nil || before.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity) {
 					t.Fatal("first preview lacks the original canonical unapproved account checkpoint")
@@ -251,7 +245,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					t.Fatal("cancel logged out the paired account")
 				default:
 				}
-				if stage != "claimant" {
+				if stage != "claim_wait" {
 					requireSittingPreviewReentry(t, ctx, config, directory, backend, terminal, peer, after, stage)
 				}
 			})

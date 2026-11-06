@@ -278,13 +278,9 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 				return fmt.Errorf("%w: %s requires a current binding", domain.ErrConflict, req.Kind)
 			}
 		}
-		challenge, err := domain.NewChallenge()
-		if err != nil {
-			return err
-		}
 		out = domain.Operation{
 			OperationID: req.OperationID, Kind: req.Kind, PrincipalID: req.PrincipalID,
-			Interface: req.Interface.Normalized(), Challenge: challenge, State: domain.StateAwaitingClaim,
+			Interface: req.Interface.Normalized(), State: domain.StateAwaitingClaim,
 			Revision: 1, SaveProof: req.SaveProof, ProofStatus: domain.ProofSkipped,
 			PlannedProofID: req.PlannedProofID, PlannedProofRevision: req.PlannedProofRevision,
 			ProviderAuthority:       req.ProviderAuthority,
@@ -293,7 +289,9 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 			ExpectedBindingRevision: req.ExpectedRevision,
 			RequestedAt:             canonicalTime(req.RequestedAt), ExpiresAt: canonicalTime(req.ExpiresAt),
 		}
-		return insertOperation(txctx, tx, runner.dialect(), out, req.RequestKeyHash, req.RequestHash, req.ExpectedRevision, "")
+		return allocateOperationChallenge(txctx, &out, domain.NewChallenge, func(op domain.Operation) error {
+			return insertOperation(txctx, tx, runner.dialect(), op, req.RequestKeyHash, req.RequestHash, req.ExpectedRevision, "")
+		})
 	})
 	return out, err
 }
@@ -1042,14 +1040,44 @@ func scanOperation(row scanner) (domain.Operation, error) {
 	return op, nil
 }
 
+const challengeAllocationDraws = 16
+
+var errChallengeCollision = errors.New("operator channel challenge already allocated")
+
+func allocateOperationChallenge(ctx context.Context, op *domain.Operation, draw func() (string, error), insert func(domain.Operation) error) error {
+	for range challengeAllocationDraws {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var err error
+		op.Challenge, err = draw()
+		if err != nil {
+			return err
+		}
+		if err = insert(*op); !errors.Is(err, errChallengeCollision) {
+			return err
+		}
+	}
+	return fmt.Errorf("%w: could not allocate an unused operator code after %d draws", domain.ErrConflict, challengeAllocationDraws)
+}
+
 func insertOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, requestKey, requestHash string, expectedRevision int64, claimProvider string) error {
 	authority, err := encodeProviderAuthority(op.ProviderAuthority, op.Kind == domain.OperationUnbind)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, d.bind(`INSERT INTO operator_channel_operations (operation_id, operation_kind, principal_id, interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_authority, onboarding_operation_id, request_key_hash, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account, conversation_reference, conversation_scope, account_presentation, claim_provider, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	// Only challenge collisions are recoverable; PostgreSQL must not abort the
+	// transaction before another draw. Other constraint failures remain errors.
+	result, err := tx.ExecContext(ctx, d.bind(`INSERT INTO operator_channel_operations (operation_id, operation_kind, principal_id, interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_authority, onboarding_operation_id, request_key_hash, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account, conversation_reference, conversation_scope, account_presentation, claim_provider, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (challenge) DO NOTHING`),
 		op.OperationID, string(op.Kind), op.PrincipalID, op.Interface.Key(), op.Interface.InterfaceRef, op.Interface.ChannelPackID, op.Interface.ChannelPackVersion, op.Interface.ChannelManifestHash, op.Interface.SemanticGeneration, authority, nullable(op.OnboardingOperationID), requestKey, requestHash, expectedRevision,
 		nullable(op.Challenge), string(op.State), op.Revision, nullableInt(op.BindingRevision), nullable(op.ExternalAccountRef), nullable(op.ConversationRef), nullable(string(op.ConversationScope)), nullable(op.AccountPresentation), nullable(claimProvider), nullable(op.ClaimDisposition), op.SaveProof, nullable(op.PlannedProofID), nullableInt(op.PlannedProofRevision), nullable(op.ProofID), nullableInt(op.ProofRevision), string(op.ProofStatus), op.RequestedAt, nullableTime(op.ExpiresAt), nullableTime(op.ClaimedAt), nullableTime(op.CompletedAt), op.RequestedAt)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err == nil && rows == 0 {
+		return errChallengeCollision
+	}
 	return err
 }
 

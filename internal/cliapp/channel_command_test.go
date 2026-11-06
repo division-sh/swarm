@@ -374,7 +374,6 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		})
 		setCLIAPITestToken(t, operatorChannelCLIToken)
 		opts := testRootCommandOptions(server)
-		opts.channelConnectWait = time.Second
 		opts.channelConnectPoll = time.Millisecond
 		opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 		opts.input = strings.NewReader("n\n")
@@ -541,10 +540,13 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 	})
 
 	t.Run("claim timeout names the exact durable resume command", func(t *testing.T) {
+		expires := time.Now().Add(100 * time.Millisecond)
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			switch request.Method {
 			case "channel.onboarding_start", "channel.onboarding_get":
-				return channelOnboardingCLIResult("awaiting_external_identity", "awaiting_claim", false)
+				result := channelOnboardingCLIResult("awaiting_external_identity", "awaiting_claim", false)
+				result["identity_operation"].(map[string]any)["expires_at"] = expires
+				return result
 			default:
 				t.Fatalf("unexpected method %q", request.Method)
 				return nil
@@ -552,7 +554,6 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		})
 		setCLIAPITestToken(t, operatorChannelCLIToken)
 		opts := testRootCommandOptions(server)
-		opts.channelConnectWait = 5 * time.Millisecond
 		opts.channelConnectPoll = time.Millisecond
 		opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 		opts.input = strings.NewReader("bot-token\n")
@@ -634,7 +635,6 @@ func runOperatorChannelCLIWithInput(t *testing.T, server *httptest.Server, input
 	t.Helper()
 	setCLIAPITestToken(t, operatorChannelCLIToken)
 	opts := testRootCommandOptions(server)
-	opts.channelConnectWait = time.Second
 	opts.channelConnectPoll = time.Millisecond
 	opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 	opts.input = strings.NewReader(input)
@@ -647,7 +647,6 @@ func runOperatorChannelCLINonterminal(t *testing.T, server *httptest.Server, inp
 	t.Helper()
 	setCLIAPITestToken(t, operatorChannelCLIToken)
 	opts := testRootCommandOptions(server)
-	opts.channelConnectWait = time.Second
 	opts.channelConnectPoll = time.Millisecond
 	opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 	opts.input = strings.NewReader(input)
@@ -746,6 +745,6 @@ func operatorChannelCLIOperationResult(state string, revision, bindingRevision i
 			"semantic_generation": "operator-channel-cli-generation", "selector": operatorChannelCLISelector,
 		},
 		"challenge": operatorChannelCLIChallenge, "state": state, "revision": revision, "binding_revision": bindingRevision,
-		"account_presentation": "@m***o", "conversation_scope": "shared", "expires_at": "2026-08-24T23:59:59Z",
+		"account_presentation": "@m***o", "conversation_scope": "shared", "expires_at": time.Now().Add(operatorchannel.DefaultChallengeTTL),
 	}
 }
