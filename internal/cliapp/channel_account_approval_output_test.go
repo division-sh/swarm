@@ -45,7 +45,7 @@ func TestChannelCLIExplicitDeploymentAccountApprovalOutputModes(t *testing.T) {
 					in := &channelCredentialInput{}
 					out, errOut, code := runChannelProgressCLI(t, server, in, args...)
 					if !approve {
-						if code == 0 || strings.Contains(out, "READY") || in.reads != 0 {
+						if code == 0 || strings.Contains(out, "READY") || strings.Contains(out, whatsAppReadyTeaching) || in.reads != 0 {
 							t.Fatal("absent answer approved or read nonterminal stdin", code, out, errOut, in.reads)
 						}
 						return

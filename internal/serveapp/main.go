@@ -2016,6 +2016,12 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(22, "channel_registration", err)
 		return 1
 	}
+	if mismatch, err := whatsAppAccountMismatch(runtimeContextManager.LoadedContexts(), registeredOperations); err != nil {
+		presenter.fail(22, "channel_registration", err)
+		return 1
+	} else if mismatch {
+		presenter.recordWhatsAppAccountMismatch()
+	}
 	if publicIngressEnabled {
 		presenter.recordNoConnectedChannels(len(initialRegistrationPairs), accountRows)
 	}

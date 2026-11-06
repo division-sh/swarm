@@ -96,7 +96,7 @@ func TestWhatsAppCLIClaimCompletesWithoutSecondAnswer(t *testing.T) {
 	})
 	input := &channelCredentialInput{}
 	out, diagnostic, code := runChannelProgressCLI(t, server, input, "channel", "resume", operatorChannelCLIOperation)
-	if code != 0 || diagnostic != "" || input.reads != 0 || !strings.Contains(out, "WhatsApp: READY") ||
+	if code != 0 || diagnostic != "" || input.reads != 0 || !strings.Contains(out, whatsAppReadyTeaching) ||
 		strings.Join(methods, ",") != "channel.onboarding_get,channel.confirm,channel.onboarding_retry" {
 		t.Fatal("authenticated WhatsApp claim required another answer", code, out, diagnostic, input.reads, methods)
 	}

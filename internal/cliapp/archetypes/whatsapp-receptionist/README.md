@@ -26,6 +26,13 @@ high-rate sending risks WhatsApp account restrictions or a ban.
 
 ## Beta limitations
 
+Messages sent while setup or serve is not receiving may never reach Swarm.
+We have not established provider redelivery.
+
+This echo scaffold handles new supported text, not edits/revokes. An earlier
+echo is not withdrawn. Swarm makes no read-receipt call; the delivered/read
+indicators shown by your phone are not qualified.
+
 Typing from another linked device does not take over the conversation: those
 self echoes are discarded, and the receptionist keeps answering. The owner can
 read the chat in their own WhatsApp app. For intervention, an integrating app

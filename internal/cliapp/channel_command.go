@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
@@ -583,7 +584,13 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 				if result.Operation.DeploymentRegistration {
 					fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
 				}
-				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
+				if result.Operation.Provider == "whatsapp" {
+					if err := writeWhatsAppClaimInstructions(progressOut, result); err != nil {
+						return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+					}
+				} else {
+					fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
+				}
 				var err error
 				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
 				if err != nil {
@@ -613,6 +620,21 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		}
 		result = next
 	}
+}
+
+func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResult) error {
+	account := result.Operation.AccountReference
+	if account == "" && result.Connection != nil {
+		account = result.Connection.AccountPresentation
+	}
+	destination, err := channelonboarding.CanonicalAccount("whatsapp", account)
+	if err != nil || result.IdentityOperation == nil || result.IdentityOperation.ExpiresAt.IsZero() {
+		return errors.New("operator code requires its exact WhatsApp destination and expiry")
+	}
+	identity := result.IdentityOperation
+	fmt.Fprintf(out, "FROM your operator phone TO %s\nSend the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
+		destination.Account, identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
+	return nil
 }
 
 func channelRetryParameters(result channelOnboardingResult, acceptedAccount, credential string) map[string]any {
