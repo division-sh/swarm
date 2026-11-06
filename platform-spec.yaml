@@ -41894,6 +41894,7 @@ api_specification:
       - {name: client_language, required: false, schema: {type: string, minLength: 1}}
       - {name: expected_locale_revision, required: false, schema: {type: integer, minimum: 1}}
       - {name: checkpoint_only, required: false, schema: {type: boolean}, description: Freeze a genuinely paired account for rejection/logout without beginning identity, activation or business publication. Only valid at session pairing.}
+      - {name: approve_account, required: false, schema: {type: boolean, default: false}, description: Carry the affirmative answer from the existing deployment account preview. Absent or false never confirms an unapproved account; invalid with checkpoint_only or outside deployment registration.}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]

@@ -338,7 +338,12 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 			break
 		}
 		checkpoint, _ := params["checkpoint_only"].(bool)
-		result, err = c.service.Retry(ctx, channelonboarding.RetryInput{OperationID: channelSelectionParam(params, "operation_id"), CheckpointOnly: checkpoint, ProviderCredential: channelSelectionParam(params, "provider_credential")})
+		approve, supplied := params["approve_account"]
+		approved, valid := approve.(bool)
+		if supplied && !valid {
+			return channelonboarding.ErrInvalidRequest
+		}
+		result, err = c.service.Retry(ctx, channelonboarding.RetryInput{OperationID: channelSelectionParam(params, "operation_id"), CheckpointOnly: checkpoint, ApproveAccount: approved, ProviderCredential: channelSelectionParam(params, "provider_credential")})
 	case "channel.confirm":
 		revision, _ := params["expected_revision"].(int64)
 		approve, _ := params["approve"].(bool)
