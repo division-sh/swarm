@@ -82,7 +82,7 @@ func readCurrentFanOutPublications(ctx context.Context, db pipelineQueryer, runI
 	// not hide an otherwise exact target ordinal. The existing partial delivery
 	// index covers this current-only set; unique outcome event_id supplies probes.
 	rows, err := db.QueryContext(ctx, `WITH active AS MATERIALIZED (
-		SELECT DISTINCT event_id,run_id FROM event_deliveries WHERE status IN ('pending','in_progress','failed')
+		SELECT DISTINCT event_id,run_id FROM event_deliveries WHERE status IN ('pending','failed','in_progress')
 	)
 	SELECT DISTINCT o.run_id,o.triggering_delivery_id,o.deployment_feed_id,o.flow_path,o.declaration_family,o.semantic_path,
 		o.ordinal,o.outcome_kind,o.event_id,o.source_event_id,o.inherited_disposition,

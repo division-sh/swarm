@@ -3014,7 +3014,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 		logStep("first_summary", stepStarted, err)
 		t.Logf("fan_out_drain_settlement pass=%d step=first_summary open=%d blocked=%d owed=%d unsettled_publications=%d error=%v", pass, summary.Open, summary.Blocked, summary.Owed, summary.Unsettled, err)
 		if err != nil {
-			t.Fatalf("FanOutRunSummary(%s): %v", runID, err)
+			t.Fatalf("ReadFanOutSettlement(%s): %v", runID, err)
 		}
 		if summary.Owed == 0 && summary.Open == 0 && summary.Blocked == 0 && summary.Unsettled == 0 && summary.BarrierArmed == 0 && summary.BarrierPending == 0 {
 			stepStarted = time.Now()
@@ -3028,7 +3028,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 			logStep("confirm_summary", stepStarted, err)
 			t.Logf("fan_out_drain_settlement pass=%d step=confirm_summary open=%d blocked=%d owed=%d unsettled_publications=%d error=%v", pass, confirmed.Open, confirmed.Blocked, confirmed.Owed, confirmed.Unsettled, err)
 			if err != nil {
-				t.Fatalf("confirm FanOutRunSummary(%s): %v", runID, err)
+				t.Fatalf("confirm ReadFanOutSettlement(%s): %v", runID, err)
 			}
 			if confirmed.Owed == 0 && confirmed.Open == 0 && confirmed.Blocked == 0 && confirmed.Unsettled == 0 && confirmed.BarrierArmed == 0 && confirmed.BarrierPending == 0 {
 				settled = true
