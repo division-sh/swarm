@@ -76,6 +76,9 @@ func TestChannelCLIPendingResumeReachesQRWithoutRevisionChange(t *testing.T) {
 					if req.Method != "channel.onboarding_retry" || call != 1 {
 						t.Fatal("QR progress initiated automatic polling or another continuation", req.Method, call)
 					}
+					if req.Params["approve_account"] != nil {
+						t.Fatal("resume inferred an account answer from pending pairing")
+					}
 					result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "test-qr-material", "expires_at": time.Now().Add(time.Minute), "paired": false, "connected": true}
 					return result
 				})

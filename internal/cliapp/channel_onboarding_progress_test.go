@@ -20,6 +20,44 @@ type channelCredentialInput struct {
 	value string
 }
 
+func TestChannelCLIRetainedPreviewWaitPreservesExactAccount(t *testing.T) {
+	const connectionID = "00000000-0000-4000-8000-000000000277"
+	base := channelOnboardingResult{Operation: channelonboarding.Operation{
+		OperationID: operatorChannelCLIOperation, Revision: 1, PrincipalID: "00000000-0000-4000-8000-000000000278",
+		DeploymentRegistration: true, Provider: "whatsapp", Posture: channelonboarding.ActivationSessionConnection,
+		Phase: channelonboarding.PhaseAwaitingExternalIdentity, AccountReference: "+15551234567", SessionConnectionID: connectionID,
+		SessionAccount: operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
+			AccountRef: "15551234567@s.whatsapp.net", AdmissionID: "00000000-0000-4000-8000-000000000279", Revision: 1}},
+		Connection: &channelonboarding.SessionConnectionReadback{Linked: true, State: "connecting"}}
+	if !retainedChannelPreviewPending(base) || validateCLIChannelProgressReadback(base, base) != nil {
+		t.Fatal("exact retained preview did not remain pending without a revision advance")
+	}
+	for name, change := range map[string]func(*channelonboarding.Operation){
+		"operation":  func(o *channelonboarding.Operation) { o.OperationID += "foreign" },
+		"revision":   func(o *channelonboarding.Operation) { o.Revision++ },
+		"principal":  func(o *channelonboarding.Operation) { o.PrincipalID += "foreign" },
+		"provider":   func(o *channelonboarding.Operation) { o.Provider = "telegram" },
+		"connection": func(o *channelonboarding.Operation) { o.SessionConnectionID += "foreign" },
+		"account":    func(o *channelonboarding.Operation) { o.AccountReference = "+15551234599" },
+		"admission":  func(o *channelonboarding.Operation) { o.SessionAccount.Revision++ },
+		"scope":      func(o *channelonboarding.Operation) { o.DeploymentRegistration = false },
+		"approval":   func(o *channelonboarding.Operation) { o.AccountConfirmed = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			next := base
+			change(&next.Operation)
+			if validateCLIChannelProgressReadback(base, next) == nil {
+				t.Fatal("pending readback accepted a changed account or implicit approval")
+			}
+		})
+	}
+	connected := base
+	connected.Connection = &channelonboarding.SessionConnectionReadback{Linked: true, State: "connected"}
+	if retainedChannelPreviewPending(connected) || validateCLIChannelProgressReadback(base, connected) != nil {
+		t.Fatal("exact connected preview was not released from the existing wait")
+	}
+}
+
 func (in *channelCredentialInput) Read(p []byte) (int, error) {
 	in.reads++
 	if in.value == "" {
