@@ -251,6 +251,30 @@ func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
 	return pending, nil
 }
 
+func retainedChannelPreviewPending(result channelOnboardingResult) bool {
+	op, view := result.Operation, result.Connection
+	return op.DeploymentRegistration && !op.AccountConfirmed && op.Posture == channelonboarding.ActivationSessionConnection &&
+		op.Phase == channelonboarding.PhaseAwaitingExternalIdentity && op.SessionAccount.Validate() == nil && op.AccountReference != "" &&
+		op.ActivationRevision == 0 && op.IdentityOperationID == "" && op.FailureCode == "" && !op.LogoutCompleted &&
+		result.IdentityOperation == nil && result.Binding == nil && (result.Readiness == nil || !result.Readiness.Ready) &&
+		view != nil && view.Linked && view.State == "connecting" && view.Reason == ""
+}
+
+func validateCLIChannelProgressReadback(previous, next channelOnboardingResult) error {
+	if next.Operation.OperationID != previous.Operation.OperationID || next.Operation.Revision < previous.Operation.Revision {
+		return errors.New("channel progress changed the retained operation")
+	}
+	if retainedChannelPreviewPending(previous) {
+		a, b := previous.Operation, next.Operation
+		if b.Revision != a.Revision || b.PrincipalID != a.PrincipalID || b.Provider != a.Provider || b.SessionAccount != a.SessionAccount ||
+			b.SessionConnectionID != a.SessionConnectionID || b.AccountReference != a.AccountReference || b.ExpectedAccount != a.ExpectedAccount ||
+			b.Coordinate != a.Coordinate || b.AccountConfirmed || !b.DeploymentRegistration || b.Phase != a.Phase {
+			return errors.New("channel progress changed the retained account preview")
+		}
+	}
+	return nil
+}
+
 func validateCLIChannelContinuation(previous, next channelOnboardingResult, checkpointOnly bool) (bool, error) {
 	if next.Operation.OperationID != previous.Operation.OperationID || next.Operation.Revision < previous.Operation.Revision {
 		return false, errors.New("channel retry changed the retained operation")

@@ -596,6 +596,9 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 			return channelOnboardingResult{}, err
 		}
 		params := map[string]any{"operation_id": result.Operation.OperationID}
+		if result.Operation.DeploymentRegistration && acceptedAccount != "" {
+			params["approve_account"] = true
+		}
 		if opts.resumeCredential != "" {
 			params["provider_credential"] = opts.resumeCredential
 		}
@@ -617,7 +620,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 }
 
 func channelPairingWaitRequired(result channelOnboardingResult, pending bool) bool {
-	return pending || !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
+	return pending || retainedChannelPreviewPending(result) || !result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
 		result.Connection != nil && result.Connection.Linked && (result.Readiness == nil || !result.Readiness.Ready)
 }
 
@@ -672,8 +675,8 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 		if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": current.Operation.OperationID}, &next); err != nil {
 			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
-		if next.Operation.OperationID != current.Operation.OperationID || next.Operation.Revision < current.Operation.Revision {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel progress changed the retained operation"))
+		if err := validateCLIChannelProgressReadback(current, next); err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
 		current = next
 	}
