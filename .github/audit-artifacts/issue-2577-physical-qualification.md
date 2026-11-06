@@ -60,9 +60,14 @@ user types no Swarm commands or IDs. No live debugging is allowed in the sitting
   account or guessed target. Rehearse the complete private command sequence.
 - Separate pairing, operator identity and business activation. With the exact
   configured deployment HITL account, `channel connect whatsapp` itself owns the
-  account preview/approval, operator challenge and claimant confirmation. Do not
+  account preview/approval and operator challenge. The exact WhatsApp code
+  completes operator enrollment without a second claimant prompt. Do not
   insert an obsolete second runtime enrollment. Serve then adopts the registered
   account for the prepared authored source; pairing alone grants no operator role.
+- Before starting connect, explain that a newly issued five-digit code, including
+  leading zeroes, lasts ten minutes. The command prints its absolute expiry and
+  waits only until that instant; re-entry does not restart the window. An earlier
+  explicit cancellation still stops the command. Account-preview approval stays.
 - Complete the sender observation below before claiming ceremony conformance.
   A synthetic peer or successful QR scan cannot establish that fact.
 - Check the quiet-host envelope, exact owned PID/socket, safe stop/join and
