@@ -16,7 +16,14 @@ import (
 )
 
 func TestWhatsAppBootAccountMismatchWarningOnly(t *testing.T) {
-	catalog, plan, rooted := sessionDiscoveryCapturedProvider(t, ".")
+	for _, account := range []string{"+15551234567", "+1 (555) 123-4567"} {
+		t.Run(account, func(t *testing.T) { requireWhatsAppBootAccountMismatchWarning(t, account) })
+	}
+}
+
+func requireWhatsAppBootAccountMismatchWarning(t *testing.T, account string) {
+	t.Helper()
+	catalog, plan, rooted := sessionDiscoveryCapturedProvider(t, ".", account)
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), rooted, contracts.DefaultPlatformSpecFile(repoRootForTest()), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)

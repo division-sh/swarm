@@ -48,7 +48,14 @@ func whatsAppAccountMismatch(contexts []runtime.BundleContext, operations []chan
 			if err != nil {
 				return false, err
 			}
-			if account.FromPolicy && !slices.ContainsFunc(registered, func(op channelonboarding.Operation) bool { return op.AccountReference == account.Policy }) {
+			if !account.FromPolicy {
+				continue
+			}
+			ref, err := channelonboarding.CanonicalAccount("whatsapp", account.Policy)
+			if err != nil {
+				return false, err
+			}
+			if !slices.ContainsFunc(registered, func(op channelonboarding.Operation) bool { return op.AccountReference == ref.Account }) {
 				return true, nil
 			}
 		}
