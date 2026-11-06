@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -49,6 +50,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 						InspectRunMutationDrift(context.Context, string) (mutationlog.DriftReport, error)
 						LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)
 						ListOperatorEntities(context.Context, operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
+						LoadEntityState(context.Context, tools.EntityIdentity) (map[string]any, bool, error)
 						pipeline.WorkflowEngineMutationOwner
 					})
 					runID, entityID := correlation.RunIDFromContext(f.ctx), uuid.NewString()
@@ -65,17 +67,20 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					}
 					assertImport := func(inspectedRun string) {
 						t.Helper()
-						entity, err := owner.LoadOperatorEntity(f.ctx, entityID, inspectedRun)
-						if err != nil || entity.Entity.EntityID != entityID || entity.Entity.RunID != inspectedRun ||
-							!reflect.DeepEqual(entity.Fields, authoredFields) || entity.Entity.StageDefined != nil || entity.Entity.CurrentState != nil ||
-							entity.Entity.Revision != nil || entity.Entity.EnteredStateAt != nil || entity.Entity.LifecycleCreatedAt != nil || entity.Entity.LifecycleUpdatedAt != nil ||
-							!entity.Entity.CreatedAt.Equal(at) || !entity.Entity.UpdatedAt.Equal(at) ||
-							entity.Bookkeeping != nil || entity.Accumulated != nil || entity.Loops != nil {
+						entity, found, err := owner.LoadEntityState(f.ctx, tools.EntityIdentity{RunID: inspectedRun, EntityID: entityID})
+						if err != nil || !found || entity["entity_id"] != entityID || entity["run_id"] != inspectedRun ||
+							!reflect.DeepEqual(entity["fields"], authoredFields) || entity["stage_defined"] != nil || entity["current_state"] != nil ||
+							entity["revision"] != nil || entity["entered_state_at"] != nil || entity["lifecycle_created_at"] != nil || entity["lifecycle_updated_at"] != nil ||
+							entity["created_at"] != at.Format(time.RFC3339Nano) || entity["updated_at"] != at.Format(time.RFC3339Nano) ||
+							entity["bookkeeping"] != nil || entity["accumulator"] != nil || entity["loops"] != nil {
 							t.Fatalf("import readback changed data membership or invented lifecycle: run=%s entity=%+v err=%v", inspectedRun, entity, err)
 						}
+						if _, err := owner.LoadOperatorEntity(f.ctx, entityID, inspectedRun); !errors.Is(err, operatorread.ErrEntityNotFound) {
+							t.Fatalf("state-only import acquired public header membership: %v", err)
+						}
 						inventory, err := owner.ListOperatorEntities(f.ctx, operatorread.OperatorEntityListOptions{RunID: inspectedRun})
-						if err != nil || len(inventory.Entities) != 1 || !reflect.DeepEqual(inventory.Entities[0], entity.Entity) {
-							t.Fatalf("import inventory lost exact data membership or clocks: run=%s inventory=%+v err=%v", inspectedRun, inventory, err)
+						if err != nil || len(inventory.Entities) != 0 {
+							t.Fatalf("import acquired public instance membership: run=%s inventory=%+v err=%v", inspectedRun, inventory, err)
 						}
 						report, err := owner.InspectRunMutationDrift(f.ctx, inspectedRun)
 						if err != nil || report.RunID != inspectedRun || report.EntitiesChecked != 1 || len(report.Rows) != 0 {

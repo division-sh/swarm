@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,12 +11,14 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
 type conversationForkCutTestOwner interface {
 	forkChatCompletionTestStore
 	LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)
+	LoadEntityState(context.Context, tools.EntityIdentity) (map[string]any, bool, error)
 	CreateOperatorConversationFork(context.Context, runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error)
 	PrepareOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error)
 	RecordOperatorConversationForkChat(context.Context, runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error)
@@ -27,14 +30,17 @@ func proveQ10ConversationDataOnlyCuts(t *testing.T, ctx context.Context, owner c
 	if err := seedConversationForkDataOnlyEntityForTest(ctx, owner, source.runID, importedID, source.turn1At); err != nil {
 		t.Fatal(err)
 	}
-	current, err := owner.LoadOperatorEntity(ctx, importedID, source.runID)
-	if err != nil {
+	current, found, err := owner.LoadEntityState(ctx, tools.EntityIdentity{RunID: source.runID, EntityID: importedID})
+	if err != nil || !found {
 		t.Fatal(err)
 	}
-	if current.Entity.StageDefined != nil || current.Entity.CurrentState != nil || current.Entity.Revision != nil ||
-		current.Entity.EnteredStateAt != nil || current.Entity.LifecycleCreatedAt != nil || current.Entity.LifecycleUpdatedAt != nil ||
-		current.Bookkeeping != nil || current.Accumulated != nil || current.Loops != nil || current.Fields["name"] != "After" {
+	if current["stage_defined"] != nil || current["current_state"] != nil || current["revision"] != nil ||
+		current["entered_state_at"] != nil || current["lifecycle_created_at"] != nil || current["lifecycle_updated_at"] != nil ||
+		current["bookkeeping"] != nil || current["accumulator"] != nil || current["loops"] != nil || current["fields"].(map[string]any)["name"] != "After" {
 		t.Fatalf("current data-only witness acquired lifecycle: %+v", current)
+	}
+	if _, err := owner.LoadOperatorEntity(ctx, importedID, source.runID); !errors.Is(err, operatorread.ErrEntityNotFound) {
+		t.Fatalf("data-only witness acquired public instance membership: %v", err)
 	}
 	for index, cut := range []struct {
 		name, turn, state, field string
