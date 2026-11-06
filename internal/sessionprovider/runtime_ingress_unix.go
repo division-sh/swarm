@@ -293,6 +293,9 @@ func (i *runtimeIncoming) pendingOperatorClaim(ctx context.Context, op channelon
 	if message == nil || message.Message == nil || message.Info.IsFromMe {
 		return false, nil
 	}
+	if _, err := validateIncomingEnvelope(message); err != nil {
+		return false, err
+	}
 	kind, text, _, _, err := incomingContent(message)
 	if err != nil || kind != "message" || text == nil {
 		return false, err

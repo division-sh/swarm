@@ -66,16 +66,20 @@ func (g *callbackGuard) receive(event any) (success bool) {
 		}
 	}()
 	if err := g.handle(g.ctx, event); err != nil {
-		if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == errIncomingAdmissionPending }) {
+		switch {
+		case runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == errIncomingAdmissionPending }):
+			return false
+		case runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == errIncomingUnsupported }):
+			diaglog.ProcessLog(diaglog.LevelWarn, "whatsapp", "unsupported incoming content discarded", "disposition", "discarded")
+		default:
+			diaglog.ProcessLog(diaglog.LevelError, "whatsapp", "incoming callback failed",
+				"unsupported", errors.Is(err, errIncomingUnsupported), "malformed", errors.Is(err, errIncomingMalformed),
+				"scope_changed", errors.Is(err, errCaptureScopeChanged), "account_invalid", errors.Is(err, errSessionAccount),
+				"occurrence_fenced", errors.Is(err, errClientOccurrenceFenced), "runtime_unavailable", errors.Is(err, errRuntimeConnection),
+				"cancelled", errors.Is(err, context.Canceled), "deadline", errors.Is(err, context.DeadlineExceeded))
+			g.fail("capture_failed", err)
 			return false
 		}
-		diaglog.ProcessLog(diaglog.LevelError, "whatsapp", "incoming callback failed",
-			"unsupported", errors.Is(err, errIncomingUnsupported), "malformed", errors.Is(err, errIncomingMalformed),
-			"scope_changed", errors.Is(err, errCaptureScopeChanged), "account_invalid", errors.Is(err, errSessionAccount),
-			"occurrence_fenced", errors.Is(err, errClientOccurrenceFenced), "runtime_unavailable", errors.Is(err, errRuntimeConnection),
-			"cancelled", errors.Is(err, context.Canceled), "deadline", errors.Is(err, context.DeadlineExceeded))
-		g.fail("capture_failed", err)
-		return false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()

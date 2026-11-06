@@ -46,22 +46,11 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	if err := account.Validate(); err != nil {
 		return result, errCaptureScopeChanged
 	}
-	if err := validateIncomingEnvelope(event); err != nil {
+	conversationScope, err := validateIncomingEnvelope(event)
+	if err != nil {
 		return result, err
 	}
 	chat, sender := event.Info.Chat.ToNonAD(), event.Info.Sender.ToNonAD()
-	if !personJID(sender) || !utf8.ValidString(chat.String()) || chat.IsEmpty() || chat.User == "" {
-		return result, errIncomingMalformed
-	}
-	conversationScope := "direct"
-	if chat.Server == types.GroupServer {
-		conversationScope = "shared"
-	} else if !personJID(chat) {
-		return result, errIncomingUnsupported
-	}
-	if event.Info.IsGroup != (conversationScope == "shared") {
-		return result, errIncomingMalformed
-	}
 	kind, text, target, contextInfo, err := incomingContent(event)
 	if err != nil {
 		return result, err
@@ -82,16 +71,30 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	return result, result.Validate()
 }
 
-func validateIncomingEnvelope(event *events.Message) error {
+func validateIncomingEnvelope(event *events.Message) (string, error) {
 	if event == nil || event.Message == nil || !exactMessageID(event.Info.ID) || event.Info.Timestamp.IsZero() || event.Info.Timestamp.UnixMilli() < 1 {
-		return errIncomingMalformed
+		return "", errIncomingMalformed
+	}
+	chat, sender := event.Info.Chat.ToNonAD(), event.Info.Sender.ToNonAD()
+	if !personJID(sender) || !utf8.ValidString(chat.String()) || chat.IsEmpty() || chat.User == "" {
+		return "", errIncomingMalformed
+	}
+	group := chat.Server == types.GroupServer
+	if event.Info.IsGroup != (group || chat.Server == types.BroadcastServer) {
+		return "", errIncomingMalformed
 	}
 	if event.Info.IsFromMe || event.SourceWebMsg != nil || event.UnavailableRequestID != "" ||
 		event.IsViewOnce || event.IsViewOnceV2 || event.IsViewOnceV2Extension || event.IsBotInvoke ||
 		event.IsDocumentWithCaption || event.IsLottieSticker || event.NewsletterMeta != nil || event.Info.MsgBotInfo.EditType != "" {
-		return errIncomingUnsupported
+		return "", errIncomingUnsupported
 	}
-	return nil
+	if group {
+		return "shared", nil
+	}
+	if !personJID(chat) {
+		return "", errIncomingUnsupported
+	}
+	return "direct", nil
 }
 
 func exactMessageID(id string) bool {
