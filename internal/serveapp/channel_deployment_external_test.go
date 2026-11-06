@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -307,7 +308,7 @@ func TestDeploymentChannelRegistrationWithoutRuntimeBothStores(t *testing.T) {
 			out.Reset()
 			errOut.Reset()
 			code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
-			if code == 0 || confirmations != 1 || polls != 2 || !channelOnboardingChallengePattern.MatchString(out.String()) {
+			if code == 0 || confirmations != 1 || polls != 2 || !regexp.MustCompile(`Send the code [0-9]{5} from `).MatchString(out.String()) {
 				t.Fatalf("failed confirmation was not retained after settlement: exit=%d polls=%d confirmations=%d out=%s err=%s", code, polls, confirmations, out.String(), errOut.String())
 			}
 			out.Reset()
