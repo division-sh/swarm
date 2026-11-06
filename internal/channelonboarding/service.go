@@ -243,6 +243,7 @@ type RetryInput struct {
 	ClientLanguage         string
 	ExpectedLocaleRevision int64
 	CheckpointOnly         bool
+	ApproveAccount         bool
 }
 
 type Result struct {
@@ -721,7 +722,10 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if input.CheckpointOnly && (!op.UsesPairingCheckpoint() || op.Phase != PhaseActivatingProvider ||
+	if input.ApproveAccount && !op.DeploymentRegistration {
+		return Result{}, ErrInvalidRequest
+	}
+	if input.CheckpointOnly && (!op.UsesPairingCheckpoint() || op.Phase != PhaseActivatingProvider || input.ApproveAccount ||
 		input.ProviderCredential != "" || input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
 		return Result{}, ErrInvalidRequest
 	}
@@ -772,7 +776,7 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 		}
 		return s.result(ctx, paired, &candidate)
 	}
-	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential, true)
+	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential, !rebound.DeploymentRegistration || input.ApproveAccount)
 	if err != nil {
 		return result, fmt.Errorf("drive onboarding retry: %w", err)
 	}

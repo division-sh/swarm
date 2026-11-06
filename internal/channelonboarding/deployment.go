@@ -125,11 +125,12 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 		return s.result(ctx, op, &candidate)
 	case op.FailureCode != "":
 		return Result{}, fmt.Errorf("%w: finish logout with swarm channel logout %s %s", ErrConflict, op.Provider, op.DeploymentAccount())
-	case !op.AccountConfirmed:
-		return s.driveLocked(ctx, op, candidate, "", false)
 	}
 	if err := s.sessions.ResumeSession(ctx, op, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
 		return Result{}, err
+	}
+	if !op.AccountConfirmed {
+		return s.driveLocked(ctx, op, candidate, "", false)
 	}
 	session, ok := s.sessions.(DeploymentSessionOwner)
 	if !ok {

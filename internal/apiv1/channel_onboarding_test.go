@@ -149,6 +149,21 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	if retry.Error != nil || lifecycle.retry.OperationID != operationID || lifecycle.retry.ProviderCredential != "retry-token" {
 		t.Fatalf("channel.onboarding_retry response=%#v input=%#v", retry, lifecycle.retry)
 	}
+	if lifecycle.retry.ApproveAccount {
+		t.Fatal("absent account answer became approval")
+	}
+	for _, answer := range []bool{false, true} {
+		response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"answer","method":"channel.onboarding_retry","params":{"operation_id":%q,"approve_account":%t}}`, operationID, answer))
+		if response.Error != nil || lifecycle.retry.ApproveAccount != answer {
+			t.Fatal("retry changed the supplied account answer", answer, response.Error)
+		}
+	}
+	for _, value := range []string{`null`, `"true"`, `1`} {
+		response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"invalid-answer","method":"channel.onboarding_retry","params":{"operation_id":%q,"approve_account":%s}}`, operationID, value))
+		if response.Error == nil || response.Error.Code != -32602 {
+			t.Fatal("retry accepted a malformed account answer", value, response)
+		}
+	}
 
 	for _, body := range []string{
 		`{"jsonrpc":"2.0","id":"missing","method":"channel.onboarding_start","params":{"provider":"telegram"}}`,

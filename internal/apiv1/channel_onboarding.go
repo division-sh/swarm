@@ -106,8 +106,12 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 			if err != nil {
 				return nil, err
 			}
+			approveAccount, err := optionalBoolParam(req.Params, "approve_account", false)
+			if err != nil {
+				return nil, err
+			}
 			result, err := opts.Onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID, ProviderCredential: credential,
-				ClientLanguage: language, ExpectedLocaleRevision: localeRevision, CheckpointOnly: checkpointOnly})
+				ClientLanguage: language, ExpectedLocaleRevision: localeRevision, CheckpointOnly: checkpointOnly, ApproveAccount: approveAccount})
 			if err != nil {
 				return nil, channelOnboardingError(err)
 			}
