@@ -259,6 +259,7 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 					deadline = time.Now().Add(5 * time.Second)
 					for result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation && time.Now().Before(deadline) {
 						time.Sleep(10 * time.Millisecond)
+						result = channelonboarding.Result{}
 						requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 					}
 					if result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation || result.IdentityOperation == nil || result.IdentityOperation.State != operatorchannel.StateAwaitingConfirmation {
