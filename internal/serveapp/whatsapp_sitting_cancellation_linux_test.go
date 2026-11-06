@@ -185,8 +185,10 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				go func() {
 					done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp"}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, factory)
 				}()
+				var pairedOperation channelonboarding.Operation
 				select {
 				case pairing := <-qr:
+					pairedOperation = pairing.Operation
 					peer.pair(pairing.Pairing.Code)
 				case code := <-done:
 					joined = true
@@ -223,6 +225,11 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				before, err := snapshot(ctx)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if stage == "account" && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
+					before.operation.AccountConfirmed || before.operation.AccountReference != "+15551234567" ||
+					before.operation.SessionAccount.Validate() != nil || before.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity) {
+					t.Fatal("first preview lacks the original canonical unapproved account checkpoint")
 				}
 				cancel()
 				select {
