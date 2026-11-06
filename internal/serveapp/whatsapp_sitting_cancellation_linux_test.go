@@ -242,6 +242,9 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					t.Fatal("cancel logged out the paired account")
 				default:
 				}
+				if stage == "account" {
+					requireSittingPreviewReentry(t, ctx, config, directory, backend, terminal, peer, after)
+				}
 			})
 		}
 	}
