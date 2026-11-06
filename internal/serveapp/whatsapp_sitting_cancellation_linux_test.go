@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/types"
 	"golang.org/x/sys/unix"
 )
@@ -271,7 +272,14 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 							t.Fatal("public connect did not observe the miss before disconnect")
 						}
 					}
-					peer.disconnect()
+					// A bare EOF need not produce a specific SDK reason. Use its
+					// existing non-logout failure event to establish the exact fence.
+					peer.mu.Lock()
+					wire := peer.wire
+					peer.mu.Unlock()
+					if err := wire.Send(ctx, waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "400"}}); err != nil {
+						t.Fatal(err)
+					}
 				readDisconnected:
 					for {
 						select {
@@ -282,7 +290,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 							if observed.view.State != "disconnected" {
 								continue
 							}
-							if observed.view.Reason != "network unreachable" || !observed.view.Linked || observed.view.ClaimCodeNotice != nil ||
+							if observed.view.Reason != "connection rejected by WhatsApp" || !observed.view.Linked || observed.view.ClaimCodeNotice != nil ||
 								observed.operation.OperationID != before.operation.OperationID || observed.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 								t.Fatal("public disconnected state/reason changed with optional notice", observed)
 							}
