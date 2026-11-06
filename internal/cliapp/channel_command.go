@@ -581,20 +581,10 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 			observedAt := now()
 			switch {
 			case identity.State == "awaiting_claim" && (identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(observedAt)):
-				if result.Operation.DeploymentRegistration {
-					fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
-				}
-				if result.Operation.Provider == "whatsapp" {
-					if err := writeWhatsAppClaimInstructions(progressOut, result); err != nil {
-						return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-					}
-				} else {
-					fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
-				}
 				var err error
-				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions, errOut)
+				result, err = presentAndWaitForChannelClaim(ctx, client, result, opts.apiOptions, progressOut, errOut)
 				if err != nil {
-					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+					return channelOnboardingResult{}, err
 				}
 				continue
 			case channelClaimantConfirmationRequired(result, observedAt):
@@ -620,6 +610,25 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 		}
 		result = next
 	}
+}
+
+func presentAndWaitForChannelClaim(ctx context.Context, client channelControlClient, result channelOnboardingResult, opts rootCommandOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
+	if result.Operation.DeploymentRegistration {
+		fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
+	}
+	if result.Operation.Provider == "whatsapp" {
+		if err := writeWhatsAppClaimInstructions(progressOut, result); err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
+	} else {
+		identity := result.IdentityOperation
+		fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
+	}
+	current, err := waitForChannelOnboardingClaim(ctx, client, result, opts, errOut)
+	if err != nil {
+		return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	return current, nil
 }
 
 func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResult) error {
