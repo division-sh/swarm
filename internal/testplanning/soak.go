@@ -49,7 +49,7 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 	if isServeappOtherSelection(packages, run, skip, timeout, count, budget) {
 		return nil
 	}
-	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$" && skip == "" && count == "count-1" && budget == "broad" {
+	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtNativeFixtureExactClassificationDelta|TestPersistenceAuthorityDebtRatchet|TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact)$" && skip == "" && count == "count-1" && budget == "broad" {
 		return nil
 	}
 	if timeout != "" || strings.Contains(run, "/") {
