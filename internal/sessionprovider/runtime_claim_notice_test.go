@@ -4,6 +4,7 @@ package sessionprovider
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -75,6 +76,35 @@ func TestWhatsAppClaimCodeNoticeSnapshotBothStores(t *testing.T) {
 			fresh := openRuntimeIncomingFixture(t, f)
 			if notice, err := fresh.ReadClaimCodeNotice(f.ctx, f.operation); err != nil || notice != nil {
 				t.Fatal("new occurrence inherited a notice", notice, err)
+			}
+		})
+	}
+}
+
+func TestWhatsAppClaimCodeNoticeDisconnectKeepsErrorsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newActiveInputFixture(t, backend)
+			identity := beginRuntimeClaimFixture(t, f)
+			c := openRuntimeIncomingFixture(t, f)
+			connectRuntimeConnectionFixture(t, f, c)
+			c.observeClaimCodeMiss(identity)
+			c.state.currentOccurrence().fenceAfterDisconnect(true, "network unreachable")
+			if notice, err := c.ReadClaimCodeNotice(f.ctx, f.operation); err != nil || notice != nil {
+				t.Fatal("optional notice converted disconnect to read failure", notice, err)
+			}
+			cancelled, cancel := context.WithCancel(f.ctx)
+			cancel()
+			if _, err := c.ReadClaimCodeNotice(cancelled, f.operation); !errors.Is(err, context.Canceled) {
+				t.Fatal("disconnect hid caller cancellation", err)
+			}
+			original := c.operations
+			failure := errors.New("selected notice currentness read failed")
+			c.operations = &nonClaimObservationFailureStore{Store: f.selected, failure: failure}
+			_, err := c.ReadClaimCodeNotice(f.ctx, f.operation)
+			c.operations = original
+			if !errors.Is(err, failure) {
+				t.Fatal("disconnect hid selected-store currentness failure", err)
 			}
 		})
 	}

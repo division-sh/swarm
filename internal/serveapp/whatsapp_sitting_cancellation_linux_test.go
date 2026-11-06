@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"go.mau.fi/whatsmeow/types"
 	"golang.org/x/sys/unix"
 )
 
@@ -108,9 +109,29 @@ func sittingTerminal(t *testing.T) *os.File {
 
 // This exercises terminal input and the real SDK against a synthetic peer, not
 // a physical device. Cancellation must join without sending an answer or unlink.
+type sittingClaimReadback struct {
+	operation channelonboarding.Operation
+	view      channelonboarding.SessionConnectionReadback
+	err       error
+}
+
+type sittingClaimReadbackObserver struct {
+	cliapp.ChannelRegistrationSession
+	read chan sittingClaimReadback
+}
+
+func (s sittingClaimReadbackObserver) ReadSessionConnection(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error) {
+	view, err := s.ChannelRegistrationSession.ReadSessionConnection(ctx, op)
+	select {
+	case s.read <- sittingClaimReadback{op, view, err}:
+	case <-ctx.Done():
+	}
+	return view, err
+}
+
 func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, stage := range []string{"account", "claim_wait", "restored_login_cancel", "restored_login_disconnect"} {
+		for _, stage := range []string{"account", "claim_wait", "restored_login_cancel", "restored_login_disconnect", "claim_disconnect_plain", "claim_disconnect_miss"} {
 			t.Run(backend+"/"+stage, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
@@ -136,6 +157,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				}
 				writeStandingCandidateFile(t, config, string(content)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n", directory))
 				qr := make(chan channelonboarding.Result, 1)
+				readbacks := make(chan sittingClaimReadback, 16)
 				var registration cliapp.ChannelRegistrationOptions
 				var operationID string
 				snapshot := func(read context.Context) (sittingCancellationState, error) {
@@ -148,7 +170,11 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 						return nil, err
 					}
 					registration = options
-					observed := firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal,
+					var reader cliapp.ChannelRegistrationSession = session
+					if strings.HasPrefix(stage, "claim_disconnect_") {
+						reader = sittingClaimReadbackObserver{session, readbacks}
+					}
+					observed := firstConnectPairingObserver{ChannelRegistrationSession: reader, principal: options.Principal,
 						observe: func(result channelonboarding.Result, _ bool) {
 							if result.Pairing != nil && result.Pairing.Code != "" {
 								select {
@@ -203,7 +229,9 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal("account prompt missing")
 				}
-				if stage == "claim_wait" {
+				var challenge string
+				claimWait := strings.HasPrefix(stage, "claim_")
+				if claimWait {
 					if _, err := terminal.WriteString("y\n"); err != nil {
 						t.Fatal(err)
 					}
@@ -213,19 +241,59 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					case <-ctx.Done():
 						t.Fatal("operator challenge missing")
 					}
-					challenge, _, ok := strings.Cut(strings.TrimPrefix(text, "Send the code "), " from your operator phone")
-					if !ok || len(challenge) != 5 || strings.Trim(challenge, "0123456789") != "" {
+					parsed, _, ok := strings.Cut(strings.TrimPrefix(text, "Send the code "), " from your operator phone")
+					if !ok || len(parsed) != 5 || strings.Trim(parsed, "0123456789") != "" {
 						t.Fatal("operator challenge malformed")
 					}
+					challenge = parsed
 				}
 				before, err := snapshot(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if stage != "claim_wait" && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
+				if !claimWait && (before.operation.OperationID != pairedOperation.OperationID || before.operation.SessionConnectionID != pairedOperation.SessionConnectionID ||
 					before.operation.AccountConfirmed || before.operation.AccountReference != "+15551234567" ||
 					before.operation.SessionAccount.Validate() != nil || before.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity) {
 					t.Fatal("first preview lacks the original canonical unapproved account checkpoint")
+				}
+				if strings.HasPrefix(stage, "claim_disconnect_") {
+					if stage == "claim_disconnect_miss" {
+						miss := "15000"
+						if challenge == miss {
+							miss = "15001"
+						}
+						sender, _, _ := peer.senderFrom(types.NewJID("15551234590", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
+						peer.sendEncryptedFrame(sender.EncryptText(t, miss, "CLAIM_DISCONNECT_MISS"))
+						for !strings.Contains(errOut.String(), "error: bad code\n") && ctx.Err() == nil {
+							time.Sleep(time.Millisecond)
+						}
+						if ctx.Err() != nil {
+							t.Fatal("public connect did not observe the miss before disconnect")
+						}
+					}
+					peer.disconnect()
+				readDisconnected:
+					for {
+						select {
+						case observed := <-readbacks:
+							if observed.err != nil {
+								t.Fatal("optional notice made public readback fail after disconnect", observed.err)
+							}
+							if observed.view.State != "disconnected" {
+								continue
+							}
+							if observed.view.Reason != "network unreachable" || !observed.view.Linked || observed.view.ClaimCodeNotice != nil ||
+								observed.operation.OperationID != before.operation.OperationID || observed.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
+								t.Fatal("public disconnected state/reason changed with optional notice", observed)
+							}
+							break readDisconnected
+						case code := <-done:
+							joined = true
+							t.Fatal("public wait failed rather than observing the disconnected account", code, errOut.String())
+						case <-ctx.Done():
+							t.Fatal("public disconnected readback was not observed")
+						}
+					}
 				}
 				cancel()
 				select {
@@ -245,7 +313,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					t.Fatal("cancel logged out the paired account")
 				default:
 				}
-				if stage != "claim_wait" {
+				if !claimWait {
 					requireSittingPreviewReentry(t, ctx, config, directory, backend, terminal, peer, after, stage)
 				}
 			})
