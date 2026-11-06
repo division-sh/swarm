@@ -13,6 +13,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -338,6 +339,7 @@ func validTestSetupEntity(entityID, note string) map[string]any {
 func assertTestSetupPersistence(t *testing.T, selected interface {
 	operatorread.RunReader
 	EntityReadStore
+	LoadEntityState(context.Context, tools.EntityIdentity) (map[string]any, bool, error)
 	runtimepipeline.WorkflowInstancePersistenceReader
 }, expectedBundleHash, runID, entityID, note string) {
 	t.Helper()
@@ -383,22 +385,30 @@ func assertTestSetupPersistence(t *testing.T, selected interface {
 
 func assertTestSetupImportedEntity(t *testing.T, selected interface {
 	EntityReadStore
+	LoadEntityState(context.Context, tools.EntityIdentity) (map[string]any, bool, error)
 	runtimepipeline.WorkflowInstancePersistenceReader
 }, runID, entityID, note string) {
 	t.Helper()
-	full, err := selected.LoadOperatorEntity(context.Background(), entityID, runID)
-	if err != nil {
+	row, found, err := selected.LoadEntityState(context.Background(), tools.EntityIdentity{RunID: runID, EntityID: entityID})
+	if err != nil || !found {
 		t.Fatalf("load imported setup entity: %v", err)
 	}
-	entity := full.Entity
-	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != "operating" || entity.EntityType != "state" || len(full.Fields) != 1 || full.Fields["note"] != note {
-		t.Fatalf("imported setup identity/fields = %+v", full)
+	fields, _ := row["fields"].(map[string]any)
+	if row["run_id"] != runID || row["entity_id"] != entityID || row["flow_instance"] != "operating" || row["entity_type"] != "state" || len(fields) != 1 || fields["note"] != note {
+		t.Fatalf("imported setup identity/fields = %+v", row)
 	}
-	if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil || entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil {
-		t.Fatalf("imported setup entity acquired lifecycle: %+v", full)
+	for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at", "bookkeeping", "accumulator", "loops"} {
+		if row[key] != nil {
+			t.Fatalf("imported setup entity acquired lifecycle %s: %+v", key, row)
+		}
 	}
-	if entity.CreatedAt.IsZero() || entity.UpdatedAt.IsZero() || !entity.CreatedAt.Equal(entity.UpdatedAt) {
-		t.Fatalf("imported setup data clocks = %+v, want unchanged birth clocks", entity)
+	created, ok := row["created_at"].(string)
+	at, err := time.Parse(time.RFC3339Nano, created)
+	if !ok || err != nil || at.IsZero() || created != row["updated_at"] {
+		t.Fatalf("imported setup data clocks = %+v, want unchanged birth clocks", row)
+	}
+	if _, err := selected.LoadOperatorEntity(context.Background(), entityID, runID); !errors.Is(err, operatorread.ErrEntityNotFound) {
+		t.Fatalf("imported setup acquired public header membership: %v", err)
 	}
 	instances, err := selected.ListWorkflowInstances(context.Background(), runID)
 	if err != nil || len(instances) != 0 {
