@@ -596,7 +596,7 @@ func completeChannelOnboarding(ctx context.Context, client channelControlClient,
 			return channelOnboardingResult{}, err
 		}
 		params := map[string]any{"operation_id": result.Operation.OperationID}
-		if result.Operation.DeploymentRegistration && acceptedAccount != "" {
+		if result.Operation.DeploymentRegistration && acceptedAccount != "" && acceptedAccount == result.Operation.AccountReference {
 			params["approve_account"] = true
 		}
 		if opts.resumeCredential != "" {
@@ -704,7 +704,7 @@ func confirmCLIChannelAccount(ctx context.Context, client channelControlClient, 
 			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the retained account preview has no connected, non-executable pairing"))
 		}
 	}
-	if pending && current.Pairing.Paired && !current.Pairing.Connected {
+	if pending && current.Pairing.Paired && (!current.Pairing.Connected || current.Operation.DeploymentRegistration) {
 		var next channelOnboardingResult
 		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
 			"operation_id": current.Operation.OperationID, "checkpoint_only": true,
