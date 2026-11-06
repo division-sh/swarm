@@ -140,6 +140,7 @@ func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCC
 					goldenEntitySummary
 					CreatedAt json.RawMessage `json:"created_at"`
 					UpdatedAt json.RawMessage `json:"updated_at"`
+					Revision  int64           `json:"revision"`
 				} `json:"entity"`
 				Fields map[string]any    `json:"fields"`
 				Loops  []json.RawMessage `json:"loops"`
@@ -147,7 +148,7 @@ func assertNumericFeedPublic(t *testing.T, ctx context.Context, rpc *releaseRPCC
 			if err := rpc.call(ctx, "entity.get", map[string]any{"entity_id": runID, "run_id": runID}, &detail); err != nil {
 				t.Fatal(err)
 			}
-			if detail.Entity.goldenEntitySummary != entity || detail.Fields == nil || len(detail.Fields) != 0 || detail.Loops == nil || len(detail.Loops) != 0 || string(detail.Entity.CreatedAt) != "null" || string(detail.Entity.UpdatedAt) != "null" {
+			if detail.Entity.goldenEntitySummary != entity || detail.Entity.Revision != 1 || detail.Fields == nil || len(detail.Fields) != 0 || detail.Loops == nil || len(detail.Loops) != 0 || string(detail.Entity.CreatedAt) != "null" || string(detail.Entity.UpdatedAt) != "null" {
 				t.Fatalf("numeric root invented data or lost public identity: %+v", detail)
 			}
 			rootSeen = true
