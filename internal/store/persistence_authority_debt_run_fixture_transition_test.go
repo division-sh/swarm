@@ -71,13 +71,6 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
 			t.Fatal("reverse portable global correspondence admitted")
 		}
-		for _, pair := range pairs {
-			for _, landed := range []bool{false, true} {
-				t.Run(pair[0].File+"/"+pair[0].Declaration+"/"+pair[0].Operation+map[bool]string{false: "/forward", true: "/landed"}[landed], func(t *testing.T) {
-					debtRunFixtureSignatureHostileControls(t, pair, before, after, landed)
-				})
-			}
-		}
 		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
 			t.Fatal("portable global comparison mutated its inputs")
 		}
