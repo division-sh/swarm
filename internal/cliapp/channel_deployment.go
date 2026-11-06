@@ -333,17 +333,7 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 		}
 		result, err = c.service.Get(ctx, channelSelectionParam(params, "operation_id"))
 	case "channel.onboarding_retry":
-		if reverify, _ := params["reverify"].(bool); reverify {
-			result, err = c.service.ReverifyDeployment(ctx, channelSelectionParam(params, "operation_id"))
-			break
-		}
-		checkpoint, _ := params["checkpoint_only"].(bool)
-		approve, supplied := params["approve_account"]
-		approved, valid := approve.(bool)
-		if supplied && !valid {
-			return channelonboarding.ErrInvalidRequest
-		}
-		result, err = c.service.Retry(ctx, channelonboarding.RetryInput{OperationID: channelSelectionParam(params, "operation_id"), CheckpointOnly: checkpoint, ApproveAccount: approved, ProviderCredential: channelSelectionParam(params, "provider_credential")})
+		result, err = c.retryRegistration(ctx, params)
 	case "channel.confirm":
 		revision, _ := params["expected_revision"].(int64)
 		approve, _ := params["approve"].(bool)
@@ -374,6 +364,20 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 		return err
 	}
 	return json.Unmarshal(raw, target)
+}
+
+func (c *DeploymentChannelControl) retryRegistration(ctx context.Context, params map[string]any) (channelonboarding.Result, error) {
+	if reverify, _ := params["reverify"].(bool); reverify {
+		return c.service.ReverifyDeployment(ctx, channelSelectionParam(params, "operation_id"))
+	}
+	checkpoint, _ := params["checkpoint_only"].(bool)
+	approve, supplied := params["approve_account"]
+	approved, valid := approve.(bool)
+	if supplied && !valid {
+		return channelonboarding.Result{}, channelonboarding.ErrInvalidRequest
+	}
+	return c.service.Retry(ctx, channelonboarding.RetryInput{OperationID: channelSelectionParam(params, "operation_id"),
+		CheckpointOnly: checkpoint, ApproveAccount: approved, ProviderCredential: channelSelectionParam(params, "provider_credential")})
 }
 
 func (c *DeploymentChannelControl) Close(ctx context.Context) error {
