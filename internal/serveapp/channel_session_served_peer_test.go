@@ -50,6 +50,7 @@ type serveNativeProtocolPeer struct {
 	from                types.JID
 	fromLID             types.JID
 	sent                chan servedNativeMessage
+	acceptedSends       int
 	logouts             chan waBinary.Node
 	withholdLogout      bool
 	malformedAck        string
@@ -700,6 +701,7 @@ func (p *serveNativeProtocolPeer) acceptMessage(wire *whatsappfixture.Transport,
 		return fmt.Errorf("outbound plaintext evidence overflow")
 	}
 	p.mu.Lock()
+	p.acceptedSends++
 	malformed := message.GetConversation() == p.malformedAck && p.malformedAck != ""
 	withheld := p.withholdAck != "" && strings.HasPrefix(message.GetConversation(), p.withholdAck)
 	p.mu.Unlock()

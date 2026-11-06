@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packadmission"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -264,7 +265,10 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			// Every source fixture declares the initial retirement gate. Join
 			// its exact send before the ordinary-restart no-redispatch cut.
 			pairingRunID := requireServedNativePairingRun(t, endpoint, result.Operation.Coordinate.BundleHash)
-			cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader, pairingRunID))
+			cards = append(cards, waitServedNativeCardBeforeRestart(t, endpoint, peer, reader, pairingRunID, result.Operation.Coordinate.BundleHash)...)
+			peer.mu.Lock()
+			settledSends := peer.acceptedSends
+			peer.mu.Unlock()
 			if code := process.stop(); code != 0 {
 				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
 			}
@@ -278,6 +282,12 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				result.Operation.IdentityOperationID != identityID || result.Operation.BindingRevision != completed.BindingRevision ||
 				result.Operation.Coordinate.RuntimeInstanceID == completed.Coordinate.RuntimeInstanceID {
 				t.Fatal("completed native restart lost its original responsibility", result.Operation, result.Readiness)
+			}
+			peer.mu.Lock()
+			restartedSends := peer.acceptedSends
+			peer.mu.Unlock()
+			if restartedSends != settledSends {
+				t.Fatalf("ordinary restart accepted another outbound message: before=%d after=%d", settledSends, restartedSends)
 			}
 			select {
 			case sent := <-peer.sent:
@@ -760,12 +770,33 @@ waiting:
 	return nil
 }
 
-func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation, runID string) servedNativeMessage {
+func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation, runID, bundleHash string) []servedNativeMessage {
 	t.Helper()
 	cardID := waitServedNativePendingCard(t, endpoint, runID)
+	var runs struct {
+		Runs       []operatorread.RunHeader `json:"runs"`
+		NextCursor string                   `json:"next_cursor"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &runs)
+	if runs.NextCursor != "" {
+		t.Fatal("native pre-restart card set has unobserved runs")
+	}
+	expected := make(map[string]string)
+	for _, run := range runs.Runs {
+		if run.BundleHash == bundleHash && run.Status == "live" {
+			id := waitServedNativePendingCard(t, endpoint, run.RunID)
+			if expected[id] != "" {
+				t.Fatal("native pre-restart card set repeats an obligation", id)
+			}
+			expected[id] = run.RunID
+		}
+	}
+	if expected[cardID] != runID {
+		t.Fatal("native pre-restart card set omits its selected root", expected)
+	}
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
-	otherCardSeen := false
+	var cards []servedNativeMessage
 	for {
 		var sent servedNativeMessage
 		select {
@@ -788,16 +819,10 @@ func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serv
 			if item.Kind != "decision_card" || !strings.Contains(sent.Body.GetConversation(), "\nReference: "+item.Card.ID) {
 				continue
 			}
-			if !strings.HasPrefix(sent.Body.GetConversation(), "Retire service\n") || sourceID != "" {
+			if !strings.HasPrefix(sent.Body.GetConversation(), "Retire service\n") || sourceID != "" || expected[item.Card.ID] == "" || expected[item.Card.ID] != item.Card.RunID {
 				t.Fatal("native card does not match one exact public retirement gate", sent.Body.String(), page)
 			}
 			sourceID = item.Card.ID
-			if sourceID != cardID {
-				if item.Card.RunID == runID || otherCardSeen {
-					t.Fatal("duplicate or ambiguous native retirement card", sent.Body.String(), page)
-				}
-				otherCardSeen = true
-			}
 		}
 		if sourceID == "" {
 			t.Fatal("native card has no exact public retirement gate", sent.Body.String(), page)
@@ -830,8 +855,10 @@ func waitServedNativeCardBeforeRestart(t *testing.T, endpoint string, peer *serv
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
-		if sourceID == cardID {
-			return sent
+		cards = append(cards, sent)
+		delete(expected, sourceID)
+		if len(expected) == 0 {
+			return cards
 		}
 	}
 }
