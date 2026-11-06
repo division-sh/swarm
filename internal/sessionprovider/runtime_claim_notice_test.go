@@ -89,13 +89,17 @@ func TestWhatsAppClaimCodeNoticeDisconnectKeepsErrorsBothStores(t *testing.T) {
 			c := openRuntimeIncomingFixture(t, f)
 			connectRuntimeConnectionFixture(t, f, c)
 			c.observeClaimCodeMiss(identity)
+			cancelled, cancel := context.WithCancel(f.ctx)
+			cancel()
+			_, cancellationErr := c.ReadClaimCodeNotice(cancelled, f.operation)
+			if !errors.Is(cancellationErr, errRuntimeConnection) {
+				t.Fatal("cancelled caller lost the connection refusal", cancellationErr)
+			}
 			c.state.currentOccurrence().fenceAfterDisconnect(true, "network unreachable")
 			if notice, err := c.ReadClaimCodeNotice(f.ctx, f.operation); err != nil || notice != nil {
 				t.Fatal("optional notice converted disconnect to read failure", notice, err)
 			}
-			cancelled, cancel := context.WithCancel(f.ctx)
-			cancel()
-			if _, err := c.ReadClaimCodeNotice(cancelled, f.operation); !errors.Is(err, context.Canceled) {
+			if _, err := c.ReadClaimCodeNotice(cancelled, f.operation); !errors.Is(err, cancellationErr) {
 				t.Fatal("disconnect hid caller cancellation", err)
 			}
 			original := c.operations
