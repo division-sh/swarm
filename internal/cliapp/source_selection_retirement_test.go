@@ -3,7 +3,7 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"path/filepath"
+	"io"
 	"strings"
 	"testing"
 
