@@ -304,6 +304,7 @@ func TestServeCompositionProvidesExactRuntimePorts(t *testing.T) {
 	)
 }
 
+func TestRuntimeSemanticModelsHaveSingleConsumerOwner(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	assertNoAliasesToRuntimeModels(t, filepath.Join(root, "internal"))
 	for _, rel := range []string{"internal/runtime/runfork", "internal/runtime/runbundle"} {
