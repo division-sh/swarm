@@ -11,11 +11,16 @@ type Binding struct {
 	id                string
 	displayName       string
 	session           bool
+	webhook           bool
 	pollClaims        bool
 	credential        bool
 	signingCredential bool
 	canonicalAccount  func(string) (string, error)
 	claimInstructions func(string, string, time.Time) (string, error)
+	readyTeaching     string
+	notLinked         string
+	pairingPrompt     string
+	languageHelp      func(string) string
 	nativeRead        string
 	nativeWrite       string
 	captureKey        string
@@ -36,10 +41,13 @@ func Lookup(provider string) (Binding, bool) {
 
 func Installed() []Binding { return append([]Binding(nil), installed[:]...) }
 
-func (b Binding) Provider() string    { return b.id }
-func (b Binding) DisplayName() string { return b.displayName }
-func (b Binding) Session() bool       { return b.id != "" && b.session }
-func (b Binding) PollsClaim() bool    { return b.id != "" && b.pollClaims }
+func (b Binding) Provider() string      { return b.id }
+func (b Binding) DisplayName() string   { return b.displayName }
+func (b Binding) ReadyTeaching() string { return b.readyTeaching }
+func (b Binding) NotLinked() string     { return b.notLinked }
+func (b Binding) Session() bool         { return b.id != "" && b.session }
+func (b Binding) Webhook() bool         { return b.id != "" && b.webhook }
+func (b Binding) PollsClaim() bool      { return b.id != "" && b.pollClaims }
 
 func (b Binding) CaptureProvenanceKey() string { return b.captureKey }
 
@@ -54,7 +62,10 @@ func (b Binding) DeploymentPosture() string {
 	if b.session {
 		return "session_connection"
 	}
-	return "webhook_registration"
+	if b.webhook {
+		return "webhook_registration"
+	}
+	return ""
 }
 
 func (b Binding) MatchesDeployment(posture, credential, signing string) bool {
@@ -75,6 +86,20 @@ func (b Binding) ClaimInstructions(account, code string, expires time.Time) (str
 		return "", fmt.Errorf("provider must be whatsapp or telegram")
 	}
 	return b.claimInstructions(account, code, expires)
+}
+
+func (b Binding) PairingInstructions(expires time.Time, qr string) string {
+	if b.pairingPrompt == "" {
+		return ""
+	}
+	return fmt.Sprintf(b.pairingPrompt, expires.UTC().Format(time.RFC3339), qr)
+}
+
+func (b Binding) LanguageHelp(operation string) string {
+	if b.languageHelp == nil {
+		return ""
+	}
+	return b.languageHelp(operation)
 }
 
 func (b Binding) NativeRead(target string) bool {

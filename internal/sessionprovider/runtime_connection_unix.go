@@ -596,7 +596,7 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 	if err != nil {
 		return result, err
 	}
-	executor := sessionChannelExecutor{owner: owner, plan: c.plan}
+	executor := sessionChannelExecutor{owner: owner, state: c.state, plan: c.plan}
 	if op.DeploymentRegistration {
 		executor.deployment = c.operatorBinding
 		if executor.deployment == nil {
@@ -623,7 +623,7 @@ func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operatio
 	if err != nil {
 		return nil, err
 	}
-	return (sessionChannelExecutor{owner: owner, plan: c.plan}).ExecuteChannelActivity(work.Context(), operation, toolID, tool, input)
+	return (sessionChannelExecutor{owner: owner, state: c.state, plan: c.plan}).ExecuteChannelActivity(work.Context(), operation, toolID, tool, input)
 }
 
 func (c *RuntimeConnection) joinRetirement() {
