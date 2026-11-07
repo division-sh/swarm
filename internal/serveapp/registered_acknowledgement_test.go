@@ -13,7 +13,10 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -164,7 +167,30 @@ func requireRegisteredAckCut(t *testing.T, ctx context.Context, peer *serveNativ
 		return // These are real retirement writes, not permission to restore them.
 	}
 	var out, errOut bytes.Buffer
-	next := cliapp.Execute(ctx, []string{"--config", config, "channel", "connect", "whatsapp", cut.operations[0].AccountReference, "--yes"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	var recovered effects.OperationOutcome
+	factory := func(call context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
+		if cut.mode == "response_observed" {
+			mutation, err := startupownership.CaptureMutationAuthority(call)
+			if err != nil {
+				return nil, err
+			}
+			read := authoractivity.WithScope(call, authoractivity.RuntimeScope(mutation.ProcessAuthority().RuntimeInstanceID))
+			// Select the abandoned attempt with the existing injected recovery clock,
+			// not a wall-clock sleep, changed lease, or fabricated journal row.
+			summary, err := opts.Effects.(effects.RecoveryStore).ReconcileExternalEffectAttempts(read,
+				effects.NewRecoveryRequest(time.Now().Add(6*time.Minute), executionposture.Live))
+			if err != nil || summary.OutcomeUncertain != 1 {
+				return nil, errors.Join(errors.New("abandoned acknowledgement was not recovered exactly once"), err)
+			}
+			var found bool
+			recovered, found, err = opts.Effects.(effects.OutcomeStore).GetExternalEffectOutcome(read, cut.id)
+			if err != nil || !found || recovered.AttemptState != effects.StateOutcomeUncertain {
+				return nil, errors.Join(errors.New("recovery did not preserve uncertain acknowledgement"), err)
+			}
+		}
+		return OpenChannelRegistration(call, opts)
+	}
+	next := cliapp.Execute(ctx, []string{"--config", config, "channel", "connect", "whatsapp", cut.operations[0].AccountReference, "--yes"}, &out, &errOut, nil, nil, factory)
 	if cut.mode == "response_observed" {
 		if next == 0 || !strings.Contains(errOut.String(), "refusing blind resend") {
 			t.Fatal("uncertain acknowledgement did not refuse replay", next, errOut.String())
