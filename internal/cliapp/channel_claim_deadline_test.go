@@ -29,8 +29,12 @@ func (c *claimDeadlineClient) call(ctx context.Context, method string, _ map[str
 }
 
 func TestChannelClaimWaitUsesStoredExpiry(t *testing.T) {
-	for _, earlierCancel := range []bool{false, true} {
-		t.Run(fmt.Sprintf("earlier_cancel=%t", earlierCancel), func(t *testing.T) {
+	for _, test := range []struct {
+		provider      string
+		earlierCancel bool
+	}{{"whatsapp", false}, {"whatsapp", true}, {"telegram", false}, {"telegram", true}} {
+		earlierCancel := test.earlierCancel
+		t.Run(fmt.Sprintf("%s/earlier_cancel=%t", test.provider, earlierCancel), func(t *testing.T) {
 			expires := time.Now().Add(50 * time.Millisecond)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -41,12 +45,15 @@ func TestChannelClaimWaitUsesStoredExpiry(t *testing.T) {
 				defer cancel()
 			}
 			begun := channelOnboardingResult{
-				Operation:         channelonboarding.Operation{Provider: "whatsapp"},
+				Operation:         channelonboarding.Operation{Provider: test.provider, DeploymentRegistration: true, OperationID: "private-operation-id"},
 				IdentityOperation: &operatorchannel.Operation{State: operatorchannel.StateAwaitingClaim, ExpiresAt: expires},
 			}
 			_, err := waitForChannelOnboardingClaim(ctx, client, begun, defaultRootCommandOptions(), io.Discard)
 			if client.calls != 1 || err == nil {
 				t.Fatal("pending RPC did not stop at its only deadline", client.calls, err)
+			}
+			if strings.Contains(err.Error(), "private-operation-id") {
+				t.Fatal("default deployment timeout exposed an operation ID", err)
 			}
 			if earlierCancel {
 				if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "stopped waiting") {
