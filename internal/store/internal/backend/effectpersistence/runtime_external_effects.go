@@ -1620,7 +1620,7 @@ func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([8]a
 }
 
 func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
-	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
+	bundleHash, err := externalEffectOperationBundle(ctx, authority)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -1681,7 +1681,7 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 }
 
 func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
-	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
+	bundleHash, err := externalEffectOperationBundle(ctx, authority)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -1738,7 +1738,7 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	return externalAuthorizedAttempt(authority, req, req.AttemptID, 1), nil
 }
 
-func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffects.Authority) (any, error) {
+func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects.Authority) (any, error) {
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	evidence, err := json.Marshal(authority.Evidence())
 	if err != nil {
@@ -1754,6 +1754,11 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 		}
 		return nil, nil
 	}
+	return requiredExternalEffectBundleHash(ctx, authority)
+}
+
+func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffects.Authority) (string, error) {
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.BundleHash) == "" {
 		return "", fmt.Errorf("external effect operation requires exact author activity bundle scope")
 	}

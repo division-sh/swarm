@@ -49,6 +49,11 @@ func DecodeTransportParent(raw []byte) (TransportParent, error) {
 	if err := decoder.Decode(&parent); err != nil {
 		return parent, err
 	}
+	_, proofID := fields["proof_id"]
+	_, proofRevision := fields["proof_revision"]
+	if proofID != proofRevision || proofID && (parent.ProofID == "" || parent.ProofRevision < 1) {
+		return TransportParent{}, fmt.Errorf("transport parent proof must be an exact existing pair")
+	}
 	if !parent.Valid() {
 		return TransportParent{}, fmt.Errorf("invalid deployment transport parent")
 	}
