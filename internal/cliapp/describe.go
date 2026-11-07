@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
@@ -232,6 +233,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 	writeDescribeEvents(out, view.Root.Events, "")
 	if view.Root.PrimaryEntity != nil {
 		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
+		writeDescribeEmbeddedSources(out, view.Root.PrimaryEntity.EmbeddedSources, "  ")
 	}
 	writeDescribeConstructors(out, view.Root.Constructors, "root ")
 	if len(view.Flows) > 0 {
@@ -270,6 +272,7 @@ func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
 	writeDescribeIngress(out, flow.Ingress)
 	if flow.PrimaryEntity != nil {
 		fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)
+		writeDescribeEmbeddedSources(out, flow.PrimaryEntity.EmbeddedSources, "      ")
 	}
 	if flow.TemplateInstance != nil {
 		fmt.Fprintf(out, "    instance: field=%s identity=%s\n", flow.TemplateInstance.Field, flow.TemplateInstance.Identity)
@@ -631,6 +634,18 @@ func writeDescribeEvents(out io.Writer, events []authoringview.EventView, indent
 			fields = "fields: " + strings.Join(event.Fields, ", ")
 		}
 		fmt.Fprintf(out, "%s  - %s (%s)\n", indent, event.Name, fields)
+		writeDescribeEmbeddedSources(out, event.EmbeddedSources, indent+"    ")
+	}
+}
+
+func writeDescribeEmbeddedSources(out io.Writer, sources map[string]string, indent string) {
+	fields := make([]string, 0, len(sources))
+	for field := range sources {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	for _, field := range fields {
+		fmt.Fprintf(out, "%s%s: %s\n", indent, field, sources[field])
 	}
 }
 

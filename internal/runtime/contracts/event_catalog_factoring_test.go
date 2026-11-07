@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -34,8 +35,18 @@ func TestEventCatalogFactoringConsumers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(disk["test.event"].Payload, actual["test.event"].Payload) || !reflect.DeepEqual(actual["test.event"].Payload.Required, []string{"id"}) {
+		diskPayload, err := json.Marshal(disk["test.event"].Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifactPayload, err := json.Marshal(actual["test.event"].Payload)
+		if err != nil || !bytes.Equal(diskPayload, artifactPayload) || !reflect.DeepEqual(actual["test.event"].Payload.Required, []string{"id"}) {
 			t.Fatal("disk/artifact admission changed")
+		}
+		diskOrigin := disk["test.event"].Payload.Properties["id"].origin.definition
+		artifactOrigin := actual["test.event"].Payload.Properties["id"].origin.definition
+		if diskOrigin.File != path || artifactOrigin.File != "events.yaml" || diskOrigin.Line != 2 || artifactOrigin.Line != 2 || diskOrigin.Column != artifactOrigin.Column {
+			t.Fatalf("disk/artifact source coordinates changed: %+v / %+v", diskOrigin, artifactOrigin)
 		}
 		for _, label := range []string{"", "missing.yaml"} {
 			_, err := loadOptionalEventCatalogFromSource(artifact, label)

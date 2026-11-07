@@ -1855,6 +1855,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 }
 
 func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(t *testing.T) {
+	const payload = `{"entity_id":"ent-2","producer":"platform","consumer":"reviewer-ent-2","swarm":"external","key":"ent-2"}`
 	store := &descriptorAwareEventStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
 			testActiveAgentDescriptor(t, "reviewer-ent-1", eventtest.UUID(eventtest.UUID("ent-1")), ""),
@@ -1873,7 +1874,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 		events.EventType("custom.trigger"),
 		"",
 		"",
-		[]byte(`{"entity_id":"ent-2"}`),
+		[]byte(payload),
 		0,
 		runtimebustest.DefaultRunID,
 		"",
@@ -1885,6 +1886,9 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	}
 
 	evt := requireBusEvent(t, matchCh, "typed-envelope delivery to entity-scoped reviewer")
+	if string(evt.Payload()) != payload || evt.Producer().Type() == events.EventProducerPlatform {
+		t.Fatalf("business names rewrote payload or granted platform authority: %s, %+v", evt.Payload(), evt.Producer())
+	}
 	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}

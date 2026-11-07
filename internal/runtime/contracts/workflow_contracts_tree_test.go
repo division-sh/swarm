@@ -721,7 +721,7 @@ lookup:
 
 func TestEventCatalogEntry_RejectsRetiredSwarmMetadata(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.CanonicalExternalEventMetadata)
-	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "swarm") {
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), `payload field "swarm"`) {
 		t.Fatalf("retired swarm metadata admission = %v", err)
 	}
 }
@@ -757,9 +757,16 @@ entity_id: string
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := admitEventCatalogEntryForTest(t, tc.yaml)
-			if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), tc.wantField) {
-				t.Fatalf("load event catalog entry error = %v, want retired %s failure", err, tc.wantField)
+			entry, err := admitEventCatalogEntryForTest(t, tc.yaml)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.platformAuthority != (PlatformEventAuthority{}) {
+				t.Fatal("business field granted producer or consumer authority")
+			}
+			_, _, err = (&WorkflowContractBundle{}).compileCurrentEventDeclaration(".", "flow", "events.yaml", "test.event", "test.event", entry, TypeCatalogDocument{})
+			if err == nil || !strings.Contains(err.Error(), tc.wantField) {
+				t.Fatalf("unresolved business type was treated as %s authority: %v", tc.wantField, err)
 			}
 		})
 	}
@@ -768,7 +775,7 @@ entity_id: string
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.ConflictingEventMetadata)
 	_, err := admitEventCatalogParserSnippet(t, snippet)
-	if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), `event field name "swarm"`) {
+	if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), `event field name "_source"`) {
 		t.Fatalf("load event catalog entry error = %v, want retirement before legacy conflict interpretation", err)
 	}
 }

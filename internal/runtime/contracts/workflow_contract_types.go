@@ -811,6 +811,7 @@ type EventPayloadSpec struct {
 type EventFieldSpec struct {
 	Type        string           `yaml:"type"`
 	ExactSchema *ToolInputSchema `yaml:"-" json:"-"`
+	origin      fieldOrigin
 	// Platform event prose is not an authored event-field declaration.
 	platformDescription string
 }
@@ -887,12 +888,14 @@ func (e EnumTypeDecl) Validate(name string) error {
 }
 
 type NamedTypeDecl struct {
-	Fields map[string]TypeFieldSpec `yaml:"-"`
+	Fields     map[string]TypeFieldSpec `yaml:"-"`
+	definition yamlsource.Location
 }
 
 type TypeFieldSpec struct {
 	Type       string `yaml:"type"`
 	IsOptional bool   `yaml:"-" json:"is_optional"`
+	origin     fieldOrigin
 }
 
 type EntityContractsDocument map[string]EntityContract
@@ -907,6 +910,7 @@ type EntityFieldDecl struct {
 	IsOptional bool   `yaml:"-"`
 	Initial    any    `yaml:"initial"`
 	Indexed    bool   `yaml:"indexed"`
+	origin     fieldOrigin
 }
 type ProjectFlowIngress struct {
 	Alias     *string                      `yaml:"alias,omitempty"`

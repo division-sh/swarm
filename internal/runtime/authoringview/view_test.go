@@ -32,8 +32,14 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 	members := map[string][]byte{
 		"manifest.yaml":           []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":             []byte("stages: []\ninputs: [inbound.team-bot.text_message]\n"),
+		"types.yaml":              []byte("Record:\n  id: uuid\n"),
+		"events.yaml":             []byte("record.ready:\n  _embed: [Record]\n  own: text\n"),
+		"state.yaml":              []byte("_embed: [Record]\n"),
 		"child/manifest.yaml":     []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"child/schema.yaml":       []byte("stages: []\ninputs: [inbound.team_bot.text_message]\n"),
+		"child/types.yaml":        []byte("# child override\nRecord:\n  id: text\n"),
+		"child/events.yaml":       []byte("record.ready:\n  _embed: [Record]\n"),
+		"child/state.yaml":        []byte("_embed: [Record]\n"),
 		"inherited/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"inherited/schema.yaml":   []byte("stages: []\ninputs: [inbound.team-bot.text_message]\n"),
 	}
@@ -74,6 +80,16 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 			t.Fatalf("root holder readback lost exact captured declaration: %+v", view.Root.Ingress)
 		}
 		child := flowByID(t, view, "child")
+		if view.Root.Events[0].EmbeddedSources["id"] != "derived from _embed[0], types.yaml:2" ||
+			child.Events[0].EmbeddedSources["id"] != "derived from _embed[0], child/types.yaml:3" ||
+			child.PrimaryEntity == nil || child.PrimaryEntity.Fields["id"] != "text" ||
+			child.PrimaryEntity.EmbeddedSources["id"] != child.Events[0].EmbeddedSources["id"] ||
+			view.Root.PrimaryEntity == nil || view.Root.PrimaryEntity.Fields["id"] != "uuid" {
+			t.Fatalf("declaring catalog/source provenance lost: root=%+v child=%+v", view.Root, child)
+		}
+		if _, present := view.Root.Events[0].EmbeddedSources["own"]; present {
+			t.Fatal("own field invented embed provenance")
+		}
 		if child.Ingress == nil || child.Ingress.Alias != "standing-readback.child" || len(child.Ingress.Providers) != 1 || child.Ingress.Providers[0].Provider != "team_bot" {
 			t.Fatalf("child holder readback collapsed a distinct provider key: %+v", child.Ingress)
 		}
@@ -91,6 +107,9 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 		}
 		if strings.Contains(string(wire), "\"effective_provenance\"") {
 			t.Fatal("declaration projection retained the retired provenance ledger")
+		}
+		if strings.Contains(string(wire), "derived from _embed") || strings.Contains(string(wire), "EmbeddedSources") {
+			t.Fatal("text-only field origin changed the JSON view")
 		}
 		var projected struct {
 			Flows []map[string]any `json:"flows"`

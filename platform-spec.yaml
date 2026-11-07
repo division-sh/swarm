@@ -2718,7 +2718,7 @@ contract_formats:
           runtime_callback_routes: '#2423 supersedes consumer-side callback name repair with canonical producer publication; authoritative route semantics remain in route_plan_authority.runtime_callback_context.'
   persistence_model:
     description: Agents do not have raw database access. The platform derives agent-facing persistence tools from the
-      authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared
+      authoritative flow-owned state.yaml contracts, agents.yaml writes declarations, and the shared
       type system. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
     role_scoped_entity_tools:
       default_surface: 'For normal agents, the Path alpha entity-tool model is mandatory. If an actor resolves to a
@@ -2748,11 +2748,11 @@ contract_formats:
         non_lossy_invariant: 'Generated typed reads return the complete typed value or fail closed with an explicit typed-read
           error. They MUST NOT silently return preview, truncated, omitted, or follow-up-file placeholder shapes as the value.'
       generated_writes:
-        save_field: 'save_{entity_type}_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
-          authorized by agents.yaml entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.
+        save_field: 'save_state_{field}({value, op?, index?, key?}) operates on exactly one top-level declared field
+          authorized by own-flow agents.yaml writes: all or writes: [fields]. An absent grant authorizes no writes.
           Default/explicit set, list append, integer-index update and map-key set share runtime_enforcement.save_entity_field;
           each generated branch carries the exact value/key/index types and excludes unrelated operands.'
-        update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
+        update_path: 'update_state_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
           declared typed mutation plan as handlers. A missing named parent rejects; the tool never synthesizes it.'
         transactional_validation: 'Generated writes and internal entity creation carry the admitted source to the selected
@@ -2761,8 +2761,8 @@ contract_formats:
           Optimistic executor validation is not commit authority. Equality-participant paths remain available when explicitly
           granted, but each single-field tool call must leave the full candidate valid. No bulk, clear or CEL agent tool is added.'
         response_semantics: 'Generated save/update tools inherit save_entity_field committed revision and post-commit failure response semantics; they expose only the safe post_commit_error_code and MUST NOT expose raw SQL or connection error text or invite a duplicate write.'
-        create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
-          expose a generic agent-facing create_entity replacement for current-entity tools.'
+        create_rule: 'writes grants authorize neither creation nor cross-flow access. The platform does not
+          expose a generic agent-facing create_entity replacement for current-state tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
         is false for named-record and argument object schemas; declared maps retain their typed additionalProperties
         value schema and exact key constraints. Exclusive operation branches use oneOf through the canonical tool-schema
@@ -2811,12 +2811,11 @@ contract_formats:
 rule:
   statement: |
     Entity contracts are the authoritative source of truth for what
-    persists in entity_state. Entity type names are flow-scoped: each
-    entity type is declared in exactly one owner flow's entities.yaml,
-    and the owner flow is determined by the file location under
-    <flow-path>/entities.yaml. Different flows may reuse the
-    same short local name; the fully-qualified form is
-    <flow>.<entity_name>.
+    persists in entity_state. Each flow may declare one wrapperless
+    state.yaml field set; its internal and persisted entity_type is
+    the constant state. Ownership is the declaring flow, not an
+    authored entity-type name. A flow without state.yaml has no state
+    record or generated state tools.
 
     A shared type system declared in types.yaml is used by entity
     contracts, event payloads, and policy. Scalars, enums, named types,
@@ -2825,9 +2824,9 @@ rule:
     surface.
   consequences:
     flow_scoped_entity_types: |
-      Entity type names are flow-scoped, not bundle-global. Cross-flow
-      references use the fully-qualified form; inside the owner flow the
-      short form is sufficient.
+      State ownership is flow-scoped. Readers filter by flow, not by
+      an authored entity-type discriminator; the persisted entity_type
+      column remains and carries state.
     declared_is_authority: |
       Writers and readers conform to the declared contract. Writer drift,
       reader drift, and dead contract fields are verification failures.
@@ -3066,13 +3065,24 @@ type_system:
     - inheritance / extends clauses
     - recursive types in Wave 1
     allowed_composition: |
-      Reuse is compositional only: types reference other named types via
-      declared fields. There is no inheritance hierarchy.
+      Types may reference other named types via declared fields. Event
+      and state field sets may also use _embed: [T, ...] alongside own
+      fields. Each member must be a nonempty named record in the
+      declaring flow's catalog. Expansion transfers type and optionality
+      only, not initials, indexing or annotations. Repeated records and
+      all field collisions refuse statically; there is no override or
+      same-type exemption. List order does not change acceptance.
+      _key selects a required field of the expanded event field set.
+      Named record definitions do not themselves accept _embed.
+      There is no inheritance, extends clause or hierarchy.
+      Ordinary business names such as producer, swarm, required and key
+      confer no envelope or routing authority. Retired underscore metadata
+      aliases and old nested payload syntax remain refused.
   entity_envelope:
     description: |
       Every entity has a platform-owned envelope parallel to the event
       envelope. Envelope fields are implicit and are not author-declared
-      in entities.yaml.
+      in state.yaml.
     fields:
       id: uuid
       current_state: text (or null for stateless flows)
@@ -28978,8 +28988,10 @@ cli_specification:
                 Root and flow policy fields expose cloned effective literal values; rules fields expose the nearest
                 scoped agent or machine declarations in their flat authored shape, not wrapper metadata or two namespaces.
                 Source files include policy.yaml and rules.yaml; no effective_provenance section is emitted.
-                Expanded-field provenance, when present, is computed from the expansion at describe time and printed
-                as one text line: 'derived from `_embed[i]`, types.yaml:LINE'.
+                Expanded-field provenance is captured from admitted definition and use coordinates at expansion,
+                copied with its field, and rendered at describe time as one field-associated text line:
+                'derived from _embed[i], types.yaml:LINE', using the declaring file, including a child path.
+                It is not a new JSON field-list format and does not participate in acceptance schema identity.
               quiet_values:
               - flow ids and summary values declared by the command implementation
             describe_pack:

@@ -886,7 +886,7 @@ stages:
 			}
 			if strings.HasSuffix(tc.name, "metadata") {
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-				if err == nil || !strings.Contains(err.Error(), "is reserved") {
+				if err == nil || !strings.Contains(err.Error(), `["swarm"]`) || !strings.Contains(err.Error(), "is not supported") {
 					t.Fatalf("metadata-only role admission = %v, want retirement error", err)
 				}
 				return
@@ -5080,7 +5080,7 @@ func TestLoadRejectsTimerExternalConsumerMetadata(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
-	if err == nil || !strings.Contains(err.Error(), "is reserved") {
+	if err == nil || !strings.Contains(err.Error(), `["swarm"]`) || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("external consumer annotation admission = %v, want retirement error", err)
 	}
 }

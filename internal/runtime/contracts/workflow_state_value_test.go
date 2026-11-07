@@ -13,7 +13,8 @@ import (
 // declaration owner; literals cannot be silently interpreted as type names.
 func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 	catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
-		"Profile": {Fields: map[string]TypeFieldSpec{"name": {Type: "text"}}},
+		"Profile":  {Fields: map[string]TypeFieldSpec{"name": {Type: "text"}}},
+		"Embedded": {Fields: map[string]TypeFieldSpec{"x": {Type: "text", IsOptional: true}}},
 	}}
 	for _, tc := range []struct {
 		name, source, typeName, refusal string
@@ -22,6 +23,7 @@ func TestStateDeclarationRetainedStyleAndLiteralAdmission(t *testing.T) {
 	}{
 		{name: "type", source: "x: text\n", typeName: "text"},
 		{name: "optional", source: "x: Profile?\n", typeName: "Profile", optional: true},
+		{name: "embedded_optional", source: "_embed: [Embedded]\n", typeName: "text", optional: true},
 		{name: "list_type", source: "x: [Profile]\n", typeName: "[Profile]"},
 		{name: "nested_list_type", source: "x: [[Profile]]\n", typeName: "[[Profile]]"},
 		{name: "deep_list_type", source: "x: [[[integer]]]\n", typeName: "[[[integer]]]"},
