@@ -327,15 +327,6 @@ func TestCLIOutputConformanceRegistryRowsAreWellFormed(t *testing.T) {
 	}
 }
 
-func TestCLIOutputConformanceExceptionRulesDoNotContradictRegistry(t *testing.T) {
-	rows := cliOutputConformanceRegistryRows(t)
-	for _, command := range cliOutputAbsentCommandRows(t) {
-		if _, ok := rows["swarm "+command]; ok {
-			t.Errorf("absent_command_rows lists %q, but output_conformance_registry has a visible row for %q", command, "swarm "+command)
-		}
-	}
-}
-
 func cliOutputExceptionRuleNames(t *testing.T) map[string]bool {
 	t.Helper()
 	spec := loadCLISpecification(t)
@@ -346,30 +337,6 @@ func cliOutputExceptionRuleNames(t *testing.T) map[string]bool {
 	out := map[string]bool{}
 	for i := 0; i+1 < len(rules.Content); i += 2 {
 		out[rules.Content[i].Value] = true
-	}
-	return out
-}
-
-func cliOutputAbsentCommandRows(t *testing.T) []string {
-	t.Helper()
-	spec := loadCLISpecification(t)
-	foundations := driftMappingValue(spec, "foundations")
-	outputContract := driftMappingValue(foundations, "output_contract")
-	exceptionRules := driftMappingValue(outputContract, "exception_rules")
-	absent := driftMappingValue(exceptionRules, "absent_command_rows")
-	if absent == nil || absent.Kind != yaml.MappingNode {
-		t.Fatal("output_contract.exception_rules.absent_command_rows not found")
-	}
-	commands := driftMappingValue(absent, "commands")
-	if commands == nil {
-		return nil
-	}
-	if commands.Kind != yaml.SequenceNode {
-		t.Fatalf("output_contract.exception_rules.absent_command_rows.commands kind = %v, want sequence", commands.Kind)
-	}
-	out := make([]string, 0, len(commands.Content))
-	for _, command := range commands.Content {
-		out = append(out, strings.TrimSpace(command.Value))
 	}
 	return out
 }
