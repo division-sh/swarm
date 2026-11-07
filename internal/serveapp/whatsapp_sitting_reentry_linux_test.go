@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -294,5 +295,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	t.Logf("restored same-account public journey completed on %s", backend)
+	id := effects.RegisteredOperatorAcknowledgementID(registered.Binding.OperationID, registered.Binding.Revision)
+	requireRegisteredAckMessage(t, ctx, peer, registered.Binding, strings.ReplaceAll(id, "-", ""))
 	requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, registered.Operation)
 }
