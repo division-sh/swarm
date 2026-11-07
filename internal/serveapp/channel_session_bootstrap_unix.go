@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -622,7 +623,7 @@ func (s *serveSessionBootstrap) CurrentValueMatchesSeal(ctx context.Context, exp
 }
 
 func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account operatorchannel.SessionAccountAdmission) (authority.Admission, error) {
-	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || account.Provider != "whatsapp" {
+	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || !channelprovider.Session(account.Provider) {
 		return authority.Admission{}, channelonboarding.ErrInvalidRequest
 	}
 	s.mu.Lock()

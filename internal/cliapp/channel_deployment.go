@@ -730,7 +730,7 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if len(rows) == 0 && provider == "whatsapp" && account == "" {
+	if len(rows) == 0 && channelprovider.Session(provider) && account == "" {
 		if err := client.Close(context.WithoutCancel(ctx)); err != nil {
 			return returnCLIValidationError(errOut, err)
 		}

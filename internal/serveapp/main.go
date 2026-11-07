@@ -16,6 +16,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -1754,7 +1755,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				return serveRegistrationSelectionCurrent(ctx, runtimeContextManager, channelOnboardingStore, pair, exactRevision)
 			},
 			EnrollmentAdmission: func(ctx context.Context, account channelonboarding.AccountReference) error {
-				if account.Provider != "telegram" {
+				provider, _ := channelprovider.Lookup(account.Provider)
+				if !provider.Webhook() {
 					return nil
 				}
 				op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
