@@ -31,6 +31,13 @@ func TestRegisteredAcknowledgementAuthorityIsOneClosedMessage(t *testing.T) {
 		"borrowed bundle":     func(a *Authority) { a.ChannelConfirmation.BundleHash = "bundle" },
 		"borrowed runtime":    func(a *Authority) { a.ChannelConfirmation.RuntimeInstanceID = uuid.NewString() },
 		"missing parent":      func(a *Authority) { a.ChannelConfirmation.TransportParent = nil },
+		"runtime parent": func(a *Authority) {
+			p := channelnative.TransportParent{Kind: channelnative.TransportRuntimeActivation,
+				ID: a.ChannelConfirmation.OnboardingOperationID, Revision: a.ChannelConfirmation.OnboardingRevision}
+			a.ChannelConfirmation.TransportParent = &p
+			a.ID = RegisteredOperatorAcknowledgementID("", a.ChannelConfirmation.BindingRevision)
+			a.ChannelConfirmation.EffectOperationID = a.ID
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := a
