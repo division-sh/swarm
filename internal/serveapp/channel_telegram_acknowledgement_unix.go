@@ -80,17 +80,21 @@ func (c *deploymentChannelSession) acknowledgeRegisteredTelegram(ctx context.Con
 	ctx = effects.WithAuthority(ctx, a)
 	ctx = effects.WithController(ctx, effects.NewController(c.opts.Effects).WithExecutionPosture(executionposture.Live))
 	executor := registration.HTTPExecutor{Client: c.opts.HTTP, Preflight: func(ctx context.Context) error {
-		retained, err := c.opts.Operations.GetChannelOnboarding(ctx, op.OperationID)
-		if err != nil || retained.Revision != op.Revision || retained.PrincipalID != op.PrincipalID || retained.AccountReference != op.AccountReference ||
-			retained.IdentityOperationID != child.OperationID || retained.FailureCode != "" || retained.LogoutCompleted {
-			return errors.Join(channelonboarding.ErrRevisionConflict, err)
-		}
-		matches, err := c.opts.Credentials.CurrentValueMatchesSeal(ctx, evidence)
-		if err != nil || !matches {
-			return errors.Join(operatorchannel.ErrCredentialStale, err)
-		}
-		return nil
+		return c.validateRegisteredTelegramAcknowledgement(ctx, op, child.OperationID, evidence)
 	}}
 	_, err = executor.DeliverChannelConfirmation(ctx, toolID, tool, input, map[string]any{admission.Role: snapshot.CredentialValue()}, nil)
 	return err
+}
+
+func (c *deploymentChannelSession) validateRegisteredTelegramAcknowledgement(ctx context.Context, op channelonboarding.Operation, childID string, evidence credentials.ValueEvidence) error {
+	retained, err := c.opts.Operations.GetChannelOnboarding(ctx, op.OperationID)
+	if err != nil || retained.Revision != op.Revision || retained.PrincipalID != op.PrincipalID || retained.AccountReference != op.AccountReference ||
+		retained.IdentityOperationID != childID || retained.FailureCode != "" || retained.LogoutCompleted {
+		return errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	matches, err := c.opts.Credentials.CurrentValueMatchesSeal(ctx, evidence)
+	if err != nil || !matches {
+		return errors.Join(operatorchannel.ErrCredentialStale, err)
+	}
+	return nil
 }
