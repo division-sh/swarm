@@ -60,6 +60,15 @@ func (f *runtimeBootstrapFixture) AcknowledgeRegisteredOperator(ctx context.Cont
 		return err
 	}
 	f.peer.admitMessageRecipient(to, 0) // The existing encrypted claim fixture is from device zero.
+	device, err := f.connection.state.device(ctx)
+	if err != nil {
+		return err
+	}
+	lid, err := device.LIDs.GetLIDForPN(ctx, to)
+	if err != nil || lid.IsEmpty() {
+		return errors.Join(errors.New("synthetic claim did not establish its sender PN/LID mapping"), err)
+	}
+	f.peer.admitMessageRecipient(lid, 0)
 	done := make(chan error, 1)
 	go func() {
 		done <- f.connection.AcknowledgeRegisteredOperator(ctx, f.store.(effects.Store), op, child, binding)

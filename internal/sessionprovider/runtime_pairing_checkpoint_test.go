@@ -363,6 +363,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					}
 					message := encryptedMessageFixture(t, device, types.NewJID("15550100124", types.DefaultUserServer),
 						&waE2E.Message{Conversation: proto.String(registered.IdentityOperation.Challenge)})
+					message.Attrs["sender_lid"] = types.NewJID("100000000124", types.HiddenUserServer)
 					f.peer.mu.Lock()
 					socket := f.peer.peers[0]
 					f.peer.mu.Unlock()
