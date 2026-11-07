@@ -17,7 +17,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/testplanning"
-	"gopkg.in/yaml.v3"
 )
 
 type publicSurfaceStoreParity struct {
@@ -59,7 +58,6 @@ type publicSurfaceStoreParityClaim struct {
 	RuntimeDeps         []string                           `yaml:"runtime_deps,omitempty"`
 	NestedRoles         map[string][]string                `yaml:"nested_roles,omitempty"`
 	OptionalProducts    []string                           `yaml:"optional_products,omitempty"`
-	PlatformTables      []string                           `yaml:"platform_tables,omitempty"`
 	PublicMethods       []string                           `yaml:"public_methods,omitempty"`
 }
 
@@ -110,7 +108,6 @@ type publicSurfaceStoreParitySourceSets struct {
 	optionalProducts map[string]struct{}
 	runtimeDeps      map[string]struct{}
 	compositeParents map[string]publicSurfaceStoreCompositeParent
-	platformTables   map[string]struct{}
 }
 
 type publicSurfaceStoreParityValidationContext struct {
@@ -310,22 +307,6 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 				claim.NestedRoles["product_run_fork"] = storeParityStringsExcept(claim.NestedRoles["product_run_fork"], "executionOwner")
 			},
 			want: "composite owner product_run_fork role census missing executionOwner",
-		},
-		{
-			name: "platform table",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "run_fork_revision")
-				claim.PlatformTables = storeParityStringsExcept(claim.PlatformTables, "run_fork_revisions")
-			},
-			want: "platform table census missing run_fork_revisions",
-		},
-		{
-			name: "duplicate platform table",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "run_fork_revision")
-				claim.PlatformTables = append(claim.PlatformTables, "run_fork_revisions")
-			},
-			want: "platform table census contains duplicate run_fork_revisions",
 		},
 		{
 			name: "public method",
@@ -651,7 +632,6 @@ func validatePublicSurfaceStoreParity(root string, layer publicSurfaceStoreParit
 		delete(compositeParents, "RuntimeDeps."+field)
 	}
 	problems = append(problems, validatePublicSurfaceStoreCompositeOwners(root, layer.CompositeOwners, layer.Claims, compositeParents)...)
-	problems = append(problems, validatePublicSurfaceStoreParityValues("platform table", collectStoreParityClaimValues(layer.Claims, func(c publicSurfaceStoreParityClaim) []string { return c.PlatformTables }), sources.platformTables)...)
 	problems = append(problems, validatePublicSurfaceStoreParityValues("public method", collectStoreParityClaimValues(layer.Claims, func(c publicSurfaceStoreParityClaim) []string { return c.PublicMethods }), ctx.apiMethods)...)
 	problems = append(problems, validatePublicSurfaceStoreParityMethodLinks(layer.Claims, mutating, reads)...)
 	sort.Strings(problems)
@@ -1493,14 +1473,9 @@ func loadPublicSurfaceStoreParitySourceSets(root string) (publicSurfaceStorePari
 	for field, parent := range productComposite {
 		compositeParents["productPorts."+field] = parent
 	}
-	tables, err := sourcePlatformTables(filepath.Join(root, "platform-spec.yaml"))
-	if err != nil {
-		return publicSurfaceStoreParitySourceSets{}, err
-	}
 	return publicSurfaceStoreParitySourceSets{
 		constructors: constructors, consumers: consumers, requiredPorts: required,
 		optionalProducts: products, runtimeDeps: runtimeDeps, compositeParents: compositeParents,
-		platformTables: tables,
 	}, nil
 }
 
@@ -1802,26 +1777,6 @@ func sourceNamedTypeMembers(path, typeName string, interfaceMembers bool) (map[s
 		}
 	}
 	return nil, fmt.Errorf("type %s not found in %s", typeName, path)
-}
-
-func sourcePlatformTables(path string) (map[string]struct{}, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var spec struct {
-		PlatformTables struct {
-			Tables map[string]any `yaml:"tables"`
-		} `yaml:"platform_tables"`
-	}
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		return nil, err
-	}
-	out := map[string]struct{}{}
-	for table := range spec.PlatformTables.Tables {
-		out[table] = struct{}{}
-	}
-	return out, nil
 }
 
 func allowedPublicSurfaceStoreParityDispositions() map[string]struct{} {
