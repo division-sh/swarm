@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -53,6 +54,11 @@ type runtimeBootstrapFixture struct {
 }
 
 func (f *runtimeBootstrapFixture) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
+	to, err := types.ParseJID(binding.ConversationRef)
+	if err != nil {
+		return err
+	}
+	f.peer.admitMessageRecipient(to, 0) // The existing encrypted claim fixture is from device zero.
 	done := make(chan error, 1)
 	go func() {
 		done <- f.connection.AcknowledgeRegisteredOperator(ctx, f.store.(effects.Store), op, child, binding)
