@@ -1749,7 +1749,7 @@ func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects
 		return nil, err
 	}
 	if parent != nil {
-		if req.Kind != runtimeeffects.KindChannelConfirmation || req.Class != runtimeeffects.EffectWriteOrUnknown || req.Adapter != "channel_confirmation_whatsapp" || req.Transport != "in_process" ||
+		if req.OperationID != authority.ID || req.Kind != runtimeeffects.KindChannelConfirmation || req.Class != runtimeeffects.EffectWriteOrUnknown || req.Adapter != "channel_confirmation_whatsapp" || req.Transport != "in_process" ||
 			req.RequestFingerprint != runtimeeffects.Fingerprint([]byte(authority.ChannelConfirmation.Destination+"\n"+runtimeeffects.RegisteredOperatorAcknowledgementText)) {
 			return nil, fmt.Errorf("deployment acknowledgement requires its exact native adapter and fixed message")
 		}

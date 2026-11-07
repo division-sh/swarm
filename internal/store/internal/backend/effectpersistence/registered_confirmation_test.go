@@ -21,13 +21,14 @@ func TestRegisteredAcknowledgementNullBundleRequiresExactNativeRequest(t *testin
 		ChannelConfirmation: effects.ChannelConfirmationAuthority{TransportParent: &parent, EffectOperationID: id,
 			OnboardingOperationID: parent.ID, OnboardingRevision: parent.Revision, PrincipalID: uuid.NewString(), BindingRevision: 1, Destination: destination}}
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(uuid.NewString()))
-	req := effects.AuthorizeRequest{Kind: effects.KindChannelConfirmation, Class: effects.EffectWriteOrUnknown,
+	req := effects.AuthorizeRequest{OperationID: id, Kind: effects.KindChannelConfirmation, Class: effects.EffectWriteOrUnknown,
 		Adapter: "channel_confirmation_whatsapp", Transport: "in_process",
 		RequestFingerprint: effects.Fingerprint([]byte(destination + "\nSwarm operator successfully connected"))}
 	if bundle, err := externalEffectOperationBundle(ctx, a, req); err != nil || bundle != nil {
 		t.Fatal("closed registered request did not select SQL NULL", bundle, err)
 	}
 	for _, mutate := range []func(*effects.AuthorizeRequest){
+		func(r *effects.AuthorizeRequest) { r.OperationID = uuid.NewString() },
 		func(r *effects.AuthorizeRequest) { r.Kind = effects.KindChannelDelivery },
 		func(r *effects.AuthorizeRequest) { r.Class = effects.EffectReadOnly },
 		func(r *effects.AuthorizeRequest) { r.Adapter = "channel_confirmation" },
