@@ -1,7 +1,10 @@
 package authoractivity
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,5 +51,65 @@ func TestDeploymentEffectLifecycleRequiresOriginalParent(t *testing.T) {
 			t.Fatal("mixed evidence admitted", field)
 		}
 		delete(evidence, field)
+	}
+}
+
+func TestDeploymentEffectActivityRequiresOriginalParentWithoutPublicBundle(t *testing.T) {
+	parent := channelnative.TransportParent{Kind: channelnative.TransportDeploymentRegistration,
+		ID: uuid.NewString(), Revision: 3, BindingOperationID: uuid.NewString(), BindingOperationRevision: 2}
+	for _, kind := range []string{"channel_native_setting", "channel_delivery", "channel_action_ack", "serve_registration"} {
+		t.Run(kind, func(t *testing.T) {
+			id := uuid.NewString()
+			evidence := map[string]any{"authority_kind": kind, "authority_id": id, "transport_parent": parent}
+			raw, err := json.Marshal(evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := DeploymentEffectParent(kind, id, raw)
+			if err != nil || decoded == nil || *decoded != parent {
+				t.Fatalf("original deployment parent: %v", err)
+			}
+			draft := testDraft(KindEffectLifecycle, "launched", time.Now())
+			draft.Projection.AuthorityKind, draft.Projection.AuthorityID = kind, id
+			draft.EffectAuthorityEvidence, draft.Scope = raw, RuntimeScope(uuid.NewString())
+			admitted, err := AdmitDraft(context.Background(), draft)
+			if err != nil {
+				t.Fatal(err)
+			}
+			occurrence := Occurrence{OccurrenceID: admitted.OccurrenceID, Kind: admitted.Kind,
+				Version: admitted.Version, Transition: admitted.Transition, SourceOwner: admitted.SourceOwner,
+				SourceIdentity: admitted.SourceIdentity, DedupKey: admitted.DedupKey, OccurredAt: admitted.OccurredAt,
+				Scope: admitted.Scope, Projection: admitted.Projection, EffectAuthorityEvidence: admitted.EffectAuthorityEvidence}
+			var output bytes.Buffer
+			if err := Render(&output, []Occurrence{occurrence}, RenderOptions{Mode: RenderNDJSON}); err != nil {
+				t.Fatal(err)
+			}
+			for _, forbidden := range []string{"bundle_hash", "transport_parent", "binding_operation_id", "EffectParent"} {
+				if strings.Contains(output.String(), forbidden) {
+					t.Fatalf("readback exposed private or invented %s", forbidden)
+				}
+			}
+			withoutParent := draft
+			withoutParent.EffectAuthorityEvidence = nil
+			if err := ValidateDraft(withoutParent); err == nil {
+				t.Fatal("missing bundle selected deployment without parent")
+			}
+			withBundle := draft
+			withBundle.Scope = BundleScope(draft.Scope.RuntimeInstanceID, "borrowed-bundle")
+			if err := ValidateDraft(withBundle); err == nil {
+				t.Fatal("deployment effect accepted an author bundle")
+			}
+			evidence["bundle_hash"] = ""
+			raw, err = json.Marshal(evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DeploymentEffectParent(kind, id, raw); err == nil {
+				t.Fatal("mixed evidence accepted even with empty authored coordinate")
+			}
+			if _, err := DeploymentEffectParent("channel_confirmation", id, raw); err == nil {
+				t.Fatal("unreleased operation accepted deployment parent")
+			}
+		})
 	}
 }

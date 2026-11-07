@@ -36,6 +36,9 @@ func settleDeploymentClaim(ctx context.Context, identities operatorchannel.Store
 
 func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger providertriggers.InboundAdmissionPlan, channel packs.SatisfactionPlan) (sessionSetupProjection, error) {
 	var absent sessionSetupProjection
+	if admitted.Responsibility().DeploymentOperator {
+		return absent, fmt.Errorf("completed deployment operator input is not a setup claim")
+	}
 	generation, err := channel.Generation()
 	if err != nil || !admitted.Responsibility().DeploymentRegistration && !generation.Equal(admitted.Coordinate().PlanGeneration) {
 		return absent, fmt.Errorf("native setup requires its exact original channel plan")

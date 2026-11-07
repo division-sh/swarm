@@ -16569,6 +16569,10 @@ platform_tables:
         allowed and required projection fields, failure-bearing transitions, author-facing subject strategy, and any typed
         subject vocabulary, exact scope policy, human visibility, and rendered action. Producers and renderers MUST consume
         that same row; parallel source, field, scope, visibility, action, or subject registries are forbidden.
+        An exact deployment-parent native installation, channel delivery, acknowledgment, or ServeRegistration
+        effect uses runtime scope without scope.bundle_hash in effect.lifecycle readback. The original effect
+        operation's validated deployment-parent evidence selects that disjoint case, never an absent bundle;
+        authored effects retain their exact bundle scope requirement.
       delivery_lifecycle_contract: >-
         delivery.lifecycle/v2 admits in_progress, delivered, failed, dead_letter, terminalized, and canceled. Canceled
         carries the exact authored terminate or turn_timeout reason, without a failure envelope. failed and dead_letter
@@ -17250,9 +17254,11 @@ platform_tables:
         setting. Sequential handoff preserves generation/effect evidence; contradictory
         simultaneous current authority is invalid. Stale predecessor retirement cannot fence
         the successor. Last-current retirement fences local entry without a provider delete.
-        activation_id is an immutable historical coordinate, not a foreign key to a live
-        activation row. Consumer creation and every usable current read still require the
-        exact current activation, binding and context. Destructive reset preserves that
+        activation_id is the legacy SQL name of an immutable tagged parent coordinate, not a foreign key to a live
+        activation row. runtime_activation retains the exact runtime activation and positive publication generation;
+        deployment_registration retains the actual deployment operation and revision plus explicit parent_evidence,
+        with no runtime generation. An ID cannot change kind or alias another parent's history. Consumer creation and
+        every usable current read still require the exact current parent, binding and applicable context. Destructive reset preserves that
         coordinate and all historical setting/install evidence while atomically retiring
         consumers whose executable activations are removed. A healthy last-consumer setting
         becomes locally retired; an unresolved launched install remains uncertain, never
@@ -17271,11 +17277,13 @@ platform_tables:
       ddl: |
         CREATE TABLE channel_native_setting_consumers (
             setting_id UUID NOT NULL REFERENCES channel_native_settings(setting_id),
+            parent_kind TEXT NOT NULL DEFAULT 'runtime_activation' CHECK (parent_kind IN ('runtime_activation','deployment_registration')),
+            parent_evidence JSONB,
             activation_id UUID NOT NULL,
             activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
-            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
+            context_publication_generation BIGINT,
             state TEXT NOT NULL CHECK (state IN ('current','retired')),
             qualification_state TEXT NOT NULL DEFAULT 'missing' CHECK (qualification_state IN ('missing','invalid','stale','qualified')),
             qualification_locale_revision BIGINT NOT NULL DEFAULT 0,
@@ -17288,6 +17296,7 @@ platform_tables:
             qualification_reason TEXT NOT NULL DEFAULT '',
             qualification_observed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL,
+            CHECK ((parent_kind = 'runtime_activation' AND parent_evidence IS NULL AND context_publication_generation IS NOT NULL AND context_publication_generation > 0) OR (parent_kind = 'deployment_registration' AND parent_evidence IS NOT NULL AND context_publication_generation IS NULL)),
             PRIMARY KEY (setting_id, activation_id),
             UNIQUE (activation_id),
             INDEX idx_channel_native_setting_consumer_current (setting_id, state)
@@ -17340,6 +17349,7 @@ platform_tables:
             source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary','response')),
             source_id UUID NOT NULL,
             request_activation_id UUID,
+            request_transport_parent JSONB,
             summary_count BIGINT CHECK (summary_count > 0),
             principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
@@ -17360,7 +17370,7 @@ platform_tables:
             resend_action_publication_id UUID UNIQUE,
             created_at TIMESTAMPTZ NOT NULL,
             CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
-            CHECK ((source_kind = 'response' AND request_activation_id IS NOT NULL) OR (source_kind <> 'response' AND request_activation_id IS NULL)),
+            CHECK ((source_kind = 'response' AND ((request_activation_id IS NOT NULL AND request_transport_parent IS NULL) OR (request_activation_id IS NULL AND request_transport_parent IS NOT NULL))) OR (source_kind <> 'response' AND request_activation_id IS NULL AND request_transport_parent IS NULL)),
             CHECK ((resend_generation = 0 AND resend_of_delivery_id IS NULL AND resend_action_publication_id IS NULL) OR (resend_generation > 0 AND resend_of_delivery_id IS NOT NULL AND resend_action_publication_id IS NOT NULL)),
             UNIQUE (source_kind, source_id, interface_key, delivery_epoch, resend_generation),
             INDEX idx_channel_delivery_plan_source (source_kind, source_id),
@@ -17800,6 +17810,9 @@ platform_tables:
       ddl: |
         CREATE TABLE operator_channel_action_intents (
             publication_id UUID PRIMARY KEY,
+            transport_parent JSONB,
+            request_fingerprint TEXT,
+            native_capture_fingerprint TEXT,
             provider TEXT NOT NULL,
             provider_event_id TEXT NOT NULL,
             interface_key TEXT NOT NULL,
@@ -17809,6 +17822,8 @@ platform_tables:
             disposition TEXT CHECK (disposition IN ('applied','input_started','navigation','stale','rejected','unsupported')),
             recorded_at TIMESTAMPTZ NOT NULL,
             settled_at TIMESTAMPTZ,
+            CHECK ((transport_parent IS NULL) = (request_fingerprint IS NULL)),
+            CHECK (native_capture_fingerprint IS NULL OR (transport_parent IS NOT NULL AND provider = 'whatsapp')),
             CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
             INDEX idx_operator_channel_action_pending (state, recorded_at)
         );
@@ -17844,6 +17859,9 @@ platform_tables:
       ddl: |
         CREATE TABLE operator_channel_text_intents (
             publication_id UUID PRIMARY KEY,
+            transport_parent JSONB,
+            request_fingerprint TEXT,
+            native_capture_fingerprint TEXT,
             provider TEXT NOT NULL,
             provider_event_id TEXT NOT NULL,
             interface_key TEXT NOT NULL,
@@ -17853,6 +17871,8 @@ platform_tables:
             disposition TEXT,
             recorded_at TIMESTAMPTZ NOT NULL,
             settled_at TIMESTAMPTZ,
+            CHECK ((transport_parent IS NULL) = (request_fingerprint IS NULL)),
+            CHECK (native_capture_fingerprint IS NULL OR (transport_parent IS NOT NULL AND provider = 'whatsapp')),
             CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
             INDEX idx_operator_channel_text_pending (state, recorded_at)
         );
@@ -18165,6 +18185,9 @@ platform_tables:
         before mutation. A non-agent authority must not carry agent_run_id. Missing, malformed, or
         conflicting authority fails closed without settling, reclaiming, or otherwise mutating the
         operation.
+        Only exact deployment-parent native installation, channel delivery, acknowledgment and ServeRegistration
+        operations omit bundle_hash, selected by their validated original authority evidence. Authored operations
+        retain their exact source-owned bundle; a missing bundle never selects deployment authority.
       ddl: |
         CREATE TABLE runtime_external_effect_operations (
             operation_id       UUID PRIMARY KEY,
@@ -18196,7 +18219,7 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            CHECK ((bundle_hash IS NOT NULL AND NULLIF(TRIM(bundle_hash), '') IS NOT NULL AND (authority_evidence -> 'transport_parent') IS NULL) OR (bundle_hash IS NULL AND effect_kind = 'channel_confirmation' AND authority_kind = 'channel_confirmation' AND COALESCE(((authority_evidence -> 'transport_parent')->>'kind'), '') = 'deployment_registration')),
+            CHECK ((bundle_hash IS NOT NULL AND NULLIF(TRIM(bundle_hash), '') IS NOT NULL AND ((authority_evidence -> 'transport_parent') IS NULL OR COALESCE(((authority_evidence -> 'transport_parent')->>'kind'), '') = 'runtime_activation')) OR (bundle_hash IS NULL AND effect_kind = authority_kind AND authority_kind IN ('channel_confirmation', 'serve_registration', 'channel_delivery', 'channel_action_ack', 'channel_native_setting') AND COALESCE(((authority_evidence -> 'transport_parent')->>'kind'), '') = 'deployment_registration')),
             CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation', 'channel_delivery', 'channel_action_ack', 'channel_native_setting', 'channel_logout') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
             CHECK ((effect_kind <> 'provider_turn' OR authority_kind NOT IN ('normal_agent', 'selected_contract_fork') OR agent_frame_bytes IS NOT NULL) AND (agent_frame_bytes IS NULL OR (effect_kind = 'provider_turn' AND authority_kind IN ('normal_agent', 'selected_contract_fork')))),

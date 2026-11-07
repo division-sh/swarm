@@ -15,6 +15,7 @@ import (
 const Description = "Open inbox"
 
 type Admission struct {
+	Parent                       TransportParent
 	Provider                     string
 	ResourceSlotID               string
 	ConversationReference        string
@@ -36,18 +37,41 @@ func (a Admission) Validate() error {
 		!strings.HasPrefix(a.ResourceSlotID, a.Provider+":") ||
 		strings.TrimSpace(a.ConversationReference) == "" ||
 		uuid.Validate(a.PrincipalID) != nil || strings.TrimSpace(a.InterfaceKey) == "" ||
-		a.BindingRevision < 1 || uuid.Validate(a.ActivationID) != nil ||
-		a.ActivationRevision < 1 || a.ContextPublicationGeneration < 1 ||
+		a.BindingRevision < 1 ||
 		strings.TrimSpace(a.PackID) == "" || strings.TrimSpace(a.PackVersion) == "" ||
 		strings.TrimSpace(a.PackManifestHash) == "" || !a.PlanGeneration.Valid() ||
 		strings.TrimSpace(a.EntryContractHash) == "" {
 		return fmt.Errorf("native inbox setting admission is incomplete")
+	}
+	if _, err := a.TransportParent(); err != nil {
+		return err
 	}
 	expected, err := EntryContractHash(a.PlanGeneration)
 	if err != nil || a.EntryContractHash != expected {
 		return fmt.Errorf("native inbox setting contract does not match compiled plan")
 	}
 	return nil
+}
+
+// Existing runtime callers retain their activation coordinates. Only an
+// explicit deployment tag can select the registration case.
+func (a Admission) TransportParent() (TransportParent, error) {
+	p := a.Parent
+	if p == (TransportParent{}) {
+		p = TransportParent{Kind: TransportRuntimeActivation,
+			ID: a.ActivationID, Revision: a.ActivationRevision}
+	}
+	if err := p.Validate(); err != nil {
+		return TransportParent{}, err
+	}
+	if p.Kind == TransportRuntimeActivation {
+		if p.ID != a.ActivationID || p.Revision != a.ActivationRevision || a.ContextPublicationGeneration < 1 {
+			return TransportParent{}, fmt.Errorf("native inbox runtime parent contradicts its activation")
+		}
+	} else if a.ActivationID != "" || a.ActivationRevision != 0 || a.ContextPublicationGeneration != 0 {
+		return TransportParent{}, fmt.Errorf("native inbox deployment parent cannot carry runtime coordinates")
+	}
+	return p, nil
 }
 
 func EntryCommand(settingID string, generation int64) (string, error) {
@@ -127,6 +151,7 @@ type Qualification struct {
 }
 
 type QualificationRequest struct {
+	Parent             TransportParent
 	SettingID          string
 	SettingGeneration  int64
 	ActivationID       string
@@ -148,4 +173,5 @@ type Store interface {
 	MarkNativeInboxSettingUnavailable(context.Context, string, int64) error
 	RecordNativeInboxQualification(context.Context, QualificationRequest) error
 	ReadNativeInboxQualification(context.Context, string) (Qualification, error)
+	ReadNativeInboxQualificationParent(context.Context, TransportParent) (Qualification, error)
 }

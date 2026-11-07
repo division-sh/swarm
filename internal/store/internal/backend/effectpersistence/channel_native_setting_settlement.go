@@ -38,7 +38,8 @@ func requireChannelNativeSettingSettlementAuthorityTx(ctx context.Context, tx *s
 			FOR UPDATE OF operation, attempt, setting`
 	}
 	var storedEvidence, originalEvidence, operationEvidence []byte
-	var kind, effectKind, bundleHash, state, owner, installOperationID string
+	var kind, effectKind, state, owner, installOperationID string
+	var bundleHash sql.NullString
 	var fence uint64
 	var generation int64
 	if err := tx.QueryRowContext(ctx, query, authority.ChannelNativeSetting.SettingID, settlement.OperationID, settlement.AttemptID).Scan(
@@ -47,10 +48,13 @@ func requireChannelNativeSettingSettlementAuthorityTx(ctx context.Context, tx *s
 		return fmt.Errorf("load exact native setting settlement attempt: %w", err)
 	}
 	if kind != string(runtimeeffects.AuthorityChannelNativeSetting) || effectKind != string(runtimeeffects.KindChannelNativeSetting) ||
-		bundleHash != authority.ChannelNativeSetting.BundleHash || owner != authority.ExecutionOwner ||
+		bundleHash.String != authority.ChannelNativeSetting.BundleHash || owner != authority.ExecutionOwner ||
 		fence != authority.FenceGeneration || generation != authority.ChannelNativeSetting.SettingGeneration ||
 		installOperationID != settlement.OperationID {
 		return fmt.Errorf("native setting settlement attempt contradicts authority")
+	}
+	if _, err := validateExternalEffectStoredScope(kind, authority.ID, operationEvidence, bundleHash); err != nil {
+		return err
 	}
 	if err := requireChannelSettlementEvidence(authority, storedEvidence, originalEvidence, operationEvidence); err != nil {
 		return err

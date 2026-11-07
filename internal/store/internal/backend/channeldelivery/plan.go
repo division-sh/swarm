@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +18,7 @@ type Plan struct {
 	SourceKind             string
 	SourceID               string
 	RequestActivationID    string
+	RequestParent          channelnative.TransportParent
 	SummaryCount           int64
 	PrincipalID            string
 	InterfaceKey           string
@@ -48,7 +50,11 @@ func (p Plan) validateSource() error {
 		if p.SummaryCount != 0 {
 			return fmt.Errorf("non-summary delivery plan has summary count")
 		}
-		if (p.SourceKind == PlanResponse && uuid.Validate(p.RequestActivationID) != nil) ||
+		if p.RequestParent != (channelnative.TransportParent{}) {
+			if p.SourceKind != PlanResponse || p.RequestActivationID != "" || p.RequestParent.Kind != channelnative.TransportDeploymentRegistration || p.RequestParent.Validate() != nil {
+				return fmt.Errorf("channel response deployment parent is invalid")
+			}
+		} else if (p.SourceKind == PlanResponse && uuid.Validate(p.RequestActivationID) != nil) ||
 			(p.SourceKind != PlanResponse && p.RequestActivationID != "") {
 			return fmt.Errorf("channel response activation ownership is invalid")
 		}
@@ -56,7 +62,7 @@ func (p Plan) validateSource() error {
 		if p.SummaryCount < 1 {
 			return fmt.Errorf("summary delivery plan has no notices")
 		}
-		if p.RequestActivationID != "" {
+		if p.RequestActivationID != "" || p.RequestParent != (channelnative.TransportParent{}) {
 			return fmt.Errorf("summary delivery has response activation")
 		}
 	default:
@@ -69,19 +75,20 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 	if db == nil || uuid.Validate(deliveryID) != nil {
 		return Plan{}, false, fmt.Errorf("channel delivery plan requires a store and delivery id")
 	}
-	query := `SELECT delivery_id, source_kind, source_id, COALESCE(request_activation_id, ''), COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
+	query := `SELECT delivery_id, source_kind, source_id, COALESCE(request_activation_id, ''), request_transport_parent, COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
 		external_account, conversation_reference, conversation_scope, state,
 		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, ''), action_capacity, text_capacity, label_capacity, action_page_index, ` + AcceptedEffectPredicate(false) + `
 		FROM channel_delivery_plans p WHERE delivery_id = ?`
 	if postgres {
-		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(request_activation_id::text, ''), COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
+		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(request_activation_id::text, ''), request_transport_parent, COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
 			external_account, conversation_reference, conversation_scope, state,
 			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, ''), action_capacity, text_capacity, label_capacity, action_page_index, ` + AcceptedEffectPredicate(true) + `
 			FROM channel_delivery_plans p WHERE delivery_id = $1::uuid`
 	}
 	var plan Plan
 	var scope string
-	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.RequestActivationID, &plan.SummaryCount,
+	var parent []byte
+	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.RequestActivationID, &parent, &plan.SummaryCount,
 		&plan.PrincipalID, &plan.InterfaceKey, &plan.BindingRevision, &plan.DeliveryEpoch, &plan.ExternalAccountRef,
 		&plan.ConversationRef, &scope, &plan.State, &plan.CurrentRenderID, &plan.CurrentReceiptID,
 		&plan.Bounds.Actions, &plan.Bounds.TextRunes, &plan.Bounds.LabelRunes, &plan.ActionPageIndex, &plan.RecoveryPending)
@@ -92,6 +99,12 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 		return Plan{}, false, err
 	}
 	plan.ConversationScope = operatorchannel.ConversationScope(scope)
+	if len(parent) != 0 {
+		plan.RequestParent, err = channelnative.DecodeTransportParent(parent)
+		if err != nil || plan.RequestParent.Kind != channelnative.TransportDeploymentRegistration {
+			return Plan{}, false, fmt.Errorf("stored channel response parent is invalid")
+		}
+	}
 	if err := plan.Validate(); err != nil {
 		return Plan{}, false, err
 	}

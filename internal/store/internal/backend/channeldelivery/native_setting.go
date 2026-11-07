@@ -101,6 +101,9 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if err := admission.Validate(); err != nil {
 		return channelnative.Setting{}, false, err
 	}
+	if admission.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		return attachDeploymentNativeInboxSettingTx(ctx, tx, admission, postgres)
+	}
 	// Lock only the actual parent before the principal fence and dependent rows.
 	query := `SELECT operation_id FROM channel_onboarding_operations
 		WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=?)`
@@ -123,11 +126,15 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if err != nil {
 		return channelnative.Setting{}, false, err
 	}
+	return attachNativeSettingTx(ctx, tx, admission, setting, postgres)
+}
+
+func attachNativeSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (channelnative.Setting, bool, error) {
 	changed, err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres)
 	if err != nil {
 		return channelnative.Setting{}, false, err
 	}
-	query = `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
+	query := `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
 		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, ''), readback_hash
 		FROM channel_native_settings WHERE provider=? AND resource_slot_id=? AND conversation_reference=?
 		AND scope_kind=? AND member_reference=? AND language_code=''`
@@ -240,6 +247,19 @@ func createNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 }
 
 func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (int64, bool, error) {
+	parent, err := admission.TransportParent()
+	if err != nil {
+		return 0, false, err
+	}
+	var evidence any
+	var generation any = admission.ContextPublicationGeneration
+	if parent.Kind == channelnative.TransportDeploymentRegistration {
+		raw, err := canonicaljson.Bytes(parent)
+		if err != nil {
+			return 0, false, err
+		}
+		evidence, generation = string(raw), nil
+	}
 	// Handoff history may survive, but an independent current connection may not
 	// acquire this setting. Retired predecessors were fenced above.
 	query := `SELECT COUNT(*) FROM channel_native_setting_consumers
@@ -249,51 +269,68 @@ func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission chan
 			WHERE setting_id=$1::uuid AND state='current' AND activation_id<>$2::uuid`
 	}
 	var competing int64
-	if err := tx.QueryRowContext(ctx, query, setting.SettingID, admission.ActivationID).Scan(&competing); err != nil {
+	if err := tx.QueryRowContext(ctx, query, setting.SettingID, parent.ID).Scan(&competing); err != nil {
 		return 0, false, err
 	}
 	if competing != 0 {
 		return 0, false, fmt.Errorf("native inbox setting has a competing current connection")
 	}
-	query = `SELECT activation_revision, interface_key, binding_revision, context_publication_generation, state
+	query = `SELECT parent_kind, parent_evidence, activation_revision, interface_key, binding_revision, context_publication_generation, state
 		FROM channel_native_setting_consumers WHERE setting_id=? AND activation_id=?`
 	if postgres {
-		query = `SELECT activation_revision, interface_key, binding_revision, context_publication_generation, state
+		query = `SELECT parent_kind, parent_evidence, activation_revision, interface_key, binding_revision, context_publication_generation, state
 			FROM channel_native_setting_consumers WHERE setting_id=$1::uuid AND activation_id=$2::uuid FOR UPDATE`
 	}
-	var activationRevision, bindingRevision, contextGeneration int64
-	var interfaceKey, state string
-	err := tx.QueryRowContext(ctx, query, setting.SettingID, admission.ActivationID).
-		Scan(&activationRevision, &interfaceKey, &bindingRevision, &contextGeneration, &state)
+	var activationRevision, bindingRevision int64
+	var contextGeneration sql.NullInt64
+	var interfaceKey, state, kind string
+	var original []byte
+	err = tx.QueryRowContext(ctx, query, setting.SettingID, parent.ID).
+		Scan(&kind, &original, &activationRevision, &interfaceKey, &bindingRevision, &contextGeneration, &state)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, false, err
 	}
-	changed := errors.Is(err, sql.ErrNoRows) || activationRevision != admission.ActivationRevision ||
+	if err == nil && kind != string(parent.Kind) {
+		return 0, false, fmt.Errorf("native inbox parent UUID belongs to another transport kind")
+	}
+	changed := errors.Is(err, sql.ErrNoRows) || activationRevision != parent.Revision ||
 		interfaceKey != admission.InterfaceKey || bindingRevision != admission.BindingRevision ||
-		contextGeneration != admission.ContextPublicationGeneration || state != "current"
+		contextGeneration.Int64 != admission.ContextPublicationGeneration || state != "current"
+	if parent.Kind == channelnative.TransportDeploymentRegistration && err == nil {
+		canonical, decodeErr := canonicaljson.Canonicalize(original)
+		if decodeErr != nil || string(canonical) != evidence {
+			changed = true
+		}
+	}
 	query = `INSERT INTO channel_native_setting_consumers
 		(setting_id, activation_id, activation_revision, interface_key, binding_revision,
-		context_publication_generation, state, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'current', ?)
+		context_publication_generation, state, updated_at, parent_kind, parent_evidence)
+		VALUES (?, ?, ?, ?, ?, ?, 'current', ?, ?, ?)
 		ON CONFLICT (setting_id, activation_id) DO UPDATE SET
 		activation_revision=excluded.activation_revision, interface_key=excluded.interface_key,
 		binding_revision=excluded.binding_revision,
 		context_publication_generation=excluded.context_publication_generation,
-		state='current', updated_at=excluded.updated_at`
+		state='current', updated_at=excluded.updated_at, parent_evidence=excluded.parent_evidence
+		WHERE channel_native_setting_consumers.parent_kind=excluded.parent_kind`
 	if postgres {
 		query = `INSERT INTO channel_native_setting_consumers
 			(setting_id, activation_id, activation_revision, interface_key, binding_revision,
-			context_publication_generation, state, updated_at)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'current', $7)
+			context_publication_generation, state, updated_at, parent_kind, parent_evidence)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'current', $7, $8, $9::jsonb)
 			ON CONFLICT (setting_id, activation_id) DO UPDATE SET
 			activation_revision=excluded.activation_revision, interface_key=excluded.interface_key,
 			binding_revision=excluded.binding_revision,
 			context_publication_generation=excluded.context_publication_generation,
-			state='current', updated_at=excluded.updated_at`
+			state='current', updated_at=excluded.updated_at, parent_evidence=excluded.parent_evidence
+			WHERE channel_native_setting_consumers.parent_kind=excluded.parent_kind`
 	}
-	if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.ActivationID, admission.ActivationRevision,
-		admission.InterfaceKey, admission.BindingRevision, admission.ContextPublicationGeneration, time.Now().UTC()); err != nil {
+	result, err := tx.ExecContext(ctx, query, setting.SettingID, parent.ID, parent.Revision,
+		admission.InterfaceKey, admission.BindingRevision, generation, time.Now().UTC(), string(parent.Kind), evidence)
+	if err != nil {
 		return 0, false, fmt.Errorf("attach native inbox activation consumer: %w", err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		return 0, false, fmt.Errorf("native inbox transport parent changed: %w", err)
 	}
 	count, err := currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
 	return count, changed, err
@@ -469,7 +506,7 @@ func reactivateAcknowledgedNativeInboxSettingTx(ctx context.Context, tx *sql.Tx,
 
 func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) (bool, error) {
 	query := `UPDATE channel_native_setting_consumers SET state='retired', updated_at=?
-		WHERE state='current' AND NOT EXISTS (
+		WHERE state='current' AND parent_kind='runtime_activation' AND NOT EXISTS (
 			SELECT 1 FROM connected_channel_activations a
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -485,7 +522,7 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 		)`
 	if postgres {
 		query = `UPDATE channel_native_setting_consumers SET state='retired', updated_at=$1
-			WHERE state='current' AND NOT EXISTS (
+			WHERE state='current' AND parent_kind='runtime_activation' AND NOT EXISTS (
 				SELECT 1 FROM connected_channel_activations a
 				JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 				JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -509,6 +546,18 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 		return false, err
 	}
 	changed := count > 0
+	query = `UPDATE channel_native_setting_consumers AS c SET state='retired', updated_at=$1
+		WHERE c.state='current' AND c.parent_kind='deployment_registration' AND NOT (` +
+		deploymentParentPredicate("c.parent_evidence", "c.interface_key", "c.binding_revision", postgres) + `)`
+	result, err = tx.ExecContext(ctx, query, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	count, err = result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	changed = changed || count > 0
 	query = `UPDATE channel_native_settings SET state='uncertain', updated_at=?
 		WHERE state IN ('planned','installed') AND NOT EXISTS (
 			SELECT 1 FROM channel_native_setting_consumers c

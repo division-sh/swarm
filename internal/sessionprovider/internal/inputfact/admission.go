@@ -31,6 +31,8 @@ type Capture struct {
 	OriginalPublicationRequest []byte
 	Body                       []byte
 	OriginalCapture            []byte
+	OriginalProviderEventID    string
+	OriginalCaptureFingerprint string
 	ReceivedAt                 time.Time
 	Generation                 triggergeneration.Generation
 	Context                    context.Context
@@ -46,6 +48,13 @@ type admittedInput struct {
 }
 
 type Admission struct{ value *admittedInput }
+
+func (a Admission) NativeCaptureEvidence() (string, string) {
+	if a.value == nil {
+		return "", ""
+	}
+	return a.value.capture.OriginalProviderEventID, a.value.capture.OriginalCaptureFingerprint
+}
 
 func (a Admission) SameOwner(other Admission) bool { return a.value != nil && a.value == other.value }
 

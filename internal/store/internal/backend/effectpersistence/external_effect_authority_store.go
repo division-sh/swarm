@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -140,6 +142,11 @@ func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, aut
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
+	if authority.ServeRegistration.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if err := channeldelivery.LockDeploymentTransportTx(ctx, tx, authority.ServeRegistration.Parent, true); err != nil {
+			return err
+		}
+	}
 	if err := requireExternalEffectRunActivePostgres(ctx, tx, authority); err != nil {
 		return err
 	}
@@ -156,6 +163,11 @@ func (s *EffectPostgresOwner) RequireExternalEffectAuthorityTx(ctx context.Conte
 func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
+	}
+	if authority.ServeRegistration.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if err := channeldelivery.LockDeploymentTransportTx(ctx, tx, authority.ServeRegistration.Parent, false); err != nil {
+			return err
+		}
 	}
 	if err := requireExternalEffectRunActiveSQLite(ctx, tx, authority); err != nil {
 		return err
@@ -680,6 +692,11 @@ func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, au
 
 func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.ServeRegistration
+	if startup.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if current, err := channeldelivery.DeploymentParentCurrent(ctx, q, startup.Parent); err != nil || !current {
+			return false, err
+		}
+	}
 	if current, err := generationauthority.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
 		return false, err
 	}
@@ -695,6 +712,11 @@ func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQuer
 
 func serveRegistrationAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.ServeRegistration
+	if startup.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if current, err := channeldelivery.DeploymentParentCurrent(ctx, q, startup.Parent); err != nil || !current {
+			return false, err
+		}
+	}
 	if current, err := generationauthority.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
 		return false, err
 	}

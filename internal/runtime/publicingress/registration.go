@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -46,6 +47,8 @@ type RegistrationTarget struct {
 }
 
 type RegistrationPair struct {
+	Parent                      channelnative.TransportParent
+	DeploymentAdmission         triggergeneration.Generation
 	BindingID                   string
 	PlanGeneration              plangeneration.Generation
 	ActivationSource            channelonboarding.ActivationSource
@@ -194,7 +197,7 @@ type admittedPair struct {
 	base     string
 }
 
-type PendingDeploymentClaim func(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), func() bool) (bool, error)
+type PendingDeploymentClaim func(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func() (providertriggers.Delivery, error), func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), func(providertriggers.InboundAdmissionPlan) (providertriggers.AdmittedRequest, error), func() bool) (bool, error)
 
 func (c *ProviderRegistrationController) OwnsAccountCallback(ctx context.Context, raw, account string) bool {
 	callback, err := url.Parse(raw)
@@ -244,31 +247,59 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			return request.Context().Err() == nil && c.snapshot.currentRevision(snapshot.revision) &&
 				err == nil && credentialsCurrent
 		}
-		admit := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
-			if !matchesDeploymentClaimAdmission(plan, selected, target) {
-				return providertriggers.Delivery{}, channelonboarding.ErrConflict
+		authenticate := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.AdmittedRequest, error) {
+			matches := matchesDeploymentClaimAdmission(plan, selected, target)
+			if state.Pair.Parent.Kind == channelnative.TransportDeploymentRegistration {
+				matches = state.Pair.Parent.Validate() == nil && selected.Valid() &&
+					selected.Generation().Equal(state.Pair.DeploymentAdmission) && selected.Provider() == target.Provider &&
+					selected.PolicySource() == providertriggers.PolicySourceVerifiedPack && selected.Transport() == packs.ChannelTransportWebhook &&
+					selected.RequestAuthentication() == providertriggers.RequestAuthenticationTokenEquality
+			}
+			if !matches {
+				return providertriggers.AdmittedRequest{}, channelonboarding.ErrConflict
 			}
 			_, signing, err := c.admitCredentials(request.Context(), state.Pair)
 			if err != nil {
-				return providertriggers.Delivery{}, err
+				return providertriggers.AdmittedRequest{}, err
 			}
 			if request.Method != http.MethodPost {
-				return providertriggers.Delivery{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}
+				return providertriggers.AdmittedRequest{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}
 			}
 			body, err := io.ReadAll(io.LimitReader(request.Body, (1<<20)+1))
 			request.Body = io.NopCloser(bytes.NewReader(body))
 			if err != nil || len(body) > 1<<20 {
-				return providertriggers.Delivery{}, providertriggers.Error{Status: http.StatusBadRequest, Message: "invalid webhook body"}
+				return providertriggers.AdmittedRequest{}, providertriggers.Error{Status: http.StatusBadRequest, Message: "invalid webhook body"}
 			}
 			var payload any
 			if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
-				return providertriggers.Delivery{}, err
+				return providertriggers.AdmittedRequest{}, err
 			}
-			return selected.Accept(providertriggers.Request{Provider: target.Provider, Method: request.Method,
+			return selected.AdmitRequest(providertriggers.Request{Provider: target.Provider, Method: request.Method,
 				URL: request.URL.String(), Body: body, Headers: request.Header, Payload: payload, ContentType: request.Header.Get("Content-Type"),
 				Target: providertriggers.Target{WebhookSecret: signing.CredentialValue()}, Received: c.opts.Now()})
 		}
-		return consume(request.Context(), account, credential, func() (providertriggers.Delivery, error) { return admit(plan) }, admit, current)
+		admit := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
+			input, err := authenticate(selected)
+			if err != nil {
+				return providertriggers.Delivery{}, err
+			}
+			return selected.ProjectDelivery(input)
+		}
+		operator := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.AdmittedRequest, error) {
+			input, err := authenticate(selected)
+			if err != nil {
+				return providertriggers.AdmittedRequest{}, err
+			}
+			if !current() {
+				return providertriggers.AdmittedRequest{}, channelonboarding.ErrRevisionConflict
+			}
+			_, signing, err := c.admitCredentials(request.Context(), state.Pair)
+			if err != nil {
+				return providertriggers.AdmittedRequest{}, err
+			}
+			return selected.BindReceivingAccount(input, account, signing.CredentialValue())
+		}
+		return consume(request.Context(), account, credential, func() (providertriggers.Delivery, error) { return admit(plan) }, admit, operator, current)
 	}
 	return false, channelonboarding.ErrConflict
 }
@@ -413,6 +444,18 @@ func (pair RegistrationPair) validateAuthority() error {
 	key := pairSemanticKey(pair)
 	activationAuthority := pair.ChannelActivationGeneration.Valid()
 	prebindingAuthority := strings.TrimSpace(pair.PrebindingOperationID) != ""
+	if pair.Parent != (channelnative.TransportParent{}) {
+		if pair.Parent.Validate() != nil || pair.Parent.Kind != channelnative.TransportDeploymentRegistration ||
+			activationAuthority || prebindingAuthority || pair.ActivationRevision != 0 ||
+			pair.OnboardingCoordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
+			pair.OnboardingOperationID != pair.Parent.ID || pair.OnboardingRevision != pair.Parent.Revision ||
+			pair.Target.RegisteredOperationID != pair.Parent.ID || pair.OperatorAccount == "" ||
+			!pair.DeploymentAdmission.Valid() || !pair.Target.AdmissionPlanGeneration.Valid() ||
+			key == "" || !pair.PlanGeneration.Valid() || pair.Target.Provider != pair.Registration.Provider() {
+			return fmt.Errorf("deployment registration requires its disjoint exact parent and admitted definition")
+		}
+		return nil
+	}
 	if key == "" || !pair.PlanGeneration.Valid() || activationAuthority == prebindingAuthority || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
 		return fmt.Errorf("provider registration pair identity is incomplete")
 	}
@@ -642,7 +685,11 @@ func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, expo
 	effectCtx := runtimeeffects.WithController(ctx, effectController)
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, intent.Authority)
 	effectCtx = runtimeeffects.WithExecutionMode(effectCtx, intent.Authority.ExecutionMode)
-	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(c.opts.RuntimeInstanceID, candidate.pair.Target.BundleHash))
+	scope := runtimeauthoractivity.BundleScope(c.opts.RuntimeInstanceID, candidate.pair.Target.BundleHash)
+	if intent.Authority.ServeRegistration.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		scope = runtimeauthoractivity.RuntimeScope(c.opts.RuntimeInstanceID)
+	}
+	effectCtx = runtimeauthoractivity.WithScope(effectCtx, scope)
 	executor := c.opts.HTTP
 	executor.Preflight = func(ctx context.Context) error { return c.revalidateCredentials(ctx, candidate) }
 	result, applyErr := executor.Apply(effectCtx, apply, input, candidateCredentials(candidate), map[string]string{
@@ -1004,6 +1051,13 @@ func pairAuthorityKey(pair RegistrationPair) string {
 	if base == "" {
 		return ""
 	}
+	if pair.Parent.Kind == channelnative.TransportDeploymentRegistration && pair.Parent.Validate() == nil {
+		raw, err := canonicaljson.Bytes(pair.Parent)
+		if err != nil {
+			return ""
+		}
+		return base + "\x00deployment:" + string(raw)
+	}
 	if pair.ChannelActivationGeneration.Valid() {
 		return base + "\x00activation:" + pair.ChannelActivationGeneration.Diagnostic()
 	}
@@ -1091,6 +1145,10 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 		"provider_credentials":    providerEvidence,
 		"signing_credential":      map[string]any{"key": signing.Key, "source": signing.Source, "observation_token": signing.ObservationToken()},
 	}
+	if pair.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		intent["transport_parent"] = pair.Parent
+		intent["deployment_admission"] = pair.DeploymentAdmission.Diagnostic()
+	}
 	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered {
 		intent["account_holder"] = pair.AccountHolder
 	}
@@ -1126,6 +1184,7 @@ func serveRegistrationAuthority(startup runtimestartupownership.GrantEvidence, i
 		ExecutionOwner: startup.ProcessOwnerID, LeaseExpiresAt: now.UTC().Add(5 * time.Minute), FenceGeneration: startup.RuntimeGeneration,
 		ExecutionMode: runtimeeffects.ExecutionMode(posture.RootMode()),
 		ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
+			Parent:   pair.Parent,
 			IntentID: strings.TrimSpace(intentID), StartupAuthorityID: startup.GrantID, StartupStateVersion: startup.StateVersion,
 			OnboardingOperationID: strings.TrimSpace(pair.OnboardingOperationID), OnboardingRevision: pair.OnboardingRevision,
 			BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,

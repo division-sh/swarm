@@ -726,9 +726,6 @@ func (s *Service) activationRecovery(identity operatorchannel.InterfaceIdentity)
 }
 
 func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
-	if s.deployment && (input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
-		return Result{}, ErrInvalidRequest
-	}
 	operationID := strings.TrimSpace(input.OperationID)
 	unlock, err := s.lockDrive(ctx, operationID)
 	if err != nil {

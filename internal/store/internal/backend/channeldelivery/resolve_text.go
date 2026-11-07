@@ -17,6 +17,13 @@ func ResolveCurrentTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.
 	if err := text.Validate(); err != nil {
 		return render.ResolvedText{}, false, err
 	}
+	deployment, err := bindingUsesDeployment(ctx, tx, text.Interface.Key())
+	if err != nil {
+		return render.ResolvedText{}, false, err
+	}
+	if deployment {
+		return resolveDeploymentText(ctx, tx, text)
+	}
 	query := `SELECT b.principal_id, b.interface_key, b.binding_revision
 		FROM operator_channel_bindings b
 		WHERE b.interface_key=? AND b.status='current'
@@ -84,8 +91,15 @@ func ResolveCurrentInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorch
 		}
 		return render.ResolvedInboxEntry{
 			Kind: render.InboxEntryTextReply, PrincipalID: bound.PrincipalID, InterfaceKey: bound.InterfaceKey,
-			BindingRevision: bound.BindingRevision, ActivationID: activationID, EntryReference: text.EntryReference,
+			BindingRevision: bound.BindingRevision, ActivationID: activationID, Parent: bound.Parent, EntryReference: text.EntryReference,
 		}, true, nil
+	}
+	deployment, err := bindingUsesDeployment(ctx, tx, text.Interface.Key())
+	if err != nil {
+		return render.ResolvedInboxEntry{}, false, err
+	}
+	if deployment {
+		return resolveDeploymentInbox(ctx, tx, text, postgres)
 	}
 	query := `SELECT b.principal_id, b.interface_key, b.binding_revision, a.activation_id,
 		s.setting_id, s.resource_slot_id, s.generation, s.entry_command
@@ -95,7 +109,7 @@ func ResolveCurrentInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorch
 			AND a.conversation_reference=b.conversation_reference AND a.status='current'
 		JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			AND o.identity_operation_id=b.operation_id AND o.phase='succeeded'
-		JOIN channel_native_setting_consumers c ON c.activation_id=a.activation_id
+		JOIN channel_native_setting_consumers c ON c.activation_id=a.activation_id AND c.parent_kind='runtime_activation'
 			AND c.activation_revision=a.activation_revision AND c.interface_key=a.interface_key
 			AND c.binding_revision=a.binding_revision
 			AND c.context_publication_generation=a.context_publication_generation AND c.state='current'
@@ -118,7 +132,7 @@ func ResolveCurrentInboxEntryTx(ctx context.Context, tx *sql.Tx, text operatorch
 				AND a.conversation_reference=b.conversation_reference AND a.status='current'
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 				AND o.identity_operation_id=b.operation_id AND o.phase='succeeded'
-			JOIN channel_native_setting_consumers c ON c.activation_id=a.activation_id
+			JOIN channel_native_setting_consumers c ON c.activation_id=a.activation_id AND c.parent_kind='runtime_activation'
 				AND c.activation_revision=a.activation_revision AND c.interface_key=a.interface_key
 				AND c.binding_revision=a.binding_revision
 				AND c.context_publication_generation=a.context_publication_generation AND c.state='current'

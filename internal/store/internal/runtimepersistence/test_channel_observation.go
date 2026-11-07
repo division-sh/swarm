@@ -4,9 +4,28 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
+
+func ObserveChannelAuthorActivityForTest(ctx context.Context, selected any, opts authoractivity.ListOptions) (authoractivity.ListResult, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return authoractivity.ListResult{}, err
+	}
+	dialect := authoractivityadapter.DialectSQLite
+	if _, postgres := selected.(*PostgresStore); postgres {
+		dialect = authoractivityadapter.DialectPostgres
+	}
+	var result authoractivity.ListResult
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = authoractivityadapter.List(ctx, tx, dialect, opts)
+		return err
+	})
+	return result, err
+}
 
 func ObserveChannelIntentForTest(ctx context.Context, selected any, demand render.IntentObservationQuery) (render.IntentObservation, bool, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {

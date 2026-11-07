@@ -1275,6 +1275,19 @@ func recordRecoveredExternalEffectStories(ctx context.Context, story *mutationpr
 }
 
 func (e existingExternalAttempt) matchesAuthorityIdentity(authority runtimeeffects.Authority) bool {
+	currentEvidence, err := json.Marshal(authority.Evidence())
+	if err != nil {
+		return false
+	}
+	storedParent, err := runtimeauthoractivity.DeploymentEffectParent(e.authorityKind, e.authorityID, e.authorityEvidence)
+	if err != nil {
+		return false
+	}
+	currentParent, err := runtimeauthoractivity.DeploymentEffectParent(string(authority.Kind), authority.ID, currentEvidence)
+	if err != nil || (storedParent == nil) != (currentParent == nil) ||
+		storedParent != nil && (e.bundleHash.Valid || *storedParent != *currentParent) {
+		return false
+	}
 	if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
 		parent, err := runtimeauthoractivity.DeploymentEffectParent(e.authorityKind, e.authorityID, e.authorityEvidence)
 		if err != nil || (parent == nil) != (authority.ChannelConfirmation.TransportParent == nil) {
@@ -1773,13 +1786,15 @@ func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects
 		return nil, err
 	}
 	if parent != nil {
-		confirmation := authority.ChannelConfirmation
-		native := confirmation.RegisteredRequest == "" && req.Adapter == "channel_confirmation_whatsapp" && req.Transport == "in_process" &&
-			req.RequestFingerprint == runtimeeffects.Fingerprint([]byte(confirmation.Destination+"\n"+runtimeeffects.RegisteredOperatorAcknowledgementText))
-		telegram := confirmation.RegisteredRequest != "" && req.Adapter == "channel_confirmation" && req.Transport == "http" &&
-			req.RequestFingerprint == runtimeeffects.Fingerprint([]byte(confirmation.RegisteredRequest))
-		if req.OperationID != authority.ID || req.Kind != runtimeeffects.KindChannelConfirmation || req.Class != runtimeeffects.EffectWriteOrUnknown || !native && !telegram {
-			return nil, fmt.Errorf("deployment acknowledgement requires its exact native adapter and fixed message")
+		if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
+			confirmation := authority.ChannelConfirmation
+			native := confirmation.RegisteredRequest == "" && req.Adapter == "channel_confirmation_whatsapp" && req.Transport == "in_process" &&
+				req.RequestFingerprint == runtimeeffects.Fingerprint([]byte(confirmation.Destination+"\n"+runtimeeffects.RegisteredOperatorAcknowledgementText))
+			telegram := confirmation.RegisteredRequest != "" && req.Adapter == "channel_confirmation" && req.Transport == "http" &&
+				req.RequestFingerprint == runtimeeffects.Fingerprint([]byte(confirmation.RegisteredRequest))
+			if req.OperationID != authority.ID || req.Kind != runtimeeffects.KindChannelConfirmation || req.Class != runtimeeffects.EffectWriteOrUnknown || !native && !telegram {
+				return nil, fmt.Errorf("deployment acknowledgement requires its exact native adapter and fixed message")
+			}
 		}
 		if !authority.Valid() || !ok || scope.Kind != runtimeauthoractivity.ScopeRuntime || scope.RuntimeInstanceID == "" || scope.BundleHash != "" {
 			return nil, fmt.Errorf("deployment effect requires valid authority and exact runtime scope")

@@ -16,6 +16,8 @@ import (
 )
 
 type DeploymentConnectionOptions struct {
+	OperatorAccount    channelonboarding.AccountReference
+	OperatorBinding    func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
 	RegisteredBusiness RegisteredBusinessSelector
 	Directory          string
 	OperationID        string
@@ -61,7 +63,8 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 		incoming = &RuntimeIncomingOptions{Trigger: opts.Trigger}
 	}
 	return openOwnedConnection(context.WithoutCancel(ctx), opts.Process, RuntimeConnectionOptions{
-		Directory: opts.Directory, Store: opts.Store, Credentials: opts.Credentials, Plan: opts.Plan, Incoming: incoming, RegisteredBusiness: opts.RegisteredBusiness}, opts.Operations, op)
+		Directory: opts.Directory, Store: opts.Store, Credentials: opts.Credentials, Plan: opts.Plan, Incoming: incoming, RegisteredBusiness: opts.RegisteredBusiness,
+		operatorAccount: opts.OperatorAccount, operatorBinding: opts.OperatorBinding}, opts.Operations, op)
 }
 
 func (c *RuntimeConnection) VerifyDeploymentRegistration(ctx context.Context, expected channelonboarding.Operation) (bool, error) {

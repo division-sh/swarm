@@ -267,7 +267,9 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 			t.Fatal("restart changed the committed CLI decision")
 		}
 	}
-	if writes := h.provider.CommandWrites(); len(writes) != 0 {
-		t.Fatal("CLI-only registration installed channel-card commands", writes)
+	// CLI decisions remain available alongside the deployment transport in v0.8.
+	// The old no-channel-command assertion described the v0.7 R45 deferral only.
+	if writes := h.provider.CommandWrites(); len(writes) != 1 {
+		t.Fatal("deployment operator transport lacks its one scoped inbox command", writes)
 	}
 }

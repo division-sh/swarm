@@ -58,7 +58,7 @@ func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Op
 		}
 		return input.Scope == channelonboarding.SessionInputOnboarding && input.OperationID == op.OperationID &&
 			op.AccountConfirmed && op.SessionAccount == input.Account && op.PrincipalID == input.PrincipalID &&
-			op.Revision == input.OperationRevision && awaitingIdentity &&
+			op.Revision == input.OperationRevision && (awaitingIdentity || op.Phase == channelonboarding.PhaseSucceeded && op.IdentityOperationID != "" && op.BindingRevision > 0) &&
 			coordinate == (channelonboarding.ChannelRuntimeContextCoordinate{}) && input.ActivationRevision == 0 && input.TargetSelector == ""
 	}
 	return input.matchesRuntimeOperation(op, coordinate, awaitingIdentity)

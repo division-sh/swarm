@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
@@ -631,6 +632,7 @@ func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate 
 		candidates = append(candidates, render.Candidate{
 			DeliveryID: plan.DeliveryID, SourceKind: plan.SourceKind, SourceID: plan.SourceID,
 			RequestActivationID: plan.RequestActivationID,
+			RequestParent:       plan.RequestParent,
 			BindingRevision:     plan.CurrentBindingRevision,
 			Audience: render.Audience{PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey,
 				DeliveryEpoch: plan.DeliveryEpoch, ExternalAccountRef: plan.ExternalAccountRef,
@@ -640,6 +642,96 @@ func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate 
 		})
 	}
 	return candidates
+}
+
+func (s *PostgresStore) CurrentChannelDeliveryParent(ctx context.Context) (channelnative.TransportParent, bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return channelnative.TransportParent{}, false, err
+	}
+	var parent channelnative.TransportParent
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		parent, found, err = channeldelivery.CurrentTransportParent(txctx, tx, true)
+		return err
+	})
+	return parent, found, err
+}
+
+func (s *SQLiteRuntimeStore) CurrentChannelDeliveryParent(ctx context.Context) (channelnative.TransportParent, bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return channelnative.TransportParent{}, false, err
+	}
+	var parent channelnative.TransportParent
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		parent, found, err = channeldelivery.CurrentTransportParent(txctx, tx, false)
+		return err
+	})
+	return parent, found, err
+}
+
+func (s *PostgresStore) AdmitDeploymentChannelInput(ctx context.Context, request render.DeploymentInput) (bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	prepared, err := channeldelivery.PrepareDeploymentInput(ctx, request)
+	if err != nil {
+		return false, err
+	}
+	var consumed, changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		consumed, changed, err = channeldelivery.AdmitDeploymentInputTx(txctx, tx, prepared, true)
+		return err
+	})
+	return consumed && acknowledged, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
+}
+
+func (s *PostgresStore) LoadDeploymentChannelInputReceipt(ctx context.Context, operationID, providerEventID string) (render.DeploymentInputReceipt, bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.DeploymentInputReceipt{}, false, err
+	}
+	var receipt render.DeploymentInputReceipt
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		receipt, found, err = channeldelivery.LoadDeploymentInputReceipt(txctx, tx, operationID, providerEventID)
+		return err
+	})
+	return receipt, found, err
+}
+
+func (s *SQLiteRuntimeStore) LoadDeploymentChannelInputReceipt(ctx context.Context, operationID, providerEventID string) (render.DeploymentInputReceipt, bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.DeploymentInputReceipt{}, false, err
+	}
+	var receipt render.DeploymentInputReceipt
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		receipt, found, err = channeldelivery.LoadDeploymentInputReceipt(txctx, tx, operationID, providerEventID)
+		return err
+	})
+	return receipt, found, err
+}
+
+func (s *SQLiteRuntimeStore) AdmitDeploymentChannelInput(ctx context.Context, request render.DeploymentInput) (bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	prepared, err := channeldelivery.PrepareDeploymentInput(ctx, request)
+	if err != nil {
+		return false, err
+	}
+	var consumed, changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "admit deployment operator input", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		consumed, changed, err = channeldelivery.AdmitDeploymentInputTx(txctx, tx, prepared, false)
+		return err
+	})
+	return consumed && acknowledged, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) CurrentChannelDeliveryActivationID(ctx context.Context) (string, bool, error) {
