@@ -426,6 +426,17 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			return returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
 	}
+	if begun.Operation.OperationID == "" {
+		var err error
+		begun, err = startCLIChannelOnboarding(ctx, client, opts.onboardingStartParams(provider, bundleHash), opts, errOut)
+		if err != nil {
+			return err
+		}
+	}
+	return finishChannelOnboarding(ctx, client, begun, opts, out, errOut)
+}
+
+func (opts channelConnectOptions) onboardingStartParams(provider, bundleHash string) map[string]any {
 	params := map[string]any{
 		"provider": provider, "verb": opts.verb, "save_proof": !opts.noSave,
 	}
@@ -440,14 +451,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	if begun.Operation.OperationID == "" {
-		var err error
-		begun, err = startCLIChannelOnboarding(ctx, client, params, opts, errOut)
-		if err != nil {
-			return err
-		}
-	}
-	return finishChannelOnboarding(ctx, client, begun, opts, out, errOut)
+	return params
 }
 
 func finishChannelOnboarding(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) error {
