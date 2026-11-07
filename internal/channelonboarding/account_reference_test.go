@@ -22,6 +22,9 @@ func TestAccountReferenceCanonicalIdentity(t *testing.T) {
 			binding.AcceptsCaptureKind("message") != (binding.Provider() == "whatsapp") || binding.AcceptsCaptureKind("foreign") {
 			t.Fatal("compiled intake or capture codec changed provider ownership")
 		}
+		if binding.Session() == binding.Webhook() {
+			t.Fatal("compiled provider lost its exact transport posture")
+		}
 	}
 	if !slices.Equal(installed, []string{"telegram", "whatsapp"}) || channelprovider.Session("unknown") {
 		t.Fatalf("compiled installation changed: %v", installed)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -638,7 +639,7 @@ func (s *serveSessionBootstrap) ValidateActivityRequestAccount(ctx context.Conte
 }
 
 func (s *serveSessionBootstrap) activityAccountConnection(ctx context.Context, account operatorchannel.SessionAccountAdmission) (*sessionprovider.RuntimeConnection, error) {
-	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || account.Provider != "whatsapp" {
+	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || !channelprovider.Session(account.Provider) {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
 	s.mu.Lock()

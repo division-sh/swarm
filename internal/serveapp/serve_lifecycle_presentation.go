@@ -359,8 +359,9 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 	defer p.mu.Unlock()
 	for _, binding := range bindings {
 		if binding.BlockReason == runtimerunlifecycle.StandingBindingSessionRequired {
-			if binding.Provider == "whatsapp" {
-				p.operatorWarnings = append(p.operatorWarnings, "Not linked: run swarm channel connect whatsapp")
+			provider, _ := channelprovider.Lookup(binding.Provider)
+			if provider.NotLinked() != "" {
+				p.operatorWarnings = append(p.operatorWarnings, provider.NotLinked())
 				continue
 			}
 			p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(

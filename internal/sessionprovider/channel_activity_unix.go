@@ -16,7 +16,7 @@ import (
 
 // The existing activity journal owns this send, not operator delivery's journal.
 func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any) (any, error) {
-	if e.owner == nil {
+	if !e.ownsSessionState() {
 		return nil, errRuntimeConnection
 	}
 	permit, err := pipeline.ConsumeNativeChannelActivity(ctx, e.owner.operation.OperationID, e.owner.operation.SessionAccount, tool, input)
@@ -52,14 +52,14 @@ func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, oper
 		return nil, err
 	}
 	defer account.Close()
-	occurrence := e.owner.state.currentOccurrence()
+	occurrence := e.state.currentOccurrence()
 	if err := permit.Validate(ctx); err != nil {
 		return nil, err
 	}
 	if err := account.Validate(ctx, e.owner.operation.SessionAccount); err != nil {
 		return nil, err
 	}
-	if !e.owner.state.ownsConnectedOccurrence(ctx, occurrence) {
+	if !e.state.ownsConnectedOccurrence(ctx, occurrence) {
 		return nil, errClientOccurrenceFenced
 	}
 	if err := e.requireNativeActivityBinding(ctx, permit); err != nil {
