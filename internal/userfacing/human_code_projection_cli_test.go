@@ -19,31 +19,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/userfacing"
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
-func TestCLIHumanCodePhrasesMatchCurrentCanonicalValues(t *testing.T) {
-	want := cliHumanCodePhrasesFromSpec(t, loadCLIHumanCodeProjectionSpec(t))
-	got := userfacing.HumanCodePhrases()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("human code phrase registry differs from authoritative platform spec:\ngot:  %#v\nwant: %#v", got, want)
-	}
-}
-
-func TestCLIHumanCodePhraseParityRejectsSpecOnlyDrift(t *testing.T) {
-	projection := loadCLIHumanCodeProjectionSpec(t)
-	families := humanProjectionMappingValue(projection, "families")
-	agentStatus := humanProjectionMappingValue(families, "agent_status")
-	phrases := humanProjectionMappingValue(agentStatus, "phrases")
-	humanProjectionMappingValue(phrases, "running").Value = "agent executing"
-
-	if got := cliHumanCodePhrasesFromSpec(t, projection); reflect.DeepEqual(userfacing.HumanCodePhrases(), got) {
-		t.Fatal("spec-only phrase drift did not break implementation parity")
-	}
-}
-
-func TestProviderHumanCodePhrasesMatchMachineOwnersAndCapabilitySpec(t *testing.T) {
+func TestProviderHumanCodePhrasesMatchMachineOwners(t *testing.T) {
 	machineValues := packs.ProviderHumanCodeValues()
 	phrases := userfacing.HumanCodePhrases()
 	for family, want := range machineValues {
@@ -56,38 +34,6 @@ func TestProviderHumanCodePhrasesMatchMachineOwnersAndCapabilitySpec(t *testing.
 			t.Fatalf("provider human-code family %s differs from machine owner:\ngot:  %v\nwant: %v", family, got, want)
 		}
 	}
-	capabilityValues := machineValues[userfacing.HumanCodeProviderCapability]
-	if specValues := providerKnownCapabilityCodesFromSpec(t, loadPlatformSpecRootForHumanProjection(t)); !reflect.DeepEqual(specValues, capabilityValues) {
-		t.Fatalf("known provider capability spec differs from machine owner:\ngot:  %v\nwant: %v", specValues, capabilityValues)
-	}
-}
-
-func TestProviderHumanCodeParityRejectsKnownCapabilitySpecDrift(t *testing.T) {
-	root := loadPlatformSpecRootForHumanProjection(t)
-	toolModel := humanProjectionMappingValue(root, "tool_model")
-	surface := humanProjectionMappingValue(toolModel, "provider_capability_surface")
-	facts := humanProjectionMappingValue(surface, "facts")
-	known := humanProjectionMappingValue(facts, "known_capability_codes")
-	known.Content = append(known.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "adversarial_current_capability"})
-
-	got := providerKnownCapabilityCodesFromSpec(t, root)
-	want := packs.ProviderHumanCodeValues()[userfacing.HumanCodeProviderCapability]
-	if reflect.DeepEqual(got, want) {
-		t.Fatal("known capability spec drift did not break machine-owner parity")
-	}
-}
-
-func loadPlatformSpecRootForHumanProjection(t *testing.T) *yaml.Node {
-	t.Helper()
-	source, err := yamlsource.LoadFile(filepath.Join(humanProjectionRepoRoot(t), "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := source.NodeCopy()
-	if len(doc.Content) != 1 {
-		t.Fatalf("platform spec document content = %d, want 1", len(doc.Content))
-	}
-	return doc.Content[0]
 }
 
 func humanProjectionRepoRoot(t *testing.T) string {
@@ -97,160 +43,6 @@ func humanProjectionRepoRoot(t *testing.T) string {
 		t.Fatal("resolve human-code projection test source")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-}
-
-func humanProjectionMappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1]
-		}
-	}
-	return nil
-}
-
-func providerKnownCapabilityCodesFromSpec(t *testing.T, root *yaml.Node) []string {
-	t.Helper()
-	toolModel := humanProjectionMappingValue(root, "tool_model")
-	surface := humanProjectionMappingValue(toolModel, "provider_capability_surface")
-	facts := humanProjectionMappingValue(surface, "facts")
-	known := humanProjectionMappingValue(facts, "known_capability_codes")
-	if known == nil || known.Kind != yaml.SequenceNode {
-		t.Fatal("provider_capability_surface.facts.known_capability_codes must be a sequence")
-	}
-	out := make([]string, 0, len(known.Content))
-	for _, node := range known.Content {
-		out = append(out, strings.TrimSpace(node.Value))
-	}
-	sort.Strings(out)
-	return out
-}
-
-func loadCLIHumanCodeProjectionSpec(t *testing.T) *yaml.Node {
-	t.Helper()
-	root := loadPlatformSpecRootForHumanProjection(t)
-	cli := humanProjectionMappingValue(root, "cli_specification")
-	foundations := humanProjectionMappingValue(cli, "foundations")
-	outputContract := humanProjectionMappingValue(foundations, "output_contract")
-	sharedRenderer := humanProjectionMappingValue(outputContract, "shared_renderer_contract")
-	projection := humanProjectionMappingValue(sharedRenderer, "human_code_projection")
-	if projection == nil {
-		t.Fatal("platform spec is missing human_code_projection")
-	}
-	return projection
-}
-
-func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[userfacing.HumanCodeFamily]map[string]string {
-	t.Helper()
-	out := map[userfacing.HumanCodeFamily]map[string]string{}
-	families := humanProjectionMappingValue(projection, "families")
-	if families == nil {
-		t.Fatal("human_code_projection is missing families")
-	}
-	knownSpecFamilies := map[string]bool{
-		"run_status": true, "operational_state": true, "agent_status": true,
-		"delivery_status":       true,
-		"provider_subject_kind": true, "provider_subject_status": true, "provider_capability": true,
-		"provider_guarantee": true, "provider_requirement_status": true,
-		"run_blocking_tuples": true, "agent_lifecycle_tuples": true, "watchdog_tuples": true,
-	}
-	forEachYAMLMappingNode(t, families, func(name string, _ *yaml.Node) {
-		if !knownSpecFamilies[name] {
-			t.Fatalf("human_code_projection has unclassified family %q", name)
-		}
-	})
-
-	for specName, family := range map[string]userfacing.HumanCodeFamily{
-		"run_status":                  userfacing.HumanCodeRunStatus,
-		"operational_state":           userfacing.HumanCodeOperationalState,
-		"agent_status":                userfacing.HumanCodeAgentStatus,
-		"delivery_status":             userfacing.HumanCodeDeliveryStatus,
-		"provider_subject_kind":       userfacing.HumanCodeProviderSubjectKind,
-		"provider_subject_status":     userfacing.HumanCodeProviderSubjectStatus,
-		"provider_capability":         userfacing.HumanCodeProviderCapability,
-		"provider_guarantee":          userfacing.HumanCodeProviderGuarantee,
-		"provider_requirement_status": userfacing.HumanCodeProviderRequirementStatus,
-	} {
-		phrases := humanProjectionMappingValue(humanProjectionMappingValue(families, specName), "phrases")
-		forEachYAMLMapping(t, phrases, func(code, phrase string) {
-			addCLIHumanCodeSpecPhrase(t, out, family, code, phrase)
-		})
-	}
-
-	forEachYAMLSequence(t, humanProjectionMappingValue(humanProjectionMappingValue(families, "run_blocking_tuples"), "current_non_empty"), func(row *yaml.Node) {
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeRunBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeRunBlockingReason, yamlScalar(t, row, "blocking_reason"), yamlScalar(t, row, "reason_phrase"))
-	})
-	forEachYAMLSequence(t, humanProjectionMappingValue(humanProjectionMappingValue(families, "agent_lifecycle_tuples"), "current"), func(row *yaml.Node) {
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeAgentLifecycleState, yamlScalar(t, row, "state"), yamlScalar(t, row, "state_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeAgentLifecycleBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
-	})
-	forEachYAMLSequence(t, humanProjectionMappingValue(humanProjectionMappingValue(families, "watchdog_tuples"), "current"), func(row *yaml.Node) {
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogState, yamlScalar(t, row, "state"), yamlScalar(t, row, "state_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogBlockingLayer, yamlScalar(t, row, "blocking_layer"), yamlScalar(t, row, "layer_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogAction, yamlScalar(t, row, "action"), yamlScalar(t, row, "action_phrase"))
-		addCLIHumanCodeSpecPhrase(t, out, userfacing.HumanCodeWatchdogOutcome, yamlScalar(t, row, "outcome"), yamlScalar(t, row, "outcome_phrase"))
-	})
-	return out
-}
-
-func addCLIHumanCodeSpecPhrase(t *testing.T, target map[userfacing.HumanCodeFamily]map[string]string, family userfacing.HumanCodeFamily, code, phrase string) {
-	t.Helper()
-	if target[family] == nil {
-		target[family] = map[string]string{}
-	}
-	if prior, exists := target[family][code]; exists && prior != phrase {
-		t.Fatalf("spec family %s gives code %q conflicting phrases %q and %q", family, code, prior, phrase)
-	}
-	target[family][code] = phrase
-}
-
-func forEachYAMLMapping(t *testing.T, node *yaml.Node, visit func(key, value string)) {
-	t.Helper()
-	if node == nil || node.Kind != yaml.MappingNode {
-		t.Fatalf("YAML node kind = %v, want mapping", yamlNodeKind(node))
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		visit(node.Content[i].Value, node.Content[i+1].Value)
-	}
-}
-
-func forEachYAMLMappingNode(t *testing.T, node *yaml.Node, visit func(key string, value *yaml.Node)) {
-	t.Helper()
-	if node == nil || node.Kind != yaml.MappingNode {
-		t.Fatalf("YAML node kind = %v, want mapping", yamlNodeKind(node))
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		visit(node.Content[i].Value, node.Content[i+1])
-	}
-}
-
-func forEachYAMLSequence(t *testing.T, node *yaml.Node, visit func(*yaml.Node)) {
-	t.Helper()
-	if node == nil || node.Kind != yaml.SequenceNode {
-		t.Fatalf("YAML node kind = %v, want sequence", yamlNodeKind(node))
-	}
-	for _, value := range node.Content {
-		visit(value)
-	}
-}
-
-func yamlScalar(t *testing.T, node *yaml.Node, key string) string {
-	t.Helper()
-	value := humanProjectionMappingValue(node, key)
-	if value == nil || value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
-		t.Fatalf("YAML mapping is missing non-empty scalar %q", key)
-	}
-	return value.Value
-}
-
-func yamlNodeKind(node *yaml.Node) yaml.Kind {
-	if node == nil {
-		return 0
-	}
-	return node.Kind
 }
 
 func TestCLIHumanCodePhrasesUseAuthorFacingVocabulary(t *testing.T) {

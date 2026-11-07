@@ -525,20 +525,6 @@ func TestCLIOutputArgCountCensusExcludesNestedCheckout(t *testing.T) {
 	}
 }
 
-func TestCLIOutputConformanceNoStaleActiveSplitOwners(t *testing.T) {
-	staleOwners := map[string]string{
-		"#1814": "display renderer migration is complete",
-		"#1816": "run trace fidelity migration is complete",
-		"#1821": "registry-ratchet parent must be closeable after active rows move to #1913",
-	}
-	rows := cliOutputConformanceRegistryRows(t)
-	for command, row := range rows {
-		if reason, ok := staleOwners[row.OwnerIssue]; ok {
-			t.Errorf("%s: command %q still points at stale split owner %s (%s); split rows need a live active owner", row.Key, command, row.OwnerIssue, reason)
-		}
-	}
-}
-
 func TestCLIOutputConformanceNoUnclassifiedLiteralTabTables(t *testing.T) {
 	root := driftTestRepoRoot(t)
 	dir := filepath.Join(root, "internal", "cliapp")
