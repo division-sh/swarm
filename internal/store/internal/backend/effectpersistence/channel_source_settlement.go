@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	native "github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -44,6 +45,7 @@ func projectChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtime
 // This codec restores original journal evidence, never current execution authority.
 // The typed source owners compare its complete re-encoding with the stored evidence.
 type channelSettlementEvidence struct {
+	TransportParent              native.TransportParent       `json:"transport_parent"`
 	Kind                         runtimeeffects.AuthorityKind `json:"authority_kind"`
 	ID                           string                       `json:"authority_id"`
 	ExecutionOwner               string                       `json:"execution_owner"`
@@ -94,6 +96,7 @@ func (e channelSettlementEvidence) authority(lease time.Time) (runtimeeffects.Au
 			BundleHash: e.BundleHash, RuntimeInstanceID: e.RuntimeInstanceID, TargetFingerprint: e.TargetFingerprint}
 	case runtimeeffects.AuthorityChannelDelivery:
 		a.ChannelDelivery = runtimeeffects.ChannelDeliveryAuthority{
+			Parent:            e.TransportParent,
 			EffectOperationID: e.EffectOperationID, DeliveryID: e.DeliveryID, RenderID: e.RenderID, RenderHash: e.RenderHash,
 			PreviousReceiptOperationID: e.PreviousReceiptOperationID, PrincipalID: e.PrincipalID, InterfaceKey: e.InterfaceKey,
 			DeliveryEpoch: e.DeliveryEpoch, BindingRevision: e.BindingRevision, ExternalAccountRef: e.ExternalAccountRef,
@@ -104,6 +107,7 @@ func (e channelSettlementEvidence) authority(lease time.Time) (runtimeeffects.Au
 		}
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		a.ChannelNativeSetting = runtimeeffects.ChannelNativeSettingAuthority{
+			Parent:            e.TransportParent,
 			EffectOperationID: e.EffectOperationID, SettingID: e.SettingID, SettingGeneration: e.SettingGeneration,
 			Provider: e.Provider, ResourceSlotID: e.ResourceSlotID, ConversationRef: e.ConversationRef, ScopeKind: e.ScopeKind,
 			MemberReference: e.MemberReference, PrincipalID: e.PrincipalID, EntryContractHash: e.EntryContractHash,

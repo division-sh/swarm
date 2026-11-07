@@ -82,6 +82,12 @@ func (s *Capture) ReconcileSessionClaim(ctx context.Context, event sessioncaptur
 	return s.owner.ReconcileSessionClaim(ctx, event, reader)
 }
 
+type DeploymentOperatorReceiptReader = private.DeploymentOperatorReceiptReader
+
+func (s *Capture) ReconcileDeploymentOperator(ctx context.Context, event sessioncapture.Event, reader DeploymentOperatorReceiptReader) (bool, error) {
+	return s.owner.ReconcileDeploymentOperator(ctx, event, reader)
+}
+
 // Fixture owns a private-state test's close/reopen boundary without exporting
 // database access. Fault and observation methods are named storage operations.
 type Fixture struct{ owner *Owner }

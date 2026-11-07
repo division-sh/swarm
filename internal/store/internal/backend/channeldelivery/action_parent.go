@@ -7,11 +7,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 )
 
 // This is a query constraint, not authority. Mutation admission still checks
 // the complete action join and intent under the original transaction.
 type actionParent struct {
+	transport                           channelnative.TransportParent
 	operationID, activationID           string
 	activationRevision, bindingRevision int64
 }
@@ -23,6 +25,9 @@ func discoverActionParentTx(ctx context.Context, tx *sql.Tx, fact operatorchanne
 	}
 	if !found {
 		return actionParent{}, fmt.Errorf("channel action is no longer current")
+	}
+	if resolved.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		return actionParent{operationID: resolved.Parent.ID, transport: resolved.Parent, bindingRevision: resolved.BindingRevision}, nil
 	}
 	query := `SELECT operation_id FROM connected_channel_activations WHERE activation_id=?`
 	if postgres {
@@ -39,6 +44,9 @@ func lockActionParentTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.Ac
 	parent, err := discoverActionParentTx(ctx, tx, fact, postgres)
 	if err != nil {
 		return actionParent{}, err
+	}
+	if parent.transport.Kind == channelnative.TransportDeploymentRegistration {
+		return parent, LockTransportParentTx(ctx, tx, parent.transport, postgres)
 	}
 	query := `SELECT operation_id FROM channel_onboarding_operations WHERE operation_id=?`
 	if postgres {

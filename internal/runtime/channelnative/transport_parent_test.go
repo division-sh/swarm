@@ -42,3 +42,25 @@ func TestTransportParentClosedCodec(t *testing.T) {
 		}
 	}
 }
+
+func TestTransportParentRuntimeCoordinatesStayDisjoint(t *testing.T) {
+	parent := TransportParent{Kind: TransportRuntimeActivation, ID: uuid.NewString(), Revision: 2}
+	raw, err := json.Marshal(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := DecodeTransportParent(raw); err != nil || decoded != parent {
+		t.Fatal("runtime parent changed", decoded, err)
+	}
+	for _, mutate := range []func(*TransportParent){
+		func(p *TransportParent) { p.BindingOperationID = uuid.NewString() },
+		func(p *TransportParent) { p.BindingOperationRevision = 1 },
+		func(p *TransportParent) { p.ProofID = uuid.NewString(); p.ProofRevision = 1 },
+	} {
+		changed := parent
+		mutate(&changed)
+		if changed.Valid() {
+			t.Fatal("runtime parent adopted deployment coordinates")
+		}
+	}
+}

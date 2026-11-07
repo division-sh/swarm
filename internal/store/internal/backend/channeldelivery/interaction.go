@@ -191,7 +191,7 @@ func RequireTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	if state != "pending" {
 		return fmt.Errorf("verified channel text intent is not pending")
 	}
-	return nil
+	return requireInputParentCurrent(ctx, tx, "operator_channel_text_intents", text.PublicationID, text.Interface.Key())
 }
 
 type intentQueryer interface {
@@ -339,7 +339,12 @@ func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	if disposition != "input_progressed" && disposition != "input_complete" && disposition != "teaching" && disposition != "chooser" && disposition != "control" && disposition != "rejected" && disposition != "entry" {
 		return fmt.Errorf("unsupported channel text disposition %q", disposition)
 	}
-	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
+	if disposition == "rejected" {
+		state, _, err := requireExactTextIntentTx(ctx, tx, text, postgres, false)
+		if err != nil || state != "pending" {
+			return errors.Join(err, fmt.Errorf("rejected text intent is not pending"))
+		}
+	} else if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
 		return err
 	}
 	query := `UPDATE operator_channel_text_intents SET state='settled', disposition=?, settled_at=?
@@ -416,6 +421,10 @@ func decodeActionTime(value any) (time.Time, error) {
 }
 
 func RequireActionIntentTx(ctx context.Context, tx intentQueryer, action operatorchannel.InboundAction, postgres, lock bool) (string, error) {
+	return requireActionIntent(ctx, tx, action, postgres, lock, true)
+}
+
+func requireActionIntent(ctx context.Context, tx intentQueryer, action operatorchannel.InboundAction, postgres, lock, current bool) (string, error) {
 	if tx == nil {
 		return "", fmt.Errorf("channel action admission requires a selected transaction")
 	}
@@ -455,6 +464,11 @@ func RequireActionIntentTx(ctx context.Context, tx intentQueryer, action operato
 		textState, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, lock)
 		if err != nil || textState != "settled" || disposition != "control" {
 			return "", errors.Join(err, fmt.Errorf("reply action lacks its exact transferred text intent"))
+		}
+	}
+	if current {
+		if err := requireInputParentCurrent(ctx, tx, "operator_channel_action_intents", action.PublicationID, action.Interface.Key()); err != nil {
+			return "", err
 		}
 	}
 	return state, nil
@@ -497,7 +511,7 @@ func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action opera
 	if disposition != render.ActionStale && disposition != render.ActionRejected && disposition != render.ActionUnsupported {
 		return false, fmt.Errorf("channel action requires a non-mutation disposition")
 	}
-	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
+	state, err := requireActionIntent(ctx, tx, action, postgres, true, false)
 	if err != nil {
 		return false, err
 	}

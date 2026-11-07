@@ -11,23 +11,39 @@ import (
 
 // TransportParent identifies existing registration and binding rows, never a
 // replacement activation or an inferred owner for an absent bundle.
+const (
+	TransportRuntimeActivation      = "runtime_activation"
+	TransportDeploymentRegistration = "deployment_registration"
+)
+
 type TransportParent struct {
 	Kind                     string `json:"kind"`
 	ID                       string `json:"id"`
 	Revision                 int64  `json:"revision"`
-	BindingOperationID       string `json:"binding_operation_id"`
-	BindingOperationRevision int64  `json:"binding_operation_revision"`
+	BindingOperationID       string `json:"binding_operation_id,omitempty"`
+	BindingOperationRevision int64  `json:"binding_operation_revision,omitempty"`
 	ProofID                  string `json:"proof_id,omitempty"`
 	ProofRevision            int64  `json:"proof_revision,omitempty"`
 }
 
 func (p TransportParent) Valid() bool {
 	_, registration := uuid.Parse(p.ID)
+	if p.Kind == TransportRuntimeActivation {
+		return registration == nil && p.Revision > 0 && p.BindingOperationID == "" &&
+			p.BindingOperationRevision == 0 && p.ProofID == "" && p.ProofRevision == 0
+	}
 	_, binding := uuid.Parse(p.BindingOperationID)
 	_, proof := uuid.Parse(p.ProofID)
 	return p.Kind == "deployment_registration" && registration == nil && binding == nil &&
 		p.Revision > 0 && p.BindingOperationRevision > 0 &&
 		((p.ProofID == "" && p.ProofRevision == 0) || (proof == nil && p.ProofRevision > 0))
+}
+
+func (p TransportParent) Validate() error {
+	if !p.Valid() {
+		return fmt.Errorf("invalid channel transport parent")
+	}
+	return nil
 }
 
 func DecodeTransportParent(raw []byte) (TransportParent, error) {

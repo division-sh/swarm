@@ -73,6 +73,13 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	if err := InsertActionIntentTx(ctx, tx, action, receivedAt, postgres); err != nil {
 		return render.PendingAction{}, false, false, err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE operator_channel_action_intents SET
+		transport_parent=(SELECT transport_parent FROM operator_channel_text_intents WHERE publication_id=$1),
+		native_capture_fingerprint=(SELECT native_capture_fingerprint FROM operator_channel_text_intents WHERE publication_id=$1),
+		request_fingerprint=(SELECT request_fingerprint FROM operator_channel_text_intents WHERE publication_id=$1)
+		WHERE publication_id=$1`, text.PublicationID); err != nil {
+		return render.PendingAction{}, false, false, err
+	}
 	if err := SettleTextIntentTx(ctx, tx, text, "control", postgres); err != nil {
 		return render.PendingAction{}, false, false, err
 	}

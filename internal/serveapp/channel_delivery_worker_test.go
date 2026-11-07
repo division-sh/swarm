@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/google/uuid"
 )
@@ -129,6 +130,10 @@ func (s *channelDeliveryWorkerStore) PlanChangedChannelCard(_ context.Context, s
 
 func (*channelDeliveryWorkerStore) CurrentChannelDeliveryActivationID(context.Context) (string, bool, error) {
 	return "activation", true, nil
+}
+
+func (*channelDeliveryWorkerStore) CurrentChannelDeliveryParent(context.Context) (channelnative.TransportParent, bool, error) {
+	return channelnative.TransportParent{Kind: channelnative.TransportRuntimeActivation, ID: uuid.NewString(), Revision: 1}, true, nil
 }
 
 func (*channelDeliveryWorkerStore) ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]runtimechanneldelivery.Candidate, error) {

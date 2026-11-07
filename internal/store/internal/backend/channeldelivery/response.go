@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -21,6 +22,9 @@ func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	expected render.ResolvedInboxEntry, fullText string, postgres bool) (string, bool, error) {
 	if tx == nil || text.EntryReference == "" || expected.PrincipalID == "" {
 		return "", false, fmt.Errorf("native inbox response requires verified entry")
+	}
+	if err := lockTextParentTx(ctx, tx, text, postgres); err != nil {
+		return "", false, err
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
 		return "", false, err
@@ -73,7 +77,13 @@ func requireInboxResponseEntryTx(ctx context.Context, tx *sql.Tx, text operatorc
 	expected render.ResolvedInboxEntry, postgres bool) (render.ResolvedInboxEntry, error) {
 	entry, found, err := ResolveCurrentInboxEntryTx(ctx, tx, text, postgres)
 	if err == nil && found && entry.Kind == render.InboxEntryNative {
-		qualification, qualificationErr := ReadNativeInboxQualificationTx(ctx, tx, entry.ActivationID, postgres)
+		var qualification channelnative.Qualification
+		var qualificationErr error
+		if entry.Parent.Kind == channelnative.TransportDeploymentRegistration {
+			qualification, qualificationErr = ReadNativeInboxQualificationParentTx(ctx, tx, entry.Parent, postgres)
+		} else {
+			qualification, qualificationErr = ReadNativeInboxQualificationTx(ctx, tx, entry.ActivationID, postgres)
+		}
 		if qualificationErr != nil {
 			return render.ResolvedInboxEntry{}, qualificationErr
 		}
@@ -175,6 +185,9 @@ func PlanDraftChooserTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 }
 
 func currentTextResponseAudienceTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (string, int64, render.Audience, error) {
+	if err := lockTextParentTx(ctx, tx, text, postgres); err != nil {
+		return "", 0, render.Audience{}, err
+	}
 	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
 		return "", 0, render.Audience{}, err
 	}
@@ -204,12 +217,18 @@ func currentBoundTextAudienceTx(ctx context.Context, tx *sql.Tx, text operatorch
 		selected.ConversationScope != text.ConversationScope {
 		return "", 0, render.Audience{}, fmt.Errorf("channel text response destination is no longer current")
 	}
-	activationID, found, err := CurrentActivationID(ctx, tx, postgres)
+	parent, found, err := CurrentTransportParent(ctx, tx, postgres)
 	if err != nil {
 		return "", 0, render.Audience{}, err
 	}
 	if !found {
 		return "", 0, render.Audience{}, fmt.Errorf("channel text response has no current activation")
+	}
+	activationID := ""
+	if parent.Kind == channelnative.TransportRuntimeActivation {
+		activationID = parent.ID
+	} else if parent != resolved.Parent {
+		return "", 0, render.Audience{}, fmt.Errorf("channel text parent changed")
 	}
 	audience := render.Audience{
 		PrincipalID: selected.PrincipalID, InterfaceKey: selected.InterfaceKey,
@@ -221,23 +240,36 @@ func currentBoundTextAudienceTx(ctx context.Context, tx *sql.Tx, text operatorch
 
 func insertResponsePlanTx(ctx context.Context, tx *sql.Tx, frozen render.Frozen, activationID string, bindingRevision int64, now time.Time, postgres bool) (string, error) {
 	if tx == nil || frozen.Validate() != nil || frozen.SourceKind != PlanResponse ||
-		uuid.Validate(activationID) != nil || bindingRevision < 1 {
+		(activationID != "" && uuid.Validate(activationID) != nil) || bindingRevision < 1 {
 		return "", fmt.Errorf("channel response plan is incomplete")
+	}
+	var parentJSON any
+	var activation any = activationID
+	if activationID == "" {
+		parent, err := originalResponseParentTx(ctx, tx, frozen.SourceID, frozen.Audience.InterfaceKey)
+		if err != nil {
+			return "", err
+		}
+		raw, err := canonicaljson.Bytes(parent)
+		if err != nil {
+			return "", err
+		}
+		parentJSON, activation = string(raw), nil
 	}
 	deliveryID, renderID := uuid.NewString(), uuid.NewString()
 	query := `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, request_activation_id, principal_id,
 		interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
-		conversation_scope, state, current_render_id, created_at)
-		VALUES (?, 'response', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rendered', ?, ?)`
+		conversation_scope, state, current_render_id, created_at,request_transport_parent)
+		VALUES (?, 'response', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rendered', ?, ?, ?)`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, request_activation_id, principal_id,
 			interface_key, binding_revision, delivery_epoch, external_account, conversation_reference,
-			conversation_scope, state, current_render_id, created_at)
-			VALUES ($1::uuid, 'response', $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 'rendered', $11::uuid, $12)`
+			conversation_scope, state, current_render_id, created_at,request_transport_parent)
+			VALUES ($1::uuid, 'response', $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 'rendered', $11::uuid, $12,$13::jsonb)`
 	}
-	if _, err := tx.ExecContext(ctx, query, deliveryID, frozen.SourceID, activationID, frozen.Audience.PrincipalID,
+	if _, err := tx.ExecContext(ctx, query, deliveryID, frozen.SourceID, activation, frozen.Audience.PrincipalID,
 		frozen.Audience.InterfaceKey, bindingRevision, frozen.Audience.DeliveryEpoch, frozen.Audience.ExternalAccountRef,
-		frozen.Audience.ConversationRef, string(frozen.Audience.ConversationScope), renderID, now); err != nil {
+		frozen.Audience.ConversationRef, string(frozen.Audience.ConversationScope), renderID, now, parentJSON); err != nil {
 		return "", fmt.Errorf("plan channel response: %w", err)
 	}
 	query = `INSERT INTO channel_delivery_renders (render_id, delivery_id, source_revision,

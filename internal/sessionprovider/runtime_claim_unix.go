@@ -20,6 +20,15 @@ func (i *runtimeIncoming) drain(ctx context.Context) error {
 		if row.event.Scope.Kind != channelonboarding.SessionInputOnboarding {
 			continue
 		}
+		if i.connection.operation.DeploymentRegistration && i.connection.operatorAccount.Account != "" {
+			settled, err := i.settleDeploymentOperator(ctx, row.event)
+			if err != nil {
+				return err
+			}
+			if settled {
+				continue
+			}
+		}
 		if err := i.settleClaim(ctx, row.event); err != nil {
 			return err
 		}

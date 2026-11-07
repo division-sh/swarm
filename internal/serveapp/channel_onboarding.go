@@ -496,7 +496,7 @@ func serveDeclaredRegistrationEnabled(ctx context.Context, manager *runtime.Runt
 	return err == nil, err
 }
 
-func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController, published func() error) error {
+func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController, published func() error, deployment ...*serveDeploymentTransport) error {
 	snapshot, err := compileServeChannelActivationSnapshot(ctx, manager, store, identities, credentials)
 	if err != nil {
 		return err
@@ -508,7 +508,7 @@ func reconcileServeProviderRegistrations(ctx context.Context, generation runtime
 	if err != nil {
 		return err
 	}
-	selection, err := resolveServeRegistrationPairs(ctx, snapshot, manager)
+	selection, err := resolveServeRegistrationPairs(ctx, snapshot, manager, deployment...)
 	if err != nil {
 		return err
 	}

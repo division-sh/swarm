@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -116,6 +117,38 @@ type AdmittedRequest struct {
 }
 
 func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
+
+// This consumes the already authenticated account/capture, not a provider
+// payload's operator_account field. Store parent currentness remains separate.
+func (a AdmittedRequest) RequireDeploymentOperator(ctx context.Context, account channelonboarding.AccountReference, operationID string, revision int64, session operatorchannel.SessionAccountAdmission) error {
+	if account.Validate() != nil || a.provider != account.Provider || a.manifestAdmission == nil {
+		return unauthorized("deployment operator input requires its authenticated account")
+	}
+	if a.sessionInput != nil {
+		r := a.sessionInput.Responsibility()
+		if !a.sessionInput.LifetimeCurrent(ctx) || !r.DeploymentRegistration || !r.DeploymentOperator || r.RegisteredBusiness ||
+			a.sessionInput.Scope() != channelonboarding.SessionInputOnboarding || r.OperationID != operationID || r.OperationRevision != revision ||
+			r.SessionAccount != session || session.Provider != account.Provider {
+			return unauthorized("deployment operator input does not own its native capture")
+		}
+		return nil
+	}
+	if a.operatorAccount != account.Account || a.accountDeliveryID == "" || session != (operatorchannel.SessionAccountAdmission{}) {
+		return unauthorized("deployment operator input does not own its receiving registration")
+	}
+	return nil
+}
+
+func (a AdmittedRequest) NativeCaptureEvidence() (string, string, error) {
+	if a.sessionInput == nil {
+		return "", "", nil
+	}
+	id, fingerprint := a.sessionInput.NativeCaptureEvidence()
+	if id == "" || fingerprint == "" {
+		return "", "", unauthorized("native input is missing its original capture evidence")
+	}
+	return id, fingerprint, nil
+}
 
 func (a AdmittedRequest) ProviderEventID() string {
 	if a.accountDeliveryID != "" {

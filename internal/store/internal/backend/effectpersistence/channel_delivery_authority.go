@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
@@ -17,6 +18,11 @@ import (
 // binding or activation even when the immutable plan still exists.
 func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) error {
 	delivery := authority.ChannelDelivery
+	if delivery.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if err := channeldelivery.LockTransportParentTx(ctx, tx, delivery.Parent, postgres); err != nil {
+			return invalidExternalAuthority(authority, "stale")
+		}
+	}
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, delivery.PrincipalID, postgres); err != nil {
 		return invalidExternalAuthority(authority, "principal_not_current")
 	}
@@ -48,6 +54,9 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		return false, nil
 	}
 	d := authority.ChannelDelivery
+	if d.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		return deploymentChannelDeliveryCurrent(ctx, q, authority, postgres, lock)
+	}
 	plan, found, err := channeldelivery.LoadPlan(ctx, q, d.DeliveryID, postgres)
 	if err != nil {
 		return false, err

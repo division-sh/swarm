@@ -53,11 +53,11 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 	if err := d.planOpenChannelCards(ctx); err != nil {
 		return err
 	}
-	activationID, found, err := d.store.CurrentChannelDeliveryActivationID(ctx)
+	parent, found, err := d.store.CurrentChannelDeliveryParent(ctx)
 	if err != nil {
 		return err
 	}
-	if !found || activationID == "" {
+	if !found || parent.Validate() != nil {
 		return nil
 	}
 	cursor := ""

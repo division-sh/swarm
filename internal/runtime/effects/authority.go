@@ -211,6 +211,7 @@ type StartupProbeAuthority struct {
 }
 
 type ServeRegistrationAuthority struct {
+	Parent                       channelnative.TransportParent
 	IntentID                     string
 	StartupAuthorityID           string
 	StartupStateVersion          uint64
@@ -250,6 +251,7 @@ func RegisteredOperatorAcknowledgementID(identityID string, revision int64) stri
 }
 
 type ChannelDeliveryAuthority struct {
+	Parent                       channelnative.TransportParent
 	EffectOperationID            string
 	DeliveryID                   string
 	RenderID                     string
@@ -272,6 +274,7 @@ type ChannelDeliveryAuthority struct {
 }
 
 type ChannelActionAckAuthority struct {
+	Parent                       channelnative.TransportParent
 	EffectOperationID            string
 	PublicationID                string
 	Provider                     string
@@ -306,6 +309,7 @@ func ChannelActionAckOperationID(publicationID string) (string, error) {
 }
 
 type ChannelNativeSettingAuthority struct {
+	Parent                       channelnative.TransportParent
 	EffectOperationID            string
 	SettingID                    string
 	SettingGeneration            int64
@@ -424,6 +428,12 @@ func (a Authority) Valid() bool {
 			a.ID != strings.TrimSpace(registration.IntentID) || registration.StartupStateVersion == 0 {
 			return false
 		}
+		if registration.Parent != (channelnative.TransportParent{}) {
+			return registration.Parent.Kind == channelnative.TransportDeploymentRegistration && registration.Parent.Validate() == nil &&
+				registration.OnboardingOperationID == registration.Parent.ID && registration.OnboardingRevision == registration.Parent.Revision &&
+				registration.BundleHash == "" && registration.BundleIdentity == "" && registration.PackInventoryGeneration == "" &&
+				registration.RuntimeInstanceID == "" && registration.ContextPublicationGeneration == 0 && !registration.PlanGeneration.Valid()
+		}
 		if strings.TrimSpace(registration.OnboardingOperationID) == "" {
 			return registration.OnboardingRevision == 0 && registration.BundleHash == "" &&
 				registration.BundleIdentity == "" && registration.PackInventoryGeneration == "" &&
@@ -441,21 +451,23 @@ func (a Authority) Valid() bool {
 		operationID, err := ChannelDeliveryOperationID(delivery.DeliveryID, delivery.RenderID)
 		return err == nil && delivery.EffectOperationID == operationID && a.ID == operationID &&
 			(delivery.PreviousReceiptOperationID == "" || validUUIDs(delivery.PreviousReceiptOperationID)) &&
-			validUUIDs(delivery.PrincipalID, delivery.ActivationID, delivery.RuntimeInstanceID) &&
-			delivery.DeliveryEpoch > 0 && delivery.BindingRevision > 0 && delivery.ActivationRevision > 0 &&
-			delivery.ContextPublicationGeneration == a.FenceGeneration &&
-			nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash,
-				delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration) && delivery.PlanGeneration.Valid()
+			validUUIDs(delivery.PrincipalID) && delivery.DeliveryEpoch > 0 && delivery.BindingRevision > 0 &&
+			channelTransportValid(delivery.Parent, delivery.ActivationID, delivery.ActivationRevision,
+				delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration,
+				delivery.RuntimeInstanceID, delivery.ContextPublicationGeneration) &&
+			channelTransportFence(delivery.Parent, delivery.ContextPublicationGeneration) == a.FenceGeneration &&
+			nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash) && delivery.PlanGeneration.Valid()
 	case AuthorityChannelActionAck:
 		ack := a.ChannelActionAck
 		operationID, err := ChannelActionAckOperationID(ack.PublicationID)
 		return err == nil && ack.EffectOperationID == operationID && a.ID == operationID &&
 			validUUIDs(ack.Token) && nonEmpty(ack.Provider, ack.ProviderEventID, ack.ProviderAuthorization, ack.InterfaceKey,
 			ack.ExternalAccountRef, ack.ConversationRef, ack.ConversationScope, ack.MessageReference, ack.InteractionRef) &&
-			validUUIDs(ack.ReceiptOperationID, ack.PrincipalID, ack.ActivationID, ack.RuntimeInstanceID) &&
-			ack.BindingRevision > 0 && ack.ActivationRevision > 0 &&
-			ack.ContextPublicationGeneration == a.FenceGeneration && ack.PlanGeneration.Valid() &&
-			nonEmpty(ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration)
+			validUUIDs(ack.ReceiptOperationID, ack.PrincipalID) && ack.BindingRevision > 0 &&
+			channelTransportValid(ack.Parent, ack.ActivationID, ack.ActivationRevision,
+				ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration,
+				ack.RuntimeInstanceID, ack.ContextPublicationGeneration) &&
+			channelTransportFence(ack.Parent, ack.ContextPublicationGeneration) == a.FenceGeneration && ack.PlanGeneration.Valid()
 	case AuthorityChannelNativeSetting:
 		setting := a.ChannelNativeSetting
 		operationID, err := channelnative.InstallOperationID(setting.SettingID, setting.SettingGeneration)
@@ -465,13 +477,13 @@ func (a Authority) Valid() bool {
 			((setting.ScopeKind == "chat" && setting.MemberReference == "") ||
 				(setting.ScopeKind == "chat_member" && setting.MemberReference != "")) &&
 			setting.SettingGeneration == int64(a.FenceGeneration) &&
-			validUUIDs(setting.PrincipalID, setting.ActivationID, setting.RuntimeInstanceID) &&
-			setting.ActivationRevision > 0 && setting.BindingRevision > 0 &&
-			setting.ContextPublicationGeneration > 0 &&
+			validUUIDs(setting.PrincipalID) && setting.BindingRevision > 0 &&
+			channelTransportValid(setting.Parent, setting.ActivationID, setting.ActivationRevision,
+				setting.BundleHash, setting.BundleIdentity, setting.PackInventoryGeneration,
+				setting.RuntimeInstanceID, setting.ContextPublicationGeneration) &&
 			strings.HasPrefix(setting.ResourceSlotID, setting.Provider+":") &&
 			nonEmpty(setting.Provider, setting.ConversationRef, setting.EntryContractHash,
-				setting.PackID, setting.PackVersion, setting.PackManifestHash,
-				setting.BundleHash, setting.BundleIdentity, setting.PackInventoryGeneration) && setting.PlanGeneration.Valid()
+				setting.PackID, setting.PackVersion, setting.PackManifestHash) && setting.PlanGeneration.Valid()
 	default:
 		return false
 	}
@@ -580,7 +592,9 @@ func (a Authority) Evidence() map[string]any {
 		evidence["intent_id"] = a.ServeRegistration.IntentID
 		evidence["startup_authority_id"] = a.ServeRegistration.StartupAuthorityID
 		evidence["startup_state_version"] = a.ServeRegistration.StartupStateVersion
-		if strings.TrimSpace(a.ServeRegistration.OnboardingOperationID) != "" {
+		if a.ServeRegistration.Parent.Kind == channelnative.TransportDeploymentRegistration {
+			evidence["transport_parent"] = a.ServeRegistration.Parent
+		} else if strings.TrimSpace(a.ServeRegistration.OnboardingOperationID) != "" {
 			evidence["onboarding_operation_id"] = a.ServeRegistration.OnboardingOperationID
 			evidence["onboarding_revision"] = a.ServeRegistration.OnboardingRevision
 			evidence["bundle_hash"] = a.ServeRegistration.BundleHash
@@ -697,6 +711,14 @@ func (a Authority) Evidence() map[string]any {
 		evidence["bundle_hash"] = logout.BundleHash
 		evidence["runtime_instance_id"] = logout.RuntimeInstanceID
 		evidence["target_fingerprint"] = logout.TargetFingerprint
+	}
+	switch a.Kind {
+	case AuthorityChannelDelivery:
+		retainChannelTransportEvidence(evidence, a.ChannelDelivery.Parent)
+	case AuthorityChannelActionAck:
+		retainChannelTransportEvidence(evidence, a.ChannelActionAck.Parent)
+	case AuthorityChannelNativeSetting:
+		retainChannelTransportEvidence(evidence, a.ChannelNativeSetting.Parent)
 	}
 	return evidence
 }

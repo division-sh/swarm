@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -541,7 +542,9 @@ func (o *ReadinessOwner) ChannelRegistrationCurrent(ctx context.Context, now tim
 		if state.Pair.BindingID != bindingID || state.Pair.Target.Selector != target || state.Pair.Target.Provider != provider {
 			continue
 		}
-		if !state.Pair.ChannelActivationGeneration.Valid() {
+		deployment := state.Pair.Parent.Kind == channelnative.TransportDeploymentRegistration &&
+			state.Pair.Parent.Validate() == nil && state.Pair.Parent.ID == state.Pair.Target.RegisteredOperationID
+		if !state.Pair.ChannelActivationGeneration.Valid() && !deployment {
 			continue
 		}
 		if found {
@@ -560,6 +563,26 @@ func (o *ReadinessOwner) ChannelRegistrationCurrent(ctx context.Context, now tim
 		result.Exposure = &copy
 	}
 	return result, o.registration.currentRevision(evaluated.snapshot.revision)
+}
+
+func (o *ReadinessOwner) DeploymentRegistrationCurrent(ctx context.Context, now time.Time, parent channelnative.TransportParent) (ChannelRegistrationCurrentness, bool) {
+	if o == nil || parent.Kind != channelnative.TransportDeploymentRegistration || parent.Validate() != nil {
+		return ChannelRegistrationCurrentness{}, false
+	}
+	evaluated := o.evaluate(ctx, now)
+	var result ChannelRegistrationCurrentness
+	found := false
+	for key, state := range evaluated.snapshot.registrations {
+		if state.Pair.Parent != parent {
+			continue
+		}
+		if found {
+			return ChannelRegistrationCurrentness{}, false
+		}
+		found = true
+		result.Registration, result.Current = state.evidence(evaluated.current[key]), evaluated.current[key]
+	}
+	return result, found && o.registration.currentRevision(evaluated.snapshot.revision)
 }
 
 func (o *ReadinessOwner) CallbackCurrent(ctx context.Context, now time.Time, alias, provider, token string) bool {

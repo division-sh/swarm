@@ -184,3 +184,29 @@ func (s *SQLiteRuntimeStore) ReadNativeInboxQualification(ctx context.Context, a
 	})
 	return out, err
 }
+
+func (s *PostgresStore) ReadNativeInboxQualificationParent(ctx context.Context, parent channelnative.TransportParent) (channelnative.Qualification, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return channelnative.Qualification{}, err
+	}
+	var out channelnative.Qualification
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = channeldelivery.ReadNativeInboxQualificationParentTx(txctx, tx, parent, true)
+		return err
+	})
+	return out, err
+}
+
+func (s *SQLiteRuntimeStore) ReadNativeInboxQualificationParent(ctx context.Context, parent channelnative.TransportParent) (channelnative.Qualification, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return channelnative.Qualification{}, err
+	}
+	var out channelnative.Qualification
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = channeldelivery.ReadNativeInboxQualificationParentTx(txctx, tx, parent, false)
+		return err
+	})
+	return out, err
+}

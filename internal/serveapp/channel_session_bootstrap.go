@@ -21,10 +21,11 @@ import (
 type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error)
 
 type deploymentRuntimeOptions struct {
-	manager  *runtime.RuntimeContextManager
-	sessions serveSessionBootstrapOwner
-	refresh  func(context.Context, channelonboarding.AccountReference) error
-	ingress  *publicingress.ReadinessOwner
+	deployment *serveDeploymentTransport
+	manager    *runtime.RuntimeContextManager
+	sessions   serveSessionBootstrapOwner
+	refresh    func(context.Context, channelonboarding.AccountReference) error
+	ingress    *publicingress.ReadinessOwner
 }
 
 type serveSessionBootstrapOwner interface {
@@ -46,6 +47,17 @@ func selectServeChannelWrite(ctx context.Context, sessions serveSessionBootstrap
 	}
 	identity, identityErr := plan.InterfaceIdentity()
 	generation, generationErr := plan.PlanGeneration()
+	if op.DeploymentRegistration {
+		if identityErr != nil || generationErr != nil || op.Posture != channelonboarding.ActivationSessionConnection ||
+			identity.Normalized() != op.Interface.Normalized() || generation.Diagnostic() != op.Interface.SemanticGeneration ||
+			op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.IdentityOperationID == "" {
+			return sessionexecution.Channel{}, errors.Join(channelonboarding.ErrRevisionConflict, identityErr, generationErr)
+		}
+		if sessions == nil {
+			return sessionexecution.Channel{}, &operatorchannel.SessionProviderUnavailableError{Provider: op.Provider}
+		}
+		return sessions.ChannelExecution(ctx, op)
+	}
 	if identityErr != nil || generationErr != nil || op.Posture != channelonboarding.ActivationSessionConnection ||
 		identity.Normalized() != op.Interface.Normalized() || !generation.Equal(op.Coordinate.PlanGeneration) {
 		return sessionexecution.Channel{}, errors.Join(channelonboarding.ErrRevisionConflict, identityErr, generationErr)
