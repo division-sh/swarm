@@ -2031,11 +2031,13 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(22, "channel_registration", err)
 		return 1
 	}
-	if mismatch, err := whatsAppAccountMismatch(runtimeContextManager.LoadedContexts(), registeredOperations); err != nil {
-		presenter.fail(22, "channel_registration", err)
-		return 1
-	} else if mismatch {
-		presenter.recordWhatsAppAccountMismatch()
+	for _, binding := range channelprovider.Installed() {
+		if mismatch, err := registeredAccountMismatch(binding, runtimeContextManager.LoadedContexts(), registeredOperations); err != nil {
+			presenter.fail(22, "channel_registration", err)
+			return 1
+		} else if mismatch {
+			presenter.recordAccountMismatch(binding)
+		}
 	}
 	if publicIngressEnabled {
 		presenter.recordNoConnectedChannels(len(initialRegistrationPairs), accountRows)
