@@ -38,6 +38,7 @@ func (t Transition) ID() string   { return t.id }
 
 type Effect struct {
 	kind           Kind
+	life           int64
 	route          runtimeflowidentity.Route
 	entityID       identity.EntityID
 	stage          string
@@ -54,6 +55,7 @@ func NewInitialEntry(route runtimeflowidentity.Route, entityID identity.EntityID
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	effect := Effect{
 		kind:          KindInitialEntry,
+		life:          1,
 		route:         route,
 		entityID:      identity.NormalizeEntityID(entityID.String()),
 		stage:         strings.TrimSpace(stage),
@@ -70,6 +72,7 @@ func NewAcceptedEvent(route runtimeflowidentity.Route, entityID identity.EntityI
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	effect := Effect{
 		kind:          KindAcceptedEvent,
+		life:          1,
 		route:         route,
 		entityID:      identity.NormalizeEntityID(entityID.String()),
 		eventID:       strings.TrimSpace(eventID),
@@ -91,6 +94,7 @@ func NewAcceptedEvent(route runtimeflowidentity.Route, entityID identity.EntityI
 }
 
 func (e Effect) Kind() Kind                        { return e.kind }
+func (e Effect) Life() int64                       { return e.life }
 func (e Effect) Route() runtimeflowidentity.Route  { return e.route }
 func (e Effect) EntityID() identity.EntityID       { return e.entityID }
 func (e Effect) InitialStage() string              { return e.stage }
@@ -98,6 +102,14 @@ func (e Effect) EventID() string                   { return e.eventID }
 func (e Effect) EventType() string                 { return e.eventType }
 func (e Effect) ExecutionMode() executionmode.Mode { return e.executionMode }
 func (e Effect) OccurredAt() time.Time             { return e.occurredAt }
+
+func (e Effect) WithLife(life int64) (Effect, error) {
+	if life <= 0 || (e.kind != KindInitialEntry && e.kind != KindAcceptedEvent) {
+		return Effect{}, fmt.Errorf("lifecycle effect requires positive captured instance life")
+	}
+	e.life = life
+	return e, nil
+}
 
 func (e Effect) Transition() (Transition, bool) {
 	if e.transition == nil {

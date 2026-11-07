@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -398,6 +399,31 @@ func provePipelineRunSummary(
 	if !summary.HasOpenWork() {
 		t.Fatalf("summary %#v should report open work", summary)
 	}
+	// The original summary inputs have provider-scoped provenance, not an
+	// instance owner. Do not adopt them into the root's captured life.
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}, nil)
+	rootSource := eventtest.RootRoutingSource(runID)
+	pendingID := commitPipelineParitySourceEvent(t, ctx, selected, runID, base.Add(10*time.Second), rootSource)
+	deferredInstanceID := commitPipelineParitySourceEvent(t, ctx, selected, runID, base.Add(11*time.Second), rootSource)
+	insertProducerIdentityDecisionObligation(t, fixture, ctx, deferredInstanceID, runID, base.Add(11*time.Second))
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}, []string{pendingID, deferredInstanceID})
+	processed, ok, err := claimNextPipelineWorkForTest(t, ctx, owner, runtimepipelineobligation.DecisionRouteQuery())
+	if err != nil || !ok || processed.Event.ID() != deferredInstanceID {
+		t.Fatalf("claim exact instance decision route: id=%s ok=%t err=%v", processed.Event.ID(), ok, err)
+	}
+	if _, err := owner.MarkDecisionProcessed(ctx, processed.Claim); err != nil {
+		t.Fatal(err)
+	}
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}, []string{pendingID, deferredInstanceID})
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 2}, nil)
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: "worker/sibling", Life: 1}, nil)
+	rootNext, err := rootSource.WithLife(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextID := commitPipelineParitySourceEvent(t, ctx, selected, runID, base.Add(12*time.Second), rootNext)
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 2}, []string{nextID})
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: runID, FlowInstance: runID, Life: 1}, []string{pendingID, deferredInstanceID})
 
 	terminalOnlyRunID := uuid.NewString()
 	ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, terminalOnlyRunID)
@@ -410,7 +436,47 @@ func provePipelineRunSummary(
 	if terminalOnly.TerminalNonSuccess != 1 || terminalOnly.HasOpenWork() || !terminalOnly.BlocksCompletion() {
 		t.Fatalf("terminal-only summary = %#v", terminalOnly)
 	}
+	assertInstanceLifePipelineCensus(t, ctx, fixture, events.InstanceLife{RunID: terminalOnlyRunID, FlowInstance: terminalOnlyRunID, Life: 1}, nil)
 
+}
+
+func commitPipelineParitySourceEvent(t *testing.T, ctx context.Context, selected pipelineObligationParityStore, runID string, at time.Time, source events.RoutingSource) string {
+	t.Helper()
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "test.event", "instance-fixture", "", []byte(`{"ok":true}`), 0,
+		runID, events.EventEnvelope{}, source, at)
+	if err := commitSemanticEventFixture(ctx, selected, event); err != nil {
+		t.Fatal(err)
+	}
+	return event.ID()
+}
+
+func assertInstanceLifePipelineCensus(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, life events.InstanceLife, want []string) {
+	t.Helper()
+	tx, err := fixture.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var owner interface {
+		ReadUnsettledInstanceLifeEventsTx(context.Context, *sql.Tx, events.InstanceLife) ([]string, error)
+	}
+	switch selected := fixture.store.(type) {
+	case *PostgresStore:
+		owner = selected.pipelinePostgresOwner
+	case *SQLiteRuntimeStore:
+		owner = selected.pipelineSQLiteOwner
+	default:
+		t.Fatal("pipeline census requires its selected-store owner")
+	}
+	got, err := owner.ReadUnsettledInstanceLifeEventsTx(ctx, tx, life)
+	if err != nil || len(got) != len(want) {
+		t.Fatalf("instance pipeline census=%v want=%v err=%v", got, want, err)
+	}
+	for index, id := range want {
+		if got[index] != id {
+			t.Fatalf("instance pipeline census=%v want=%v", got, want)
+		}
+	}
 }
 
 func provePipelineDecisionRouteDispositions(

@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"strings"
 	"testing"
 
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -41,6 +42,7 @@ func TestWorkflowEngineStateDecisionOwnsCompanionAndHistory(t *testing.T) {
 		{"create state and companion", runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion, true, "create"},
 		{"update state and companion", runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, false, "mutate"},
 		{"preserve state and companion", runtimepipeline.WorkflowEngineStateTransitionPreserveStateAndCompanion, false, ""},
+		{"restart state and companion", runtimepipeline.WorkflowEngineStateTransitionRestartStateAndCompanion, false, "restart"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			decision, err := decideWorkflowEngineState(test.transition)
@@ -54,12 +56,18 @@ func TestWorkflowEngineStateDecisionOwnsCompanionAndHistory(t *testing.T) {
 	}
 	for _, transition := range []runtimepipeline.WorkflowEngineStateTransition{
 		runtimepipeline.WorkflowEngineStateTransitionUnknown,
-		runtimepipeline.WorkflowEngineStateTransition(4),
+		runtimepipeline.WorkflowEngineStateTransition(5),
 		runtimepipeline.WorkflowEngineStateTransition(255),
 	} {
 		if decision, err := decideWorkflowEngineState(transition); err == nil || decision != (workflowEngineStateDecision{}) {
 			t.Fatalf("unknown transition %d returned decision %+v, error %v", transition, decision, err)
 		}
+	}
+	ordinary := runtimepipeline.WorkflowEngineMutationCommand{State: runtimepipeline.WorkflowEngineStateRecord{
+		Transition: runtimepipeline.WorkflowEngineStateTransitionRestartStateAndCompanion,
+	}}
+	if err := ordinary.Validate(); err == nil || !strings.Contains(err.Error(), "ordinary workflow mutation requires a constructed target") {
+		t.Fatalf("ordinary mutation gained constructor restart authority: %v", err)
 	}
 }
 

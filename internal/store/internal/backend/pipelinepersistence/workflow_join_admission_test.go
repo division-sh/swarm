@@ -35,7 +35,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 			if _, err := db.Exec(fmt.Sprintf(`CREATE TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, fields TEXT, PRIMARY KEY (run_id, entity_id))`, idType, idType)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(fmt.Sprintf(`CREATE TABLE flow_instances (run_id %s, entity_id %s, instance_path TEXT, entity_type TEXT, flow_template TEXT, current_state TEXT, revision BIGINT, bookkeeping TEXT, accumulator TEXT, PRIMARY KEY (run_id, instance_path))`, idType, idType)); err != nil {
+			if _, err := db.Exec(fmt.Sprintf(`CREATE TABLE flow_instances (run_id %s, entity_id %s, instance_path TEXT, entity_type TEXT, flow_template TEXT, current_state TEXT, revision BIGINT, bookkeeping TEXT, accumulator TEXT, life BIGINT NOT NULL CHECK (life > 0), PRIMARY KEY (run_id, instance_path))`, idType, idType)); err != nil {
 				t.Fatal(err)
 			}
 			run, entity := uuid.NewString(), uuid.NewString()
@@ -47,7 +47,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			entry := timeridentity.StageEntryRef{RunID: run, EntityID: entity, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID, InstancePath: owner.Route.InstancePath, Stage: "awaiting", Cause: "construction"}
+			entry := timeridentity.StageEntryRef{Life: 1, RunID: run, EntityID: entity, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID, InstancePath: owner.Route.InstancePath, Stage: "awaiting", Cause: "construction"}
 			ref, err := declaration.BindStageEntry(entry, attemptgeneration.Generation{})
 			if err != nil {
 				t.Fatal(err)
@@ -105,7 +105,7 @@ func TestA2FirstPublicationStageEntryFenceOnBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3,$4,'collector',$5,1,$6,$7)`, run, entity, owner.Route.InstancePath, entityType, entry.Stage, book, arms); err != nil {
+			if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3,$4,'collector',$5,1,$6,$7,1)`, run, entity, owner.Route.InstancePath, entityType, entry.Stage, book, arms); err != nil {
 				t.Fatal(err)
 			}
 			check(false)

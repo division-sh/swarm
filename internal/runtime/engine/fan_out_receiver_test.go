@@ -53,6 +53,20 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 			if capsule.Receiver == nil || capsule.Receiver.Node != node || capsule.Receiver.Target != route.Target || capsule.Validate() != nil || capsule.Lineage.ParentEventID != event.ID() {
 				t.Fatalf("receiver capture changed ownership or lineage: %+v", capsule)
 			}
+			captured := capsule
+			captured.Context.Life = &events.InstanceLife{RunID: capsule.Lineage.RunID, FlowInstance: capsule.Route.InstancePath, Life: capsule.Receiver.Target.Life()}
+			if err := captured.Validate(); err != nil {
+				t.Fatalf("exact captured receiver life refused: %v", err)
+			}
+			changed := *capsule.Receiver
+			changed.Target, err = changed.Target.WithLife(captured.Context.Life.Life + 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			captured.Receiver = &changed
+			if err := captured.Validate(); err == nil {
+				t.Fatal("fan-out receiver adopted another life")
+			}
 			raw, err := json.Marshal(capsule)
 			if err != nil || bytes.Contains(raw, []byte(`"receiver_initialization"`)) || bytes.Contains(raw, []byte(`"delivery_route"`)) {
 				t.Fatalf("capture retained publication authority: %s %v", raw, err)

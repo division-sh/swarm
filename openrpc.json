@@ -6059,6 +6059,15 @@
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
           }
+        },
+        {
+          "name": "iter",
+          "required": false,
+          "description": "Positive instance life; omitted selects the current life. Prior-life reads use retained state and revision rows.",
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
+          }
         }
       ],
       "result": {
@@ -12348,7 +12357,7 @@
         {
           "name": "filter",
           "required": false,
-          "description": "Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
+          "description": "Typed predicates over canonical RunTraceRow facts. List fields are OR-lists within the field and AND-composed across fields; scalar iter requires exactly one entity_id and selects its captured instance life.",
           "schema": {
             "$ref": "#/components/schemas/RunTraceFilter"
           }
@@ -12469,7 +12478,7 @@
         {
           "name": "filter",
           "required": false,
-          "description": "Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
+          "description": "Typed predicates over canonical RunTraceRow facts. List fields are OR-lists within the field and AND-composed across fields; scalar iter requires exactly one entity_id and selects its captured instance life.",
           "schema": {
             "$ref": "#/components/schemas/RunTraceFilter"
           }
@@ -19123,13 +19132,18 @@
             ],
             "type": "string"
           },
+          "life": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "route": {
             "$ref": "#/components/schemas/DecisionCardRoutingSourceRoute"
           }
         },
         "required": [
           "kind",
-          "route"
+          "route",
+          "life"
         ],
         "type": "object"
       },
@@ -19571,7 +19585,7 @@
       },
       "EntitySummary": {
         "additionalProperties": false,
-        "description": "Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every lifecycle property. Instances with no data row have null data clocks. Constructed no-stage members have stage_defined false, a positive header revision and lifecycle clocks, but null current_state and entered_state_at. Staged members expose the exact declared stage. created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.",
+        "description": "Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every lifecycle property. Instances with no data row have null data clocks. Constructed no-stage members have stage_defined false, a positive header revision and lifecycle clocks and a positive life, but null current_state and entered_state_at. Life is not identity; instance-taking reads default to the current life and accept iter only for an explicit prior life. Staged members expose the exact declared stage. created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.",
         "properties": {
           "created_at": {
             "oneOf": [
@@ -19611,6 +19625,17 @@
           },
           "flow_instance": {
             "type": "string"
+          },
+          "life": {
+            "oneOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lifecycle_created_at": {
             "oneOf": [
@@ -19679,6 +19704,7 @@
           "flow_instance",
           "entity_type",
           "stage_defined",
+          "life",
           "current_state",
           "revision",
           "entered_state_at",
@@ -23163,7 +23189,7 @@
       },
       "RunTraceFilter": {
         "additionalProperties": false,
-        "description": "Typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.",
+        "description": "Typed predicates for the canonical composed RunTraceRow owner. List fields are OR-lists; different fields compose with AND. The scalar iter selects one positive captured instance life and requires exactly one entity_id. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.",
         "properties": {
           "delivery_status": {
             "items": {
@@ -23189,6 +23215,11 @@
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
+          },
+          "iter": {
+            "description": "Selected instance life; requires exactly one entity_id filter, otherwise trace_iter_one_entity_required.",
+            "minimum": 1,
+            "type": "integer"
           },
           "subscriber_id": {
             "items": {

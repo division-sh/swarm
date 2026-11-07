@@ -114,6 +114,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					fixture.capabilitiesMu.Unlock()
 					before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", ".", entityID, "pending", 1, at)
+					record.Life = 1
 					record.Mode = f.bundle.FlowTree.ByID["."].Schema.EffectiveMode()
 					record.CurrentState = "pending"
 					record.EntityType = "state"

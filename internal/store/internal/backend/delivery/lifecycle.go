@@ -489,6 +489,14 @@ func (s *DeliverySQLiteOwner) ValidateProviderOriginTx(ctx context.Context, tx *
 	return sqliteDeliveryAdapter.ValidateCurrentClaim(ctx, tx, claim)
 }
 
+func (s *DeliveryPostgresOwner) ProviderOriginSnapshotTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+	return postgresDeliveryAdapter.ProviderOriginSnapshotTx(ctx, tx, claim)
+}
+
+func (s *DeliverySQLiteOwner) ProviderOriginSnapshotTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+	return sqliteDeliveryAdapter.ProviderOriginSnapshotTx(ctx, tx, claim)
+}
+
 func (s *DeliveryPostgresOwner) ProviderOriginPendingTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
 	return postgresDeliveryAdapter.providerOriginPendingTx(ctx, tx, claim)
 }
@@ -1102,6 +1110,20 @@ func (s *DeliverySQLiteOwner) SummarizeRunTx(ctx context.Context, tx *sql.Tx, ru
 		return runtimedelivery.RunSummary{}, errors.New("delivery SQLite transaction owner is required")
 	}
 	return sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
+}
+
+func (s *DeliveryPostgresOwner) ReadActiveInstanceLifeDeliveriesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]runtimedelivery.Snapshot, error) {
+	if s == nil {
+		return nil, errors.New("delivery PostgreSQL owner is required")
+	}
+	return postgresDeliveryAdapter.ReadActiveInstanceLifeSnapshots(ctx, tx, life)
+}
+
+func (s *DeliverySQLiteOwner) ReadActiveInstanceLifeDeliveriesTx(ctx context.Context, tx *sql.Tx, life events.InstanceLife) ([]runtimedelivery.Snapshot, error) {
+	if s == nil {
+		return nil, errors.New("delivery SQLite owner is required")
+	}
+	return sqliteDeliveryAdapter.ReadActiveInstanceLifeSnapshots(ctx, tx, life)
 }
 
 func (s *DeliveryPostgresOwner) TerminalizeRunDeliveriesTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string) ([]runtimedelivery.Terminalization, error) {

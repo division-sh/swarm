@@ -482,7 +482,11 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	}
 	ctx = events.WithDeliveryContext(ctx, deliveryContext)
 	intent := runtimeengine.EmitIntent{Event: event}
-	plans, err := l.planner.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
+	publicationContext, err := commit.PublicationContext(ctx)
+	if err != nil {
+		return CommitResult{Outcome: CommitRetry}, err
+	}
+	plans, err := l.planner.PrepareEnginePublications(publicationContext, []runtimeengine.EmitIntent{intent})
 	if err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
 	}

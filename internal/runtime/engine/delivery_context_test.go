@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -27,7 +28,8 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 		StateRepo:     stubStateRepo{},
 		MutationOwner: composedMutationOwner{publications: publications, activities: activities},
 	}}
-	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:intent-propagation"}}
+	life := events.InstanceLife{RunID: eventtest.UUID("continuation-intent-life"), FlowInstance: "worker/one", Life: 7}
+	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:intent-propagation"}, Life: &life}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
 	frame := executionFrame{
 		req: ExecutionRequest{
@@ -43,10 +45,10 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 	if _, err := exec.persist(ctx, frame); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
-	if len(publications.intents) != 1 || publications.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
+	if len(publications.intents) != 1 || publications.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() || publications.intents[0].Context.Life == nil || *publications.intents[0].Context.Life != life {
 		t.Fatalf("emit context = %#v", publications.intents)
 	}
-	if len(activities.intents) != 1 || activities.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
+	if len(activities.intents) != 1 || activities.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() || activities.intents[0].Context.Life == nil || *activities.intents[0].Context.Life != life {
 		t.Fatalf("activity context = %#v", activities.intents)
 	}
 }

@@ -247,6 +247,12 @@ func TestCanceledTurnStartupReadCancellationBothStores(t *testing.T) {
 			startupCtx, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			baseline := f.db.Stats().InUse
+			// The gated inventory now owns locks, not a read-only transaction.
+			// Cancellation must join without any domain/evidence write; SQLite
+			// retains its exact native idempotent writer-possession fence.
+			f.probe.mu.Lock()
+			f.probe.readOnlyGate = false
+			f.probe.mu.Unlock()
 			entered, release := f.probe.arm("canceled-turn", 1, nil, nil)
 			defer release()
 			defer f.probe.disarm()
@@ -276,10 +282,14 @@ func TestCanceledTurnStartupReadCancellationBothStores(t *testing.T) {
 			}
 			f.probe.disarm()
 			f.probe.mu.Lock()
-			active, outside, writes := f.probe.active, f.probe.outside, f.probe.writes
+			active, outside, writes, fences := f.probe.active, f.probe.outside, f.probe.writes, f.probe.nativeFences
 			f.probe.mu.Unlock()
-			if active != 0 || outside != 0 || writes != 0 || f.db.Stats().InUse != baseline {
-				t.Fatalf("startup snapshot escaped or leaked: active=%d outside=%d writes=%d connections=%d baseline=%d", active, outside, writes, f.db.Stats().InUse, baseline)
+			wantFences := 0
+			if backend == "sqlite" {
+				wantFences = 1
+			}
+			if active != 0 || outside != 0 || writes != fences || fences != wantFences || f.db.Stats().InUse != baseline {
+				t.Fatalf("startup snapshot escaped or leaked: active=%d outside=%d writes=%d native_fences=%d connections=%d baseline=%d", active, outside, writes, fences, f.db.Stats().InUse, baseline)
 			}
 			turns, err := f.store.(effects.CanceledTurnRecoveryStore).ListCanceledTurnRecoveries(f.ctx, request)
 			if err != nil || len(turns) != 1 || !turns[0].Attempt.Origin.Same(intent.Origin) {

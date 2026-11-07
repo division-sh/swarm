@@ -39,7 +39,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					ctx = originalStoreFixtureContext(t, ctx, selected)
 					identity := mustTestAgentIdentityForRun(fixture.forkRun, "diagnostic-fork-worker", "global")
-					transition := diagnosticTestTransition(t, identity, runtimemanager.LifecycleDiagnosticOrigin{}, executionmode.Live)
+					transition := diagnosticTestTransition(t, identity, runfork.LifecycleDiagnosticOrigin{}, executionmode.Live)
 					plan, err := identity.Plan()
 					if err != nil {
 						t.Fatal(err)
@@ -111,8 +111,8 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						t.Fatal(err)
 					}
 					projector := selected.(diagnosticProjectionTestStore)
-					origin := runtimemanager.LifecycleDiagnosticOrigin{
-						Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+					origin := runfork.LifecycleDiagnosticOrigin{
+						Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 						SelectedFork: authority.SelectedFork, SourceRunID: fixture.sourceRun, ForkPoint: binding.ForkPoint, ForkEventID: fixture.eventID,
 					}
 					if strings.HasPrefix(scenario, "causal_") {
@@ -128,7 +128,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						}); err != nil {
 							t.Fatal(err)
 						}
-						origin.Causality, origin.ParentEventID = runtimemanager.LifecycleDiagnosticAcceptedEvent, parent
+						origin.Causality, origin.ParentEventID = runfork.LifecycleDiagnosticAcceptedEvent, parent
 					}
 					transition.DiagnosticOrigin, transition.ConfigRevision = origin, revision
 					transition.Topology, err = agenttopology.SelectedDeclarationAdmission(fixture.forkRun, fixture.request.DeclarationPlan)
@@ -337,11 +337,11 @@ func proveMalformedDiagnosticProvenance(t *testing.T, ctx context.Context, db *s
 			case "owner_missing":
 				p.Origin.Owner = ""
 			case "causal_without_parent":
-				p.Origin.Causality = runtimemanager.LifecycleDiagnosticAcceptedEvent
+				p.Origin.Causality = runfork.LifecycleDiagnosticAcceptedEvent
 			case "observation_with_parent":
 				p.Origin.ParentEventID = uuid.NewString()
 			case "missing_parent":
-				p.Origin.Causality, p.Origin.ParentEventID = runtimemanager.LifecycleDiagnosticAcceptedEvent, uuid.NewString()
+				p.Origin.Causality, p.Origin.ParentEventID = runfork.LifecycleDiagnosticAcceptedEvent, uuid.NewString()
 			}
 			// Matching copied payload/provenance is insufficient: the durable
 			// lifecycle/fork owners must still reject altered historical authority.

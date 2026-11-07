@@ -97,6 +97,9 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 		route.FlowInstance = root.RunID()
 	}
 	producerSource, sourceErr := pinrouting.AdmitNodeExecutionRoutingSource(source, node, flowID, route)
+	if sourceErr == nil {
+		producerSource, sourceErr = producerSource.WithLife(request.RoutingSource().Life())
+	}
 	if sourceErr != nil || route.FlowID != flowID || producerSource != request.RoutingSource() {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has conflicting execution route")
 	}
@@ -105,7 +108,8 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	for _, execution := range executions {
 		delivery := execution.Delivery
 		if delivery.EventID == parent.ID() && delivery.RunID == parent.RunID() && delivery.Status == runtimedelivery.StatusDelivered &&
-			delivery.Route.Recipient == events.MustNodeDeliveryRecipient(node) && delivery.Route.Target.Route() == route {
+			delivery.Route.Recipient == events.MustNodeDeliveryRecipient(node) && delivery.Route.Target.Route() == route &&
+			delivery.Route.Target.Life() == request.RoutingSource().Life() {
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), delivery.Route), source, node, parent)
 			delivered = resolved.Matched && resolved.HandlerEventKey == intent.HandlerEventKey
 			if delivered {

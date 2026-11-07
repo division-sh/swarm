@@ -63,7 +63,7 @@ func derivedStaticTargetObservation(t *testing.T, source semanticview.Source, fa
 		t.Fatal(err)
 	}
 	at := time.Now().UTC()
-	instance := WorkflowInstance{WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active",
+	instance := WorkflowInstance{Life: 1, WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active",
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
 		CurrentState: "active", Revision: 1, CreatedAt: at, UpdatedAt: at}

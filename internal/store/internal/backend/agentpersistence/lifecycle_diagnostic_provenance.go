@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func snapshotLifecycleDiagnostic(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result *runtimemanager.AgentLifecycleTransitionResult, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator) error {
@@ -30,8 +31,8 @@ func snapshotLifecycleDiagnostic(ctx context.Context, tx *sql.Tx, req runtimeman
 	if err != nil {
 		return err
 	}
-	p := runtimemanager.LifecycleDiagnosticProvenance{Origin: req.DiagnosticOrigin, ActorMode: executionmode.Mode(desc.ExecutionMode), EventMode: executionmode.Mode(desc.ExecutionMode)}
-	if p.Origin.Causality == runtimemanager.LifecycleDiagnosticAcceptedEvent {
+	p := runfork.LifecycleDiagnosticProvenance{Origin: req.DiagnosticOrigin, ActorMode: executionmode.Mode(desc.ExecutionMode), EventMode: executionmode.Mode(desc.ExecutionMode)}
+	if p.Origin.Causality == runfork.LifecycleDiagnosticAcceptedEvent {
 		parent, found, err := eventOwner.LoadLifecycleDiagnosticEventTx(ctx, tx, p.Origin.ParentEventID)
 		if err != nil {
 			return err

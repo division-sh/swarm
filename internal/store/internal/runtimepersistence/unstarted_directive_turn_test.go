@@ -104,7 +104,17 @@ func TestUnstartedDirectiveTurnRecoveryBothStores(t *testing.T) {
 func commitUnstartedDirectiveTermination(t *testing.T, ctx context.Context, fixture completionSettlementFixture, owner flowidentity.RunScopedFlowInstance, rollback bool) (pipeline.CommittedWorkflowEngineMutation, error) {
 	t.Helper()
 	at, entity := time.Now().UTC().Truncate(time.Microsecond), uuid.NewString()
+	if owner.Route.ScopeKey == "global" {
+		source := defaultTurnInstanceSourceForTest(t)
+		root := flowidentity.Stored(source, ".", owner.RunID, owner.RunID, owner.RunID, "")
+		child, err := flowidentity.KeylessChild(source, root, "global")
+		if err != nil || child.InstancePath != owner.Route.InstancePath {
+			t.Fatalf("termination fixture differs from its canonical child: %+v %v", child, err)
+		}
+		entity = child.EntityID
+	}
 	record := seedTurnTerminationHeader(t, fixture, owner, entity, at)
+	entity = record.EntityID
 	cause := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
 	node, err := identity.AdmitExecutableNodeDeclaration(owner.Route.ScopeKey, "router")
 	if err != nil {

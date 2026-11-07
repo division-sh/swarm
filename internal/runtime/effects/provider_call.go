@@ -273,9 +273,15 @@ func newProviderCallJournal(authority Authority, req AuthorizeRequest) (Provider
 }
 
 // EncodeAttemptAuthorityEvidence leaves operation authority unchanged. Only
-// this initial attempt insert adds the immutable request journal.
+// the attempt insert adds ownership and, when present, the request journal.
 func EncodeAttemptAuthorityEvidence(authority Authority, req AuthorizeRequest) ([]byte, error) {
 	evidence := authority.Evidence()
+	if req.Kind == KindProviderTurn && authority.HasBusinessTurnOrigin() {
+		if err := req.InstanceOwnership.Validate(); err != nil {
+			return nil, err
+		}
+		evidence["instance_ownership"] = req.InstanceOwnership.Clone()
+	}
 	if req.ProviderCall != nil {
 		journal, err := newProviderCallJournal(authority, req)
 		if err != nil {

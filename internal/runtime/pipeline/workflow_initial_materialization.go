@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -355,8 +356,19 @@ func validateFlowConstructionOutgoingContextFields(context semanticvalue.Value) 
 		return fmt.Errorf("flow construction outgoing context must be an object")
 	}
 	for name := range contextFields {
-		if name != "reply" && name != "joins" {
+		if name != "reply" && name != "joins" && name != "instance_life" {
 			return fmt.Errorf("flow construction outgoing context has undeclared field %q", name)
+		}
+	}
+	if value, present := contextFields["instance_life"]; present {
+		fields, object := value.ObjectMap()
+		if !object || len(fields) != 3 {
+			return fmt.Errorf("flow construction outgoing life requires its exact coordinates")
+		}
+		for name := range fields {
+			if name != "run_id" && name != "flow_instance" && name != "life" {
+				return fmt.Errorf("flow construction outgoing life has undeclared field %q", name)
+			}
 		}
 	}
 	return nil
@@ -452,6 +464,9 @@ func validateFlowConstructionOutgoingOccurrence(receipt FlowConstructionReceipt)
 	}
 	if err := receipt.CreationEvent.DeliveryContext.Validate(); err != nil {
 		return fmt.Errorf("flow construction outgoing context: %w", err)
+	}
+	if life := receipt.CreationEvent.DeliveryContext.Life; life != nil && life.RunID != receipt.RunID {
+		return fmt.Errorf("flow construction outgoing life crosses its publication run")
 	}
 	if _, err := canonicaljson.Decode(receipt.CreationEvent.Payload); err != nil {
 		return fmt.Errorf("flow construction outgoing payload: %w", err)
@@ -597,6 +612,9 @@ func validateFlowConstructionChildOutgoingOccurrence(receipt FlowConstructionRec
 }
 
 func validateFlowConstructionChildReturnAdmissions(original, creationEvent *DynamicFlowRuntimeCreationEventPlan, childRunID string) error {
+	if err := validateFlowConstructionChildLife(original, creationEvent, childRunID); err != nil {
+		return err
+	}
 	for index, originalJoin := range original.DeliveryContext.Joins {
 		mappedJoin := creationEvent.DeliveryContext.Joins[index]
 		if originalJoin.Disposition != mappedJoin.Disposition || !originalJoin.Ref.Declaration().Equal(mappedJoin.Ref.Declaration()) {
@@ -605,6 +623,28 @@ func validateFlowConstructionChildReturnAdmissions(original, creationEvent *Dyna
 		if !mappedJoin.Ref.StageEntry().Empty() && mappedJoin.Ref.StageEntry().RunID != childRunID {
 			return fmt.Errorf("flow construction child projection has foreign outgoing return admission")
 		}
+	}
+	return nil
+}
+
+func validateFlowConstructionChildLife(original, child *DynamicFlowRuntimeCreationEventPlan, childRunID string) error {
+	source, projected := original.DeliveryContext.Life, child.DeliveryContext.Life
+	if source == nil {
+		if projected != nil {
+			return fmt.Errorf("flow construction child invented outgoing instance life")
+		}
+		return nil
+	}
+	expected := *source
+	if original.RunID != childRunID {
+		var err error
+		expected, err = runfork.ProjectInstanceLifeOwnership(original.RunID, childRunID, *source)
+		if err != nil {
+			return err
+		}
+	}
+	if projected == nil || *projected != expected {
+		return fmt.Errorf("flow construction child changed captured outgoing instance life")
 	}
 	return nil
 }

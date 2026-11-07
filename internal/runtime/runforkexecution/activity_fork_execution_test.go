@@ -654,7 +654,7 @@ func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture
 	state := pipeline.WorkflowEngineStateRecord{
 		Identity: owner, EntityID: entityID, ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: instance.Mode, Status: instance.Status,
-		CurrentState: activation.CurrentStage, StageDefined: true, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
+		CurrentState: activation.CurrentStage, StageDefined: true, Life: instance.Life, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
 		Fields: before.State.Fields, Bookkeeping: before.Lifecycle.State.Bookkeeping,
 		Accumulator: json.RawMessage(selectedContractActivityJSON(t, buckets)), Config: before.Lifecycle.Config,
 		InitialFields:  json.RawMessage(selectedContractActivityJSON(t, instance.InitialFieldValues)),

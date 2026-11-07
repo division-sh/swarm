@@ -15,29 +15,36 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
 
 const directiveOperationTestRunID = "00000000-0000-0000-0000-000000001000"
 
-func seedDirectiveOperationRun(t *testing.T, ctx context.Context, db *sql.DB, postgres bool) {
+func seedDirectiveOperationRun(t *testing.T, ctx context.Context, native agentfixture.Store, db *sql.DB, postgres bool) {
 	t.Helper()
 	if postgres {
 		requireRunningPostgresRunForTest(t, ctx, db, directiveOperationTestRunID, time.Now().UTC())
 	} else {
 		requireRunningSQLiteRunForTest(t, ctx, db, directiveOperationTestRunID, time.Now().UTC())
 	}
-	seedTestAgentRow(t, ctx, db, postgres, mustTestAgentIdentityForRun(directiveOperationTestRunID, "agent-1", "directive/instance-1"), "active")
+	actor := mustTestAgentIdentityForRun(directiveOperationTestRunID, "agent-1", "directive/instance-1")
+	if err := agentfixture.UpsertStatic(t, ctx, native, agentFixtureStaticRecord(t, actor)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
+	seedDirectiveOperationRun(t, ctx, store, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001001", "00000000-0000-0000-0000-000000001002", "idem-1", "hash-1", now)
 
@@ -69,14 +76,14 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 	}
 
 	ownerID := "00000000-0000-0000-0000-000000001007"
-	admitted, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, ownerID, now.Add(3*time.Second), time.Minute)
+	admitted, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, ownerID, now.Add(3*time.Second), time.Minute)
 	if err != nil {
 		t.Fatalf("AdmitDirectiveExecution: %v", err)
 	}
 	if admitted.Operation.State != runtimeagentcontrol.DirectiveOperationExecuting {
 		t.Fatalf("admitted state = %s", admitted.Operation.State)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, "other", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, "other", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
 		t.Fatalf("second admission error = %v", err)
 	}
 
@@ -109,7 +116,7 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
+	seedDirectiveOperationRun(t, ctx, store, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC)
 
 	executingReq := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001101", "00000000-0000-0000-0000-000000001102", "idem-recovery", "hash-recovery", now)
@@ -117,7 +124,7 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 	if err != nil {
 		t.Fatalf("reserve executing: %v", err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, "owner", now, time.Second); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, "owner", now, time.Second); err != nil {
 		t.Fatalf("admit executing: %v", err)
 	}
 
@@ -132,7 +139,7 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 	if err != nil {
 		t.Fatalf("reserve executed: %v", err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, executedReservation.Operation.OperationID, "executed-owner", now, time.Minute); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, executedReservation.Operation.OperationID, "executed-owner", now, time.Minute); err != nil {
 		t.Fatalf("admit executed: %v", err)
 	}
 	if _, err := store.RecordDirectiveExecuted(ctx, executedReservation.Operation.OperationID, "executed-owner", directiveOperationResponseForTest(executedReservation.Operation), now); err != nil {
@@ -154,7 +161,7 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 	if uncertain.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
 		t.Fatalf("uncertain state = %s", uncertain.State)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, uncertain.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, uncertain.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("indeterminate readmission error = %v", err)
 	}
 	abandoned, _, err := store.LoadDirectiveOperation(ctx, prepared.Operation.OperationID)
@@ -171,7 +178,7 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 	path := filepath.Join(t.TempDir(), "directive.db")
 	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	ctx = originalStoreFixtureContext(t, ctx, first)
-	seedDirectiveOperationRun(t, ctx, first.backend.ConstructionHandle(), false)
+	seedDirectiveOperationRun(t, ctx, first, first.backend.ConstructionHandle(), false)
 	second := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	ctx = originalStoreFixtureContext(t, ctx, second)
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)
@@ -232,7 +239,7 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 			ctx := testAuthorActivityContext()
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 			ctx = originalStoreFixtureContext(t, ctx, store)
-			seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
+			seedDirectiveOperationRun(t, ctx, store, store.backend.ConstructionHandle(), false)
 			now := time.Date(2026, 7, 10, 14, 30, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedDirectiveForTest(t, ctx, store, now)
 			if _, err := store.backend.Exec(tc.triggerSQL); err != nil {
@@ -273,7 +280,7 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
+	seedDirectiveOperationRun(t, ctx, store, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 14, 45, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001251", "00000000-0000-0000-0000-000000001252", "result-failure", "result-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -281,7 +288,7 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 		t.Fatalf("reserve: %v", err)
 	}
 	ownerID := "00000000-0000-0000-0000-000000001253"
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, ownerID, now, time.Second); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, ownerID, now, time.Second); err != nil {
 		t.Fatalf("admit: %v", err)
 	}
 	if _, err := store.backend.Exec(`CREATE TRIGGER fail_directive_executed BEFORE UPDATE OF state ON agent_directive_operations WHEN NEW.state = 'executed' BEGIN SELECT RAISE(ABORT, 'injected result failure'); END`); err != nil {
@@ -303,7 +310,7 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 	if operation.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
 		t.Fatalf("operation state = %s, want indeterminate", operation.State)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, operation.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, operation.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("readmission error = %v", err)
 	}
 }
@@ -312,7 +319,7 @@ func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
+	seedDirectiveOperationRun(t, ctx, store, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 14, 50, 0, 0, time.UTC)
 	if _, err := store.backend.Exec(`CREATE TRIGGER fail_directive_event BEFORE INSERT ON events WHEN NEW.event_name = 'platform.agent_directive' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END`); err != nil {
 		t.Fatalf("create event trigger: %v", err)
@@ -341,7 +348,7 @@ func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *test
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, db, true)
+	seedDirectiveOperationRun(t, ctx, store, db, true)
 	now := time.Date(2026, 7, 10, 15, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001301", "00000000-0000-0000-0000-000000001302", "pg-idem", "pg-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -349,7 +356,7 @@ func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *test
 		t.Fatalf("ReserveDirectiveOperation: %v", err)
 	}
 	ownerID := "00000000-0000-0000-0000-000000001303"
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
 		t.Fatalf("AdmitDirectiveExecution: %v", err)
 	}
 	if _, err := store.RecordDirectiveExecuted(ctx, reserved.Operation.OperationID, ownerID, directiveOperationResponseForTest(reserved.Operation), now.Add(2*time.Second)); err != nil {
@@ -378,7 +385,7 @@ func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmissio
 	ctx := testAuthorActivityContext()
 	stores := []*PostgresStore{admitTestPostgresStore(t, db), admitTestPostgresStore(t, db)}
 	ctx = originalStoreFixtureContext(t, ctx, stores[0])
-	seedDirectiveOperationRun(t, ctx, db, true)
+	seedDirectiveOperationRun(t, ctx, stores[0], db, true)
 	now := time.Date(2026, 7, 10, 15, 15, 0, 0, time.UTC)
 	requests := []runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001311", "00000000-0000-0000-0000-000000001312", "pg-same-key", "pg-same-hash", now),
@@ -410,7 +417,7 @@ func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmissio
 
 	admissionErrs := make([]error, 2)
 	runConcurrently(2, func(i int) {
-		_, admissionErrs[i] = admitDirectiveExecutionForTest(ctx, stores[i], results[0].Operation.OperationID, fmt.Sprintf("owner-%d", i), now, time.Minute)
+		_, admissionErrs[i] = admitDirectiveExecutionForTest(t, ctx, stores[i], results[0].Operation.OperationID, fmt.Sprintf("owner-%d", i), now, time.Minute)
 	})
 	var admitted, inProgress int
 	for _, err := range admissionErrs {
@@ -434,14 +441,14 @@ func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *te
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, db, true)
+	seedDirectiveOperationRun(t, ctx, store, db, true)
 	now := time.Date(2026, 7, 10, 15, 30, 0, 0, time.UTC)
 
 	executing, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001321", "00000000-0000-0000-0000-000000001322", "pg-recovery", "pg-recovery-hash", now))
 	if err != nil {
 		t.Fatalf("reserve executing: %v", err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, executing.Operation.OperationID, "owner", now, time.Second); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, executing.Operation.OperationID, "owner", now, time.Second); err != nil {
 		t.Fatalf("admit executing: %v", err)
 	}
 	prepared, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001323", "00000000-0000-0000-0000-000000001324", "", "pg-keyless-hash", now))
@@ -452,7 +459,7 @@ func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *te
 	if err != nil {
 		t.Fatalf("reserve executed: %v", err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, executed.Operation.OperationID, "executed-owner", now, time.Minute); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, executed.Operation.OperationID, "executed-owner", now, time.Minute); err != nil {
 		t.Fatalf("admit executed: %v", err)
 	}
 	if _, err := store.RecordDirectiveExecuted(ctx, executed.Operation.OperationID, "executed-owner", directiveOperationResponseForTest(executed.Operation), now); err != nil {
@@ -470,7 +477,7 @@ func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *te
 	if err != nil || uncertain.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
 		t.Fatalf("uncertain operation = %#v err=%v", uncertain, err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, uncertain.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, uncertain.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("indeterminate readmission error = %v", err)
 	}
 	abandoned, _, err := store.LoadDirectiveOperation(ctx, prepared.Operation.OperationID)
@@ -495,7 +502,7 @@ func TestPostgresDirectiveOperationFinalizationFailuresRollbackToExecuted(t *tes
 			ctx := testAuthorActivityContext()
 			store := admitTestPostgresStore(t, db)
 			ctx = originalStoreFixtureContext(t, ctx, store)
-			seedDirectiveOperationRun(t, ctx, db, true)
+			seedDirectiveOperationRun(t, ctx, store, db, true)
 			now := time.Date(2026, 7, 10, 15, 45, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedPostgresDirectiveForTest(t, ctx, store, now)
 			dropTrigger := installPostgresDirectiveRejectInsertTrigger(t, db, tc.triggerName, tc.table)
@@ -531,14 +538,14 @@ func TestPostgresDirectiveOperationResultPersistenceFailureBecomesIndeterminate(
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, db, true)
+	seedDirectiveOperationRun(t, ctx, store, db, true)
 	now := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
 	reserved, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001341", "00000000-0000-0000-0000-000000001342", "pg-result-failure", "pg-result-hash", now))
 	if err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
 	ownerID := "00000000-0000-0000-0000-000000001343"
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, ownerID, now, time.Second); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, ownerID, now, time.Second); err != nil {
 		t.Fatalf("admit: %v", err)
 	}
 	dropTrigger := installPostgresDirectiveRejectExecutedTrigger(t, db)
@@ -553,7 +560,7 @@ func TestPostgresDirectiveOperationResultPersistenceFailureBecomesIndeterminate(
 	if err != nil || operation.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
 		t.Fatalf("operation = %#v err=%v", operation, err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, store, operation.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, operation.OperationID, "new-owner", now, time.Minute); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
 		t.Fatalf("indeterminate readmission error = %v", err)
 	}
 }
@@ -564,7 +571,7 @@ func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testi
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, store)
-	seedDirectiveOperationRun(t, ctx, db, true)
+	seedDirectiveOperationRun(t, ctx, store, db, true)
 	dropTrigger := installPostgresDirectiveRejectInsertTrigger(t, db, "fail_pg_directive_event", "events")
 	defer dropTrigger()
 	now := time.Date(2026, 7, 10, 16, 15, 0, 0, time.UTC)
@@ -596,12 +603,12 @@ func TestDirectiveExecutionAdmitsExactPersistedModeBeforeTransitionOnSQLiteAndPo
 				t.Cleanup(cleanup)
 				pg := admitTestPostgresStore(t, db)
 				ctx = originalStoreFixtureContext(t, ctx, pg)
-				seedDirectiveOperationRun(t, ctx, db, true)
+				seedDirectiveOperationRun(t, ctx, pg, db, true)
 				store = pg
 			} else {
 				sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				ctx = originalStoreFixtureContext(t, ctx, sqlite)
-				seedDirectiveOperationRun(t, ctx, sqlite.backend.ConstructionHandle(), false)
+				seedDirectiveOperationRun(t, ctx, sqlite, sqlite.backend.ConstructionHandle(), false)
 				store = sqlite
 			}
 			now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
@@ -612,7 +619,7 @@ func TestDirectiveExecutionAdmitsExactPersistedModeBeforeTransitionOnSQLiteAndPo
 			if err != nil {
 				t.Fatalf("reserve live directive: %v", err)
 			}
-			if _, err := store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+			if _, err := admitDirectiveRequestForTest(t, ctx, store, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 				OperationID: live.Operation.OperationID, OwnerID: "mock-only-owner", Now: now.Add(time.Second), Lease: time.Minute,
 				ExecutionPosture: executionposture.MockOnly,
 			}); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
@@ -630,7 +637,7 @@ func TestDirectiveExecutionAdmitsExactPersistedModeBeforeTransitionOnSQLiteAndPo
 			if err != nil {
 				t.Fatalf("reserve mock directive: %v", err)
 			}
-			admitted, err := store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+			admitted, err := admitDirectiveRequestForTest(t, ctx, store, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 				OperationID: mock.Operation.OperationID, OwnerID: "mock-owner", Now: now.Add(3 * time.Second), Lease: time.Minute,
 				ExecutionPosture: executionposture.MockOnly,
 			})
@@ -721,7 +728,7 @@ func reserveAndRecordExecutedDirectiveForTest(t *testing.T, ctx context.Context,
 		t.Fatalf("reserve: %v", err)
 	}
 	ownerID := "00000000-0000-0000-0000-000000001243"
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, ownerID, now, time.Minute); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, ownerID, now, time.Minute); err != nil {
 		t.Fatalf("admit: %v", err)
 	}
 	executed, err := store.RecordDirectiveExecuted(ctx, reserved.Operation.OperationID, ownerID, directiveOperationResponseForTest(reserved.Operation), now)
@@ -739,7 +746,7 @@ func reserveAndRecordExecutedPostgresDirectiveForTest(t *testing.T, ctx context.
 		t.Fatalf("reserve: %v", err)
 	}
 	ownerID := "00000000-0000-0000-0000-000000001363"
-	if _, err := admitDirectiveExecutionForTest(ctx, store, reserved.Operation.OperationID, ownerID, now, time.Minute); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, store, reserved.Operation.OperationID, ownerID, now, time.Minute); err != nil {
 		t.Fatalf("admit: %v", err)
 	}
 	executed, err := store.RecordDirectiveExecuted(ctx, reserved.Operation.OperationID, ownerID, directiveOperationResponseForTest(reserved.Operation), now)
@@ -760,16 +767,41 @@ type directiveExecutionPersistenceForTest interface {
 }
 
 func admitDirectiveExecutionForTest(
+	t testing.TB,
 	ctx context.Context,
 	store directiveExecutionAdmitterForTest,
 	operationID, ownerID string,
 	now time.Time,
 	lease time.Duration,
 ) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
-	return store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+	return admitDirectiveRequestForTest(t, ctx, store, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 		OperationID: operationID, OwnerID: ownerID, Now: now, Lease: lease,
 		ExecutionPosture: executionposture.Live,
 	})
+}
+
+func admitDirectiveRequestForTest(t testing.TB, ctx context.Context, store directiveExecutionAdmitterForTest, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
+	t.Helper()
+	native, ok := store.(interface {
+		LoadDirectiveOperation(context.Context, string) (runtimeagentcontrol.DirectiveOperation, bool, error)
+		LoadAgentLifecycleState(context.Context, agentidentity.Identity) (manager.AgentLifecycleState, bool, error)
+	})
+	if !ok {
+		return runtimeagentcontrol.DirectiveExecutionAdmission{}, fmt.Errorf("directive fixture needs its native actor reader")
+	}
+	op, found, err := native.LoadDirectiveOperation(ctx, req.OperationID)
+	if err != nil || !found {
+		return runtimeagentcontrol.DirectiveExecutionAdmission{}, errors.Join(err, fmt.Errorf("directive fixture operation missing"))
+	}
+	state, found, err := native.LoadAgentLifecycleState(ctx, op.AgentIdentity)
+	if err != nil || !found {
+		return runtimeagentcontrol.DirectiveExecutionAdmission{}, errors.Join(err, fmt.Errorf("directive fixture actor missing"))
+	}
+	ctx = effects.WithLifecycleToken(ctx, effects.LifecycleToken{Identity: op.AgentIdentity, AgentID: op.AgentIdentity.AgentID(), RuntimeEpoch: state.RuntimeEpoch, Generation: state.Generation})
+	if req.Source == nil {
+		req.Source = defaultTurnInstanceSourceForTest(t)
+	}
+	return store.AdmitDirectiveExecution(ctx, req)
 }
 
 func runConcurrently(count int, run func(int)) {

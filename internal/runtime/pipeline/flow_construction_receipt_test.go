@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func constructionReceiptFixture(t *testing.T) (FlowConstructionReceipt, flowidentity.RunScopedFlowInstance) {
@@ -29,11 +30,12 @@ func constructionReceiptFixture(t *testing.T) (FlowConstructionReceipt, flowiden
 	control.TransitionHistory = []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "account", "before", "initial", receipt.CreatingInput.EventID, receipt.OccurredAt)}
 	receipt.Persisted.Bookkeeping = map[string]any{"initial": map[string]any{"integer": int64(7), "double": float64(7)}}
 	receipt.Persisted.Accumulator = map[string]any{"members": []any{"original-member", int64(7), float64(7)}}
+	life := events.InstanceLife{RunID: receipt.RunID, FlowInstance: "parent/keyed", Life: 7}
 	receipt.CreationEvent = &DynamicFlowRuntimeCreationEventPlan{
 		EventID: "33333333-3333-4333-8333-333333333333", EventType: "account.created", RunID: receipt.RunID,
 		ParentEventID: receipt.CreatingInput.EventID, ExecutionMode: executionmode.Live,
 		Payload: []byte(`{"double":7.0,"integer":7}`), CreatedAt: receipt.OccurredAt,
-		DeliveryContext: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}},
+		DeliveryContext: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}, Life: &life},
 	}
 	return receipt, owner
 }
@@ -63,6 +65,7 @@ func TestFlowConstructionReceiptV3CanonicalCorrespondence(t *testing.T) {
 		{name: "header presentation", mutate: func(r *FlowConstructionReceipt) { r.Persisted.Control.Slug = "other-slug" }},
 		{name: "creation occurrence", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.EventID = "44444444-4444-4444-8444-444444444444" }},
 		{name: "reply context", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.DeliveryContext.Reply.ID = "other-reply" }},
+		{name: "captured life", mutate: func(r *FlowConstructionReceipt) { r.CreationEvent.DeliveryContext.Life.Life++ }},
 		{name: "creating input", mutate: func(r *FlowConstructionReceipt) {
 			r.CreatingInput.EventID = "55555555-5555-4555-8555-555555555555"
 			r.CreationEvent.ParentEventID = r.CreatingInput.EventID
@@ -127,6 +130,7 @@ func TestFlowConstructionReceiptV3IndependentIdentityAndOccurrence(t *testing.T)
 	got.Persisted.Control.TransitionHistory[0].From = "changed"
 	got.CreationEvent.Payload[0] = 'x'
 	got.CreationEvent.DeliveryContext.Reply.ID = "changed"
+	got.CreationEvent.DeliveryContext.Life.Life++
 	if !bytes.Equal(raw, constructionReceiptRaw(t, receipt)) {
 		t.Fatal("decoded nested values alias immutable evidence")
 	}
@@ -235,6 +239,9 @@ func TestFlowConstructionReceiptV3RejectsMissingAndAliasedEvidence(t *testing.T)
 		{"control_case_alias", strings.Replace(string(raw), `"storage_ref":`, `"STORAGE_REF":`, 1)},
 		{"occurrence_case_alias", strings.Replace(string(raw), `"event_type":`, `"EVENT_TYPE":`, 1)},
 		{"missing_occurrence_payload", strings.Replace(string(raw), `"payload":`, `"PAYLOAD":`, 1)},
+		{"zero_outgoing_life", strings.Replace(string(raw), `"life":7`, `"life":0`, 1)},
+		{"missing_life_coordinate", strings.Replace(string(raw), `"flow_instance":"parent/keyed",`, ``, 1)},
+		{"foreign_life_field", strings.Replace(string(raw), `"life":7`, `"life":7,"foreign":true`, 1)},
 		{"missing_initial_bookkeeping", strings.Replace(string(raw), `"bookkeeping":`, `"BOOKKEEPING":`, 1)},
 		{"duplicate_initial_field", strings.Replace(string(raw), `"integer":7`, `"integer":7,"integer":8`, 1)},
 		{"trailing_object", string(raw) + `{}`}, {"null_root", `null`}, {"array_root", `[]`},
@@ -270,6 +277,9 @@ func TestFlowConstructionReceiptV3RejectsIdentityAndOccurrenceCorruption(t *test
 		{"missing_occurrence_parent", func(r *FlowConstructionReceipt) { r.CreationEvent.ParentEventID = "" }},
 		{"wrong_occurrence_mode", func(r *FlowConstructionReceipt) { r.CreationEvent.ExecutionMode = executionmode.Mock }},
 		{"duplicate_occurrence_payload", func(r *FlowConstructionReceipt) { r.CreationEvent.Payload = []byte(`{"key":1,"key":2}`) }},
+		{"foreign_occurrence_life", func(r *FlowConstructionReceipt) {
+			r.CreationEvent.DeliveryContext.Life.RunID = "44444444-4444-4444-8444-444444444444"
+		}},
 		{"incoming_equals_outgoing", func(r *FlowConstructionReceipt) { r.CreationEvent.EventID = r.CreatingInput.EventID }},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -310,6 +320,13 @@ func childConstructionReceiptMapping(t *testing.T, receipt FlowConstructionRecei
 		mapped.EventID, mapped.RunID, mapped.ParentEventID = "99999999-9999-4999-8999-999999999999", childRun, input.EventID
 		mapped.Payload = bytes.Clone(receipt.CreationEvent.Payload)
 		mapped.DeliveryContext = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "child-reply"}}
+		if receipt.CreationEvent.DeliveryContext.Life != nil {
+			life, err := runfork.ProjectInstanceLifeOwnership(receipt.RunID, childRun, *receipt.CreationEvent.DeliveryContext.Life)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mapped.DeliveryContext.Life = &life
+		}
 		occurrence = &mapped
 	}
 	return owner, identity, input, occurrence
@@ -386,6 +403,12 @@ func TestFlowConstructionReceiptV3ChildProjectionRejectsInventedEvidence(t *test
 		{"lost_return_binding", func(_ *flowidentity.Instance, _ *FlowConstructionInput, e **DynamicFlowRuntimeCreationEventPlan) {
 			(*e).DeliveryContext = events.DeliveryContext{}
 		}},
+		{"lost_captured_life", func(_ *flowidentity.Instance, _ *FlowConstructionInput, e **DynamicFlowRuntimeCreationEventPlan) {
+			(*e).DeliveryContext.Life = nil
+		}},
+		{"changed_captured_life", func(_ *flowidentity.Instance, _ *FlowConstructionInput, e **DynamicFlowRuntimeCreationEventPlan) {
+			(*e).DeliveryContext.Life.Life++
+		}},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			receipt, _ := constructionReceiptFixture(t)
@@ -422,6 +445,7 @@ func TestFlowConstructionReceiptV3ChildReturnAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := timeridentity.StageEntryRef{
+		Life:  1,
 		RunID: receipt.RunID, FlowScope: receipt.Identity.ScopeKey, InstanceID: receipt.Identity.InstanceID,
 		InstancePath: receipt.Identity.InstancePath, EntityID: receipt.EntityID, Stage: "initial", Cause: "construction",
 	}

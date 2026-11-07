@@ -36,6 +36,7 @@ func TestUnstartedClaimedTurnTerminationBothStores(t *testing.T) {
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				entity := uuid.NewString()
 				record := seedTurnTerminationHeader(t, fixture, owner, entity, at)
+				entity = record.EntityID
 				cause := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
 				node, err := identity.AdmitExecutableNodeDeclaration(scope, "router")
 				if err != nil {

@@ -37,7 +37,7 @@ func constructionIndexContext(t testing.TB, source semanticview.Source) context.
 
 func constructionIndexObservation(t testing.TB, source semanticview.Source, runID string, identity flowidentity.Instance, key string) pipeline.FlowInstanceObservation {
 	t.Helper()
-	observed, err := admitConstructionIndexTestObservation(source, runID, identity, key)
+	observed, err := admitConstructionIndexTestObservation(source, runID, identity, key, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func installNativeConstructionIndexFixture(t testing.TB, store *targetRouteMemor
 	store.installConstructionReceipt(observed.Owner(), receipt)
 }
 
-func admitConstructionIndexTestObservation(source semanticview.Source, runID string, identity flowidentity.Instance, key string) (pipeline.FlowInstanceObservation, error) {
+func admitConstructionIndexTestObservation(source semanticview.Source, runID string, identity flowidentity.Instance, key string, life int64) (pipeline.FlowInstanceObservation, error) {
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle.SourceArtifact == nil {
 		return pipeline.FlowInstanceObservation{}, fmt.Errorf("fixture requires admitted source artifact")
@@ -81,7 +81,7 @@ func admitConstructionIndexTestObservation(source semanticview.Source, runID str
 		WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, InstanceKey: key,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
-		CurrentState: "active", Revision: 1, CreatedAt: at, UpdatedAt: at,
+		CurrentState: "active", Life: life, Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}
 	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
 		instance.EntityType = entity.EntityType

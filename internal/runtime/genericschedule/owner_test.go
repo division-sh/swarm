@@ -10,12 +10,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -366,6 +368,117 @@ func TestOccurrenceEventPreservesImmutableExecutionMode(t *testing.T) {
 	if event.ExecutionMode() != executionmode.Mock {
 		t.Fatalf("occurrence execution mode = %q, want mock", event.ExecutionMode())
 	}
+	t.Run("prepared_owner_binding", testPreparedPublicationOwnerBinding)
+}
+
+func runOwnedPreparedOccurrence(t *testing.T) (Activation, Occurrence, Wakeup) {
+	t.Helper()
+	activation, occurrence, wakeup := lifecyclePreparedOccurrence(t)
+	command := &activation.Command
+	command.RunID, command.EntityID = uuid.NewString(), uuid.NewString()
+	command.OwnerKind, command.OwnerID = OwnerAgent, "runtime"
+	command.AgentIdentity = agentidentitytest.RootRuntimeForRun(t, command.RunID, command.OwnerID, "schedule-owner-proof")
+	var err error
+	command.RoutingSource, err = events.NewRootRoutingSource(command.EntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation.ImmutableHash, err = command.ImmutableHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return activation, occurrence, wakeup
+}
+
+func testPreparedPublicationOwnerBinding(t *testing.T) {
+	activation, occurrence, _ := runOwnedPreparedOccurrence(t)
+	prepared := PreparedOccurrence{Outcome: PrepareReady, Activation: activation, Occurrence: occurrence}
+	event, err := occurrencePublicationEvent(activation, occurrence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
+	bound := withPreparedPublicationOwner(ctx, prepared)
+	actor, found, err := PreparedPublicationAgent(bound, event)
+	if err != nil || !found || actor != activation.Command.AgentIdentity {
+		t.Fatalf("exact prepared actor=%+v found=%t err=%v", actor, found, err)
+	}
+	if _, found, err := PreparedPublicationAgent(ctx, event); err != nil || found {
+		t.Fatalf("platform producer invented schedule ownership: found=%t err=%v", found, err)
+	}
+	for _, field := range []string{"run", "source", "event", "occurrence", "payload"} {
+		t.Run(field, func(t *testing.T) {
+			changed, due := activation, occurrence
+			switch field {
+			case "run":
+				changed.Command.RunID = uuid.NewString()
+			case "source":
+				changed.Command.RoutingSource, err = events.NewRootRoutingSource(uuid.NewString())
+			case "event":
+				changed.Command.EventType = "platform.foreign"
+			case "occurrence":
+				due.DueAt = due.DueAt.Add(time.Second)
+				due.EventID = OccurrenceEventID(due.ActivationID, due.DueAt)
+			case "payload":
+				changed.Command.Payload, err = canonicaljson.FromGo(map[string]any{"foreign": true})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign, err := occurrencePublicationEvent(changed, due)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, found, err := PreparedPublicationAgent(bound, foreign); !found || err == nil {
+				t.Fatalf("foreign %s borrowed prepared ownership: found=%t err=%v", field, found, err)
+			}
+		})
+	}
+	foreign, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := PreparedPublicationAgent(correlation.WithSourceArtifactFact(bound, foreign), event); err == nil {
+		t.Fatal("prepared owner crossed its admitted artifact")
+	}
+	if _, _, err := PreparedPublicationAgent(withPreparedPublicationOwner(context.Background(), prepared), event); err == nil {
+		t.Fatal("prepared owner invented absent source evidence")
+	}
+	canceled, cancel := context.WithCancel(bound)
+	cancel()
+	if _, _, err := PreparedPublicationAgent(canceled, event); !errors.Is(err, context.Canceled) {
+		t.Fatalf("prepared owner lost cancellation: %v", err)
+	}
+	t.Run("acknowledged_system_owner", func(t *testing.T) {
+		system := prepared
+		system.Activation.Command.OwnerKind = OwnerSystem
+		system.Activation.Command.OwnerID = "runtime-test"
+		system.Activation.Command.AgentIdentity = agentidentity.Identity{}
+		system.Activation.ImmutableHash, err = system.Activation.Command.ImmutableHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		commit := PreparationCommit{Acknowledged: true, Result: system}
+		bound, err := commit.PublicationContext(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		command, found, err := PreparedPublicationCommand(bound, event)
+		if err != nil || !found || command.OwnerKind != OwnerSystem || !command.AgentIdentity.IsZero() {
+			t.Fatalf("native system occurrence borrowed an actor: %+v found=%t err=%v", command, found, err)
+		}
+		if _, found, err := PreparedPublicationAgent(bound, event); err != nil || found {
+			t.Fatalf("system occurrence became an agent: found=%t err=%v", found, err)
+		}
+		commit.Acknowledged = false
+		if _, err := commit.PublicationContext(ctx); err == nil {
+			t.Fatal("unacknowledged occurrence acquired publication ownership")
+		}
+	})
 }
 
 func TestCatchupDepthUsesPersistedCoordinatesWithoutSkipping(t *testing.T) {
@@ -644,15 +757,21 @@ type lifecycleProofPlanner struct {
 	prepareCalls int
 	releases     int
 	finalizes    int
+	inspect      func(context.Context, runtimeengine.EmitIntent) error
 }
 
-func (p *lifecycleProofPlanner) PrepareEnginePublications(_ context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+func (p *lifecycleProofPlanner) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
 	p.prepareCalls++
 	if p.prepareErr != nil {
 		return nil, p.prepareErr
 	}
 	result := make([]runtimeengine.DurablePublicationPlan, 0, len(intents))
 	for _, intent := range intents {
+		if p.inspect != nil {
+			if err := p.inspect(ctx, intent); err != nil {
+				return nil, err
+			}
+		}
 		result = append(result, lifecycleProofPlan{intent: intent})
 	}
 	return result, nil
@@ -980,6 +1099,46 @@ func TestLifecyclePreparationAcknowledgementControlsOccurrenceSettlement(t *test
 			}
 			if store.commitCalls != test.wantCommits || planner.finalizes != test.wantCommits || dispatcher.calls != test.wantCommits {
 				t.Fatalf("preparation consequences = commits:%d finalizes:%d dispatches:%d", store.commitCalls, planner.finalizes, dispatcher.calls)
+			}
+		})
+	}
+	for _, acknowledged := range []bool{false, true} {
+		name := "unacknowledged_owner_handoff"
+		if acknowledged {
+			name = "acknowledged_owner_handoff"
+		}
+		t.Run(name, func(t *testing.T) {
+			activation, occurrence, wakeup := runOwnedPreparedOccurrence(t)
+			store := &lifecycleProofStore{activation: activation,
+				prepared:      PreparedOccurrence{Outcome: PrepareReady, Activation: activation, Occurrence: occurrence},
+				prepareReject: !acknowledged, prepareErr: cleanupErr}
+			plannerErr := errors.New("stop after observing exact owner handoff")
+			planner := &lifecycleProofPlanner{inspect: func(ctx context.Context, intent runtimeengine.EmitIntent) error {
+				actor, found, err := PreparedPublicationAgent(ctx, intent.Event)
+				if err != nil || !found || actor != activation.Command.AgentIdentity {
+					t.Fatalf("acknowledged owner=%+v found=%t err=%v", actor, found, err)
+				}
+				return plannerErr
+			}}
+			lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, planner, &lifecycleProofDispatcher{}, nil, executionposture.Live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stopLifecycleProof(t, lifecycle)
+			fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = lifecycle.fire(correlation.WithSourceArtifactFact(context.Background(), fact), wakeup)
+			want := 0
+			if acknowledged {
+				want = 1
+				if !errors.Is(err, plannerErr) {
+					t.Fatalf("acknowledged owner never reached planner: %v", err)
+				}
+			}
+			if !errors.Is(err, cleanupErr) || planner.prepareCalls != want || store.commitCalls != 0 {
+				t.Fatalf("owner admission calls=%d commits=%d err=%v", planner.prepareCalls, store.commitCalls, err)
 			}
 		})
 	}

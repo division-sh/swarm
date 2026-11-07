@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime/pprof"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -233,7 +234,7 @@ func issue642RequireNewSelectedArm(t *testing.T, rt issue2564ServedFixture, read
 	}
 	expectedID := timeridentity.WorkflowTimerActivationID(completed.RunID, completed.RunID, completed.RunID,
 		actual.Ref.DeclarationKey, actual.Ref.DeclarationRevision, string(actual.Ref.Cause), actual.Ref.Generation.KeySuffix(),
-		creating.ID(), string(creating.Type()), "", "", "")
+		creating.ID(), string(creating.Type()), "", "", "", strconv.FormatInt(creating.RoutingSource().Life(), 10))
 	if actual.Ref.ActivationID != expectedID {
 		t.Fatalf("new arm identity does not bind its fresh selected creating input: expected=%s actual=%+v", expectedID, actual)
 	}

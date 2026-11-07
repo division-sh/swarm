@@ -49,7 +49,7 @@ func (e *captureFanOutExecutor) ReportFanOutServingError(_ context.Context, err 
 
 // Capture only execution, not admission: selection, retained-session provider,
 // grant binding and all mutations below use the production selected-store path.
-func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixtures []fanOutOwnerFixture) (startupownership.ProcessCapability, []startupownership.LiveGenerationGrant, []*worklifetime.RuntimeOccurrence, agenttopology.SourceSetPlan) {
+func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixtures []fanOutOwnerFixture, retainedPlans ...agenttopology.SourceSetPlan) (startupownership.ProcessCapability, []startupownership.LiveGenerationGrant, []*worklifetime.RuntimeOccurrence, agenttopology.SourceSetPlan) {
 	t.Helper()
 	capability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
@@ -73,6 +73,21 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	plan, err := agenttopology.NewSourceSetPlan(sources, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(retainedPlans) > 1 {
+		t.Fatal("fan-out fixture accepts only its one complete source plan")
+	}
+	if len(retainedPlans) == 1 {
+		retained := retainedPlans[0]
+		if err := retained.Validate(); err != nil || len(retained.Sources) != len(plan.Sources) {
+			t.Fatalf("fan-out fixture changed its exact source coordinates: %v", err)
+		}
+		for i := range plan.Sources {
+			if plan.Sources[i].Normalize().Key() != retained.Sources[i].Normalize().Key() {
+				t.Fatal("fan-out fixture changed its exact source coordinate")
+			}
+		}
+		plan = retained
 	}
 	current, exists, err := capability.CurrentSourceSet(ctx)
 	if err != nil {
@@ -148,9 +163,9 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	return capability, grants, occurrences, plan
 }
 
-func grantedFanOutOwnerForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixture fanOutOwnerFixture) (pipeline.FanOutObligationOwner, startupownership.ProcessCapability, startupownership.LiveGenerationGrant, agenttopology.SourceSetPlan) {
+func grantedFanOutOwnerForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixture fanOutOwnerFixture, plans ...agenttopology.SourceSetPlan) (pipeline.FanOutObligationOwner, startupownership.ProcessCapability, startupownership.LiveGenerationGrant, agenttopology.SourceSetPlan) {
 	t.Helper()
-	capability, grants, occurrences, plan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
+	capability, grants, occurrences, plan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture}, plans...)
 	grant, occurrence := grants[0], occurrences[0]
 	executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 1), done: make(chan struct{})}
 	workers := 1

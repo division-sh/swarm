@@ -45,6 +45,14 @@ func (c DeliveryContext) Validate() error {
 	if err := validateOptionalUUID("delivery.run_id", c.RunID); err != nil {
 		return err
 	}
+	if c.Life != nil {
+		if err := c.Life.Validate(); err != nil {
+			return err
+		}
+		if c.RunID != "" && c.RunID != c.Life.RunID {
+			return fmt.Errorf("delivery life crosses its execution run")
+		}
+	}
 	seen := make(map[string]bool, len(c.Joins))
 	for _, receipt := range c.Joins {
 		if err := receipt.Validate(); err != nil {
@@ -68,8 +76,8 @@ func (c DeliveryContext) JoinAdmission(declaration timeridentity.JoinRef) (JoinA
 	return JoinAdmissionReceipt{}, false
 }
 
-func (c DeliveryContext) ReplyOnly() DeliveryContext {
-	return DeliveryContext{Reply: c.Reply}.Normalized()
+func (c DeliveryContext) Continuation() DeliveryContext {
+	return DeliveryContext{Reply: c.Reply, Life: c.Life}.Normalized()
 }
 
 func (c DeliveryContext) Identity() (string, error) {

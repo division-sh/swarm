@@ -36,7 +36,7 @@ func TestRootTurnTerminationUsesConstructedRunOwnerBothStores(t *testing.T) {
 				runID := fixture.authority.Target.RunID
 				owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)}
 				at := time.Now().UTC().Truncate(time.Microsecond)
-				entity := uuid.NewString()
+				entity := runID // The structural root's canonical constructor owns this identity.
 				record := seedTurnTerminationHeader(t, fixture, owner, entity, at)
 				cause := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
 				node, err := identity.AdmitExecutableNodeDeclaration(".", "router")

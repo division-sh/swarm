@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -48,7 +49,7 @@ func loadLifecycleDiagnosticOccurrence(ctx context.Context, tx *sql.Tx, id strin
 	if err := json.Unmarshal(raw, &o.result); err != nil {
 		return o, err
 	}
-	var p runtimemanager.LifecycleDiagnosticProvenance
+	var p runfork.LifecycleDiagnosticProvenance
 	if err := json.Unmarshal(provenance, &p); err != nil {
 		return o, err
 	}
@@ -124,7 +125,7 @@ func validateLifecycleDiagnosticHistory(ctx context.Context, tx *sql.Tx, o lifec
 		}
 	}
 	p := result.DiagnosticProvenance
-	if p.Origin.Causality == runtimemanager.LifecycleDiagnosticAcceptedEvent {
+	if p.Origin.Causality == runfork.LifecycleDiagnosticAcceptedEvent {
 		parent, found, err := eventOwner.LoadLifecycleDiagnosticEventTx(ctx, tx, p.Origin.ParentEventID)
 		if err != nil {
 			return err
@@ -207,7 +208,7 @@ func lifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string, ev
 		if err := eventOwner.ValidateRuntimeLogRecordTx(ctx, tx, record); err != nil {
 			return nil, err
 		}
-		if o.result.DiagnosticProvenance.Origin.Owner == runtimemanager.LifecycleDiagnosticSelectedFork && o.result.DiagnosticProvenance.Origin.Causality == runtimemanager.LifecycleDiagnosticObservation {
+		if o.result.DiagnosticProvenance.Origin.Owner == runfork.LifecycleDiagnosticSelectedFork && o.result.DiagnosticProvenance.Origin.Causality == runfork.LifecycleDiagnosticObservation {
 			if record.ParentEventID == "" {
 				observations = append(observations, record.EventID)
 			}

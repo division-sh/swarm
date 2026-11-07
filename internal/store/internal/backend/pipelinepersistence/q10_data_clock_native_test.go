@@ -38,6 +38,7 @@ func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProce
 				_, ctx = materializeSQLiteStatementRuns(t, db, location, false, prepare, runID, foreignRunID)
 			}
 			record := pipeline.WorkflowEngineStateRecord{
+				Life:     1,
 				Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("work", "work", "work")},
 				EntityID: entityID, EntityType: "task", WorkflowName: "work", Mode: "static", Status: "active", StageDefined: true,
 				CurrentState: "ready", Fields: []byte(`{"count":1}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{}`),

@@ -24,6 +24,7 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 		for _, test := range []struct {
 			name, corruption, refusal string
 			fielded, construct, ready bool
+			lifeChanged               bool
 		}{
 			{name: "fieldless", construct: true, ready: true},
 			{name: "fielded", fielded: true, construct: true, ready: true},
@@ -32,6 +33,8 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 			{name: "required_fields_missing", fielded: true, construct: true, corruption: "entity_state", refusal: "incomplete"},
 			{name: "terminated_fieldless", construct: true, refusal: "terminated"},
 			{name: "terminated_fielded", fielded: true, construct: true, refusal: "terminated"},
+			{name: "stale_life_fieldless", construct: true, lifeChanged: true, refusal: "instance_restarted"},
+			{name: "stale_life_fielded", fielded: true, construct: true, lifeChanged: true, refusal: "instance_restarted"},
 		} {
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				documents := map[string]string{
@@ -58,6 +61,11 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 				}
 				if test.corruption != "" {
 					if _, err := f.db.ExecContext(f.ctx, "DELETE FROM "+test.corruption+" WHERE run_id=$1", runID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if test.lifeChanged {
+					if _, err := f.db.ExecContext(f.ctx, `UPDATE flow_instances SET life=2 WHERE run_id=$1 AND instance_path=$2`, runID, req.Instance.InstancePath); err != nil {
 						t.Fatal(err)
 					}
 				}

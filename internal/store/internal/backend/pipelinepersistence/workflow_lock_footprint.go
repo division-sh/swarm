@@ -10,7 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
@@ -81,12 +84,51 @@ func (s *PipelinePostgresOwner) LockWorkflowPublicationTx(ctx context.Context, t
 }
 
 func (s *PipelineSQLiteOwner) LockWorkflowPublicationTx(ctx context.Context, tx *sql.Tx, command runtimebus.PublicationCommand) error {
-	return nil
+	return lockWorkflowPublicationFootprintTx(ctx, tx, false, nil, []runtimebus.PublicationCommand{command})
+}
+
+func prepareWorkflowTerminationOwnershipTx(ctx context.Context, tx *sql.Tx, owner WorkflowTurnTerminationTxOwner, command *workflowlifecycle.TurnTermination, publications []runtimebus.PublicationCommand) (context.Context, error) {
+	if command == nil {
+		return ctx, nil
+	}
+	if owner == nil {
+		return nil, fmt.Errorf("authored termination requires its native turn owner")
+	}
+	var lives []events.InstanceLife
+	var binding processbinding.Binding
+	for _, publication := range publications {
+		for _, plan := range publication.Activations {
+			if err := collectRestartActorScopes(plan, &lives, &binding); err != nil {
+				return nil, err
+			}
+		}
+	}
+	actors, err := agentpersistence.InstanceLifeActorIdentitiesTx(ctx, tx, lives)
+	if err != nil {
+		return nil, err
+	}
+	// Union the restart census with retained turn actors BEFORE either owner
+	// takes source/run/header locks. Each later owner retains its own checks.
+	return owner.PrepareWorkflowTurnTerminationTx(ctx, tx, *command, actors)
 }
 
 // The prepared plans name locks, not accepted state. Semantic checks and receipt
 // writes stay at their commit sites after this complete native acquisition prefix.
 func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgres bool, owners []flowidentity.RunScopedFlowInstance, publications []runtimebus.PublicationCommand) error {
+	var lives []events.InstanceLife
+	var binding processbinding.Binding
+	for _, publication := range publications {
+		for _, plan := range publication.Activations {
+			if err := collectRestartActorScopes(plan, &lives, &binding); err != nil {
+				return err
+			}
+		}
+	}
+	if len(lives) != 0 {
+		if err := agentpersistence.LockInstanceLifeActorsTx(ctx, tx, lives, binding, !postgres); err != nil {
+			return err
+		}
+	}
 	if !postgres {
 		return nil
 	}
@@ -95,6 +137,24 @@ func lockWorkflowPublicationFootprintTx(ctx context.Context, tx *sql.Tx, postgre
 		return err
 	}
 	return acquireWorkflowPublicationFootprintTx(ctx, tx, footprint)
+}
+
+func collectRestartActorScopes(plan pipeline.FlowInstanceActivationPlan, lives *[]events.InstanceLife, binding *processbinding.Binding) error {
+	if plan.Restart != nil {
+		if len(*lives) != 0 && !binding.Equal(plan.Restart.ProcessBinding) {
+			return fmt.Errorf("instance restarts cross their exact publication process binding")
+		}
+		*binding = plan.Restart.ProcessBinding
+		*lives = append(*lives, events.InstanceLife{
+			RunID: plan.Readiness.RunID, FlowInstance: plan.Identity.InstancePath, Life: plan.Restart.Life,
+		})
+	}
+	for _, child := range plan.Children {
+		if err := collectRestartActorScopes(child, lives, binding); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type preparedWorkflowPublicationFootprint struct {

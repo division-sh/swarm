@@ -5,13 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -49,7 +46,7 @@ func TestCanceledTurnReactionCommitsAtomicallyBothStores(t *testing.T) {
 				if result, err := store.CommitCanceledTurn(ctx, command); err == nil || result.Acknowledged {
 					t.Fatalf("timeout origin settled without declared reaction: %+v err=%v", result, err)
 				}
-				command.Publication = prepareCanceledReactionForTest(t, ctx, fixture, clock, intent.RequestedAt)
+				command.Publication = prepareCanceledReactionForTest(t, ctx, fixture, runtimeeffects.TurnExecutionResult{Attempt: handle.Attempt(), Cancellation: intent, Clock: &clock})
 				installCanceledReactionCut(t, ctx, fixture)
 				result, err := store.CommitCanceledTurn(ctx, command)
 				if err == nil || result.Acknowledged || result.Publication != nil {
@@ -97,17 +94,8 @@ func TestCanceledTurnReactionCommitsAtomicallyBothStores(t *testing.T) {
 	}
 }
 
-func prepareCanceledReactionForTest(t *testing.T, ctx context.Context, fixture completionSettlementFixture, clock runtimeeffects.LogicalTurnClock, requestedAt time.Time) runtimeeffects.TurnReactionPlan {
+func prepareCanceledReactionForTest(t *testing.T, ctx context.Context, fixture completionSettlementFixture, turn runtimeeffects.TurnExecutionResult) runtimeeffects.TurnReactionPlan {
 	t.Helper()
-	flowID, _, path, present := fixture.authority.Normal.Identity.Route.Fields()
-	if !present {
-		t.Fatal("turn reaction needs the exact agent route")
-	}
-	source, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := eventtest.RuntimeControlWithRoutingSource(clock.TimeoutEvent, events.EventType(clock.Timeout.Emit), runtimeeffects.TurnTimeoutProducerID(), "", []byte(`{}`), 0, fixture.authority.Target.RunID, "", events.EventEnvelope{}, source, requestedAt)
 	if !fixture.sqlite {
 		registerTestAuthorActivityCatalogForContext(t, fixture.store.(testAuthorActivityCatalogRegistrar), ctx)
 	}
@@ -115,11 +103,11 @@ func prepareCanceledReactionForTest(t *testing.T, ctx context.Context, fixture c
 	if err != nil {
 		t.Fatal(err)
 	}
-	plans, err := bus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
-	if err != nil || len(plans) != 1 {
-		t.Fatalf("prepare reaction: count=%d err=%v", len(plans), err)
+	plan, err := bus.PrepareTurnTimeoutReaction(ctx, turn)
+	if err != nil {
+		t.Fatalf("prepare exact acknowledged reaction: %v", err)
 	}
-	return plans[0]
+	return plan
 }
 
 func assertCanceledReactionCount(t *testing.T, ctx context.Context, fixture completionSettlementFixture, eventID string, want int) {

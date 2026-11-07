@@ -343,7 +343,7 @@ func (actual WorkflowTimerActivation) ValidateCauseReplay(expected WorkflowTimer
 		return fmt.Errorf("requested workflow timer cause replay: %w", err)
 	}
 	if actual.Ref != expected.Ref || actual.RunID != expected.RunID || actual.EntityID != expected.EntityID ||
-		actual.Route != expected.Route || actual.RoutingSource.Kind() != expected.RoutingSource.Kind() || actual.RoutingSource.Route() != expected.RoutingSource.Route() || actual.OwnerAgent != expected.OwnerAgent ||
+		actual.Route != expected.Route || actual.RoutingSource != expected.RoutingSource || actual.OwnerAgent != expected.OwnerAgent ||
 		actual.EventType != expected.EventType || actual.ExecutionMode != expected.ExecutionMode || actual.Recurring != expected.Recurring ||
 		actual.RecurrenceInterval != expected.RecurrenceInterval || !actual.CreatedAt.Equal(expected.CreatedAt) ||
 		actual.SourceTimerID != expected.SourceTimerID || actual.ForkedFromRunID != expected.ForkedFromRunID ||

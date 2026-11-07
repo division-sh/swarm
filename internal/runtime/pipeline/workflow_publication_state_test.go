@@ -34,7 +34,7 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := WorkflowEngineStateRecord{Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: constructed.Route()},
+	record := WorkflowEngineStateRecord{Life: 1, Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: constructed.Route()},
 		EntityID: constructed.EntityID, WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "static", Status: "active",
 		ParentInstance: constructed.ParentRoute.FlowInstance,
 		CurrentState:   "ready", ExpectedState: "ready", ExpectedRevision: 3, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
@@ -92,6 +92,7 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 		t.Fatal(err)
 	}
 	record := WorkflowEngineStateRecord{
+		Life:     1,
 		Identity: owner, EntityID: entityID, WorkflowName: "review", WorkflowVersion: "v1",
 		Mode: "template", Status: "active", CurrentState: "review", EntityType: "state",
 		InstanceKey: "exact", ParentInstance: runID,

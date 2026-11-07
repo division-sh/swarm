@@ -344,7 +344,7 @@ func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.C
 	if err != nil {
 		return projected, err
 	}
-	projected.ContinuedRecipientRoutes, err = projectContinuedSourceRecipientRoutes(ctx, tx, a.snapshot, source.SourceEventID, a.forkRunID, projected.ContinuedReplyRequests)
+	projected.ContinuedRecipientRoutes, err = projectContinuedSourceRecipientRoutes(ctx, tx, a.snapshot, source.SourceEventID, a.forkRunID)
 	if err != nil {
 		return projected, err
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -46,6 +47,9 @@ func TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores(t *testing.T) {
 			if err != nil {
 				t.Errorf("controlled provider admission: %v", err)
 				return "", err
+			}
+			if !handle.Attempt().InstanceOwnership.RunOwned || handle.Attempt().InstanceOwnership.Life != nil {
+				t.Fatal("run-owned directive borrowed a constructed instance")
 			}
 			if err := handle.MarkLaunched(ctx); err != nil {
 				t.Errorf("controlled provider launch: %v", err)
@@ -123,8 +127,11 @@ func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *t
 						}
 					}
 					scope, instanceID, path, _ := token.Identity.Route.Fields()
+					if token.Identity.Route.Presence == agentidentity.RouteRoot {
+						scope, instanceID, path = ".", directive.Event.RunID(), directive.Event.RunID()
+					}
 					owner := flowidentity.RunScopedFlowInstance{RunID: directive.Event.RunID(), Route: flowidentity.StoredRoute(scope, instanceID, path)}
-					entity, at := uuid.NewString(), time.Now().UTC().Truncate(time.Microsecond)
+					entity, at := directive.Event.RunID(), time.Now().UTC().Truncate(time.Microsecond)
 					record := seedTurnTerminationHeader(t, completionSettlementFixture{store: backend.store.(completionSettlementTestStore), original: ctx}, owner, entity, at)
 					node, err := identity.AdmitExecutableNodeDeclaration(scope, "termination-router")
 					if err != nil {
@@ -166,7 +173,7 @@ func TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores(t *t
 					settleErr := handle.Settle(context.WithoutCancel(ctx), state, &failure, map[string]any{"physical_joined": true, "launch_rejected": phase == "prelaunch"})
 					return "", errors.Join(context.Canceled, settleErr)
 				}
-				harness = newDirectiveAmbiguityHarness(t, backend, agent)
+				harness = newDirectiveAmbiguityHarnessInFlow(t, backend, agent, "")
 				_, err := harness.manager.SendDirective(harness.workContext(t), harness.request)
 				operation := harness.loadOperation(t)
 				if !errors.Is(err, agentcontrol.ErrDirectiveCanceled) || operation.State != agentcontrol.DirectiveOperationCanceled || operation.CancellationReason != deliverylifecycle.CancellationTerminate || operation.Failure != nil {

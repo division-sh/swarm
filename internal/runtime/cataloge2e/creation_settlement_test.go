@@ -61,6 +61,8 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				}
 				firstCommitted := make(chan struct{})
 				var once sync.Once
+				var handlerMu sync.Mutex
+				initialSecondEvent := ""
 				observedState := make(chan string, 1)
 				h.rt.Pipeline.SetTestLifecycleProbe(catalogCreationSettlementObserver(func(_ context.Context, signal lifecycleprobe.Signal) {
 					if signal.Kind == lifecycleprobe.HandlerCompleted && strings.HasSuffix(signal.EventType, first) {
@@ -73,6 +75,13 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 					if !strings.HasSuffix(string(event.Type()), second) {
 						return nil
 					}
+					handlerMu.Lock()
+					if fixtureName == "test-create-flow-instance-duplicate" && initialSecondEvent != "" && initialSecondEvent != event.ID() {
+						handlerMu.Unlock()
+						return nil // The explicit second construction starts another life, not the initial handshake.
+					}
+					initialSecondEvent = event.ID()
+					handlerMu.Unlock()
 					ctx, cancel := context.WithTimeout(ctx, catalogRuntimePublishTimeout)
 					defer cancel()
 					select {
@@ -92,9 +101,20 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 						return fmt.Errorf("wait for %s fixture handshake: %w", first, ctx.Err())
 					}
 				})
+				spawnRequests := 0
 				for _, group := range transcript.groups {
 					for _, step := range group.steps {
 						var preserved map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance
+						var restarting map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance
+						if fixtureName == "test-create-flow-instance-duplicate" && step.Event == "flow.spawn_requested" {
+							spawnRequests++
+							if spawnRequests == 2 {
+								restarting = captureCatalogConstruction(t, h.ctx, h.workflow, workerPath)
+								if before := restarting[catalogExactWorkflowRoute(workerPath)]; before.CurrentState != "complete" || before.Life != 1 {
+									t.Fatal("second construction requires the exact finished first life")
+								}
+							}
+						}
 						if step.ReceiptFailureClass == "platform.conflicting_duplicate" {
 							preserved = captureCatalogConstruction(t, h.ctx, h.workflow, workerPath)
 						}
@@ -122,6 +142,10 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 							t.Fatal(err)
 						}
 						assertCatalogConstructionUnchanged(t, h.ctx, h.workflow, preserved)
+						if restarting != nil {
+							h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+							assertCatalogConstructionRestarted(t, h.ctx, h.workflow, restarting, workerPath)
+						}
 					}
 					h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 				}
@@ -142,6 +166,23 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				}
 				transcript.requireUnchanged(t)
 			})
+		}
+	}
+}
+
+func assertCatalogConstructionRestarted(t testing.TB, ctx context.Context, reader catalogWorkflowPersistence, before map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance, workerPath string) {
+	t.Helper()
+	for route, instance := range before {
+		after, found, err := reader.Load(ctx, route)
+		wantLife, wantRevision := instance.Life, instance.Revision+1
+		if route == catalogExactWorkflowRoute(workerPath) {
+			wantLife++
+			wantRevision++ // One reset plus the new life's creating-input handler.
+		}
+		if err != nil || !found || after.Life != wantLife || after.Revision != wantRevision ||
+			after.EntityID != instance.EntityID || after.StorageRef != instance.StorageRef || after.InstanceKey != instance.InstanceKey ||
+			!after.CreatedAt.Equal(instance.CreatedAt) || !reflect.DeepEqual(after.Fields, instance.Fields) {
+			t.Fatalf("finished construction lost exact identity/life/progress: before=%+v after=%+v found=%t err=%v", instance, after, found, err)
 		}
 	}
 }

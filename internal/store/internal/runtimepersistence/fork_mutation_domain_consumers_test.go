@@ -33,6 +33,11 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				CurrentState: "draft", Fields: map[string]any{}, CreatedAt: created, EnteredStageAt: created,
 			}, created)
 			record := stateOnlyWorkflowEngineMutationRecord(t, runID, "flow/forkchat", "flow/forkchat", entityID, "draft", 1, created)
+			instance, found, err := f.store.(pipeline.WorkflowInstancePersistenceReader).LoadWorkflowInstance(ctx, record.Identity)
+			if err != nil || !found {
+				t.Fatalf("load constructed domain owner: found=%t err=%v", found, err)
+			}
+			record.Life = instance.Life
 			record.Mode = "static"
 			record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 			var wantFields, wantAtomic map[string]any
@@ -65,7 +70,6 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: turnAt}); err != nil {
 				t.Fatal(err)
 			}
-			var err error
 			f.fork, err = f.store.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 				SourceSessionID: f.source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: turnID}, CreatedBy: "actor-token", Now: time.Now().UTC(),
 			})

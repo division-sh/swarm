@@ -22,7 +22,7 @@ import (
 // These fixtures explicitly supply admitted lifecycle evidence. They do not
 // infer an arm or an admission receipt from an arrival's payload or state.
 func a2EngineJoinEntry(runID, entityID, stage string, route flowidentity.Route) timeridentity.StageEntryRef {
-	return timeridentity.StageEntryRef{RunID: runID, FlowScope: route.ScopeKey, InstanceID: route.InstanceID,
+	return timeridentity.StageEntryRef{Life: 1, RunID: runID, FlowScope: route.ScopeKey, InstanceID: route.InstanceID,
 		InstancePath: route.InstancePath, EntityID: entityID, Stage: stage, Cause: "construction"}
 }
 

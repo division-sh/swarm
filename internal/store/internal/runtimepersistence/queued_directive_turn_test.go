@@ -53,7 +53,7 @@ func TestQueuedDirectiveTerminationBothStores(t *testing.T) {
 				}
 				req := agentcontrol.DirectiveExecutionAdmissionRequest{OperationID: op.OperationID, OwnerID: uuid.NewString(), Now: time.Now().UTC(), Lease: time.Minute, ExecutionPosture: executionposture.Live}
 				if mode == "admission_wins" {
-					if _, err := store.AdmitDirectiveExecution(ctx, req); err != nil {
+					if _, err := admitDirectiveRequestForTest(t, ctx, store, req); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -62,7 +62,7 @@ func TestQueuedDirectiveTerminationBothStores(t *testing.T) {
 					if err == nil || committed.Committed || len(committed.Lifecycle.QueuedDirectiveCancellations) != 0 {
 						t.Fatalf("rolled-back stage retained queued directive settlement: %+v err=%v", committed, err)
 					}
-					admitted, err := store.AdmitDirectiveExecution(ctx, req)
+					admitted, err := admitDirectiveRequestForTest(t, ctx, store, req)
 					if err != nil || admitted.Operation.State != agentcontrol.DirectiveOperationExecuting {
 						t.Fatalf("rollback blocked queued directive: %+v err=%v", admitted, err)
 					}
@@ -99,7 +99,7 @@ func TestQueuedDirectiveTerminationBothStores(t *testing.T) {
 				if !canceled.Acknowledged || canceled.OperationID != op.OperationID || canceled.State != agentcontrol.DirectiveOperationCanceled || canceled.CancellationReason != deliverylifecycle.CancellationTerminate || canceled.ExecutionOwnerID != "" || !canceled.ExecutionAdmittedAt.IsZero() || canceled.Failure != nil || len(canceled.Response) != 0 {
 					t.Fatalf("prepared cancellation invented execution or failure evidence: %+v", canceled)
 				}
-				if _, err := store.AdmitDirectiveExecution(ctx, req); err == nil {
+				if _, err := admitDirectiveRequestForTest(t, ctx, store, req); err == nil {
 					t.Fatal("canceled prepared directive admitted execution")
 				}
 				actual, found, err := store.LoadDirectiveOperation(context.WithoutCancel(ctx), op.OperationID)

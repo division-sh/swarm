@@ -92,7 +92,7 @@ func TestResetRetainedCleanupDirectiveAuthorityBothStores(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
-				seedDirectiveOperationRun(t, ctx, backend.db, backend.name == "postgres")
+				seedDirectiveOperationRun(t, ctx, backend.store, backend.db, backend.name == "postgres")
 				now := time.Now().UTC()
 				if strings.HasPrefix(state, "expired_") {
 					now = now.Add(-48 * time.Hour)
@@ -103,7 +103,7 @@ func TestResetRetainedCleanupDirectiveAuthorityBothStores(t *testing.T) {
 				}
 				const owner = "reset-guard-owner"
 				if state != "prepared" {
-					if _, err := admitDirectiveExecutionForTest(ctx, backend.store, reserved.Operation.OperationID, owner, now, time.Minute); err != nil {
+					if _, err := admitDirectiveExecutionForTest(t, ctx, backend.store, reserved.Operation.OperationID, owner, now, time.Minute); err != nil {
 						t.Fatal(err)
 					}
 				}

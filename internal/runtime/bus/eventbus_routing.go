@@ -429,6 +429,7 @@ func (eb *EventBus) targetOwnerCandidates(ctx context.Context) ([]runtimepipelin
 				EntityID:     identity.EntityID,
 				FlowInstance: identity.InstancePath},
 			Availability: workflowInstanceTargetAvailability(instance),
+			Life:         instance.Life,
 		})
 	}
 	return owners, true, nil

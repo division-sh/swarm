@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
@@ -14,13 +15,14 @@ import (
 // This is a narrowed resolution input, not execution authority. The selected
 // owner and final exact recipient guard remain required for publication.
 type selectedForkRecipientPlan struct {
-	eventID      string
-	lineage      events.SelectedForkLineage
-	recipients   []forkrecipient.Evidence
-	contexts     map[events.DeliveryRouteIdentity]events.DeliveryContext
-	requests     []replycontext.Record
-	returnReply  *replycontext.Record
-	returnRoutes []events.DeliveryRoute
+	eventID       string
+	lineage       events.SelectedForkLineage
+	recipients    []forkrecipient.Evidence
+	contexts      map[events.DeliveryRouteIdentity]events.DeliveryContext
+	contextRoutes []events.DeliveryRoute
+	requests      []replycontext.Record
+	returnReply   *replycontext.Record
+	returnRoutes  []events.DeliveryRoute
 }
 
 type selectedForkRecipientPlanKey struct{}
@@ -148,10 +150,12 @@ func WithSelectedForkRecipientContexts(ctx context.Context, event events.Event, 
 		return nil, err
 	}
 	plan.contexts = make(map[events.DeliveryRouteIdentity]events.DeliveryContext, len(routes))
+	plan.contextRoutes = append([]events.DeliveryRoute(nil), routes...)
 	if plan.returnReply != nil {
 		plan.returnRoutes = append([]events.DeliveryRoute(nil), routes...)
 	}
-	for _, route := range routes {
+	for index, route := range routes {
+		plan.contextRoutes[index].Context = route.Context.Normalized()
 		key, err := selectedForkContextRouteIdentity(route)
 		if err != nil {
 			return nil, err
@@ -169,6 +173,57 @@ func selectedForkContextRouteIdentity(route events.DeliveryRoute) (events.Delive
 	return route.Identity()
 }
 
+// An inherited request's projected execution life is part of its full claim,
+// so it must be available before hashing. Accept only an exact compiled claim
+// and context; the later route/partition checks remain independent admission.
+func selectedForkRequestExecutionLife(ctx context.Context, event events.Event, compiled pinrouting.ConnectRoutePlan, route pinrouting.ConnectDeliveryRoute) (*events.InstanceLife, error) {
+	selected, found := selectedForkRecipientPlanFromContext(ctx, event)
+	if !found || selected.requests == nil || selected.contexts == nil {
+		return route.Context.Life, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var matched *events.InstanceLife
+	found = false
+	for _, retained := range selected.contextRoutes {
+		var continuation *pinrouting.ReplyRequestContinuation
+		for _, record := range selected.requests {
+			if retained.Context.ReplyContextID() == record.ID && compiled.MatchesReplyRecord(record) {
+				if continuation != nil {
+					return nil, fmt.Errorf("selected request has ambiguous compiled reply bindings")
+				}
+				value := pinrouting.ReplyRequestContinuation{Record: record, Plan: compiled}
+				continuation = &value
+			}
+		}
+		if continuation == nil {
+			continue
+		}
+		expected, err := continuation.ClaimForDelivery(retained)
+		if err != nil {
+			return nil, err
+		}
+		candidate := route
+		candidate.Context.Life = retained.Context.Life
+		claim, err := pinrouting.ConnectExecutionClaim(compiled, candidate)
+		if err != nil {
+			return nil, err
+		}
+		if !claim.Equal(expected) || !reflect.DeepEqual(candidate.Context.Normalized(), retained.Context.Normalized()) {
+			continue
+		}
+		if found {
+			return nil, fmt.Errorf("selected request has ambiguous exact execution-life claims")
+		}
+		matched, found = retained.Context.Life, true
+	}
+	if !found {
+		return nil, fmt.Errorf("selected request execution life lacks its exact compiled claim")
+	}
+	return matched, nil
+}
+
 func restoreSelectedForkRecipientContexts(ctx context.Context, event events.Event, routes RoutePlan) (RoutePlan, error) {
 	if err := ctx.Err(); err != nil {
 		return RoutePlan{}, err
@@ -180,6 +235,12 @@ func restoreSelectedForkRecipientContexts(ctx context.Context, event events.Even
 	routes = routes.Normalized()
 	if selected.returnReply != nil {
 		contexts, err := selectedForkReturnContexts(selected, routes.ReplyReturns)
+		if err != nil {
+			return RoutePlan{}, err
+		}
+		selected.contexts = contexts
+	} else if selected.requests != nil {
+		contexts, err := selectedForkRequestContexts(selected, routes.ReplyContinuations)
 		if err != nil {
 			return RoutePlan{}, err
 		}
@@ -205,6 +266,35 @@ func restoreSelectedForkRecipientContexts(ctx context.Context, event events.Even
 		return RoutePlan{}, fmt.Errorf("selected receiver context is missing a resolved recipient")
 	}
 	return routes.Normalized(), nil
+}
+
+func selectedForkRequestContexts(selected selectedForkRecipientPlan, continuations []pinrouting.ReplyRequestContinuation) (map[events.DeliveryRouteIdentity]events.DeliveryContext, error) {
+	contexts := make(map[events.DeliveryRouteIdentity]events.DeliveryContext, len(selected.contextRoutes))
+	for _, route := range selected.contextRoutes {
+		matched := false
+		for _, continuation := range continuations {
+			if route.Context.ReplyContextID() != continuation.Record.ID {
+				continue
+			}
+			if matched {
+				return nil, fmt.Errorf("retained request context has ambiguous compiled bindings")
+			}
+			claim, err := continuation.ClaimForDelivery(route)
+			if err != nil {
+				return nil, err
+			}
+			route.ConnectClaim, matched = claim, true
+		}
+		key, err := selectedForkContextRouteIdentity(route)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := contexts[key]; duplicate {
+			return nil, fmt.Errorf("retained request has duplicate projected recipient claims")
+		}
+		contexts[key] = route.Context.Normalized()
+	}
+	return contexts, nil
 }
 
 func selectedForkReturnContexts(selected selectedForkRecipientPlan, returns []pinrouting.ReplyReturnContinuation) (map[events.DeliveryRouteIdentity]events.DeliveryContext, error) {

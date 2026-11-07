@@ -93,6 +93,20 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	if got := observability.lastTrace.Filter; len(got.EventNames) != 1 || got.EventNames[0] != "scan.requested" || len(got.EntityIDs) != 1 || got.EntityIDs[0] != "entity-1" || len(got.DeliveryStatuses) != 1 || got.DeliveryStatuses[0] != "delivered" || len(got.SubscriberIDs) != 1 || got.SubscriberIDs[0] != "agent-1" || len(got.SubscriberTypes) != 1 || got.SubscriberTypes[0] != "agent" {
 		t.Fatalf("run.trace filter = %#v", got)
 	}
+	iterTrace := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-life","method":"run.trace","params":{"run_id":"run-1","filter":{"entity_id":["entity-1"],"iter":1}}}`)
+	if iterTrace.Error != nil || observability.lastTrace.Filter.Iter == nil || *observability.lastTrace.Filter.Iter != 1 {
+		t.Fatalf("run.trace lost selected iter: filter=%+v error=%v", observability.lastTrace.Filter, iterTrace.Error)
+	}
+	for _, entities := range []string{``, `"entity_id":[],`, `"entity_id":["entity-1","entity-2"],`} {
+		refused := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-life-refused","method":"run.trace","params":{"run_id":"run-1","filter":{`+entities+`"iter":1}}}`)
+		if refused.Error == nil || refused.Error.Code != codeInvalidParams {
+			t.Fatalf("iter without exactly one entity was accepted: %+v", refused)
+		}
+		details := asMap(t, asMap(t, refused.Error.Data)["details"])
+		if details["field"] != "filter.iter" || details["reason"] != operatorread.TraceIterOneEntityRequired {
+			t.Fatalf("iter refusal changed its typed reason: %+v", details)
+		}
+	}
 	traceVerbose := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-verbose","method":"run.trace","params":{"run_id":"run-1","include_internal":true}}`)
 	if traceVerbose.Error != nil {
 		t.Fatalf("run.trace include_internal error = %#v", traceVerbose.Error)

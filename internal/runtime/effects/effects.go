@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -275,16 +277,19 @@ type AuthorizeRequest struct {
 	AgentFrame         *agentframe.Frame
 	ProviderCall       *ProviderCall
 	Origin             CompletionOrigin
+	InstanceSource     agentcontrol.TurnInstanceSource
+	InstanceOwnership  events.InstanceOwnership
 	Lineage            map[string]string
 	Now                time.Time
 }
 
 type Attempt struct {
-	TurnTimeout      *timeridentity.TurnTimeout
-	SessionGrantID   string
-	SessionLockOwner string
-	OperationID      string
-	AttemptID        string
+	InstanceOwnership events.InstanceOwnership
+	TurnTimeout       *timeridentity.TurnTimeout
+	SessionGrantID    string
+	SessionLockOwner  string
+	OperationID       string
+	AttemptID         string
 	// AuthorizationAcknowledged is set only after the authorization commit is acknowledged.
 	AuthorizationAcknowledged  bool `json:"-"`
 	Token                      LifecycleToken
@@ -471,6 +476,7 @@ type Settlement struct {
 	OperationID               string
 	AttemptID                 string
 	Authority                 Authority
+	InstanceOwnership         events.InstanceOwnership
 	State                     State
 	Failure                   *runtimefailures.Envelope
 	Evidence                  map[string]any
@@ -1293,7 +1299,9 @@ func (h *Handle) Attempt() Attempt {
 	if h == nil {
 		return Attempt{}
 	}
-	return h.attempt
+	attempt := h.attempt
+	attempt.InstanceOwnership = attempt.InstanceOwnership.Clone()
+	return attempt
 }
 
 func (h *Handle) CompletionContinuation() (CompletionContinuationSnapshot, bool) {
@@ -1389,8 +1397,8 @@ func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailur
 	}
 	return reportPostCommitMutation(h.controller.Settle(ctx, Settlement{
 		OperationID: h.attempt.OperationID, AttemptID: h.attempt.AttemptID,
-		Authority: h.attempt.Authority,
-		State:     state, Failure: failure, Evidence: evidence,
+		Authority: h.attempt.Authority, InstanceOwnership: h.attempt.InstanceOwnership.Clone(),
+		State: state, Failure: failure, Evidence: evidence,
 	}))
 }
 
@@ -1413,6 +1421,7 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	settlement.Settlement.OperationID = h.attempt.OperationID
 	settlement.Settlement.AttemptID = h.attempt.AttemptID
 	settlement.Settlement.Authority = h.attempt.Authority
+	settlement.Settlement.InstanceOwnership = h.attempt.InstanceOwnership.Clone()
 	if settlement.Now.IsZero() {
 		settlement.Now = time.Now().UTC()
 	}
@@ -1548,6 +1557,8 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		}, err)
 	}
 	if registration.Kind == KindProviderTurn {
+		req.InstanceSource, _ = ctx.Value(turnInstanceSourceKey{}).(agentcontrol.TurnInstanceSource)
+		req.InstanceOwnership, _ = ctx.Value(turnInstanceOwnershipKey{}).(events.InstanceOwnership)
 		if req.CompletionRequest == (CompletionRequest{}) {
 			req.CompletionRequest, _ = ctx.Value(completionRequestContextKey{}).(CompletionRequest)
 		}

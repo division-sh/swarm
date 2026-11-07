@@ -232,6 +232,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				construction224Ctx := testLiveExecutionContext(ctx)
 				construction224At := time.Now().UTC()
 				construction224Instance, construction224Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction224Ctx, owner, runtimepipeline.WorkflowInstance{
+					Life:       1,
 					InstanceID: flowInstanceID, StorageRef: flowInstance, EntityID: entityID,
 					ParentFlowID: parent.TemplateID, ParentFlowInstance: parent.InstancePath, ParentEntityID: parent.EntityID,
 					WorkflowName: "global", WorkflowVersion: source.WorkflowVersion(),

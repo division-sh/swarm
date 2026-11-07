@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ const (
 
 type workflowTimerCause struct {
 	Kind          workflowTimerCauseKind
+	Life          int64
 	EventID       string
 	EventType     string
 	OccurredAt    time.Time
@@ -61,6 +63,9 @@ func (c workflowTimerCause) normalized() workflowTimerCause {
 
 func (c workflowTimerCause) validateForActivation() error {
 	c = c.normalized()
+	if c.Life <= 0 {
+		return fmt.Errorf("workflow timer activation requires positive captured instance life")
+	}
 	if c.OccurredAt.IsZero() {
 		return fmt.Errorf("workflow timer activation requires an exact causal time")
 	}
@@ -223,6 +228,10 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	if err != nil {
 		return err
 	}
+	retained, err = workflowTimersForLife(instance.Life, retained)
+	if err != nil {
+		return err
+	}
 	var active []WorkflowTimerActivation
 	for _, activation := range retained {
 		if activation.Status == workflowTimerStatusActive {
@@ -262,6 +271,10 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	initialEntryOpen := currentState == initialState
 	desired := map[string]WorkflowTimerActivation{}
 	if initialEntryOpen {
+		lifeStartedAt, err := instance.LifeStartedAt()
+		if err != nil {
+			return err
+		}
 		generation, _, err := workflowLoopGenerationForStage(source, &instance, currentState)
 		if err != nil {
 			return err
@@ -290,9 +303,10 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			}
 			cause := workflowTimerCause{
 				Kind:          workflowTimerCauseInitial,
+				Life:          instance.Life,
 				ExecutionMode: initialMode,
 				EventType:     "state:" + currentState,
-				OccurredAt:    instance.CreatedAt,
+				OccurredAt:    lifeStartedAt,
 				ToState:       currentState,
 			}
 			if err := cause.validateForActivation(); err != nil {
@@ -337,6 +351,10 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 					return err
 				}
 				routing, event, err := workflowTimerDeclarationSourceEvent(source, entityID.String(), route.InstancePath, declaration)
+				if err != nil {
+					return err
+				}
+				routing, err = routing.WithLife(instance.Life)
 				if err != nil {
 					return err
 				}
@@ -426,6 +444,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 					activation.Ref.Generation,
 					workflowTimerCause{
 						Kind:          workflowTimerCauseInitial,
+						Life:          activation.RoutingSource.Life(),
 						ExecutionMode: activation.ExecutionMode,
 						EventType:     "state:" + initialState,
 						OccurredAt:    activation.CreatedAt,
@@ -792,6 +811,22 @@ func workflowTimerGenerationKey(declarationKey string, generation attemptgenerat
 	return strings.TrimSpace(declarationKey) + "\x00" + generation.Normalize().KeySuffix()
 }
 
+func workflowTimersForLife(life int64, timers []WorkflowTimerActivation) ([]WorkflowTimerActivation, error) {
+	if life <= 0 {
+		return nil, fmt.Errorf("timer selection requires positive instance life")
+	}
+	selected := make([]WorkflowTimerActivation, 0, len(timers))
+	for _, activation := range timers {
+		if activation.RoutingSource.Life() <= 0 {
+			return nil, fmt.Errorf("retained timer has no captured instance life")
+		}
+		if activation.RoutingSource.Life() == life {
+			selected = append(selected, activation)
+		}
+	}
+	return selected, nil
+}
+
 func workflowTimerActivationForCause(
 	source semanticview.Source,
 	runID, entityID string,
@@ -802,6 +837,9 @@ func workflowTimerActivationForCause(
 	interval time.Duration,
 ) (WorkflowTimerActivation, error) {
 	cause = cause.normalized()
+	if err := cause.validateForActivation(); err != nil {
+		return WorkflowTimerActivation{}, err
+	}
 	generation = generation.Normalize()
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	if !route.Valid() {
@@ -822,6 +860,10 @@ func workflowTimerActivationForCause(
 	if err != nil {
 		return WorkflowTimerActivation{}, err
 	}
+	routingSource, err = routingSource.WithLife(cause.Life)
+	if err != nil {
+		return WorkflowTimerActivation{}, err
+	}
 	activationID := timeridentity.WorkflowTimerActivationID(
 		runID,
 		entityID,
@@ -835,6 +877,7 @@ func workflowTimerActivationForCause(
 		cause.TransitionID,
 		cause.FromState,
 		cause.ToState,
+		strconv.FormatInt(cause.Life, 10),
 	)
 	return WorkflowTimerActivation{
 		Ref: timeridentity.WorkflowTimerActivationRef{

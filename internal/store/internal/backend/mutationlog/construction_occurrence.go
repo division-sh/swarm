@@ -175,7 +175,7 @@ func fixedForkWitnessBuckets(plan pipeline.FlowInstanceActivationPlan, component
 		return plan.Lifecycle.StageEntry == nil
 	}
 	entry, present, err := workflowlifecycle.LoadStageEntry(plan.Instance.Bookkeeping)
-	want := timeridentity.StageEntryRef{RunID: plan.Readiness.RunID, FlowScope: plan.Identity.ScopeKey, InstanceID: plan.Identity.InstanceID,
+	want := timeridentity.StageEntryRef{RunID: plan.Readiness.RunID, Life: plan.Instance.Life, FlowScope: plan.Identity.ScopeKey, InstanceID: plan.Identity.InstanceID,
 		InstancePath: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID, Stage: plan.Instance.CurrentState, Cause: "construction"}
 	if err != nil || !present || entry != want || plan.Lifecycle.StageEntry == nil || *plan.Lifecycle.StageEntry != want {
 		return false

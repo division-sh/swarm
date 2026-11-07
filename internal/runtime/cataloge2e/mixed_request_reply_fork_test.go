@@ -200,8 +200,16 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 					if route.Recipient == originalObserver.Recipient {
 						observerCount++
 						projection, err := runfork.ProjectEntityOwnership(catalogRuntimeRunID, staged.ForkRunID, originalObserver.Target.Route().EntityID, originalObserver.Target.Route().FlowInstance)
+						wantContext := originalObserver.Context.Normalized()
+						if wantContext.Life != nil {
+							projectedLife, lifeErr := runfork.ProjectInstanceLifeOwnership(catalogRuntimeRunID, staged.ForkRunID, *wantContext.Life)
+							if lifeErr != nil {
+								t.Fatal(lifeErr)
+							}
+							wantContext.Life = &projectedLife
+						}
 						if err != nil || route.Target.Route() != (events.RouteIdentity{FlowID: originalObserver.Target.Route().FlowID, FlowInstance: projection.Fork.FlowInstance, EntityID: projection.Fork.EntityID}) ||
-							!reflect.DeepEqual(route.Context, originalObserver.Context) || !route.ConnectClaim.Equal(originalObserver.ConnectClaim) {
+							!reflect.DeepEqual(route.Context, wantContext) || !route.ConnectClaim.Equal(originalObserver.ConnectClaim) {
 							t.Fatalf("publication reinterpreted ordinary observer context/claim/ownership: %+v error=%v", route, err)
 						}
 					} else {

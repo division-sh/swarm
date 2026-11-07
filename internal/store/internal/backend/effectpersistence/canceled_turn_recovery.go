@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -27,6 +28,21 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	if err != nil {
 		return nil, err
 	}
+	var ids []string
+	for _, row := range pending {
+		ids = append(ids, row.admittedAttempt.String, row.currentAttempt.String, row.firstAttempt.String)
+	}
+	ctx, err = prepareRetainedTurnOwnershipTx(ctx, tx, postgres, directives, ids)
+	if err != nil {
+		return nil, err
+	}
+	current, err := loadCanceledTurnRecoveryRowsTx(ctx, tx, selectedExecutionID)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(pending, current) {
+		return nil, fmt.Errorf("canceled turn inventory changed under its ownership prefix")
+	}
 	turns := make([]runtimeeffects.TurnExecutionResult, 0, len(pending))
 	for _, row := range pending {
 		var turn runtimeeffects.TurnExecutionResult
@@ -36,6 +52,9 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 			turn, err = recoverUnstartedCanceledTurn(ctx, tx, postgres, delivery, directives, row)
 		}
 		if err != nil {
+			return nil, err
+		}
+		if err := requireCurrentTurnOwnership(ctx, tx, turn.Attempt); err != nil {
 			return nil, err
 		}
 		if !row.currentAttempt.Valid && selectedExecutionID != "" && turn.Attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
@@ -211,7 +230,7 @@ func loadCanceledFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool, fi
 	}
 }
 
-func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool, first string, now time.Time) (runtimeeffects.Attempt, runtimeeffects.State, error) {
+func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool, first string, now time.Time, mode ...recoveryReadMode) (runtimeeffects.Attempt, runtimeeffects.State, error) {
 	lineageRun := `COALESCE(json_extract(o.lineage,'$.run_id'),'')`
 	if postgres {
 		lineageRun = `COALESCE(o.lineage->>'run_id','')`
@@ -249,6 +268,9 @@ func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool
 		return runtimeeffects.Attempt{}, "", fmt.Errorf("business turn has an invalid physical state")
 	}
 	attempt, _, err := completionRecoverySettlement(recovered[0], runtimeeffects.StateOutcomeUncertain, nil, now)
+	if err == nil && recoveryLocks(mode) {
+		attempt, err = projectRetainedTurnOwnership(ctx, tx, attempt)
+	}
 	if err == nil && (!attempt.Authority.Valid() || !attempt.Authority.HasBusinessTurnOrigin() || attempt.Authority.ExecutionOwner == "" || attempt.Authority.FenceGeneration == 0) {
 		return runtimeeffects.Attempt{}, "", fmt.Errorf("business turn has incomplete original execution authority")
 	}
@@ -263,7 +285,7 @@ func (s *EffectPostgresOwner) ListCanceledTurnRecoveries(ctx context.Context, re
 		return nil, err
 	}
 	var turns []runtimeeffects.TurnExecutionResult
-	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+	err := s.backend.RunLockingReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
 		turns, err = listCanceledTurnRecoveries(ctx, tx, true, s.delivery, s.directives, request, "")
 		return err
 	})
@@ -281,7 +303,7 @@ func (s *EffectSQLiteOwner) ListCanceledTurnRecoveries(ctx context.Context, requ
 		return nil, err
 	}
 	var turns []runtimeeffects.TurnExecutionResult
-	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+	err := s.backend.RunLockingReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
 		turns, err = listCanceledTurnRecoveries(ctx, tx, false, s.delivery, s.directives, request, "")
 		return err
 	})

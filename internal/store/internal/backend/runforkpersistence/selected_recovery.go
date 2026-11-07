@@ -107,6 +107,11 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		var recovered runfork.SelectedForkRecoveryResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, err = s.PrepareSelectedTurnOwnershipTx(txctx, tx, req.Entry.Binding.ForkRunID)
+			if err != nil {
+				return err
+			}
 			if err := admitSelectedRecoveryTx(txctx, tx, req, false); err != nil {
 				return err
 			}
@@ -146,6 +151,11 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		var recovered runfork.SelectedForkRecoveryResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, err = s.PrepareSelectedTurnOwnershipTx(txctx, tx, req.Entry.Binding.ForkRunID)
+			if err != nil {
+				return err
+			}
 			if _, err := mutationprotocol.RunRowLock(txctx, tx, req.Entry.Binding.ForkRunID, true); err != nil {
 				return err
 			}

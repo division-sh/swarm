@@ -18,6 +18,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -76,11 +77,19 @@ func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T)
 			if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
 				t.Fatal(err)
 			}
+			life := events.InstanceLife{RunID: command.Claim.Key.RunID, FlowInstance: command.Claim.Key.RunID, Life: 7}
+			capsule.Route = runtimeflowidentity.StoredRoute("root", life.RunID, life.FlowInstance)
+			capsule.Context.Life = &life
+			producer, err := capsule.ProducerSource.WithLife(life.Life)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capsule.ProducerSource = producer
 			capsule.StateFields = map[string]any{
 				"integer": json.Number("75"),
 				"decimal": json.Number("75.0"),
 			}
-			capsuleRaw, err := json.Marshal(capsule)
+			capsuleRaw, err = json.Marshal(capsule)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +106,67 @@ func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T)
 			if !integerOK || integer.String() != "75" || !decimalOK || decimal.String() != "75.0" {
 				t.Fatalf("hydrated capsule numerics = integer:%#v decimal:%#v, want lexical json.Number carriers", intent.Request.Capsule.StateFields["integer"], intent.Request.Capsule.StateFields["decimal"])
 			}
+			proveFanOutInstanceLifeCensus(t, db, backend == "postgres", intent)
 		})
+	}
+}
+
+func proveFanOutInstanceLifeCensus(t *testing.T, db *sql.DB, postgres bool, intent fanoutobligation.Intent) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	life := *intent.Request.Capsule.Context.Life
+	read := func(scope events.InstanceLife, want int) {
+		t.Helper()
+		if got, err := readPendingInstanceLifeFanOutTx(ctx, tx, postgres, scope); err != nil || got != want {
+			t.Fatalf("fan-out census scope=%+v pending=%d want=%d err=%v", scope, got, want, err)
+		}
+	}
+	read(life, 2)
+	prior := life
+	prior.Life--
+	read(prior, 0)
+	sibling := life
+	sibling.FlowInstance = "root/sibling"
+	read(sibling, 0)
+	foreign := life
+	foreign.RunID = uuid.NewString()
+	read(foreign, 0)
+	key := intent.Request.Key
+	args := []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath}
+	if _, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET cursor=cardinality,status='closed',claim_owner=NULL,lease_expires_at=NULL
+		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, args...); err != nil {
+		t.Fatal(err)
+	}
+	for ordinal := 0; ordinal < intent.Request.Cardinality; ordinal++ {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO fan_out_outcomes
+			(run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,created_at)
+			VALUES ($1,$2,$3,$4,$5,$6,'semantic_rejected',$7)`, append(args, ordinal, intent.CreatedAt)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(life, 0)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO fan_out_obligation_barriers
+		(run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,status)
+		VALUES ($1,$2,$3,$4,$5,$6)`, append(args, string(fanoutbarrier.StatusArmed))...); err != nil {
+		t.Fatal(err)
+	}
+	read(life, 1)
+	read(prior, 0)
+	for _, status := range []fanoutbarrier.Status{fanoutbarrier.StatusClosedPending, fanoutbarrier.StatusFired} {
+		if _, err := tx.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$6
+			WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, append(args, string(status))...); err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if status.BlocksCompletion() {
+			want = 1
+		}
+		read(life, want)
 	}
 }
 

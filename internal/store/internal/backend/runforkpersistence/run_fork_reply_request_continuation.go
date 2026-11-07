@@ -143,9 +143,9 @@ func projectContinuedRequestSourceRoutes(ctx context.Context, tx *sql.Tx, snapsh
 	return routes, nil
 }
 
-func projectContinuedSourceRecipientRoutes(ctx context.Context, tx *sql.Tx, snapshot *runForkRevisionSnapshot, eventID, child string, requests []replycontext.Record) ([]events.DeliveryRoute, error) {
+func projectContinuedSourceRecipientRoutes(ctx context.Context, tx *sql.Tx, snapshot *runForkRevisionSnapshot, eventID, child string) ([]events.DeliveryRoute, error) {
 	fanOut, err := projectContinuedFanOutSourceRoutes(snapshot, eventID, child)
-	if err != nil || len(requests) != 0 {
+	if err != nil {
 		return fanOut, err
 	}
 	routes, err := projectContinuedRequestSourceRoutes(ctx, tx, snapshot, eventID, child)

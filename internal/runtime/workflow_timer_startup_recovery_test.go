@@ -249,7 +249,8 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 					t.Fatalf("overdue control changed occurrence: %+v", signal)
 				}
 			case <-witnessCtx.Done():
-				t.Fatal("overdue control never published after both handoffs")
+				current, found, err := selected.LoadGenericScheduleActivation(ctx, original.ID)
+				t.Fatalf("overdue control never published after both handoffs: found=%t status=%s failure=%+v err=%v", found, current.Status, current.Failure, err)
 			}
 			if err := rt.Scheduler.Wait(witnessCtx); err != nil {
 				t.Fatal(err)
@@ -458,6 +459,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				t.Fatal("timer fixture requires its compiled keyless root declaration")
 			}
 			construction383Instance, construction383Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction383Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.StoredRoute(".", workflowRunID, workflowRunID)}, runtimepipeline.WorkflowInstance{
+				Life:       1,
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
 				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
 				Mode: rootSchema.EffectiveMode(),
@@ -722,6 +724,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				t.Fatal("timer fixture requires its compiled keyless root declaration")
 			}
 			construction620Instance, construction620Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction620Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}, runtimepipeline.WorkflowInstance{
+				Life:            1,
 				InstanceID:      runID,
 				StorageRef:      runID,
 				WorkflowName:    ".",
@@ -898,6 +901,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						t.Fatal("timer fixture requires its compiled keyless root declaration")
 					}
 					construction757Instance, construction757Lifecycle, err := seedRuntime.Pipeline.PrepareInitialEntryLifecycle(construction757Ctx, rootOwner, runtimepipeline.WorkflowInstance{
+						Life:            1,
 						InstanceID:      rootIdentity.InstanceID,
 						StorageRef:      rootIdentity.InstancePath,
 						EntityID:        rootIdentity.EntityID,

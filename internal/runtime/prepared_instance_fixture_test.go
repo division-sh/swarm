@@ -105,6 +105,7 @@ func seedRuntimeTestKeylessSource(t testing.TB, ctx context.Context, selected bu
 			entityType = entity.EntityType
 		}
 		committed := seedRuntimeTestPreparedInstance(t, ctx, selected, pc, pipeline.WorkflowInstance{
+			Life:         1,
 			WorkflowName: id, WorkflowVersion: source.WorkflowVersion(), StorageRef: instance.InstancePath,
 			InstanceID: instance.InstanceID, EntityID: instance.EntityID,
 			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,

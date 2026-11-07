@@ -450,6 +450,7 @@ func testApprovedActivityFrozenInputBothStores(t *testing.T, method, terminalOut
 				construction430Ctx := ctx
 				construction430At := enteredAt
 				construction430Instance, construction430Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction430Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					Life:       1,
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
@@ -908,6 +909,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				construction852Ctx := ctx
 				construction852At := enteredAt
 				construction852Instance, construction852Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction852Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+					Life:       1,
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "drafting", StageDefined: true,
 					Mode:           bundle.RootSchema.EffectiveMode(),
 					EnteredStageAt: enteredAt, CreatedAt: enteredAt,
@@ -1228,6 +1230,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		construction1118Ctx := ctx
 		construction1118At := at
 		construction1118Instance, construction1118Lifecycle, err := setupCoordinator.PrepareInitialEntryLifecycle(construction1118Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			Life:       1,
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: at,
@@ -1371,6 +1374,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		construction1236Ctx := ctx
 		construction1236At := enteredAt
 		construction1236Instance, construction1236Lifecycle, err := matching.PrepareInitialEntryLifecycle(construction1236Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			Life:       1,
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", StageDefined: true, EnteredStageAt: enteredAt,
@@ -1474,6 +1478,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 		construction1336Ctx := ctx
 		construction1336At := scenarioAt
 		construction1336Instance, construction1336Lifecycle, err := matching.PrepareInitialEntryLifecycle(construction1336Ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
+			Life:       1,
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), StageDefined: true,
 			Mode:         bundle.RootSchema.EffectiveMode(),
 			CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,

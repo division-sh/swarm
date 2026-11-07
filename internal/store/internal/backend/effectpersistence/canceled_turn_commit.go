@@ -28,6 +28,12 @@ func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt,
 	}
 	result := runtimeeffects.CanceledTurnCommit{Origin: attempt.Origin}
 	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		ctx, attempt, err = prepareTurnAttemptOwnershipTx(ctx, tx, postgres, directives, attempt)
+		if err != nil {
+			return err
+		}
+		command.Attempt = &attempt
 		pending, err := providerTurnPendingTx(ctx, tx, attempt, delivery, directives)
 		if err != nil {
 			return err
@@ -117,6 +123,12 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 		return err
 	}
 	source := event.RoutingSource()
+	if err := attempt.InstanceOwnership.Validate(); err != nil {
+		return err
+	}
+	if captured := attempt.InstanceOwnership.Life; captured != nil && source.Life() != captured.Life {
+		return fmt.Errorf("canceled turn reaction changed its captured originating life")
+	}
 	if source.Kind() != events.RoutingSourceFlowOwnedControl ||
 		source.Route().FlowID != flowID || source.Route().FlowInstance != path ||
 		source.Route().EntityID != attempt.Authority.Target.EntityID ||
@@ -133,6 +145,12 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 	originalSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: attempt.Authority.Target.EntityID})
 	if err != nil {
 		return err
+	}
+	if captured := attempt.InstanceOwnership.Life; captured != nil {
+		originalSource, err = originalSource.WithInstanceLife(attempt.Authority.Target.RunID, *captured)
+		if err != nil {
+			return err
+		}
 	}
 	original, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		RunID: attempt.Authority.Target.RunID,

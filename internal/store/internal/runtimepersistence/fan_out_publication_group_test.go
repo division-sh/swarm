@@ -184,7 +184,7 @@ func TestFanOutPublicationGroupSettlementBothStores(t *testing.T) {
 			fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, 3, time.Now().UTC().Truncate(time.Microsecond), artifact)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fixture.bundleHash))
 			ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))
-			sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+			sourceRoute := constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), fixture.runID, "producer", fixture.createdAt)
 			source, err := events.NewStaticFlowRoutingSource(sourceRoute)
 			if err != nil {
 				t.Fatal(err)

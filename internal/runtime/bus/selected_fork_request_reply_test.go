@@ -43,13 +43,23 @@ func TestIssue642RequestContinuationBindsBeforeCompiledClaim(t *testing.T) {
 	compiled := []pinrouting.ConnectDeliveryRoute{{Recipient: routes.DeliveryIntents[0].Recipient,
 		Handler: pinrouting.MustConnectReceiverHandler(node), Target: origin}}
 	resolved := bindReplyRequestRoutes(compiled, got.ID)
-	resolved, err = stampConnectExecutionClaims(plan, resolved)
+	life := events.InstanceLife{RunID: event.RunID(), FlowInstance: origin.FlowInstance, Life: 7}
+	resolved, err = stampConnectExecutionClaims(events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &life}), event, plan, resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expected, err := pinrouting.ConnectExecutionClaim(plan, resolved[0])
 	if err != nil || !resolved[0].ConnectClaim.Equal(expected) {
 		t.Fatalf("child claim does not bind actual context: %v", err)
+	}
+	if !reflect.DeepEqual(resolved[0].Context.Life, &life) {
+		t.Fatal("child claim omitted its continuation life")
+	}
+	withoutLife := resolved[0]
+	withoutLife.Context.Life = nil
+	unstamped, err := pinrouting.ConnectExecutionClaim(plan, withoutLife)
+	if err != nil || unstamped.Equal(expected) {
+		t.Fatal("claim did not bind its exact life")
 	}
 	other := resolved[0]
 	other.Context.Reply = &events.ReplyContextRef{ID: draft.ID}
@@ -78,6 +88,28 @@ func TestIssue642RequestContinuationBindsBeforeCompiledClaim(t *testing.T) {
 	if err != nil || !observed.Equal(acquired) || observed.Equal(original) {
 		t.Fatalf("request continuation lost its acquired receiver identity: %v", err)
 	}
+	t.Run("projected_life_before_hash", func(t *testing.T) {
+		selected, err := WithSelectedForkRecipientContexts(bound, event, []events.DeliveryRoute{sourceRoute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate := raw
+		candidate.Context.Life = nil
+		actual, err := stampConnectExecutionClaims(selected, event, plan, []pinrouting.ConnectDeliveryRoute{candidate})
+		if err != nil || len(actual) != 1 || !actual[0].ConnectClaim.Equal(acquired) || !reflect.DeepEqual(actual[0].Context, sourceRoute.Context) {
+			t.Fatalf("projected life was attached after the full claim: %+v err=%v", actual, err)
+		}
+		candidate.Target.EntityID = uuid.NewString()
+		if _, err := stampConnectExecutionClaims(selected, event, plan, []pinrouting.ConnectDeliveryRoute{candidate}); err == nil {
+			t.Fatal("changed target borrowed projected execution life")
+		}
+		intent := RoutePlanDeliveryIntent{Recipient: actual[0].Recipient, Context: actual[0].Context, ConnectClaim: actual[0].ConnectClaim}
+		intent.Context.Life = nil
+		projected := (RoutePlan{ReplyContextConsumed: true, DeliveryIntents: []RoutePlanDeliveryIntent{intent}}).WithDefaultDeliveryContext(events.DeliveryContext{Life: &life})
+		if projected.DeliveryIntents[0].Context.Life != nil {
+			t.Fatal("default context mutated an already-hashed connect route")
+		}
+	})
 	for _, fault := range []string{"terminal", "foreign", "duplicate", "ambiguous", "pair", "ordinary_scope", "canceled"} {
 		t.Run(fault, func(t *testing.T) {
 			input := []replycontext.Record{retained.Normalized()}

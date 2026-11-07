@@ -37,6 +37,7 @@ func TestQueuedTurnTerminationBothStores(t *testing.T) {
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				entity := uuid.NewString()
 				record := seedTurnTerminationHeader(t, fixture, owner, entity, at)
+				entity = record.EntityID
 				event := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
 				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.authority.Normal.Identity.AgentID()), AgentIdentity: fixture.authority.Normal.Identity}
 				if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {

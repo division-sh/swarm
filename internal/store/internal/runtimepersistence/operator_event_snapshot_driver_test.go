@@ -26,6 +26,7 @@ type operatorSnapshotProbe struct {
 	options        []driver.TxOptions
 	outside        int
 	writes         int
+	nativeFences   int
 	finished       int
 	active         int
 	candidates     []string
@@ -38,6 +39,7 @@ func (p *operatorSnapshotProbe) arm(kind string, occurrence int, readFailure, co
 	p.readFailure, p.commitFailure = readFailure, commitFailure
 	p.seen, p.options, p.candidates = map[string]int{}, nil, nil
 	p.outside, p.writes, p.finished, p.active, p.fired = 0, 0, 0, 0, false
+	p.nativeFences = 0
 	p.entered, p.release = make(chan struct{}), make(chan struct{})
 	release := p.release
 	var once sync.Once
@@ -193,6 +195,9 @@ func (c *operatorSnapshotConn) ExecContext(ctx context.Context, query string, ar
 	c.probe.mu.Lock()
 	if c.probe.armed && (!c.probe.readOnlyGate || c.readOnly.Load()) && (strings.HasPrefix(q, "insert") || strings.HasPrefix(q, "update") || strings.HasPrefix(q, "delete")) {
 		c.probe.writes++
+		if q == "update runtime_process_generation set generation = generation where singleton_id = 1" {
+			c.probe.nativeFences++
+		}
 	}
 	c.probe.mu.Unlock()
 	return c.diagnosticSQLConn.ExecContext(ctx, query, args)

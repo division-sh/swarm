@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -42,7 +43,7 @@ func TestCanceledTurnRecoveryPreservesExactClaimBoundaryBothStores(t *testing.T)
 					t.Fatalf("canonical event missing: %t %v", found, err)
 				}
 				expireProviderOriginLease(t, f, f.origin)
-				command := effects.CanceledTurnCommandForAttempt(handle.Attempt(), prepareCanceledReactionForTest(t, ctx, f, clock, intent.RequestedAt))
+				command := effects.CanceledTurnCommandForAttempt(handle.Attempt(), prepareCanceledReactionForTest(t, ctx, f, effects.TurnExecutionResult{Attempt: handle.Attempt(), Cancellation: intent, Clock: &clock}))
 				defer func() {
 					plan := command.Publication.(bus.EnginePublicationPlan)
 					if err := f.store.(storeTestDurableEventBusStore).PipelineObligations().Release(context.WithoutCancel(ctx), plan.PublicationCommand().Commit.PipelineClaim); err != nil {
@@ -52,6 +53,9 @@ func TestCanceledTurnRecoveryPreservesExactClaimBoundaryBothStores(t *testing.T)
 				recovery := f.store.(effects.CanceledTurnRecoveryStore)
 				request := liveExternalEffectRecoveryRequest(time.Now().UTC())
 				if boundary == "expired" {
+					t.Run("retained_ownership", func(t *testing.T) {
+						proveCanceledTurnHistoricalOwnership(t, ctx, f, handle.Attempt(), request)
+					})
 					turns, err := recovery.ListCanceledTurnRecoveries(ctx, request)
 					if err != nil || len(turns) != 1 || !turns[0].Attempt.Origin.Same(handle.Attempt().Origin) {
 						t.Fatalf("expired recovery substituted origin: %+v %v", turns, err)
@@ -103,5 +107,54 @@ func TestCanceledTurnRecoveryPreservesExactClaimBoundaryBothStores(t *testing.T)
 				assertCanceledReactionCount(t, ctx, f, clock.TimeoutEvent, 0)
 			})
 		})
+	}
+}
+
+func proveCanceledTurnHistoricalOwnership(t *testing.T, ctx context.Context, f completionSettlementFixture, attempt effects.Attempt, request effects.RecoveryRequest) {
+	t.Helper()
+	if !attempt.InstanceOwnership.RunOwned {
+		t.Fatal("historical run-owned control lost its native nonmembership proof")
+	}
+	var original []byte
+	if err := f.db.QueryRowContext(ctx, `SELECT authority_evidence FROM runtime_external_effect_attempts WHERE attempt_id=$1`, attempt.AttemptID).Scan(&original); err != nil {
+		t.Fatal(err)
+	}
+	var evidence map[string]json.RawMessage
+	if err := json.Unmarshal(original, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	write := func(raw []byte) {
+		t.Helper()
+		if _, err := f.db.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET authority_evidence=$1 WHERE attempt_id=$2`, string(raw), attempt.AttemptID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer write(original)
+	for _, invalid := range []json.RawMessage{json.RawMessage(`null`), json.RawMessage(`{}`), json.RawMessage(`{"run_owned":true,"instance_life":{"run_id":"invalid"}}`)} {
+		evidence["instance_ownership"] = invalid
+		raw, err := json.Marshal(evidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(raw)
+		if rows, err := f.store.(effects.CanceledTurnRecoveryStore).ListCanceledTurnRecoveries(ctx, request); err == nil || len(rows) != 0 {
+			t.Fatalf("malformed retained statement became absence: rows=%+v err=%v", rows, err)
+		}
+	}
+	// Model only the ruled no-counter deployment population, not recovery of
+	// candidate-written life-2 scratch data. This turn is native run-owned work.
+	delete(evidence, "instance_ownership")
+	historical, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(historical)
+	before := snapshotForkHistoricalExecutionTables(t, f.db, !f.sqlite)
+	rows, err := f.store.(effects.CanceledTurnRecoveryStore).ListCanceledTurnRecoveries(ctx, request)
+	if err != nil || len(rows) != 1 || !rows[0].Attempt.InstanceOwnership.Equal(attempt.InstanceOwnership) {
+		t.Fatalf("historical owner-proven run-owned recovery: rows=%+v err=%v", rows, err)
+	}
+	if after := snapshotForkHistoricalExecutionTables(t, f.db, !f.sqlite); !reflect.DeepEqual(before, after) {
+		t.Fatal("locking inventory wrote historical evidence or a revision")
 	}
 }

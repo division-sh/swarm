@@ -183,7 +183,7 @@ func (s *targetRouteMemoryStore) commitValidatedPublication(command PublicationC
 			s.constructions = make(map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence)
 		}
 		for _, constructor := range plan.ConstructionPlans() {
-			observed, err := admitConstructionIndexTestObservation(s.constructionIndexSource, constructor.Readiness.RunID, constructor.Identity, constructor.Instance.InstanceKey)
+			observed, err := admitConstructionIndexTestObservation(s.constructionIndexSource, constructor.Readiness.RunID, constructor.Identity, constructor.Instance.InstanceKey, constructor.Instance.Life)
 			if err != nil {
 				return CommittedPublication{}, err
 			}
@@ -3157,8 +3157,8 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		0,
 		runID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("project-source-owner")),
-		eventtest.RootRoutingSource(eventtest.UUID("project-source-owner")),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, reviewerOwner.EntityID),
+		eventtest.RootRoutingSource(reviewerOwner.EntityID),
 		time.Now().UTC(),
 	)
 
@@ -3177,7 +3177,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		t.Fatalf("Publish: %v", err)
 	}
 	got := requireBusEvent(t, ch, "workflow-runtime carrier delivery")
-	if got.EntityID() != eventtest.UUID("project-source-owner") {
+	if got.EntityID() != reviewerOwner.EntityID {
 		t.Fatalf("delivered entity_id = %q, want unchanged source entity", got.EntityID())
 	}
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, reviewerRoute) || !deliveryRoutesContain(routes, workflowRuntimeRoute) {

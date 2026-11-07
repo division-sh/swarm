@@ -49,14 +49,14 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 						return count == 1
 					}
 				case "directive_renew", "directive_expiry":
-					seedDirectiveOperationRun(t, base, fixture.db, true)
+					seedDirectiveOperationRun(t, base, store, fixture.db, true)
 					req := directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), "writer-cut-key", "writer-cut-hash", now)
 					reserved, err := store.ReserveDirectiveOperation(base, req)
 					if err != nil {
 						t.Fatal(err)
 					}
 					id, ownerID := reserved.Operation.OperationID, uuid.NewString()
-					if _, err := admitDirectiveExecutionForTest(base, store, id, ownerID, now, time.Minute); err != nil {
+					if _, err := admitDirectiveExecutionForTest(t, base, store, id, ownerID, now, time.Minute); err != nil {
 						t.Fatal(err)
 					}
 					if owner == "directive_renew" {

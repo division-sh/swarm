@@ -56,7 +56,7 @@ func nativeWorkflowTimerSourceActivationForTest(t *testing.T, backend string, bu
 		}
 	})
 	if err := reconcileWorkflowTimerForTest(ctx, pc, workflowTimerRootRoute(ctx), entityID, "", "waiting", workflowTimerCause{
-		Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting", ExecutionMode: mode,
+		Kind: workflowTimerCauseInitial, Life: 1, OccurredAt: createdAt, ToState: "waiting", ExecutionMode: mode,
 	}); err != nil {
 		t.Fatalf("activate native workflow timer: %v", err)
 	}

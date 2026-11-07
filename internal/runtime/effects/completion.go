@@ -439,6 +439,7 @@ func (s CompletionSettlement) validateProviderEvidence(attempt Attempt) error {
 }
 
 func (s CompletionSettlement) Clone() CompletionSettlement {
+	s.Settlement.InstanceOwnership = s.Settlement.InstanceOwnership.Clone()
 	s.Usage = s.Usage.Clone()
 	if s.AgentTurn != nil {
 		turn := *s.AgentTurn

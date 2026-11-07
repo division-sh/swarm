@@ -39,8 +39,12 @@ func TestWorkflowHeaderSubmittedJSONBothDialects(t *testing.T) {
 					// Whitespace is intentional: observe these submitted bytes,
 					// not another JSON serialization or PostgreSQL's JSONB output.
 					config := []byte(`{ "name" : "exact argument" }`)
-					record := pipeline.WorkflowEngineStateRecord{Config: config}
-					args := make([]driver.Value, 20)
+					record := pipeline.WorkflowEngineStateRecord{Config: config, Life: 1}
+					argumentCount := 22
+					if create {
+						argumentCount = 21
+					}
+					args := make([]driver.Value, argumentCount)
 					for index := range args {
 						args[index] = sqlmock.AnyArg()
 					}
@@ -48,6 +52,7 @@ func TestWorkflowHeaderSubmittedJSONBothDialects(t *testing.T) {
 					if create {
 						query, position = `(?s)^INSERT INTO flow_instances`, 10
 					}
+					args[len(args)-1] = int64(1)
 					args[position] = string(config)
 					expect := mock.ExpectQuery(query).WithArgs(args...)
 					refusal := errors.New("native header write refused")

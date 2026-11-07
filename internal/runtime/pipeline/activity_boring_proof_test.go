@@ -18,6 +18,7 @@ import (
 	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -403,6 +404,34 @@ func newActivityBoringFixture(t *testing.T, backend, serverURL string, open func
 func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBoringFixture, ctx context.Context, intent runtimeengine.ActivityIntent, request events.Event) {
 	t.Helper()
 	entity := intent.EntityID.String()
+	constructionCtx := effects.WithExecutionMode(ctx, intent.ExecutionMode)
+	rootFlow := semanticview.RootExecutionFlowID(fixture.pc.SemanticSource())
+	topology, found := semanticview.WorkflowStageTopology(fixture.pc.SemanticSource(), rootFlow)
+	if !found {
+		t.Fatal("activity component parent requires its admitted stage catalog")
+	}
+	stage, err := topology.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
+		Life: 1, InstanceID: intent.SourceRunID, StorageRef: intent.SourceRunID, EntityID: intent.SourceRunID,
+		WorkflowName: rootFlow, WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
+		CurrentState: stage.ID(), StageDefined: !stage.IsStatelessPosture(),
+		CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
+	})
+	if err := fixture.native.Construct(constructionCtx, parent); err != nil {
+		t.Fatal(err)
+	}
+	instance := materializedWorkflowInstanceForSource(t, fixture.pc.SemanticSource(), ctx, WorkflowInstance{
+		Life: 1, InstanceID: entity, StorageRef: intent.FlowInstance, EntityID: entity,
+		WorkflowName: "research", WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
+		CurrentState: "pending", CreatedAt: request.CreatedAt(), EnteredStageAt: request.CreatedAt(),
+		Fields: map[string]any{"marker": entity}, EntityType: "state",
+	})
+	if err := fixture.native.Construct(constructionCtx, instance); err != nil {
+		t.Fatal(err)
+	}
 	source := eventtest.ExistingRunRootIngressWithRoutingSource(intent.SourceEventID, "research/source.requested", "", intent.SourceTaskID,
 		[]byte(`{}`), intent.ChainDepth, intent.SourceRunID, events.EventEnvelope{}, testWorkflowRoutingSource("research", intent.FlowInstance, entity), request.CreatedAt())
 	fixture.native.Publish(ctx, source)

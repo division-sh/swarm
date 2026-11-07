@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -57,6 +59,44 @@ func requestWorkflowTurnTermination(ctx context.Context, mutation *mutationproto
 
 type workflowTerminationTurn struct {
 	id, current string
+}
+
+func prepareWorkflowTurnTerminationTx(ctx context.Context, tx *sql.Tx, postgres bool, directives providerDrainDirectiveOwner, command workflowlifecycle.TurnTermination, actors []agentidentity.Identity) (context.Context, error) {
+	if err := command.Validate(); err != nil {
+		return nil, err
+	}
+	before, err := loadWorkflowTerminationTurnsTx(ctx, tx, command)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, row := range before {
+		var admitted, first sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT CAST(admitted_attempt_id AS TEXT),CAST(first_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE turn_id=$1`, row.id).Scan(&admitted, &first); err != nil {
+			return nil, err
+		}
+		ids = append(ids, row.current, admitted.String, first.String)
+	}
+	ctx, err = prepareRetainedTurnOwnershipTx(ctx, tx, postgres, directives, ids, actors...)
+	if err != nil {
+		return nil, err
+	}
+	after, err := loadWorkflowTerminationTurnsTx(ctx, tx, command)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(before, after) {
+		return nil, fmt.Errorf("authored termination turn set changed under its ownership prefix")
+	}
+	return ctx, nil
+}
+
+func (s *EffectPostgresOwner) PrepareWorkflowTurnTerminationTx(ctx context.Context, tx *sql.Tx, command workflowlifecycle.TurnTermination, actors []agentidentity.Identity) (context.Context, error) {
+	return prepareWorkflowTurnTerminationTx(ctx, tx, true, s.directives, command, actors)
+}
+
+func (s *EffectSQLiteOwner) PrepareWorkflowTurnTerminationTx(ctx context.Context, tx *sql.Tx, command workflowlifecycle.TurnTermination, actors []agentidentity.Identity) (context.Context, error) {
+	return prepareWorkflowTurnTerminationTx(ctx, tx, false, s.directives, command, actors)
 }
 
 func validateWorkflowTerminationCauseTx(ctx context.Context, tx *sql.Tx, postgres bool, command workflowlifecycle.TurnTermination) error {

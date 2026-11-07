@@ -2,7 +2,6 @@ package runforkpersistence
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -17,10 +16,7 @@ func decodeRunForkRevisionEvent(fact runForkRevisionEvent) (events.AdmittedEvent
 	if bytes.Equal(fact.InheritedFanOutOrigin, []byte("null")) {
 		fact.InheritedFanOutOrigin = nil
 	}
-	source, err := json.Marshal(fact.RoutingSource.Route())
-	if err != nil {
-		return events.AdmittedEvent{}, err
-	}
+	source := eventrecord.EncodeSourceRoute(fact.RoutingSource)
 	return (eventrecord.Record{
 		Class: events.EventAdmissionClass(fact.EventClass), EventID: fact.EventID, RunID: fact.RunID, EventName: fact.EventName,
 		TaskID: fact.TaskID, EntityID: fact.EntityID, FlowInstance: fact.FlowInstance, Scope: events.EventScope(fact.Scope),

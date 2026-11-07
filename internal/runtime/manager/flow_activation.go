@@ -161,16 +161,84 @@ func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 		return descendantsErr
 	}
 	plan := committed.Plan
+	if committed.StartedOver {
+		if err := am.requireCurrentRestartedInstance(ctx, committed); err != nil {
+			return err
+		}
+	}
 	if committed.Created {
 		if err := am.workflowInstances.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
 			return fmt.Errorf("finalize flow instance initial lifecycle: %w", err)
 		}
 	}
+	if err := am.finalizeRestartedActors(ctx, committed); err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+		return err
+	}
 	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, committed.ReadinessAttemptOrdinal, am.semanticReadinessSource.source)
+	if err == nil && committed.StartedOver {
+		err = am.finalizeRestartedEntry(ctx, committed)
+	}
 	if err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 	}
 	return err
+}
+
+func (am *AgentManager) finalizeRestartedActors(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	for _, restarted := range committed.RestartedAgents {
+		if err := am.requireCurrentRestartedInstance(ctx, committed); err != nil {
+			return err
+		}
+		identity := restarted.Token.Identity
+		cell, err := am.lifecycle.lockIdentityOperationMode(identity, true, false)
+		if err != nil {
+			return fmt.Errorf("refresh restarted actor: %w", err)
+		}
+		current := cell.view.LastTransitionID == restarted.TransitionID && cell.view.RuntimeEpoch == restarted.Token.RuntimeEpoch && cell.view.Generation == restarted.Token.Generation
+		cell.opMu.Unlock()
+		if !current {
+			continue
+		}
+		if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
+			return fmt.Errorf("materialize restarted actor: %w", err)
+		}
+	}
+	return nil
+}
+
+func (am *AgentManager) finalizeRestartedEntry(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	if err := am.requireCurrentRestartedInstance(ctx, committed); err != nil {
+		return err
+	}
+	finalizer, ok := am.workflowInstances.(interface {
+		FinalizeRestartEntryLifecycle(context.Context, runtimepipeline.CommittedWorkflowLifecycleMutation) error
+	})
+	if !ok {
+		return fmt.Errorf("instance restart requires its existing entry lifecycle finalizer")
+	}
+	return finalizer.FinalizeRestartEntryLifecycle(ctx, committed.Lifecycle)
+}
+
+func (am *AgentManager) requireCurrentRestartedInstance(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	reader, ok := am.workflowInstances.(interface {
+		LoadConstructedFlowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowInstance, bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("instance restart requires its existing constructed-instance reader")
+	}
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: committed.Plan.Readiness.RunID, Route: committed.Plan.Identity.Route()}
+	instance, found, err := reader.LoadConstructedFlowInstance(ctx, owner, runtimeidentity.NormalizeEntityID(committed.Plan.Identity.EntityID))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("restarted instance is missing")
+	}
+	if instance.Life != committed.Plan.Instance.Life {
+		return runtimepipeline.InstanceRestarted(owner, committed.Plan.Instance.Life, instance.Life)
+	}
+	return nil
 }
 
 func (am *AgentManager) prepareFlowInstanceActivation(
@@ -297,6 +365,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: runtimepipeline.WorkflowInstance{
+			Life:               1,
 			InstanceID:         instanceID,
 			StorageRef:         flowPath,
 			EntityID:           flowEntityID,
@@ -322,6 +391,24 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		CreatingInput:       runtimepipeline.FlowConstructionInput{EventID: triggerEventID, Input: constructor.Input()},
 		ActivationVariables: flowActivationVars(req),
 		OccurredAt:          occurredAt,
+		Restart:             req.Restart,
+	}
+	if req.Restart != nil {
+		plan.Instance.Life = req.Restart.Life + 1
+		if err := req.Restart.Validate(plan.Instance); err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		restart := *req.Restart
+		restart.ProcessBinding, err = registrationProcessBinding(am.lifecycle.persistence())
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		origin, err := am.lifecycle.lifecycleTransitionWithDiagnostic(ctx, AgentLifecycleTransition{})
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+		restart.DiagnosticOrigin = origin.DiagnosticOrigin
+		plan.Restart = &restart
 	}
 	if seed := req.ScenarioSeed; seed != nil {
 		primary, err := bundle.ResolveTestSetupPrimaryEntity(templateID, seed.EntityType)
@@ -366,6 +453,9 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	for _, childFlowID := range children {
+		if req.Restart != nil {
+			break // Existing descendants retain their own instance lives.
+		}
 		child, err := runtimeflowidentity.KeylessChild(req.ContractBundle, instance, childFlowID)
 		if err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err

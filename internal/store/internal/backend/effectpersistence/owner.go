@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
@@ -32,6 +34,7 @@ type schemaQueryer interface {
 }
 
 type providerDrainDeliveryOwner interface {
+	ProviderOriginSnapshotTx(context.Context, *sql.Tx, runtimedelivery.Claim) (runtimedelivery.Snapshot, error)
 	ValidateSelectedProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeagentidentity.Identity, runtimedelivery.ExecutionAuthority) error
 	ValidateSelectedOriginExecutionTx(context.Context, *sql.Tx, runtimedelivery.Claim, string) error
 	ClaimedAgentFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]storedelivery.ClaimedFlowTurn, error)
@@ -50,6 +53,8 @@ type providerDrainDeliveryOwner interface {
 }
 
 type providerDrainDirectiveOwner interface {
+	ReadRetainedTurnOwnershipTx(context.Context, *sql.Tx, runtimeagentidentity.Identity, string) (events.InstanceOwnership, error)
+	PrepareAgentTurnOwnershipTx(context.Context, *sql.Tx, runtimeagentcontrol.TurnInstanceSource, effects.LifecycleToken) (events.InstanceOwnership, error)
 	PreparedDirectiveFlowOperationsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimeagentcontrol.DirectiveOperation, error)
 	CancelPreparedDirectiveTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveOperation, time.Time) (runtimeagentcontrol.DirectiveOperation, error)
 	ExecutingDirectiveFlowOriginsTx(context.Context, *sql.Tx, runtimeflowidentity.RunScopedFlowInstance) ([]runtimeagentcontrol.DirectiveOperation, error)

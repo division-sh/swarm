@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -25,7 +26,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -200,7 +203,6 @@ func prepareP16IndependentDirective(t *testing.T, ctx context.Context, raw selec
 	t.Helper()
 	store := raw.(agentcontrol.DirectiveOperationStore)
 	agent := mustTestAgentIdentityForRun(fixture.runID, "p16-group-agent", "producer")
-	seedTestAgentRow(t, ctx, db, postgres, agent, "active")
 	operationID, eventID := uuid.NewString(), uuid.NewString()
 	now := time.Now().UTC()
 	request := agentcontrol.SendDirectiveRequest{AgentID: agent.AgentID(), FlowInstance: agent.FlowInstance(), Directive: "preserve independent origin", RunID: fixture.runID, Source: agentcontrol.DirectiveSourceV1RPC, OperatorID: "p16-test"}
@@ -221,7 +223,13 @@ func prepareP16IndependentDirective(t *testing.T, ctx context.Context, raw selec
 		t.Fatal(err)
 	}
 	owner := uuid.NewString()
-	if _, err := store.AdmitDirectiveExecution(ctx, agentcontrol.DirectiveExecutionAdmissionRequest{OperationID: operationID, OwnerID: owner, Now: now, Lease: time.Minute, ExecutionPosture: executionposture.Live}); err != nil {
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", fixture.artifact)
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admitDirectiveRequestForTest(t, ctx, store, agentcontrol.DirectiveExecutionAdmissionRequest{OperationID: operationID, OwnerID: owner, Now: now, Lease: time.Minute, ExecutionPosture: executionposture.Live, Source: semanticview.Wrap(bundle)}); err != nil {
 		t.Fatal(err)
 	}
 	return reserved.Operation, owner
@@ -249,7 +257,24 @@ func prepareP16PublicationGroup(t *testing.T, raw selectedFanOutLifecycleOwner, 
 	ctx := testAuthorActivityContextForBundle(artifact.BundleHash())
 	ctx = originalStoreFixtureContext(t, ctx, raw)
 	fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, backend == "postgres", cardinality, time.Now().UTC(), artifact)
-	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))
+	// Admit the independent actor before retaining the group's generation. Both
+	// operations then keep the same source set instead of replacing its owner.
+	agent := agentFixtureStaticRecord(t, mustTestAgentIdentityForRun(fixture.runID, "p16-group-agent", "producer"))
+	agent.Config.FlowID = "producer"
+	selected := raw.(agentfixture.Store)
+	if err := agentfixture.UpsertStaticForSource(t, ctx, selected, agent, mustStoreTestSourceArtifactFact(fixture.bundleHash)); err != nil {
+		t.Fatal(err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("read fixture's complete source plan: found=%t err=%v", found, err)
+	}
+	route := constructGroupProofPublicationSource(t, ctx, raw, semanticview.Wrap(bundle), fixture.runID, "producer", fixture.createdAt)
 	source, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +300,7 @@ func prepareP16PublicationGroup(t *testing.T, raw selectedFanOutLifecycleOwner, 
 	if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET capsule=$1 WHERE run_id=$2`, string(capsuleRaw), fixture.runID); err != nil {
 		t.Fatal(err)
 	}
-	owner, _, grant, _ := grantedFanOutOwnerForTest(t, ctx, raw, fixture)
+	owner, _, grant, _ := grantedFanOutOwnerForTest(t, ctx, raw, fixture, plan)
 	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
 	if err != nil {
 		t.Fatal(err)
