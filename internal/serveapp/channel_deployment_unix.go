@@ -30,9 +30,9 @@ import (
 
 type deploymentChannelSession struct {
 	opts       cliapp.ChannelRegistrationOptions
-	connection *sessionprovider.RuntimeConnection
+	connection serveSessionConnection
 	business   sessionprovider.RegisteredBusinessSelector
-	opened     func(channelonboarding.Operation, *sessionprovider.RuntimeConnection) error
+	opened     func(channelonboarding.Operation, serveSessionConnection) error
 }
 
 func (c *deploymentChannelSession) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
@@ -365,11 +365,13 @@ func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op chan
 	if c.connection != nil {
 		return c.connection.CheckBootstrap(ctx)
 	}
-	var err error
-	c.connection, err = sessionprovider.OpenDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
+	connection, err := sessionprovider.OpenDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
 		OperationID: op.OperationID, Principal: c.opts.Principal, Process: c.opts.Process, Operations: c.opts.Operations,
 		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger, RegisteredBusiness: c.business,
 		OperatorAccount: c.opts.OperatorAccount, OperatorBinding: c.opts.OperatorBinding})
+	if connection != nil {
+		c.connection = connection
+	}
 	if err != nil {
 		return err
 	}
