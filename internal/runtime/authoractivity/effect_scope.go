@@ -34,8 +34,11 @@ func DeploymentEffectParent(kind, id string, evidence []byte) (*channelnative.Tr
 		return nil, fmt.Errorf("deployment effect kind %q is not admitted", kind)
 	}
 	var operationID, parentID string
+	var storedKind, storedID string
 	var revision int64
-	if json.Unmarshal(fields["effect_operation_id"], &operationID) != nil || operationID != id ||
+	if json.Unmarshal(fields["authority_kind"], &storedKind) != nil || storedKind != kind ||
+		json.Unmarshal(fields["authority_id"], &storedID) != nil || storedID != id ||
+		json.Unmarshal(fields["effect_operation_id"], &operationID) != nil || operationID != id ||
 		json.Unmarshal(fields["onboarding_operation_id"], &parentID) != nil || parentID != parent.ID ||
 		json.Unmarshal(fields["onboarding_revision"], &revision) != nil || revision != parent.Revision {
 		return nil, fmt.Errorf("deployment effect contradicts its exact parent")

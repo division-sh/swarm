@@ -14,6 +14,7 @@ func TestDeploymentEffectLifecycleRequiresOriginalParent(t *testing.T) {
 	parent := channelnative.TransportParent{Kind: "deployment_registration", ID: uuid.NewString(), Revision: 4,
 		BindingOperationID: uuid.NewString(), BindingOperationRevision: 6}
 	evidence := map[string]any{"transport_parent": parent, "effect_operation_id": id,
+		"authority_kind": "channel_confirmation", "authority_id": id,
 		"onboarding_operation_id": parent.ID, "onboarding_revision": parent.Revision}
 	raw, _ := json.Marshal(evidence)
 	attempt := 1
