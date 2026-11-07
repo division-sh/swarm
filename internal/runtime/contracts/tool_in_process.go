@@ -1,6 +1,10 @@
 package contracts
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/channelprovider"
+)
 
 // ToolInProcessTarget names a shipped provider operation, not Go code or a
 // callback. It grants intent only; the selected connection/effect owners admit execution.
@@ -35,12 +39,10 @@ func ParseToolInProcessTarget(raw string) (ToolInProcessTarget, error) {
 }
 
 func (t ToolInProcessTarget) Provider() string {
-	switch t {
-	case ToolInProcessWhatsAppReadAccount, ToolInProcessWhatsAppSendText:
-		return "whatsapp"
-	default:
-		return ""
+	if binding, installed := channelprovider.ForNativeTarget(t.String()); installed {
+		return binding.Provider()
 	}
+	return ""
 }
 
 func (t ToolInProcessTarget) contract() (ToolCategory, ActivityEffectClass) {

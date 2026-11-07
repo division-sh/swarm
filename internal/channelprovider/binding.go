@@ -41,6 +41,15 @@ func Lookup(provider string) (Binding, bool) {
 	return Binding{}, false
 }
 
+func ForNativeTarget(target string) (Binding, bool) {
+	for _, binding := range installed {
+		if binding.NativeRead(target) || binding.NativeWrite(target) {
+			return binding, true
+		}
+	}
+	return Binding{}, false
+}
+
 func Installed() []Binding { return append([]Binding(nil), installed[:]...) }
 
 func (b Binding) Provider() string      { return b.id }
