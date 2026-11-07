@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -65,6 +66,10 @@ func (f *runtimeBootstrapFixture) AcknowledgeRegisteredOperator(ctx context.Cont
 	}()
 	select {
 	case err := <-done:
+		var failure *failures.Error
+		if errors.As(err, &failure) {
+			f.t.Log("synthetic registered acknowledgement cause:", failure.Unwrap())
+		}
 		return err
 	case frame := <-f.peer.frames:
 		id := strings.ReplaceAll(effects.RegisteredOperatorAcknowledgementID(child.OperationID, binding.Revision), "-", "")
