@@ -34,7 +34,10 @@ func ValidateTelegramConfirmation(request, destination, text string) error {
 		"body": map[string]any{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}", "reply_markup": "{{input.reply_markup}}"}}
 	expectedInput := map[string]any{"chat_id": destination, "text": text,
 		"reply_markup": map[string]any{"inline_keyboard": []any{}}}
+	expectedSuccess := map[string]any{"kind": "json_field_equals", "path": "response.body.ok", "equals": true}
+	expectedMapping := map[string]any{"message_id": "{{response.body.result.message_id}}"}
 	if destination == "" || text == "" || !reflect.DeepEqual(contract["http"], expectedHTTP) ||
+		!reflect.DeepEqual(contract["response_success"], expectedSuccess) || !reflect.DeepEqual(contract["response_mapping"], expectedMapping) ||
 		!reflect.DeepEqual(contract["credentials"], []any{"telegram.telegram_bot_token"}) ||
 		!reflect.DeepEqual(value["input"], expectedInput) {
 		return fmt.Errorf("registered Telegram acknowledgement requires its fixed request and destination")

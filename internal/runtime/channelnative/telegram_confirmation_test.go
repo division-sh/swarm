@@ -37,6 +37,12 @@ func TestRegisteredTelegramConfirmationUsesExactExistingSerializer(t *testing.T)
 			r["contract"].(map[string]any)["http"].(map[string]any)["body"] = map[string]any{"text": "{{input.text}}"}
 		},
 		"other transport": func(r map[string]any) { r["contract"].(map[string]any)["mcp"] = map[string]any{"server": "foreign"} },
+		"invented success": func(r map[string]any) {
+			r["contract"].(map[string]any)["response_success"] = map[string]any{"kind": "http_status_2xx"}
+		},
+		"invented receipt": func(r map[string]any) {
+			r["contract"].(map[string]any)["response_mapping"] = map[string]any{"message_id": 1}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			value, err := canonicaljson.Decode(request)
