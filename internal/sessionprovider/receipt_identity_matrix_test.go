@@ -108,7 +108,7 @@ func mutateNativeReceiptRequest(t *testing.T, original inbound.Request, mutation
 		if err := json.Unmarshal(request.OriginalTransportMetadata, &fields); err != nil {
 			t.Fatal(err)
 		}
-		fields[sessioncapture.CaptureProvenanceKey], err = json.Marshal(capture)
+		fields["whatsapp_capture"], err = json.Marshal(capture)
 		if err != nil {
 			t.Fatal(err)
 		}

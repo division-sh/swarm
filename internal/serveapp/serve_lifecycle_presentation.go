@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -827,11 +828,8 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 	}
 	for _, account := range accounts {
 		provider := account.Provider
-		switch provider {
-		case "whatsapp":
-			provider = "WhatsApp"
-		case "telegram":
-			provider = "Telegram"
+		if binding, installed := channelprovider.Lookup(provider); installed {
+			provider = binding.DisplayName()
 		}
 		label := provider + " " + account.Account
 		if len(account.Holders) == 1 {
