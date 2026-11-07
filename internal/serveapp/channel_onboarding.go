@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -1171,7 +1172,8 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 }
 
 func (r *serveChannelActivationRefresher) refreshRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference) error {
-	if ref.Provider == "telegram" && ref.Validate() == nil {
+	provider, _ := channelprovider.Lookup(ref.Provider)
+	if provider.Webhook() && ref.Validate() == nil {
 		if err := admitServeRegisteredWebhookCredentials(ctx, r.manager, r.store, ref); err != nil {
 			return err
 		}

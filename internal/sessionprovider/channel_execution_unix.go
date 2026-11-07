@@ -25,15 +25,20 @@ import (
 
 type sessionChannelExecutor struct {
 	owner      *sessionAuthorityOwner
+	state      *sessionState
 	plan       packs.SatisfactionPlan
 	deployment func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
 }
 
 func (e sessionChannelExecutor) channelExecution() execution.Channel {
-	if e.owner == nil {
+	if !e.ownsSessionState() {
 		return execution.Channel{}
 	}
 	return executionfact.SealOwnedChannel(e.owner.operation.OperationID, e)
+}
+
+func (e sessionChannelExecutor) ownsSessionState() bool {
+	return e.owner != nil && e.state != nil && e.owner.state == e.state
 }
 
 func (e sessionChannelExecutor) ExecuteChannelWrite(ctx context.Context, operation, toolID string, tool runtimecontracts.ToolSchemaEntry, input map[string]any, lineage map[string]string, kind runtimeeffects.AuthorityKind) (registration.DeliveryResult, error) {
@@ -83,7 +88,7 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 		return registration.DeliveryResult{}, err
 	}
 	target, native := tool.InProcess()
-	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText || e.owner == nil {
+	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText || !e.ownsSessionState() {
 		return registration.DeliveryResult{}, fmt.Errorf("native channel write requires its owned WhatsApp send target")
 	}
 	if kind == runtimeeffects.AuthorityChannelDelivery {
@@ -108,7 +113,7 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 	if !ok || selected.Kind != kind || !selected.Valid() {
 		return registration.DeliveryResult{}, fmt.Errorf("native channel write requires its exact selected effect authority")
 	}
-	occurrence := e.owner.state.currentOccurrence()
+	occurrence := e.state.currentOccurrence()
 	account, err := e.owner.AdmitSessionAccount(ctx, e.owner.operation.SessionAccount)
 	if err != nil {
 		return registration.DeliveryResult{}, err
@@ -118,7 +123,7 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 		if err := account.Validate(ctx, e.owner.operation.SessionAccount); err != nil {
 			return err
 		}
-		if !e.owner.state.ownsConnectedOccurrence(ctx, occurrence) {
+		if !e.state.ownsConnectedOccurrence(ctx, occurrence) {
 			return errClientOccurrenceFenced
 		}
 		return e.requireChannelDestination(ctx, selected, destination)
