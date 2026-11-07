@@ -1777,7 +1777,8 @@ func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects
 		return nil, err
 	}
 	if parent != nil {
-		if req.OperationID != authority.ID || string(req.Kind) != string(authority.Kind) || req.Class != runtimeeffects.EffectWriteOrUnknown {
+		if authority.Kind != runtimeeffects.AuthorityServeRegistration && req.OperationID != authority.ID ||
+			string(req.Kind) != string(authority.Kind) || req.Class != runtimeeffects.EffectWriteOrUnknown {
 			return nil, fmt.Errorf("deployment effect requires its exact operation and request kind")
 		}
 		if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {

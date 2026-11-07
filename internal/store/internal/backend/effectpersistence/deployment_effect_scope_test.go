@@ -1,11 +1,15 @@
 package effectpersistence
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
@@ -44,5 +48,26 @@ func TestStoredEffectScopeDoesNotInferDeploymentFromMissingBundle(t *testing.T) 
 				t.Fatalf("authored operation lost exact bundle: %v", err)
 			}
 		})
+	}
+}
+
+func TestDeploymentRegistrationRetainsCanonicalEffectOperationIdentity(t *testing.T) {
+	parent := channelnative.TransportParent{Kind: channelnative.TransportDeploymentRegistration,
+		ID: uuid.NewString(), Revision: 3, BindingOperationID: uuid.NewString(), BindingOperationRevision: 2}
+	intent := uuid.NewString()
+	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityServeRegistration, ID: intent,
+		ExecutionOwner: "registration", FenceGeneration: 1, LeaseExpiresAt: time.Now().Add(time.Minute),
+		ExecutionMode: runtimeeffects.ExecutionModeLive, ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
+			Parent: parent, IntentID: intent, StartupAuthorityID: uuid.NewString(), StartupStateVersion: 1,
+			OnboardingOperationID: parent.ID, OnboardingRevision: parent.Revision}}
+	ctx := authoractivity.WithScope(context.Background(), authoractivity.RuntimeScope(uuid.NewString()))
+	req := runtimeeffects.AuthorizeRequest{OperationID: uuid.NewString(), Kind: runtimeeffects.KindServeRegistration,
+		Class: runtimeeffects.EffectWriteOrUnknown, Adapter: "provider_registration", Transport: "http"}
+	if bundle, err := externalEffectOperationBundle(ctx, authority, req); err != nil || bundle != nil {
+		t.Fatal("registration replaced its canonical effect ID with the intent ID", bundle, err)
+	}
+	req.Kind = runtimeeffects.KindChannelDelivery
+	if _, err := externalEffectOperationBundle(ctx, authority, req); err == nil {
+		t.Fatal("registration accepted another operation kind")
 	}
 }
