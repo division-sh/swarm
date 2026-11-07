@@ -433,16 +433,7 @@ func (a Authority) Valid() bool {
 				registration.PackInventoryGeneration, registration.RuntimeInstanceID) &&
 			registration.ContextPublicationGeneration > 0 && registration.PlanGeneration.Valid()
 	case AuthorityChannelConfirmation:
-		confirmation := a.ChannelConfirmation
-		if confirmation.TransportParent != nil {
-			return a.validRegisteredConfirmation()
-		}
-		return confirmation.Destination == "" && validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
-			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
-			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
-			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
-			nonEmpty(confirmation.BundleHash, confirmation.BundleIdentity,
-				confirmation.PackInventoryGeneration) && confirmation.PlanGeneration.Valid()
+		return a.validChannelConfirmation()
 	case AuthorityChannelDelivery:
 		delivery := a.ChannelDelivery
 		operationID, err := ChannelDeliveryOperationID(delivery.DeliveryID, delivery.RenderID)
@@ -482,6 +473,19 @@ func (a Authority) Valid() bool {
 	default:
 		return false
 	}
+}
+
+func (a Authority) validChannelConfirmation() bool {
+	confirmation := a.ChannelConfirmation
+	if confirmation.TransportParent != nil {
+		return a.validRegisteredConfirmation()
+	}
+	return confirmation.Destination == "" && validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
+		a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
+		confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
+		confirmation.ContextPublicationGeneration == a.FenceGeneration &&
+		nonEmpty(confirmation.BundleHash, confirmation.BundleIdentity,
+			confirmation.PackInventoryGeneration) && confirmation.PlanGeneration.Valid()
 }
 
 func (a Authority) validRegisteredConfirmation() bool {
