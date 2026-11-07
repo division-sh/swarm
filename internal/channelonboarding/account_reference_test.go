@@ -29,6 +29,15 @@ func TestAccountReferenceCanonicalIdentity(t *testing.T) {
 	if !slices.Equal(installed, []string{"telegram", "whatsapp"}) || channelprovider.Session("unknown") {
 		t.Fatalf("compiled installation changed: %v", installed)
 	}
+	for _, target := range []string{"whatsapp.read_account", "whatsapp.send_text"} {
+		binding, found := channelprovider.ForNativeTarget(target)
+		if !found || binding.Provider() != "whatsapp" {
+			t.Fatalf("shipped native target lost its exact provider: %s", target)
+		}
+	}
+	if _, found := channelprovider.ForNativeTarget("foreign.send_text"); found {
+		t.Fatal("foreign native target acquired an installed provider")
+	}
 	for _, cell := range []struct{ provider, account, want string }{
 		{"whatsapp", "+1 (555) 010-0123", "+15550100123"},
 		{"whatsapp", "+15550100124", "+15550100124"},
