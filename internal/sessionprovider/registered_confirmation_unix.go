@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/google/uuid"
 )
 
 func (c *RuntimeConnection) AcknowledgeRegisteredOperator(ctx context.Context, store effects.Store, expected channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) (err error) {
@@ -39,7 +38,7 @@ func (c *RuntimeConnection) AcknowledgeRegisteredOperator(ctx context.Context, s
 	process := mutation.ProcessAuthority()
 	parent := channelnative.TransportParent{Kind: "deployment_registration", ID: op.OperationID, Revision: op.Revision,
 		BindingOperationID: child.OperationID, BindingOperationRevision: child.Revision, ProofID: binding.ProofID, ProofRevision: binding.ProofRevision}
-	id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("registered-operator-ack-v1:"+child.OperationID+":"+fmt.Sprint(binding.Revision))).String()
+	id := effects.RegisteredOperatorAcknowledgementID(child.OperationID, binding.Revision)
 	a := effects.Authority{Kind: effects.AuthorityChannelConfirmation, ID: id, ExecutionOwner: process.BootID,
 		FenceGeneration: process.AuthorityGeneration, LeaseExpiresAt: time.Now().UTC().Add(5 * time.Minute), ExecutionMode: effects.ExecutionModeLive,
 		ChannelConfirmation: effects.ChannelConfirmationAuthority{TransportParent: &parent, Destination: binding.ConversationRef,

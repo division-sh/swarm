@@ -241,6 +241,10 @@ type ChannelConfirmationAuthority struct {
 	PlanGeneration               plangeneration.Generation
 }
 
+func RegisteredOperatorAcknowledgementID(identityID string, revision int64) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("registered-operator-ack-v1:%s:%d", identityID, revision))).String()
+}
+
 type ChannelDeliveryAuthority struct {
 	EffectOperationID            string
 	DeliveryID                   string
@@ -430,13 +434,14 @@ func (a Authority) Valid() bool {
 		confirmation := a.ChannelConfirmation
 		if parent := confirmation.TransportParent; parent != nil {
 			return parent.Valid() && validUUIDs(confirmation.EffectOperationID, confirmation.PrincipalID) &&
+				confirmation.EffectOperationID == RegisteredOperatorAcknowledgementID(parent.BindingOperationID, confirmation.BindingRevision) &&
 				a.ID == confirmation.EffectOperationID && confirmation.OnboardingOperationID == parent.ID &&
 				confirmation.OnboardingRevision == parent.Revision && confirmation.BindingRevision > 0 &&
 				confirmation.Destination != "" && confirmation.ActivationID == "" && confirmation.ActivationRevision == 0 &&
 				confirmation.BundleHash == "" && confirmation.BundleIdentity == "" && confirmation.PackInventoryGeneration == "" &&
 				confirmation.RuntimeInstanceID == "" && confirmation.ContextPublicationGeneration == 0 && !confirmation.PlanGeneration.Valid()
 		}
-		return validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
+		return confirmation.Destination == "" && validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
 			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
 			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
 			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
