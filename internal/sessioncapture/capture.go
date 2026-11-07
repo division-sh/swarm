@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -66,7 +67,8 @@ func (s Scope) Validate() error {
 	default:
 		return fmt.Errorf("WhatsApp capture requires explicit onboarding or business scope")
 	}
-	if s.Session.Provider != "whatsapp" || uuid.Validate(s.OnboardingOperation) != nil ||
+	binding, installed := channelprovider.Lookup(s.Session.Provider)
+	if !installed || binding.CaptureProvenanceKey() == "" || uuid.Validate(s.OnboardingOperation) != nil ||
 		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 || s.OperationRevision < 1 || !s.DeploymentRegistration && s.TargetSelector == "" {
 		return fmt.Errorf("WhatsApp capture requires its exact existing onboarding/principal/source scope")
 	}
@@ -128,8 +130,8 @@ func (e Event) Validate() error {
 	if e.Scope.Kind == channelonboarding.SessionInputBusiness && e.Source.Coordinate.ValidateContext() != nil {
 		return fmt.Errorf("WhatsApp business capture requires its exact source context")
 	}
-	if uuid.Validate(e.OccurrenceID) != nil || e.Conversation == "" || e.EventID == "" ||
-		(e.Kind != "message" && e.Kind != "edit" && e.Kind != "revoke") {
+	binding, _ := channelprovider.Lookup(e.Scope.Session.Provider)
+	if uuid.Validate(e.OccurrenceID) != nil || e.Conversation == "" || e.EventID == "" || !binding.AcceptsCaptureKind(e.Kind) {
 		return fmt.Errorf("WhatsApp capture requires exact occurrence/conversation/event and supported kind")
 	}
 	if len(e.Body) == 0 || len(e.Body) > MaxCaptureEventBytes {
@@ -268,8 +270,6 @@ func (e Event) SameNonClaimDelivery(other Event) bool {
 		e.Kind == other.Kind && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
 }
 
-const CaptureProvenanceKey = "whatsapp_capture"
-
 // The selected-store request retains original occurrence provenance; only the
 // retry-stable content fingerprint excludes that transport occurrence.
 func WithCaptureProvenance(event Event, request runtimeinbound.Request) (runtimeinbound.Request, error) {
@@ -287,14 +287,16 @@ func WithCaptureProvenance(event Event, request runtimeinbound.Request) (runtime
 	if err := json.Unmarshal(metadata, &fields); err != nil || fields == nil {
 		return runtimeinbound.Request{}, fmt.Errorf("WhatsApp publication requires object transport metadata")
 	}
-	if _, exists := fields[CaptureProvenanceKey]; exists {
+	binding, _ := channelprovider.Lookup(event.Scope.Session.Provider)
+	key := binding.CaptureProvenanceKey()
+	if _, exists := fields[key]; exists {
 		return runtimeinbound.Request{}, runtimeinbound.ErrRequestIdentityConflict
 	}
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return runtimeinbound.Request{}, err
 	}
-	fields[CaptureProvenanceKey] = raw
+	fields[key] = raw
 	request.OriginalTransportMetadata, err = json.Marshal(fields)
 	return request, err
 }
@@ -308,8 +310,9 @@ func PublicationCaptureProvenance(request runtimeinbound.Request) (Event, error)
 	if err := json.Unmarshal(request.OriginalTransportMetadata, &fields); err != nil {
 		return event, err
 	}
-	raw, ok := fields[CaptureProvenanceKey]
-	if !ok {
+	binding, installed := channelprovider.Lookup(request.Provider)
+	raw, ok := fields[binding.CaptureProvenanceKey()]
+	if !installed || !ok {
 		return event, fmt.Errorf("WhatsApp publication has no original capture evidence")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -421,7 +424,7 @@ func (event Event) PublicationIdentity() (runtimeinbound.Identity, error) {
 	if err != nil {
 		return runtimeinbound.Identity{}, err
 	}
-	identity := event.Scope.PublicationBinding.Identity("whatsapp", key)
+	identity := event.Scope.PublicationBinding.Identity(event.Scope.Session.Provider, key)
 	return identity, identity.Validate()
 }
 

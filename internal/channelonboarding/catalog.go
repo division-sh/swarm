@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -103,10 +104,9 @@ func (c Candidate) ValidateDeclaration() error {
 		if err := c.Interface.Validate(); err != nil {
 			return err
 		}
+		binding, installed := channelprovider.Lookup(c.Provider)
 		if c.Target != (CandidateTarget{}) || c.Ceremony != CeremonyAccountLink ||
-			c.SigningCredentialRole != "" && (c.Provider != "telegram" || c.SigningCredentialRole == c.ProviderCredentialRole) || c.ConfirmationOperation != "" ||
-			c.Posture != (map[string]ActivationPosture{"whatsapp": ActivationSessionConnection, "telegram": ActivationWebhookRegistration})[c.Provider] ||
-			(c.ProviderCredentialRole == "") != (c.Provider == "whatsapp") {
+			c.ConfirmationOperation != "" || !installed || !binding.MatchesDeployment(string(c.Posture), c.ProviderCredentialRole, c.SigningCredentialRole) {
 			return fmt.Errorf("%w: deployment registration has runtime activation or invalid provider inputs", ErrInvalidRequest)
 		}
 		return validateRegistrationScope(true, c.Provider, "", c.Coordinate, c.Target.Selector)
