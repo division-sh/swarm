@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"go.mau.fi/whatsmeow/types"
@@ -75,8 +76,9 @@ func (w *sittingCLIWriter) Write(p []byte) (int, error) {
 // The external Noise/WhatsApp service is a peer double. No persisted paired
 // device shortcut is used; approval is scripted with --yes, not interactive TTY.
 func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
+	for _, cell := range []string{"sqlite/acknowledged", "postgres/acknowledged", "sqlite/prelaunch", "postgres/prelaunch", "sqlite/response_observed", "postgres/response_observed", "sqlite/settlement_ack_lost", "postgres/settlement_ack_lost", "sqlite/unbind", "postgres/unbind", "sqlite/logout_pending", "postgres/logout_pending"} {
+		backend, mode, _ := strings.Cut(cell, "/")
+		t.Run(cell, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			peer := newServeNativeProtocolPeer(t)
@@ -110,6 +112,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			var native *deploymentChannelSession
 			var operations channelonboarding.OperationStore
 			var operationID string
+			cut := &registeredAckCut{mode: mode}
 			pause := func(stage, text string) error {
 				op, err := operations.GetChannelOnboarding(ctx, operationID)
 				if err != nil {
@@ -129,6 +132,8 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				}
 			}
 			factory := func(call context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
+				cut.Store, cut.options = options.Effects, options
+				options.Effects = cut
 				session, err := OpenChannelRegistration(call, options)
 				if err != nil {
 					return nil, err
@@ -165,6 +170,10 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			case pairing = <-qr:
 			case code := <-done:
 				joined = true
+				if mode != "acknowledged" {
+					requireRegisteredAckCut(t, ctx, peer, cut, opts.ConfigPath, code, errOut.String())
+					return
+				}
 				t.Fatalf("public enrollment exited before QR: exit=%d err=%s", code, errOut.String())
 			case <-ctx.Done():
 				t.Fatal("public CLI did not offer its QR")
@@ -249,6 +258,10 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			select {
 			case code := <-done:
 				joined = true
+				if mode != "acknowledged" {
+					requireRegisteredAckCut(t, ctx, peer, cut, opts.ConfigPath, code, errOut.String())
+					return
+				}
 				if code != 0 {
 					t.Fatalf("public enrollment failed: exit=%d err=%s", code, errOut.String())
 				}
@@ -266,14 +279,8 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			if registered.Operation.OperationID != pairing.Operation.OperationID || registered.Operation.Phase != channelonboarding.PhaseSucceeded || !registered.Operation.AccountConfirmed || registered.Operation.IdentityOperationID == "" || registered.Binding == nil || registered.Binding.ExternalAccountRef != "15551234568@s.whatsapp.net" {
 				t.Fatal("public enrollment lost the original account or exact operator")
 			}
-			select {
-			case sent := <-peer.sent:
-				if sent.To.ToNonAD().String() != registered.Binding.ConversationRef || sent.Body.GetConversation() != "Swarm operator successfully connected" {
-					t.Fatalf("registered operator acknowledgement mismatch: to=%s body=%v", sent.To, sent.Body)
-				}
-			case <-ctx.Done():
-				t.Fatal("public enrollment succeeded without the operator acknowledgement")
-			}
+			id := effects.RegisteredOperatorAcknowledgementID(registered.Binding.OperationID, registered.Binding.Revision)
+			requireRegisteredAckMessage(t, ctx, peer, registered.Binding, strings.ReplaceAll(id, "-", ""))
 			requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, registered.Operation)
 		})
 	}

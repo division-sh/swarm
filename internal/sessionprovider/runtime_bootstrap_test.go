@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -48,6 +50,30 @@ type runtimeBootstrapFixture struct {
 	connection  *RuntimeConnection
 	credentials *credentials.SnapshotOwner
 	writer      *channelonboarding.CredentialWriter
+}
+
+func (f *runtimeBootstrapFixture) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- f.connection.AcknowledgeRegisteredOperator(ctx, f.store.(effects.Store), op, child, binding)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case frame := <-f.peer.frames:
+		id := strings.ReplaceAll(effects.RegisteredOperatorAcknowledgementID(child.OperationID, binding.Revision), "-", "")
+		if frame.node.Tag != "message" || frame.node.AttrGetter().OptionalString("id") != id {
+			f.peer.cancel()
+			<-done
+			return errors.New("registered acknowledgement fixture received a different SDK write")
+		}
+		f.peer.acknowledge(f.t, frame)
+		return <-done
+	case <-ctx.Done():
+		f.peer.cancel()
+		<-done
+		return ctx.Err()
+	}
 }
 
 func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapFixture {
