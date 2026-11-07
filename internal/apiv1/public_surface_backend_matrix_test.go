@@ -34,7 +34,6 @@ type publicSurfaceBackendMatrix struct {
 }
 
 type publicSurfaceMatrixSource struct {
-	PlatformSpec          string `yaml:"platform_spec"`
 	OpenRPCArtifact       string `yaml:"openrpc_artifact"`
 	AdjacentOpenRPCMatrix string `yaml:"adjacent_openrpc_matrix"`
 }
@@ -1581,12 +1580,10 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 func validatePublicSurfaceSources(root string, source publicSurfaceMatrixSource) []string {
 	var problems []string
 	expected := map[string]string{
-		"platform_spec":           "platform-spec.yaml",
 		"openrpc_artifact":        "openrpc.json",
 		"adjacent_openrpc_matrix": "internal/apiv1/testdata/openrpc_compliance_matrix.yaml",
 	}
 	actual := map[string]string{
-		"platform_spec":           source.PlatformSpec,
 		"openrpc_artifact":        source.OpenRPCArtifact,
 		"adjacent_openrpc_matrix": source.AdjacentOpenRPCMatrix,
 	}

@@ -28,7 +28,6 @@ const (
 type rawSQLBoundaryEntry struct {
 	Classification rawSQLBoundaryClassification
 	Issue          int
-	SpecRef        string
 	Reason         string
 }
 
@@ -105,7 +104,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 		"tests/support/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.runtime_execution_persistence_authority",
 			Reason:         "test-only fixture exposes transaction-bound execution for hostile atomicity proof; production runtime has no raw SQL context capability",
 		},
 		"tests/support/testutil/postgres.go": {
@@ -116,7 +114,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 		"tests/support/testutil/runlifecyclefixture/fixture.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2111,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.run_lifecycle_authority",
 			Reason:         "test-only hostile readback fixtures deliberately materialize persisted run states that valid lifecycle construction forbids",
 		},
 		"tests/support/testpostgres/connection.go": {
@@ -376,8 +373,8 @@ func classifyRawSQLBoundaryMatches(matches map[string][]string, ledger map[strin
 		if entry.Classification == "" {
 			failures = append(failures, path+" classification is empty")
 		}
-		if entry.Issue == 0 && strings.TrimSpace(entry.SpecRef) == "" {
-			failures = append(failures, path+" classification is missing tracker issue or governing spec ref")
+		if entry.Issue == 0 {
+			failures = append(failures, path+" classification is missing tracker issue")
 		}
 		if strings.TrimSpace(entry.Reason) == "" {
 			failures = append(failures, path+" classification reason is empty")
