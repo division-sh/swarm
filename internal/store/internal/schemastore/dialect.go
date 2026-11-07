@@ -524,6 +524,8 @@ var sqlitePredicateReplacements = func() [][2]string {
 	add("source_route <> '{}'::jsonb", "source_route <> '{}'")
 	add("target_route <> '{}'::jsonb", "target_route <> '{}'")
 	add("routing_source->>'kind'", "json_extract(routing_source, '$.kind')")
+	add("((authority_evidence -> 'transport_parent')->>'kind')", "json_extract(authority_evidence, '$.transport_parent.kind')")
+	add("(authority_evidence -> 'transport_parent') IS NULL", "json_type(authority_evidence, '$.transport_parent') IS NULL")
 	return replacements
 }()
 
