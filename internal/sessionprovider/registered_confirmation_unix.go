@@ -40,7 +40,7 @@ func (c *RuntimeConnection) AcknowledgeRegisteredOperator(ctx context.Context, s
 		BindingOperationID: child.OperationID, BindingOperationRevision: child.Revision, ProofID: binding.ProofID, ProofRevision: binding.ProofRevision}
 	id := effects.RegisteredOperatorAcknowledgementID(child.OperationID, binding.Revision)
 	a := effects.Authority{Kind: effects.AuthorityChannelConfirmation, ID: id, ExecutionOwner: process.BootID,
-		FenceGeneration: process.AuthorityGeneration, LeaseExpiresAt: time.Now().UTC().Add(5 * time.Minute), ExecutionMode: effects.ExecutionModeLive,
+		FenceGeneration: uint64(parent.Revision), LeaseExpiresAt: time.Now().UTC().Add(5 * time.Minute), ExecutionMode: effects.ExecutionModeLive,
 		ChannelConfirmation: effects.ChannelConfirmationAuthority{TransportParent: &parent, Destination: binding.ConversationRef,
 			EffectOperationID: id, OnboardingOperationID: op.OperationID, OnboardingRevision: op.Revision, BindingRevision: binding.Revision, PrincipalID: op.PrincipalID}}
 	reader, ok := store.(effects.OutcomeStore)

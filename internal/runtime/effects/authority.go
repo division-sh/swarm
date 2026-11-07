@@ -434,6 +434,7 @@ func (a Authority) Valid() bool {
 		confirmation := a.ChannelConfirmation
 		if parent := confirmation.TransportParent; parent != nil {
 			return parent.Valid() && validUUIDs(confirmation.EffectOperationID, confirmation.PrincipalID) &&
+				a.FenceGeneration == uint64(parent.Revision) &&
 				confirmation.EffectOperationID == RegisteredOperatorAcknowledgementID(parent.BindingOperationID, confirmation.BindingRevision) &&
 				a.ID == confirmation.EffectOperationID && confirmation.OnboardingOperationID == parent.ID &&
 				confirmation.OnboardingRevision == parent.Revision && confirmation.BindingRevision > 0 &&
