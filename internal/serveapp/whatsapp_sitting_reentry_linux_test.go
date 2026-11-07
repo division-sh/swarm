@@ -295,7 +295,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	t.Logf("restored same-account public journey completed on %s", backend)
-	id := effects.RegisteredOperatorAcknowledgementID(registered.Binding.OperationID, registered.Binding.Revision)
-	requireRegisteredAckMessage(t, ctx, peer, registered.Binding, strings.ReplaceAll(id, "-", ""))
+	ackID := effects.RegisteredOperatorAcknowledgementID(registered.Binding.OperationID, registered.Binding.Revision)
+	requireRegisteredAckMessage(t, ctx, peer, registered.Binding, strings.ReplaceAll(ackID, "-", ""))
 	requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, registered.Operation)
 }
