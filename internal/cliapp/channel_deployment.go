@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -258,10 +259,14 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 		return err
 	}
 	var trigger, webhook providertriggers.InboundAdmissionPlan
-	switch provider {
-	case "whatsapp":
+	binding, installed := channelprovider.Lookup(provider)
+	if !installed {
+		return channelonboarding.ErrInvalidRequest
+	}
+	switch {
+	case binding.Session():
 		trigger, err = triggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Provider: provider, Alias: provider})
-	case "telegram":
+	case binding.PollsClaim():
 		trigger, err = triggers.CompileRegistrationPolling(provider)
 		if err == nil {
 			webhook, err = triggers.CompileAdmission(providertriggers.CompileAdmissionRequest{Provider: provider, Alias: provider, SigningSecret: candidate.SigningCredentialRole})
@@ -271,7 +276,7 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 		return err
 	}
 	c.operatorTrigger = webhook
-	if provider == "whatsapp" {
+	if binding.Session() {
 		c.operatorTrigger = trigger
 	}
 	if opts.channelRegistration == nil {
@@ -348,7 +353,8 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 		if readErr != nil {
 			return readErr
 		}
-		if current.Operation.Provider == "telegram" && current.IdentityOperation != nil && current.IdentityOperation.State == operatorchannel.StateAwaitingClaim {
+		binding, _ := channelprovider.Lookup(current.Operation.Provider)
+		if binding.PollsClaim() && current.IdentityOperation != nil && current.IdentityOperation.State == operatorchannel.StateAwaitingClaim {
 			if err := c.session.PollOperatorClaim(ctx, current.Operation); err != nil {
 				return err
 			}
@@ -610,7 +616,8 @@ func (opts channelConnectOptions) requireDeploymentSelection() error {
 
 func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	accounts := []channelonboarding.Result{}
-	for _, provider := range []string{"telegram", "whatsapp"} {
+	for _, binding := range channelprovider.Installed() {
+		provider := binding.Provider()
 		client, err := openDeploymentChannelClient(ctx, provider, opts)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)

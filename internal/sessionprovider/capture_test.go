@@ -78,6 +78,8 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	}{
 		{"unknown_scope", business, func(e *capturedEvent) { e.Scope.Kind = "guessed" }},
 		{"no_scope", business, func(e *capturedEvent) { e.Scope.Kind = "" }},
+		{"foreign_provider", business, func(e *capturedEvent) { e.Scope.Session.Provider = "foreign" }},
+		{"non_capture_provider", business, func(e *capturedEvent) { e.Scope.Session.Provider = "telegram" }},
 		{"no_operation_revision", business, func(e *capturedEvent) { e.Scope.OperationRevision = 0 }},
 		{"no_target", business, func(e *capturedEvent) { e.Scope.TargetSelector = "" }},
 		{"bootstrap_binding", bootstrap, func(e *capturedEvent) { e.Scope.PublicationBinding = business.Scope.PublicationBinding }},

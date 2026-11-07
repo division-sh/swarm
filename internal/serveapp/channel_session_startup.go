@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -36,7 +37,8 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		return nil
 	}
 	for _, activation := range activations {
-		if activation.Provider != "whatsapp" {
+		binding, installed := channelprovider.Lookup(activation.Provider)
+		if !installed || !binding.Session() {
 			continue
 		}
 		result, err := d.onboarding.Get(ctx, activation.OperationID)
@@ -50,7 +52,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		state := result.Connection.State
 		if state == "connected" {
 			if d.sessionStates[op.OperationID] != state {
-				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", result.Connection.AccountPresentation)
+				fmt.Fprintf(d.output, "%s: reconnected (%s)\n", binding.DisplayName(), result.Connection.AccountPresentation)
 			}
 			d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
 			continue
@@ -62,7 +64,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 			} else if reason == "network unreachable" {
 				reason += ", reconnecting..."
 			}
-			fmt.Fprintf(d.output, "WhatsApp disconnected: %s\n", reason)
+			fmt.Fprintf(d.output, "%s disconnected: %s\n", binding.DisplayName(), reason)
 			d.sessionStates[op.OperationID] = "disconnected"
 		}
 		if d.sessionAttempts[op.OperationID] >= 3 || d.now().Before(d.sessionNextAttempt[op.OperationID]) {
