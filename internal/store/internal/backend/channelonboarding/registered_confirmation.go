@@ -36,23 +36,36 @@ func RegisteredConfirmationCurrent(ctx context.Context, q queryer, a effects.Aut
 	}
 	if op.Revision != parent.Revision || op.IdentityOperationID != parent.BindingOperationID ||
 		op.Phase != domain.PhaseAwaitingOperatorConfirmation || !op.AccountConfirmed || op.LogoutCompleted || op.FailureCode != "" ||
-		op.Provider != "whatsapp" || op.PrincipalID != c.PrincipalID || op.ValidateSessionAccount() != nil {
+		op.PrincipalID != c.PrincipalID || op.ValidateSessionAccount() != nil {
 		return false, nil
 	}
 	binding, child, err := identityowner.ReadEffectBinding(ctx, q, postgres, lock, op.Interface, parent.BindingOperationID)
 	if err != nil {
 		return false, err
 	}
-	return registeredConfirmationBindingMatches(op, c, binding, child), nil
+	return registeredConfirmationBindingMatches(op, c, binding, child) && registeredConfirmationProviderMatches(op, c, binding), nil
+}
+
+func registeredConfirmationProviderMatches(op domain.Operation, c effects.ChannelConfirmationAuthority, binding operatorchannel.Binding) bool {
+	provider := binding.ProviderAuthority
+	if op.Provider == "whatsapp" {
+		return c.RegisteredRequest == "" && provider.Kind == operatorchannel.ProviderAuthoritySession && provider.Session == op.SessionAccount
+	}
+	if op.Provider != "telegram" || c.RegisteredRequest == "" || provider.Kind != operatorchannel.ProviderAuthorityCredential ||
+		provider.Session != (operatorchannel.SessionAccountAdmission{}) || len(op.CredentialReservations) == 0 {
+		return false
+	}
+	admission, err := domain.ProviderCredentialAdmission(op, op.CredentialReservations[0].Role)
+	return err == nil && admission.Role == "telegram.telegram_bot_token" && provider.Credential.Key == admission.StoreKey && provider.Credential.Seal == admission.ValueSeal
 }
 
 func registeredConfirmationBindingMatches(op domain.Operation, c effects.ChannelConfirmationAuthority, binding operatorchannel.Binding, child operatorchannel.Operation) bool {
 	parent := c.TransportParent
 	return binding.Status == operatorchannel.BindingCurrent && binding.Revision == c.BindingRevision &&
 		binding.OperationID == parent.BindingOperationID && binding.PrincipalID == op.PrincipalID &&
-		binding.ConversationRef == c.Destination && binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession &&
+		binding.ConversationRef == c.Destination &&
 		binding.ProviderAuthority.Scope == authority.DeploymentParent &&
-		binding.ProviderAuthority.Session == op.SessionAccount && binding.ProofID == parent.ProofID && binding.ProofRevision == parent.ProofRevision &&
+		binding.ProofID == parent.ProofID && binding.ProofRevision == parent.ProofRevision &&
 		child.State == operatorchannel.StateBound && child.Revision == parent.BindingOperationRevision &&
 		child.OnboardingOperationID == parent.ID && child.PrincipalID == op.PrincipalID && child.Interface == op.Interface &&
 		child.BindingRevision == binding.Revision && child.ProviderAuthority == binding.ProviderAuthority &&

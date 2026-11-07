@@ -16,6 +16,15 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- Telegram deployment connect names the authenticated bot and supplies a
+  prefilled send-code link, confirms the authenticated claimant without another
+  yes/no prompt, and prints the operator-ready next commands. A newly committed
+  operator binding sends `Swarm operator successfully connected` through the
+  existing registered acknowledgement journal before terminal success; later
+  connect, serve, restart and reset do not resend it. Account approval and
+  provider credential/intake checks are unchanged. Human claim deadlines for
+  both providers show local date/time to seconds with the timezone. (#2988)
+
 - A newly bound registered WhatsApp operator receives one journaled
   `Swarm operator successfully connected` acknowledgement before connect reports
   success. Reconnect and restart do not resend it. (#2577)

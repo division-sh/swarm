@@ -192,9 +192,13 @@ func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions
 		if result.Operation.ExpectedAccount != "" {
 			verb = "Reverified"
 		}
-		fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
+		if result.Operation.Provider != "telegram" || result.Binding == nil {
+			fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
+		}
 		if result.Operation.Provider == "whatsapp" && result.Binding != nil {
 			fmt.Fprintln(w, whatsAppReadyTeaching)
+		} else if result.Operation.Provider == "telegram" && result.Binding != nil {
+			fmt.Fprintln(w, "Telegram ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.")
 		}
 		writeChannelAccountNextSteps(w)
 	}, func() ([]string, error) { return []string{result.Operation.AccountReference}, nil })

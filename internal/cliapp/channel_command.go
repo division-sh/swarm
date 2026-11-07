@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -370,11 +371,20 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if provider == "" {
 		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
 	}
-	closeInput, err := opts.prepareConfirmationInput(ctx)
-	if err != nil {
-		return returnCLIValidationError(errOut, err)
+	deferAccountInput := provider == "telegram" && opts.verb == "connect" && opts.account != "" && opts.apiOptions.channelRegistration != nil
+	var closeInput func() error
+	var err error
+	if !deferAccountInput {
+		closeInput, err = opts.prepareConfirmationInput(ctx)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
 	}
-	defer finishChannelConfirmationInput(closeInput, &resultErr)
+	defer func() {
+		if closeInput != nil {
+			finishChannelConfirmationInput(closeInput, &resultErr)
+		}
+	}()
 	bundleHash := ""
 	if opts.sourceSet {
 		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
@@ -401,6 +411,12 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 		}
 		if !proceed {
 			return nil
+		}
+		if deferAccountInput && !begun.Operation.AccountConfirmed {
+			closeInput, err = opts.prepareConfirmationInput(ctx)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
+			}
 		}
 		client = local
 	} else {
@@ -450,6 +466,7 @@ func finishChannelOnboarding(ctx context.Context, client channelControlClient, b
 		return err
 	}
 	if opts.account != "" && result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded &&
+		!(result.Operation.Provider == "telegram" && result.Binding != nil) &&
 		!opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet {
 		fmt.Fprintf(out, "Reverified %s account %s.\n", result.Operation.Provider, result.Operation.AccountReference)
 		writeChannelAccountNextSteps(out)
@@ -491,7 +508,7 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	if opts.apiOptions.now != nil {
 		now = opts.apiOptions.now()
 	}
-	if current.Operation.Provider != "whatsapp" && channelClaimantConfirmationRequired(current, now) && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
+	if !channelAutomaticClaimConfirmation(current) && channelClaimantConfirmationRequired(current, now) && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
 	if opts.credentialStdin {
@@ -620,15 +637,33 @@ func presentAndWaitForChannelClaim(ctx context.Context, client channelControlCli
 		if err := writeWhatsAppClaimInstructions(progressOut, result); err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
+	} else if result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" {
+		if err := writeTelegramClaimInstructions(progressOut, result); err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
 	} else {
 		identity := result.IdentityOperation
-		fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano))
+		fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, channelClaimDeadline(identity.ExpiresAt))
 	}
 	current, err := waitForChannelOnboardingClaim(ctx, client, result, opts, errOut)
 	if err != nil {
 		return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
 	return current, nil
+}
+
+func writeTelegramClaimInstructions(out io.Writer, result channelOnboardingResult) error {
+	if result.Connection == nil || result.IdentityOperation == nil || result.IdentityOperation.ExpiresAt.IsZero() {
+		return errors.New("operator code requires its exact Telegram destination and expiry")
+	}
+	bot := result.Connection.AccountName
+	if !regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`).MatchString(bot) || result.Connection.AccountPresentation != result.Operation.AccountReference {
+		return errors.New("operator code requires its authenticated Telegram bot address")
+	}
+	identity := result.IdentityOperation
+	fmt.Fprintf(out, "Send the code %s to @%s before %s.\nSEND-CODE LINK: https://t.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
+		identity.Challenge, bot, channelClaimDeadline(identity.ExpiresAt), bot, url.QueryEscape(identity.Challenge))
+	return nil
 }
 
 func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResult) error {
@@ -643,7 +678,7 @@ func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResul
 	identity := result.IdentityOperation
 	fmt.Fprintf(out, "FROM your operator phone TO %s\n", destination.Account)
 	fmt.Fprintf(out, "Send the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339Nano), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
+		identity.Challenge, channelClaimDeadline(identity.ExpiresAt), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
 	return nil
 }
 
@@ -825,7 +860,7 @@ func confirmCLIAccountPreview(ctx context.Context, client channelControlClient, 
 
 func confirmChannelOnboardingClaim(ctx context.Context, client channelControlClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
 	identity := result.IdentityOperation
-	if result.Operation.Provider == "whatsapp" {
+	if channelAutomaticClaimConfirmation(result) {
 		fmt.Fprintf(progressOut, "Code received from %s (%s conversation).\n", cliSanitizeOneLineValue(identity.AccountPresentation), identity.ConversationScope)
 	} else {
 		fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
@@ -834,7 +869,7 @@ func confirmChannelOnboardingClaim(ctx context.Context, client channelControlCli
 		fmt.Fprintln(progressOut, "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.")
 		*sharedAudienceAnnounced = true
 	}
-	approve := opts.yes || result.Operation.Provider == "whatsapp"
+	approve := opts.yes || channelAutomaticClaimConfirmation(result)
 	var err error
 	if !approve {
 		approve, err = confirmChannelAccount(ctx, opts.apiOptions.input, errOut, "Make them the operator? [y/N] ")
@@ -859,6 +894,14 @@ func confirmChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	return nil
 }
 
+func channelAutomaticClaimConfirmation(result channelOnboardingResult) bool {
+	return result.Operation.Provider == "whatsapp" || result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram"
+}
+
+func channelClaimDeadline(expires time.Time) string {
+	return expires.Local().Format("2006-01-02 15:04:05 MST (-07:00)")
+}
+
 func channelClaimantConfirmationRequired(result channelOnboardingResult, now time.Time) bool {
 	identity := result.IdentityOperation
 	if result.Operation.Phase != "awaiting_operator_confirmation" || identity == nil || identity.State != "awaiting_confirmation" {
@@ -869,7 +912,7 @@ func channelClaimantConfirmationRequired(result channelOnboardingResult, now tim
 
 func waitForChannelOnboardingClaim(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts rootCommandOptions, noticeOut io.Writer) (channelOnboardingResult, error) {
 	continuation := ""
-	if begun.Operation.Provider != "whatsapp" {
+	if !channelAutomaticClaimConfirmation(begun) {
 		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
 	}
 	if begun.IdentityOperation == nil || begun.IdentityOperation.ExpiresAt.IsZero() {
@@ -916,7 +959,7 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	if ctx.Err() != nil {
 		return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
 	}
-	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", expires.Local().Format(time.RFC3339Nano), continuation)
+	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", channelClaimDeadline(expires), continuation)
 }
 
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {

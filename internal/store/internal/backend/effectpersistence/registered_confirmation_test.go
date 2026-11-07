@@ -8,6 +8,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -53,4 +55,36 @@ func TestRegisteredAcknowledgementNullBundleRequiresExactNativeRequest(t *testin
 	if _, err := externalEffectOperationBundle(borrowed, a, req); err == nil {
 		t.Fatal("registered acknowledgement borrowed a holder bundle")
 	}
+	t.Run("exact Telegram HTTP request", func(t *testing.T) {
+		installed := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive")
+		request, err := registration.ChannelWriteFingerprint(installed.ToolID, installed.Tool, map[string]any{
+			"chat_id": "12345", "text": effects.RegisteredOperatorAcknowledgementText,
+			"reply_markup": map[string]any{"inline_keyboard": []any{}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.ChannelConfirmation.Destination, a.ChannelConfirmation.RegisteredRequest = "12345", string(request)
+		req.Adapter, req.Transport, req.RequestFingerprint = "channel_confirmation", "http", effects.Fingerprint(request)
+		if bundle, err := externalEffectOperationBundle(ctx, a, req); err != nil || bundle != nil {
+			t.Fatal("exact Telegram request did not select SQL NULL", bundle, err)
+		}
+		for _, mutate := range []func(*effects.AuthorizeRequest){
+			func(r *effects.AuthorizeRequest) { r.Adapter = "another_http_adapter" },
+			func(r *effects.AuthorizeRequest) { r.Transport = "in_process" },
+			func(r *effects.AuthorizeRequest) {
+				r.RequestFingerprint = effects.Fingerprint([]byte("another request"))
+			},
+		} {
+			changed := req
+			mutate(&changed)
+			if _, err := externalEffectOperationBundle(ctx, a, changed); err == nil {
+				t.Fatal("Telegram permit admitted another request", changed)
+			}
+		}
+		a.ChannelConfirmation.Destination = "67890"
+		if _, err := externalEffectOperationBundle(ctx, a, req); err == nil {
+			t.Fatal("Telegram permit admitted a foreign destination")
+		}
+	})
 }

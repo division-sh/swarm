@@ -36,7 +36,13 @@ type deploymentChannelSession struct {
 }
 
 func (c *deploymentChannelSession) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
-	if c == nil || c.connection == nil {
+	if c == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	if op.Provider == "telegram" {
+		return c.acknowledgeRegisteredTelegram(ctx, op, child, binding)
+	}
+	if c.connection == nil {
 		return channelonboarding.ErrInvalidRequest
 	}
 	return c.connection.AcknowledgeRegisteredOperator(ctx, c.opts.Effects, op, child, binding)
@@ -325,26 +331,26 @@ func (c *deploymentChannelSession) CheckpointSessionPairing(ctx context.Context,
 	return c.connection.CheckpointPairing(ctx, op.Revision)
 }
 
-func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelonboarding.Operation) (string, error) {
+func (c *deploymentChannelSession) telegramIdentity(ctx context.Context, op channelonboarding.Operation) (string, string, error) {
 	profile, ok := c.opts.Plan.Registration()
 	if !ok || !op.DeploymentRegistration || op.Provider != "telegram" || op.PrincipalID != c.opts.Principal.ID {
-		return "", channelonboarding.ErrInvalidRequest
+		return "", "", channelonboarding.ErrInvalidRequest
 	}
 	plan, err := profile.Operation(packs.RegistrationOperationIdentify)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	values := map[string]any{}
 	for _, admission := range op.CredentialAdmissions {
 		snapshot, current, err := c.opts.Credentials.ObserveValueMatchingSeal(ctx, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 		if err != nil || !current {
-			return "", errors.Join(operatorchannel.ErrCredentialStale, err)
+			return "", "", errors.Join(operatorchannel.ErrCredentialStale, err)
 		}
 		values[admission.Role] = snapshot.CredentialValue()
 	}
 	input, err := plan.Prepare(map[string]any{})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	executor := registration.HTTPExecutor{Client: c.opts.HTTP, Preflight: func(ctx context.Context) error {
 		current, err := c.opts.Operations.GetChannelOnboarding(ctx, op.OperationID)
@@ -361,13 +367,24 @@ func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelo
 	}}
 	output, err := executor.Read(ctx, plan, input, values)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	projected, err := plan.Project(output)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return fmt.Sprint(projected["resource_id"]), nil
+	identity := fmt.Sprint(projected["resource_id"])
+	object, ok := output.(map[string]any)
+	name, named := object["username"].(string)
+	if !ok || !named || name == "" || op.AccountReference != "" && identity != op.AccountReference {
+		return "", "", channelonboarding.ErrConflict
+	}
+	return identity, name, nil
+}
+
+func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelonboarding.Operation) (string, error) {
+	identity, _, err := c.telegramIdentity(ctx, op)
+	return identity, err
 }
 func (c *deploymentChannelSession) ReadSessionPairing(ctx context.Context, _ channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if c.connection == nil {
@@ -378,9 +395,11 @@ func (c *deploymentChannelSession) ReadSessionPairing(ctx context.Context, _ cha
 func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error) {
 	view := channelonboarding.SessionConnectionReadback{State: "disconnected", Linked: op.AccountReference != "", AccountPresentation: op.AccountReference}
 	if op.Provider == "telegram" && op.AccountReference != "" && !op.Phase.Terminal() {
-		if _, err := c.telegramRead(ctx, op); err != nil {
+		_, name, err := c.telegramIdentity(ctx, op)
+		if err != nil {
 			return view, err
 		}
+		view.AccountName = name
 		view.State = "connected"
 		return view, nil
 	}

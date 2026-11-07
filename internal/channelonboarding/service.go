@@ -1399,7 +1399,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 						return Result{}, errors.Join(ErrRevisionConflict, err, authorityErr)
 					}
 					op.BindingRevision = binding.Revision
-					if op.Provider == "whatsapp" {
+					if op.Provider == "whatsapp" || op.Provider == "telegram" {
 						sender, ok := s.sessions.(RegisteredAcknowledgement)
 						if !ok {
 							return Result{}, fmt.Errorf("registered operator acknowledgement owner is unavailable")

@@ -13,6 +13,10 @@ import (
 
 func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.T) {
 	expires := time.Date(2026, 11, 6, 22, 42, 17, 123000, time.UTC)
+	displayed, err := time.Parse("2006-01-02 15:04:05 MST (-07:00)", channelClaimDeadline(expires))
+	if err != nil || displayed.After(expires) || expires.Sub(displayed) >= time.Second {
+		t.Fatal("human deadline rounded later than its stored expiry", displayed, expires, err)
+	}
 	for _, registered := range []bool{false, true} {
 		result := channelOnboardingResult{
 			Operation:         channelonboarding.Operation{Provider: "whatsapp"},
@@ -28,7 +32,7 @@ func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.
 			t.Fatal(err)
 		}
 		text := out.String()
-		for _, want := range []string{"FROM your operator phone TO +15551234567", "Send the code 00007", expires.Local().Format(time.RFC3339Nano), "SEND-CODE LINK (not a device-link QR): "} {
+		for _, want := range []string{"FROM your operator phone TO +15551234567", "Send the code 00007", expires.Local().Format("2006-01-02 15:04:05 MST (-07:00)"), "SEND-CODE LINK (not a device-link QR): "} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("missing %q in %q", want, text)
 			}
@@ -40,6 +44,42 @@ func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.
 		}
 		if strings.Contains(text, "not the destination") || strings.Contains(text, "countdown") || strings.Contains(text, "operator number") {
 			t.Fatal("instructions invented a lookup or another clock", text)
+		}
+	}
+}
+
+func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.T) {
+	expires := time.Date(2026, 11, 6, 22, 42, 17, 987654321, time.UTC)
+	result := channelOnboardingResult{
+		Operation:         channelonboarding.Operation{Provider: "telegram", DeploymentRegistration: true, AccountReference: "420079"},
+		IdentityOperation: &operatorchannel.Operation{Challenge: "00007", ExpiresAt: expires},
+		Connection:        &channelonboarding.SessionConnectionReadback{AccountPresentation: "420079", AccountName: "SwarmTestBot"},
+	}
+	var out bytes.Buffer
+	if err := writeTelegramClaimInstructions(&out, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Send the code 00007 to @SwarmTestBot", channelClaimDeadline(expires), "SEND-CODE LINK: https://t.me/SwarmTestBot?text=00007"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in %q", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "987654321") || result.IdentityOperation.ExpiresAt != expires {
+		t.Fatal("display changed stored precision or printed fractional seconds")
+	}
+	for _, mutate := range []func(*channelOnboardingResult){
+		func(r *channelOnboardingResult) { r.Connection = nil },
+		func(r *channelOnboardingResult) { r.IdentityOperation = nil },
+		func(r *channelOnboardingResult) { r.Connection.AccountName = "@masked***" },
+		func(r *channelOnboardingResult) { r.Connection.AccountPresentation = "420080" },
+	} {
+		copy := result
+		connection := *result.Connection
+		copy.Connection = &connection
+		mutate(&copy)
+		out.Reset()
+		if err := writeTelegramClaimInstructions(&out, copy); err == nil || out.Len() != 0 {
+			t.Fatal("instructions inferred a bot destination from incomplete/foreign evidence")
 		}
 	}
 }

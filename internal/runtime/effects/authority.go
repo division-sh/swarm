@@ -2,6 +2,7 @@ package effects
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -225,6 +226,7 @@ type ServeRegistrationAuthority struct {
 
 type ChannelConfirmationAuthority struct {
 	TransportParent              *channelnative.TransportParent
+	RegisteredRequest            string
 	Destination                  string
 	EffectOperationID            string
 	OnboardingOperationID        string
@@ -480,7 +482,7 @@ func (a Authority) validChannelConfirmation() bool {
 	if confirmation.TransportParent != nil {
 		return a.validRegisteredConfirmation()
 	}
-	return confirmation.Destination == "" && validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
+	return confirmation.RegisteredRequest == "" && confirmation.Destination == "" && validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
 		a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
 		confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
 		confirmation.ContextPublicationGeneration == a.FenceGeneration &&
@@ -490,6 +492,9 @@ func (a Authority) validChannelConfirmation() bool {
 
 func (a Authority) validRegisteredConfirmation() bool {
 	c, parent := a.ChannelConfirmation, a.ChannelConfirmation.TransportParent
+	if c.RegisteredRequest != "" && channelnative.ValidateTelegramConfirmation(c.RegisteredRequest, c.Destination, RegisteredOperatorAcknowledgementText) != nil {
+		return false
+	}
 	return parent.Valid() && validUUIDs(c.EffectOperationID, c.PrincipalID) && a.FenceGeneration == uint64(parent.Revision) &&
 		c.EffectOperationID == RegisteredOperatorAcknowledgementID(parent.BindingOperationID, c.BindingRevision) &&
 		a.ID == c.EffectOperationID && c.OnboardingOperationID == parent.ID && c.OnboardingRevision == parent.Revision &&
@@ -592,6 +597,9 @@ func (a Authority) Evidence() map[string]any {
 		evidence["onboarding_revision"] = confirmation.OnboardingRevision
 		if confirmation.TransportParent != nil {
 			evidence["transport_parent"] = *confirmation.TransportParent
+			if confirmation.RegisteredRequest != "" {
+				evidence["registered_request"] = json.RawMessage(confirmation.RegisteredRequest)
+			}
 			evidence["binding_revision"] = confirmation.BindingRevision
 			evidence["principal_id"] = confirmation.PrincipalID
 			evidence["destination"] = confirmation.Destination

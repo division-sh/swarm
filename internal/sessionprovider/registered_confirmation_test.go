@@ -23,7 +23,7 @@ func TestRegisteredAcknowledgementReplayRefusesWrongIdentityAndUncertainStates(t
 	id := uuid.NewString()
 	base := effects.OperationOutcome{OperationID: id, Kind: effects.KindChannelConfirmation,
 		AuthorityKind: effects.AuthorityChannelConfirmation, AuthorityID: id, State: effects.StateSettled, AttemptState: effects.StateSettled}
-	if settled, err := registeredAcknowledgementSettled(t.Context(), registeredAckOutcomeFixture{base, true}, id); err != nil || !settled {
+	if settled, err := effects.RegisteredAcknowledgementSettled(t.Context(), registeredAckOutcomeFixture{base, true}, id); err != nil || !settled {
 		t.Fatal("exact terminal acknowledgement was not reused", settled, err)
 	}
 	for _, mutate := range []func(*effects.OperationOutcome){
@@ -37,14 +37,14 @@ func TestRegisteredAcknowledgementReplayRefusesWrongIdentityAndUncertainStates(t
 	} {
 		changed := base
 		mutate(&changed)
-		if settled, err := registeredAcknowledgementSettled(t.Context(), registeredAckOutcomeFixture{changed, true}, id); err == nil || settled {
+		if settled, err := effects.RegisteredAcknowledgementSettled(t.Context(), registeredAckOutcomeFixture{changed, true}, id); err == nil || settled {
 			t.Fatal("wrong or uncertain acknowledgement was reused", changed, settled, err)
 		}
 	}
 	for _, state := range []effects.State{effects.StateAuthorized, effects.StateTerminalFailure} {
 		unlaunched := base
 		unlaunched.State, unlaunched.AttemptState = state, state
-		if settled, err := registeredAcknowledgementSettled(t.Context(), registeredAckOutcomeFixture{unlaunched, true}, id); err != nil || settled {
+		if settled, err := effects.RegisteredAcknowledgementSettled(t.Context(), registeredAckOutcomeFixture{unlaunched, true}, id); err != nil || settled {
 			t.Fatal("unlaunched outcome fabricated success or blocked exact journal admission", state, settled, err)
 		}
 	}
