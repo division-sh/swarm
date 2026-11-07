@@ -371,19 +371,12 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if provider == "" {
 		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
 	}
-	deferAccountInput := provider == "telegram" && opts.verb == "connect" && opts.account != "" && opts.apiOptions.channelRegistration != nil
-	var closeInput func() error
-	var err error
-	if !deferAccountInput {
-		closeInput, err = opts.prepareConfirmationInput(ctx)
-		if err != nil {
-			return returnCLIValidationError(errOut, err)
-		}
+	closeInput, deferAccountInput, err := opts.prepareConnectConfirmationInput(ctx, provider)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
 	}
 	defer func() {
-		if closeInput != nil {
-			finishChannelConfirmationInput(closeInput, &resultErr)
-		}
+		finishChannelConfirmationInput(closeInput, &resultErr)
 	}()
 	bundleHash := ""
 	if opts.sourceSet {
