@@ -48,6 +48,32 @@ func TestEventCatalogFactoringConsumers(t *testing.T) {
 		if diskOrigin.File != path || artifactOrigin.File != "events.yaml" || diskOrigin.Line != 2 || artifactOrigin.Line != 2 || diskOrigin.Column != artifactOrigin.Column {
 			t.Fatalf("disk/artifact source coordinates changed: %+v / %+v", diskOrigin, artifactOrigin)
 		}
+		merged := &WorkflowContractBundle{
+			Events: map[string]EventCatalogEntry{}, scopedEvents: map[string]EventCatalogEntry{},
+			eventSources: map[string]ContractItemSource{}, scopedEventSources: map[string]ContractItemSource{},
+			ambiguousEventAliases: map[string]struct{}{},
+		}
+		source := ContractItemSource{FlowPath: ".", Family: "events", File: "events.yaml"}
+		for _, entries := range []map[string]EventCatalogEntry{disk, actual} {
+			if err := mergeEventContracts(merged, entries, source); err != nil {
+				t.Fatalf("source coordinates changed duplicate admission: %v", err)
+			}
+		}
+		for _, change := range []func(*EventCatalogEntry){
+			func(e *EventCatalogEntry) { e.Payload.Properties["id"] = EventFieldSpec{Type: "text"} },
+			func(e *EventCatalogEntry) { e.Payload.Required = []string{"id", "note"} },
+			func(e *EventCatalogEntry) { e.BusinessKeyField = "id" },
+			func(e *EventCatalogEntry) { e.platformAuthority = PlatformEventAuthority{declared: true} },
+		} {
+			changed := cloneEventCatalogEntry(actual["test.event"])
+			change(&changed)
+			if err := mergeEventContracts(merged, map[string]EventCatalogEntry{"test.event": changed}, source); err == nil {
+				t.Fatal("provenance-independent equality lost a semantic or authority refusal")
+			}
+		}
+		if disk["test.event"].Payload.Properties["id"].origin.definition != diskOrigin || actual["test.event"].Payload.Properties["id"].origin.definition != artifactOrigin {
+			t.Fatal("declaration equality mutated source provenance")
+		}
 		for _, label := range []string{"", "missing.yaml"} {
 			_, err := loadOptionalEventCatalogFromSource(artifact, label)
 			if (label != "") != (err != nil) {
