@@ -322,10 +322,10 @@ func (p *serveLifecyclePresenter) recordDefaultAPITokenWarning() {
 	p.operatorWarnings = append(p.operatorWarnings, "using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener")
 }
 
-func (p *serveLifecyclePresenter) recordWhatsAppAccountMismatch() {
+func (p *serveLifecyclePresenter) recordAccountMismatch(binding channelprovider.Binding) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.operatorWarnings = append(p.operatorWarnings, whatsAppAccountMismatchWarning)
+	p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf("This flow's operator_account does not match the registered %s account; customer messages on the unmatched account will not reach this flow. Check the configured account.", binding.DisplayName()))
 }
 
 func (p *serveLifecyclePresenter) recordPublicIngressDisabledHint() {

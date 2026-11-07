@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -20,10 +21,11 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
-const whatsAppAccountMismatchWarning = "This flow's operator_account does not match the registered WhatsApp account; customer messages on the unmatched account will not reach this flow. Check the configured account."
-
-func whatsAppAccountMismatch(contexts []runtime.BundleContext, operations []channelonboarding.Operation) (bool, error) {
-	registered := channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp")
+func registeredAccountMismatch(binding channelprovider.Binding, contexts []runtime.BundleContext, operations []channelonboarding.Operation) (bool, error) {
+	if !binding.Session() {
+		return false, nil
+	}
+	registered := channelonboarding.RetainedConfirmedAccounts(operations, binding.Provider())
 	if len(registered) == 0 {
 		return false, nil
 	}
@@ -41,7 +43,7 @@ func whatsAppAccountMismatch(contexts []runtime.BundleContext, operations []chan
 			return false, channelonboarding.ErrInvalidRequest
 		}
 		for _, candidate := range candidates {
-			if candidate.Provider != "whatsapp" {
+			if candidate.Provider != binding.Provider() {
 				continue
 			}
 			account, err := bundle.ResolveFlowOperatorAccount(candidate.Target.FlowPath)
@@ -51,7 +53,7 @@ func whatsAppAccountMismatch(contexts []runtime.BundleContext, operations []chan
 			if !account.FromPolicy {
 				continue
 			}
-			ref, err := channelonboarding.CanonicalAccount("whatsapp", account.Policy)
+			ref, err := channelonboarding.CanonicalAccount(binding.Provider(), account.Policy)
 			if err != nil {
 				return false, err
 			}
