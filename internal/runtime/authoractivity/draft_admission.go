@@ -38,8 +38,9 @@ func DraftsEqual(left, right Draft) bool {
 // command shape used for exact duplicate comparison.
 func DraftFromOccurrence(occurrence Occurrence) Draft {
 	return Draft{
-		OccurrenceID: occurrence.OccurrenceID,
-		Kind:         occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
+		EffectAuthorityEvidence: append([]byte(nil), occurrence.EffectAuthorityEvidence...),
+		OccurrenceID:            occurrence.OccurrenceID,
+		Kind:                    occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
 		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity, DedupKey: occurrence.DedupKey,
 		OccurredAt: occurrence.OccurredAt, RunID: occurrence.RunID, EntityID: occurrence.EntityID,
 		AgentID: occurrence.AgentID, FlowID: occurrence.FlowID, Scope: occurrence.Scope,

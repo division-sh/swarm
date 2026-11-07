@@ -190,7 +190,7 @@ func (m *Mutation) loadByDedup(ctx context.Context, key string) (runtimeauthorac
 	if m.dialect == DialectSQLite {
 		query = occurrenceSelect + ` WHERE dedup_key = ?`
 	}
-	occurrence, err := authoractivityadapter.ScanOccurrence(m.tx.QueryRowContext(ctx, query, key))
+	occurrence, err := authoractivityadapter.ScanOccurrence(ctx, m.tx, m.tx.QueryRowContext(ctx, query, key))
 	if err == sql.ErrNoRows {
 		return runtimeauthoractivity.Occurrence{}, false, nil
 	}

@@ -25,13 +25,15 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 		"internal/store/internal/backend/pipelinepersistence/run_execution_posture.go": true,
 	}
 	// Exact session owners: three read-only mode comparisons, the process-posture
-	// admission call, and the original logout owner's fenced effect/context pair.
+	// admission call, the original logout owner's fenced effect/context pair,
+	// and the closed registered-operator acknowledgement's owned native effect.
 	namedSessionSites := map[string]int{
 		"internal/runtime/pipeline/channel_native_activity.go::withNativeChannelActivityLaunch":          1,
 		"internal/runtime/pipeline/channel_session_activity.go::prepareSessionActivityIntent":            1,
 		"internal/runtime/pipeline/channel_session_activity.go::validateSessionActivityRequestSelection": 1,
 		"internal/serveapp/channel_logout.go::PrepareSessionLogout":                                      1,
 		"internal/sessionprovider/runtime_logout_unix.go::admitSessionLogout":                            2,
+		"internal/sessionprovider/registered_confirmation_unix.go::AcknowledgeRegisteredOperator":        1,
 	}
 	seenSessionSites := map[string]int{}
 	skippedPrefixes := []string{

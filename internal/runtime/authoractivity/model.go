@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -528,6 +529,9 @@ func sortedSet(values map[string]struct{}) []string {
 }
 
 func cloneDraft(d Draft) Draft {
+	if value, err := canonicaljson.Decode(d.EffectAuthorityEvidence); err == nil {
+		d.EffectAuthorityEvidence, _ = canonicaljson.Encode(value)
+	}
 	d.SourceOwner = strings.TrimSpace(d.SourceOwner)
 	d.SourceIdentity = strings.TrimSpace(d.SourceIdentity)
 	d.DedupKey = strings.TrimSpace(d.DedupKey)
