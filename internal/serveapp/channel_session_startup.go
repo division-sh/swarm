@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -45,7 +46,8 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 	var operations []channelonboarding.Operation
 	presentations := map[string]string{}
 	for _, activation := range activations {
-		if activation.Provider != "whatsapp" {
+		binding, installed := channelprovider.Lookup(activation.Provider)
+		if !installed || !binding.Session() {
 			continue
 		}
 		result, err := d.onboarding.Get(ctx, activation.OperationID)
@@ -109,7 +111,8 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.
 					return err
 				}
 			}
-			fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentation)
+			binding, _ := channelprovider.Lookup(op.Provider)
+			fmt.Fprintf(d.output, "%s: reconnected (%s)\n", binding.DisplayName(), presentation)
 		}
 		d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
 		return nil
