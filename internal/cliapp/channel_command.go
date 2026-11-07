@@ -53,10 +53,12 @@ func (r channelListResult) linkedSessionOperation(provider string) (string, erro
 		}
 	}
 	if matches > 1 {
-		return "", errors.New("more than one WhatsApp connection is linked")
+		binding, _ := channelprovider.Lookup(provider)
+		return "", fmt.Errorf("more than one %s connection is linked", binding.DisplayName())
 	}
 	if operationID == "" {
-		return "", errors.New("Not linked: run swarm channel connect whatsapp")
+		binding, _ := channelprovider.Lookup(provider)
+		return "", errors.New(binding.NotLinked())
 	}
 	return operationID, nil
 }
