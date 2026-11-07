@@ -112,7 +112,8 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 	}
 	var result channelonboarding.Result
 	if len(hitl) != 0 {
-		if !strings.Contains(out.String(), "Claimed by") {
+		if !strings.Contains(out.String(), "Code received from") || strings.Contains(out.String(), "Make them the operator?") ||
+			!strings.Contains(out.String(), "Telegram ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.") {
 			t.Fatalf("deployment connect did not confirm the operator: %s", out.String())
 		}
 		out, errOut = &lockedBuffer{}, &lockedBuffer{}
@@ -124,6 +125,11 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 			t.Fatalf("deployment claim readback exit=%d out=%s err=%s", code, out.String(), errOut.String())
 		}
 		result = listed.Accounts[0]
+		ack := hitl[0].Delivery(0)
+		if result.Binding == nil || ack == nil || ack["chat_id"] != result.Binding.ConversationRef ||
+			ack["text"] != "Swarm operator successfully connected" || hitl[0].Delivery(1) != nil {
+			t.Fatal("deployment connect did not acknowledge exactly its committed operator binding", ack)
+		}
 	} else if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
 		t.Fatal(err)
 	}
