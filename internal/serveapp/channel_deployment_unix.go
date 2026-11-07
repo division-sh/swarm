@@ -10,10 +10,10 @@ import (
 	"io"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
@@ -32,7 +32,6 @@ import (
 type deploymentChannelSession struct {
 	opts       cliapp.ChannelRegistrationOptions
 	connection *sessionprovider.RuntimeConnection
-	offset     int64
 	business   sessionprovider.RegisteredBusinessSelector
 	opened     func(channelonboarding.Operation, *sessionprovider.RuntimeConnection) error
 }
@@ -40,9 +39,6 @@ type deploymentChannelSession struct {
 func (c *deploymentChannelSession) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
 	if c == nil {
 		return channelonboarding.ErrInvalidRequest
-	}
-	if op.Provider == "telegram" {
-		return c.acknowledgeRegisteredTelegram(ctx, op, child, binding)
 	}
 	if c.connection == nil {
 		return channelonboarding.ErrInvalidRequest
@@ -215,7 +211,7 @@ func deploymentTransportControl(ctx context.Context, op channelonboarding.Operat
 	if client != nil {
 		return client, nil
 	}
-	if op.Provider == "whatsapp" {
+	if channelprovider.Session(op.Provider) {
 		return nil, fmt.Errorf("deployment operator connection has no exact restored control")
 	}
 	client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
@@ -290,38 +286,43 @@ func rememberDeploymentControl(clients map[string]*cliapp.DeploymentChannelContr
 }
 
 func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex, output io.Writer, sessions serveSessionBootstrapOwner) error {
-	for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
-		ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
-		client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
-		if err != nil {
-			return err
+	for _, binding := range channelprovider.Installed() {
+		if !binding.Session() {
+			continue
 		}
-		if err := client.ResumeRegisteredAccount(ctx, ref, op); err != nil {
-			if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
-				if err := client.Close(context.WithoutCancel(ctx)); err != nil {
-					return err
-				}
-				observer, ok := sessions.(interface {
-					recordDeploymentNotLinked(context.Context, channelonboarding.Operation, error) error
-				})
-				if !ok {
-					return channelonboarding.ErrInvalidRequest
-				}
-				if observeErr := observer.recordDeploymentNotLinked(ctx, op, err); observeErr != nil {
-					return observeErr
-				}
-				if output != nil {
-					fmt.Fprintln(output, channelonboarding.ErrSessionNotLinked)
-				}
-				continue
+		for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, binding.Provider()) {
+			ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
+			client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
+			if err != nil {
+				return err
 			}
-			if !channelonboarding.SessionUnavailableOnly(err) {
-				return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+			if err := client.ResumeRegisteredAccount(ctx, ref, op); err != nil {
+				if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+					if err := client.Close(context.WithoutCancel(ctx)); err != nil {
+						return err
+					}
+					observer, ok := sessions.(interface {
+						recordDeploymentNotLinked(context.Context, channelonboarding.Operation, error) error
+					})
+					if !ok {
+						return channelonboarding.ErrInvalidRequest
+					}
+					if observeErr := observer.recordDeploymentNotLinked(ctx, op, err); observeErr != nil {
+						return observeErr
+					}
+					if output != nil {
+						fmt.Fprintln(output, channelonboarding.ErrSessionNotLinked)
+					}
+					continue
+				}
+				if !channelonboarding.SessionUnavailableOnly(err) {
+					return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+				}
 			}
+			mu.Lock()
+			clients[op.Provider+":"+op.OperationID] = client
+			mu.Unlock()
 		}
-		mu.Lock()
-		clients[op.Provider+":"+op.OperationID] = client
-		mu.Unlock()
 	}
 	return nil
 }
@@ -330,7 +331,10 @@ func configureDeploymentRuntimeSession(value cliapp.ChannelRegistrationSession, 
 	if runtimeOptions.manager == nil {
 		return
 	}
-	session := value.(*deploymentChannelSession)
+	session, native := value.(*deploymentChannelSession)
+	if !native {
+		return
+	}
 	session.business = serveRegisteredBusinessSelector(runtimeOptions.manager)
 	if owner, ok := runtimeOptions.sessions.(*serveSessionBootstrap); ok {
 		session.opened = owner.registerDeploymentConnection
@@ -356,16 +360,23 @@ func OpenChannelRegistration(ctx context.Context, opts cliapp.ChannelRegistratio
 		opts.Credentials == nil || opts.Principal.Validate() != nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
-	return &deploymentChannelSession{opts: opts}, nil
+	binding, installed := channelprovider.Lookup(opts.Plan.Provider())
+	if !installed {
+		return nil, channelonboarding.ErrInvalidRequest
+	}
+	if binding.PollsClaim() {
+		return &telegramDeploymentSession{opts: opts}, nil
+	}
+	if binding.Session() {
+		return &deploymentChannelSession{opts: opts}, nil
+	}
+	return nil, channelonboarding.ErrInvalidRequest
 }
 
 func (c *deploymentChannelSession) QualifySessionPlan(candidate channelonboarding.Candidate) error {
 	return sessionprovider.QualifyBootstrapPlan(candidate.Plan)
 }
 func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op channelonboarding.Operation, _ channelonboarding.Candidate) error {
-	if op.Provider == "telegram" {
-		return nil
-	}
 	if c.connection != nil {
 		return c.connection.CheckBootstrap(ctx)
 	}
@@ -402,7 +413,7 @@ func (c *deploymentChannelSession) ResumeSession(ctx context.Context, op channel
 			return err
 		}
 	}
-	if op.Provider == "whatsapp" && op.AccountConfirmed {
+	if op.AccountConfirmed {
 		// Wait for login while preserving observed revocation for re-verification.
 		_, err := c.connection.VerifyDeploymentRegistration(ctx, op)
 		return c.connection.RecoveryFailure(ctx, op, err)
@@ -410,29 +421,12 @@ func (c *deploymentChannelSession) ResumeSession(ctx context.Context, op channel
 	return nil
 }
 func (c *deploymentChannelSession) AwaitSessionBootstrap(ctx context.Context, op channelonboarding.Operation) error {
-	if op.Provider == "telegram" {
-		return nil // The pairing checkpoint performs the authenticated getMe.
-	}
 	return c.connection.CheckBootstrap(ctx)
 }
 func (c *deploymentChannelSession) CheckpointSessionPairing(ctx context.Context, op channelonboarding.Operation) (channelonboarding.Operation, bool, error) {
-	if op.Provider == "telegram" {
-		identity, err := c.telegramRead(ctx, op)
-		if err != nil {
-			return op, false, err
-		}
-		ref, err := channelonboarding.CanonicalAccount(op.Provider, identity)
-		if err != nil || op.ExpectedAccount != "" && op.ExpectedAccount != ref.Account {
-			return op, false, errors.Join(channelonboarding.ErrConflict, err)
-		}
-		next, err := c.opts.Operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
-			ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseAwaitingExternalIdentity, AccountReference: ref.Account, Now: time.Now().UTC()})
-		return next, err == nil, err
-	}
 	return c.connection.CheckpointPairing(ctx, op.Revision)
 }
-
-func (c *deploymentChannelSession) telegramIdentity(ctx context.Context, op channelonboarding.Operation) (string, string, error) {
+func (c *telegramDeploymentSession) telegramIdentity(ctx context.Context, op channelonboarding.Operation) (string, string, error) {
 	profile, ok := c.opts.Plan.Registration()
 	if !ok || !op.DeploymentRegistration || op.Provider != "telegram" || op.PrincipalID != c.opts.Principal.ID {
 		return "", "", channelonboarding.ErrInvalidRequest
@@ -484,7 +478,7 @@ func (c *deploymentChannelSession) telegramIdentity(ctx context.Context, op chan
 	return identity, name, nil
 }
 
-func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelonboarding.Operation) (string, error) {
+func (c *telegramDeploymentSession) telegramRead(ctx context.Context, op channelonboarding.Operation) (string, error) {
 	identity, _, err := c.telegramIdentity(ctx, op)
 	return identity, err
 }
@@ -496,15 +490,6 @@ func (c *deploymentChannelSession) ReadSessionPairing(ctx context.Context, _ cha
 }
 func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error) {
 	view := channelonboarding.SessionConnectionReadback{State: "disconnected", Linked: op.AccountReference != "", AccountPresentation: op.AccountReference}
-	if op.Provider == "telegram" && op.AccountReference != "" && !op.Phase.Terminal() {
-		_, name, err := c.telegramIdentity(ctx, op)
-		if err != nil {
-			return view, err
-		}
-		view.AccountName = name
-		view.State = "connected"
-		return view, nil
-	}
 	if c.connection == nil || op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired {
 		return view, nil
 	}
@@ -570,35 +555,15 @@ func (c *deploymentChannelSession) Close(ctx context.Context) error {
 	return nil
 }
 
-func (c *deploymentChannelSession) PollOperatorClaim(ctx context.Context, op channelonboarding.Operation) error {
-	var err error
-	c.offset, err = sessionprovider.PollDeploymentClaim(ctx, c.opts.HTTP, c.opts.Operations, c.opts.Identities, c.opts.Credentials,
-		c.opts.Plan, c.opts.Trigger, op, c.offset)
-	var active providertriggers.PollingWebhookActive
-	if errors.As(err, &active) && c.opts.CurrentWebhook != nil && c.opts.CurrentWebhook(ctx, active.URL, op.AccountReference) {
-		return nil
-	}
-	return err
+func (c *deploymentChannelSession) PollOperatorClaim(context.Context, channelonboarding.Operation) error {
+	return channelonboarding.ErrInvalidRequest
 }
 
-func (c *deploymentChannelSession) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
-	return sessionprovider.ConsumeDeploymentWebhookClaim(ctx, sessionprovider.DeploymentConnectionOptions{Operations: c.opts.Operations, Principal: c.opts.Principal, Plan: c.opts.Plan, Trigger: c.opts.Webhook}, c.opts.Identities, account, credential, admit, current)
+func (c *deploymentChannelSession) ConsumeWebhookClaim(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), func() bool) (bool, error) {
+	return false, channelonboarding.ErrInvalidRequest
 }
 
 func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {
-	if op.Provider == "telegram" {
-		identity, err := c.telegramRead(ctx, op)
-		if err != nil {
-			return false, err
-		}
-		if identity != op.AccountReference {
-			return false, channelonboarding.ErrConflict
-		}
-		if op.IdentityOperationID != "" {
-			return true, c.PollOperatorClaim(ctx, op)
-		}
-		return true, nil
-	}
 	if c.connection == nil {
 		return false, channelonboarding.ErrInvalidRequest
 	}
@@ -606,17 +571,6 @@ func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op ch
 }
 
 func (c *deploymentChannelSession) LogoutRegistration(ctx context.Context, op channelonboarding.Operation) error {
-	if op.Provider == "telegram" {
-		for _, state := range []string{"account_logout_launched", "account_logout_unlinked"} {
-			var err error
-			op, err = c.opts.Operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
-				ExpectedRevision: op.Revision, Phase: op.Phase, FailureCode: state, Now: time.Now().UTC()})
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 	if c.connection == nil {
 		if op.FailureCode != "account_logout_pending" {
 			return fmt.Errorf("%w: logout outcome is unconfirmed; no unlink was repeated", channelonboarding.ErrConflict)

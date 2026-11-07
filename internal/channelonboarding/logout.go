@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,7 +26,7 @@ type SessionLogoutPreparation struct {
 
 func (t SessionLogoutPreparation) Validate() error {
 	if uuid.Validate(t.OperationID) != nil || uuid.Validate(t.OccurrenceID) != nil || t.OperationRevision < 1 || strings.TrimSpace(t.TargetSelector) == "" ||
-		t.Account.Provider != "whatsapp" || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil ||
+		!channelprovider.Session(t.Account.Provider) || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil ||
 		t.ProcessBinding.Validate() != nil || t.ProcessBinding.BundleHash != t.Coordinate.BundleHash ||
 		t.ProcessBinding.RuntimeInstanceID != t.Coordinate.RuntimeInstanceID {
 		return fmt.Errorf("%w: logout requires exact paired session, operation revision, source and SDK occurrence", ErrInvalidRequest)
