@@ -1,8 +1,31 @@
 package channelonboarding
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/channelprovider"
+)
 
 func TestAccountReferenceCanonicalIdentity(t *testing.T) {
+	var installed []string
+	for _, binding := range channelprovider.Installed() {
+		installed = append(installed, binding.Provider())
+		got, found := channelprovider.Lookup(binding.Provider())
+		if !found || got.Provider() != binding.Provider() || binding.MatchesDeployment(binding.DeploymentPosture(), "token", "token") {
+			t.Fatal("compiled binding lost its identity or admitted a shared signing/provider role")
+		}
+		if binding.Session() && (!binding.NativeWrite("whatsapp.send_text") || binding.NativeWrite("foreign.send_text") || binding.NativeRead("whatsapp.send_text")) {
+			t.Fatal("native binding gained a foreign or wrong-kind target")
+		}
+		if binding.PollsClaim() != (binding.Provider() == "telegram") ||
+			binding.AcceptsCaptureKind("message") != (binding.Provider() == "whatsapp") || binding.AcceptsCaptureKind("foreign") {
+			t.Fatal("compiled intake or capture codec changed provider ownership")
+		}
+	}
+	if !slices.Equal(installed, []string{"telegram", "whatsapp"}) || channelprovider.Session("unknown") {
+		t.Fatalf("compiled installation changed: %v", installed)
+	}
 	for _, cell := range []struct{ provider, account, want string }{
 		{"whatsapp", "+1 (555) 010-0123", "+15550100123"},
 		{"whatsapp", "+15550100124", "+15550100124"},

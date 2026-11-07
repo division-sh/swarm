@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -625,17 +626,8 @@ func presentAndWaitForChannelClaim(ctx context.Context, client channelControlCli
 	if result.Operation.DeploymentRegistration {
 		fmt.Fprintf(progressOut, "%s is this deployment's HITL channel.\n", result.Operation.AccountReference)
 	}
-	if result.Operation.Provider == "whatsapp" {
-		if err := writeWhatsAppClaimInstructions(progressOut, result); err != nil {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-		}
-	} else if result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" {
-		if err := writeTelegramClaimInstructions(progressOut, result); err != nil {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-		}
-	} else {
-		identity := result.IdentityOperation
-		fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, channelClaimDeadline(identity.ExpiresAt))
+	if err := writeChannelClaimInstructions(progressOut, result); err != nil {
+		return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 	}
 	current, err := waitForChannelOnboardingClaim(ctx, client, result, opts, errOut)
 	if err != nil {
@@ -658,20 +650,25 @@ func writeTelegramClaimInstructions(out io.Writer, result channelOnboardingResul
 	return nil
 }
 
-func writeWhatsAppClaimInstructions(out io.Writer, result channelOnboardingResult) error {
+func writeChannelClaimInstructions(out io.Writer, result channelOnboardingResult) error {
+	if result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" {
+		return writeTelegramClaimInstructions(out, result)
+	}
 	account := result.Operation.AccountReference
 	if account == "" && result.Connection != nil {
 		account = result.Connection.AccountPresentation
 	}
-	destination, err := channelonboarding.CanonicalAccount("whatsapp", account)
-	if err != nil || result.IdentityOperation == nil || result.IdentityOperation.ExpiresAt.IsZero() {
+	if result.IdentityOperation == nil {
 		return errors.New("operator code requires its exact WhatsApp destination and expiry")
 	}
 	identity := result.IdentityOperation
-	fmt.Fprintf(out, "FROM your operator phone TO %s\n", destination.Account)
-	fmt.Fprintf(out, "Send the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		identity.Challenge, channelClaimDeadline(identity.ExpiresAt), strings.TrimPrefix(destination.Account, "+"), url.QueryEscape(identity.Challenge))
-	return nil
+	binding, _ := channelprovider.Lookup(result.Operation.Provider)
+	text, err := binding.ClaimInstructions(account, identity.Challenge, identity.ExpiresAt)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(out, text)
+	return err
 }
 
 func channelRetryParameters(result channelOnboardingResult, acceptedAccount, credential string) map[string]any {

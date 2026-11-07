@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -565,7 +566,7 @@ func (r StartRequest) Validate() error {
 	if !r.Posture.Valid() || !r.Ceremony.Valid() || r.Ceremony == CeremonyAccountLink && r.Posture != ActivationSessionConnection && !r.DeploymentRegistration {
 		return fmt.Errorf("%w: activation posture and identity ceremony are required", ErrInvalidRequest)
 	}
-	if r.DeploymentRegistration && (r.Provider == "whatsapp") != (r.Posture == ActivationSessionConnection) {
+	if r.DeploymentRegistration && channelprovider.Session(r.Provider) != (r.Posture == ActivationSessionConnection) {
 		return fmt.Errorf("%w: registration transport does not match its provider", ErrInvalidRequest)
 	}
 	if len(r.CredentialReservations) == 0 && r.Posture != ActivationSessionConnection {
@@ -686,7 +687,7 @@ func (o Operation) ValidateDeploymentRegistration() error {
 		if err := validateRegistrationScope(true, o.Provider, o.ExpectedAccount, o.Coordinate, o.TargetSelector); err != nil {
 			return err
 		}
-		if (o.Provider == "whatsapp") != (o.Posture == ActivationSessionConnection) {
+		if channelprovider.Session(o.Provider) != (o.Posture == ActivationSessionConnection) {
 			return fmt.Errorf("%w: registration transport does not match its provider", ErrInvalidRequest)
 		}
 		if o.AccountReference != "" {
@@ -738,7 +739,8 @@ func validateRegistrationScope(deployment bool, provider, expected string, coord
 		}
 		return coordinate.ValidateContext()
 	}
-	if coordinate != (ChannelRuntimeContextCoordinate{}) || target != "" || provider != "whatsapp" && provider != "telegram" {
+	_, installed := channelprovider.Lookup(provider)
+	if coordinate != (ChannelRuntimeContextCoordinate{}) || target != "" || !installed {
 		return fmt.Errorf("%w: deployment registration must not carry runtime or flow authority", ErrInvalidRequest)
 	}
 	if expected != "" {

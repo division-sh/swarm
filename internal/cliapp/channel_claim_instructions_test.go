@@ -28,7 +28,7 @@ func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.
 			result.Connection.AccountPresentation = "not the destination"
 		}
 		var out bytes.Buffer
-		if err := writeWhatsAppClaimInstructions(&out, result); err != nil {
+		if err := writeChannelClaimInstructions(&out, result); err != nil {
 			t.Fatal(err)
 		}
 		text := out.String()
@@ -90,7 +90,7 @@ func TestWhatsAppClaimInstructionsRefuseMissingOrMaskedDestination(t *testing.T)
 		var out bytes.Buffer
 		result := channelOnboardingResult{Operation: channelonboarding.Operation{Provider: "whatsapp", AccountReference: account},
 			IdentityOperation: &operatorchannel.Operation{Challenge: "12345", ExpiresAt: time.Now().Add(time.Minute)}}
-		if err := writeWhatsAppClaimInstructions(&out, result); err == nil || out.Len() != 0 {
+		if err := writeChannelClaimInstructions(&out, result); err == nil || out.Len() != 0 {
 			t.Fatal("instructions guessed a destination", account, out.String(), err)
 		}
 	}
