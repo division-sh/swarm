@@ -395,9 +395,9 @@ func ValidateDraft(d Draft) error {
 		return fmt.Errorf("author activity %s occurred_at is required", d.Kind)
 	}
 	deploymentEffect := false
-	if d.Kind == KindEffectLifecycle && d.Scope.Kind == ScopeRuntime {
+	if d.Kind == KindEffectLifecycle && (d.Scope.Kind == ScopeRuntime || len(d.EffectAuthorityEvidence) > 0) {
 		parent, err := DeploymentEffectParent(d.Projection.AuthorityKind, d.Projection.AuthorityID, d.EffectAuthorityEvidence)
-		if err != nil || parent == nil || d.Scope.RuntimeInstanceID == "" || d.Scope.BundleHash != "" {
+		if err != nil || parent == nil || d.Scope.Kind != ScopeRuntime || d.Scope.RuntimeInstanceID == "" || d.Scope.BundleHash != "" {
 			return fmt.Errorf("runtime effect lifecycle requires exact deployment evidence: %v", err)
 		}
 		deploymentEffect = true

@@ -84,7 +84,7 @@ func TestDeploymentEffectActivityRequiresOriginalParentWithoutPublicBundle(t *te
 			if err := Render(&output, []Occurrence{occurrence}, RenderOptions{Mode: RenderNDJSON}); err != nil {
 				t.Fatal(err)
 			}
-			for _, forbidden := range []string{"bundle_hash", "transport_parent", "binding_operation_id", "EffectParent"} {
+			for _, forbidden := range []string{"bundle_hash", "transport_parent", "binding_operation_id", "EffectAuthorityEvidence"} {
 				if strings.Contains(output.String(), forbidden) {
 					t.Fatalf("readback exposed private or invented %s", forbidden)
 				}
