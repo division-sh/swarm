@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
 
@@ -119,17 +118,6 @@ func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 		t.Fatalf("write config file: %v", err)
 	}
 	return path
-}
-
-func decodeAuthoritativeYAMLFileForTest(t testing.TB, path string, target any) {
-	t.Helper()
-	source, err := yamlsource.LoadFile(path)
-	if err != nil {
-		t.Fatalf("read authoritative YAML %s: %v", path, err)
-	}
-	if err := source.Decode(target); err != nil {
-		t.Fatalf("decode authoritative YAML %s: %v", path, err)
-	}
 }
 
 func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {

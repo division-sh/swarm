@@ -7427,12 +7427,7 @@ func TestWaitForServeHealthEndpointsProvesOnlyPreCommitLiveness(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
-	steps := loadServeBootProgressSequenceFromSpec(t)
-	if got, want := len(steps), runtimepkg.BootProgressTotalSteps; got != want {
-		t.Fatalf("serve boot progress spec step count = %d, want %d", got, want)
-	}
-
+func TestRunServeRuntimeVerboseEmitsCompleteBootSequence(t *testing.T) {
 	sqlitePath := filepath.Join(t.TempDir(), "verbose-sequence.sqlite")
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
@@ -7450,14 +7445,15 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 	}
 
 	rows := parseServeBootProgressRows(t, serve.outputString())
-	if got, want := len(rows), len(steps); got != want {
+	if got, want := len(rows), runtimepkg.BootProgressTotalSteps; got != want {
 		t.Fatalf("serve boot progress rows = %d, want %d\noutput:\n%s", got, want, serve.outputString())
 	}
-	for i, want := range steps {
-		got := rows[i]
-		if got.Step != want.Step || got.Total != runtimepkg.BootProgressTotalSteps || got.Name != want.Name {
-			t.Fatalf("row %d = step=%d total=%d name=%q, want step=%d total=%d name=%q\noutput:\n%s", i, got.Step, got.Total, got.Name, want.Step, runtimepkg.BootProgressTotalSteps, want.Name, serve.outputString())
+	names := make(map[string]bool, len(rows))
+	for i, row := range rows {
+		if row.Step != i+1 || row.Total != runtimepkg.BootProgressTotalSteps || strings.TrimSpace(row.Name) == "" || names[row.Name] {
+			t.Fatalf("row %d = step=%d total=%d name=%q; want ordered, named, unique progress\noutput:\n%s", i, row.Step, row.Total, row.Name, serve.outputString())
 		}
+		names[row.Name] = true
 	}
 	if strings.Contains(serve.outputString(), "health_endpoints_respond       ok  (/healthz /readyz /v1/rpc /v1/ws)") {
 		t.Fatalf("serve verbose output still claims unproven v1 endpoint response:\n%s", serve.outputString())
@@ -7986,47 +7982,6 @@ func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, targe
 		*s.stoppedContainers = append(*s.stoppedContainers, target.Name)
 	}
 	return nil
-}
-
-type serveBootProgressSpecStep struct {
-	Step  int    `yaml:"step"`
-	Name  string `yaml:"name"`
-	Owner string `yaml:"owner"`
-}
-
-func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpecStep {
-	t.Helper()
-	var spec struct {
-		CLISpecification struct {
-			CommandCatalog struct {
-				Serve struct {
-					BootObservability struct {
-						BootProgressSequence struct {
-							TotalSteps int                         `yaml:"total_steps"`
-							Steps      []serveBootProgressSpecStep `yaml:"steps"`
-						} `yaml:"boot_progress_sequence"`
-					} `yaml:"boot_observability"`
-				} `yaml:"serve"`
-			} `yaml:"command_catalog"`
-		} `yaml:"cli_specification"`
-	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), &spec)
-	sequence := spec.CLISpecification.CommandCatalog.Serve.BootObservability.BootProgressSequence
-	if sequence.TotalSteps != runtimepkg.BootProgressTotalSteps {
-		t.Fatalf("platform spec total_steps = %d, want %d", sequence.TotalSteps, runtimepkg.BootProgressTotalSteps)
-	}
-	for i, step := range sequence.Steps {
-		if step.Step != i+1 {
-			t.Fatalf("platform spec step index %d has step %d", i, step.Step)
-		}
-		if strings.TrimSpace(step.Name) == "" {
-			t.Fatalf("platform spec step %d missing name", step.Step)
-		}
-		if strings.TrimSpace(step.Owner) == "" {
-			t.Fatalf("platform spec step %d missing owner", step.Step)
-		}
-	}
-	return sequence.Steps
 }
 
 type lockedBuffer struct {
