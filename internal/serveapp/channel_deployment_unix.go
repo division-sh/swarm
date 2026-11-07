@@ -35,6 +35,13 @@ type deploymentChannelSession struct {
 	opened     func(channelonboarding.Operation, *sessionprovider.RuntimeConnection) error
 }
 
+func (c *deploymentChannelSession) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
+	if c == nil || c.connection == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	return c.connection.AcknowledgeRegisteredOperator(ctx, c.opts.Effects, op, child, binding)
+}
+
 func deploymentChannelHandlers(repo, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, webhook func(context.Context, string, string) bool, runtimeOptions deploymentRuntimeOptions) (apiv1.MethodHandler, publicingress.PendingDeploymentClaim, func(context.Context) error, func() error) {
 	root, rootErr := cliapp.NewInvocationRoot(repo)
 	factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {

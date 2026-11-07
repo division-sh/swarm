@@ -28,7 +28,16 @@ type QueryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at FROM author_activity_occurrences`
+const OccurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at,
+COALESCE((SELECT CAST(o.authority_evidence AS TEXT) FROM runtime_external_effect_operations o
+JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+WHERE author_activity_occurrences.kind='effect.lifecycle' AND author_activity_occurrences.source_owner='runtime_external_effect_attempts'
+AND author_activity_occurrences.source_identity=CAST(a.attempt_id AS TEXT)||':'||author_activity_occurrences.transition
+AND o.authority_kind=author_activity_occurrences.projection->>'authority_kind'
+AND o.authority_id=author_activity_occurrences.projection->>'authority_id'), '{}')
+FROM author_activity_occurrences`
+
+const occurrenceSelect = OccurrenceSelect
 
 func CountRecordedDeadLetterStorage(ctx context.Context, tx *sql.Tx, postgres bool, runID string) (int, error) {
 	query := `SELECT COUNT(*) FROM author_activity_occurrences aa
@@ -163,7 +172,7 @@ func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 		&occurrence.Transition, &occurrence.SourceOwner, &occurrence.SourceIdentity, &occurrence.DedupKey,
 		&occurrence.RunID, &occurrence.EntityID, &occurrence.AgentID, &occurrence.FlowID,
 		&occurrence.Scope.Kind, &occurrence.Scope.RuntimeInstanceID, &occurrence.Scope.BundleHash,
-		&projectionRaw, &failureRaw, &occurredAtRaw,
+		&projectionRaw, &failureRaw, &occurredAtRaw, &occurrence.EffectAuthorityEvidence,
 	); err != nil {
 		return runtimeauthoractivity.Occurrence{}, err
 	}
@@ -190,6 +199,7 @@ func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity,
 		DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, Scope: occurrence.Scope,
 		Projection: occurrence.Projection, Failure: occurrence.Failure,
+		EffectAuthorityEvidence: occurrence.EffectAuthorityEvidence,
 	}); err != nil {
 		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("invalid persisted author activity %s: %w", occurrence.OccurrenceID, err)
 	}

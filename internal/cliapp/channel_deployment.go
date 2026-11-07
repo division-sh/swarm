@@ -268,7 +268,7 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 	}
 	c.session, err = opts.channelRegistration(ctx, ChannelRegistrationOptions{Directory: directory, Principal: principal,
 		Process: c.process, Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Credentials: currentness,
-		Identities: owner.OperatorChannels(), HTTP: opts.httpClient, Plan: candidate.Plan, Trigger: trigger, Webhook: webhook})
+		Identities: owner.OperatorChannels(), Effects: owner.Effects(), HTTP: opts.httpClient, Plan: candidate.Plan, Trigger: trigger, Webhook: webhook})
 	if err != nil {
 		return err
 	}

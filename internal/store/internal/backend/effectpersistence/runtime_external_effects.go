@@ -829,7 +829,8 @@ type existingExternalAttempt struct {
 	capabilityPlan       string
 	agentFrame           []byte
 	capabilitySurfaceID  string
-	bundleHash           string
+	bundleHash           sql.NullString
+	authorityEvidence    []byte
 	evidenceJSON         string
 	originDeliveryID     string
 	originRunID          string
@@ -852,6 +853,8 @@ type existingExternalAttempt struct {
 }
 
 type externalEffectStorySource struct {
+	AuthorityEvidence []byte
+
 	AttemptID     string
 	Kind          string
 	Class         string
@@ -868,7 +871,10 @@ type externalEffectStorySource struct {
 type ExternalEffectStorySource = externalEffectStorySource
 
 func externalEffectStorySourceFromAttempt(attempt runtimeeffects.Attempt) externalEffectStorySource {
+	evidence, _ := json.Marshal(attempt.Authority.Evidence())
 	return externalEffectStorySource{
+		AuthorityEvidence: evidence,
+
 		AttemptID: attempt.AttemptID, Kind: string(attempt.Kind), Class: string(attempt.Class),
 		Adapter: attempt.Adapter, Transport: attempt.Transport, AuthorityKind: string(attempt.Authority.Kind),
 		AuthorityID: attempt.Authority.ID, AgentID: attempt.Authority.Normal.AgentID,
@@ -879,7 +885,7 @@ func externalEffectStorySourceFromAttempt(attempt runtimeeffects.Attempt) extern
 func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID string, postgres bool) (externalEffectStorySource, error) {
 	query := `
 		SELECT CAST(a.attempt_id AS TEXT), o.effect_kind, o.effect_class, a.adapter, a.transport,
-		       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal, o.bundle_hash
+		       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal, COALESCE(o.bundle_hash,''), o.authority_evidence
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 		WHERE a.attempt_id = ?
@@ -887,7 +893,7 @@ func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID st
 	if postgres {
 		query = `
 			SELECT a.attempt_id::text, o.effect_kind, o.effect_class, a.adapter, a.transport,
-			       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal, o.bundle_hash
+			       o.authority_kind, o.authority_id, COALESCE(o.agent_id, ''), o.execution_mode, a.attempt_ordinal, COALESCE(o.bundle_hash,''), o.authority_evidence
 			FROM runtime_external_effect_attempts a
 			JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 			WHERE a.attempt_id = $1::uuid
@@ -896,7 +902,7 @@ func loadExternalEffectStorySource(ctx context.Context, tx *sql.Tx, attemptID st
 	var source externalEffectStorySource
 	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(attemptID)).Scan(
 		&source.AttemptID, &source.Kind, &source.Class, &source.Adapter, &source.Transport,
-		&source.AuthorityKind, &source.AuthorityID, &source.AgentID, &source.ExecutionMode, &source.Ordinal, &source.BundleHash,
+		&source.AuthorityKind, &source.AuthorityID, &source.AgentID, &source.ExecutionMode, &source.Ordinal, &source.BundleHash, &source.AuthorityEvidence,
 	); err != nil {
 		return externalEffectStorySource{}, fmt.Errorf("load external effect author activity source: %w", err)
 	}
@@ -971,7 +977,17 @@ func recordExternalEffectStory(ctx context.Context, story *mutationprotocol.Atte
 	attempt := source.Ordinal
 	identity := source.AttemptID + ":" + transition
 	var scope runtimeauthoractivity.Scope
-	if strings.TrimSpace(source.BundleHash) != "" {
+	parent, err := runtimeauthoractivity.DeploymentEffectParent(source.AuthorityKind, source.AuthorityID, source.AuthorityEvidence)
+	if err != nil {
+		return err
+	}
+	if parent != nil {
+		current, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !ok || current.RuntimeInstanceID == "" || source.BundleHash != "" {
+			return fmt.Errorf("deployment effect lifecycle requires exact runtime scope and no bundle")
+		}
+		scope = runtimeauthoractivity.RuntimeScope(current.RuntimeInstanceID)
+	} else if strings.TrimSpace(source.BundleHash) != "" {
 		current, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !ok || strings.TrimSpace(current.RuntimeInstanceID) == "" {
 			return fmt.Errorf("external effect author activity requires current runtime scope")
@@ -982,7 +998,7 @@ func recordExternalEffectStory(ctx context.Context, story *mutationprotocol.Atte
 		Kind: runtimeauthoractivity.KindEffectLifecycle, Transition: transition,
 		SourceOwner: "runtime_external_effect_attempts", SourceIdentity: identity, DedupKey: "effect:" + identity,
 		OccurredAt: occurredAt.UTC(), AgentID: source.AgentID,
-		Scope: scope,
+		Scope: scope, EffectAuthorityEvidence: source.AuthorityEvidence,
 		Projection: runtimeauthoractivity.Projection{
 			EffectClass: source.Class, Attempt: &attempt, Adapter: source.Adapter, Transport: source.Transport,
 			AuthorityKind: source.AuthorityKind, AuthorityID: source.AuthorityID, ExecutionMode: source.ExecutionMode,
@@ -1235,6 +1251,15 @@ func recordRecoveredExternalEffectStories(ctx context.Context, story *mutationpr
 }
 
 func (e existingExternalAttempt) matchesAuthorityIdentity(authority runtimeeffects.Authority) bool {
+	if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
+		parent, err := runtimeauthoractivity.DeploymentEffectParent(e.authorityKind, e.authorityID, e.authorityEvidence)
+		if err != nil || (parent == nil) != (authority.ChannelConfirmation.TransportParent == nil) {
+			return false
+		}
+		if parent != nil && (e.bundleHash.Valid || *parent != *authority.ChannelConfirmation.TransportParent) {
+			return false
+		}
+	}
 	mode := string(authority.ExecutionMode)
 	if e.authorityKind != string(authority.Kind) || e.authorityID != authority.ID ||
 		e.operationMode != mode || e.attemptMode != mode {
@@ -1367,7 +1392,7 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.bundle_hash, o.state, a.attempt_id::text, a.adapter, a.transport, a.state,
 		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'::jsonb)::text, COALESCE(a.evidence, '{}'::jsonb)::text, COALESCE(a.capability_surface_id::text,''),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_type,''),COALESCE(a.origin_subscriber_id,''),
-		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,''),COALESCE(o.authority_evidence->'provider_request','{}'::jsonb)::text
+		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,''),COALESCE(o.authority_evidence->'provider_request','{}'::jsonb)::text,o.authority_evidence
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
 		WHERE o.operation_id = $1::uuid
@@ -1378,7 +1403,7 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
 		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.bundleHash, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
 		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.evidenceJSON, &existing.capabilitySurfaceID,
-		&existing.originKind, &existing.originDeliveryID, &existing.originRunID, &existing.originRouteIdentity, &existing.originClaimToken, &existing.originClaimVersion, &existing.originSubscriberType, &existing.originSubscriberID, &existing.originDirectiveID, &existing.originDirectiveOwner, &existing.providerRequestJSON)
+		&existing.originKind, &existing.originDeliveryID, &existing.originRunID, &existing.originRouteIdentity, &existing.originClaimToken, &existing.originClaimVersion, &existing.originSubscriberType, &existing.originSubscriberID, &existing.originDirectiveID, &existing.originDirectiveOwner, &existing.providerRequestJSON, &existing.authorityEvidence)
 	if err == sql.ErrNoRows {
 		return existingExternalAttempt{}, false, nil
 	}
@@ -1400,7 +1425,7 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.bundle_hash, o.state, a.attempt_id, a.adapter, a.transport, a.state,
 		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'), COALESCE(a.evidence, '{}'), COALESCE(a.capability_surface_id,''),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_type,''),COALESCE(a.origin_subscriber_id,''),
-		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,''),COALESCE(json_extract(o.authority_evidence,'$.provider_request'),'{}')
+		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,''),COALESCE(json_extract(o.authority_evidence,'$.provider_request'),'{}'),o.authority_evidence
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
 		WHERE o.operation_id = ?
@@ -1411,7 +1436,7 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
 		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.bundleHash, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
 		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.evidenceJSON, &existing.capabilitySurfaceID,
-		&existing.originKind, &existing.originDeliveryID, &existing.originRunID, &existing.originRouteIdentity, &existing.originClaimToken, &existing.originClaimVersion, &existing.originSubscriberType, &existing.originSubscriberID, &existing.originDirectiveID, &existing.originDirectiveOwner, &existing.providerRequestJSON)
+		&existing.originKind, &existing.originDeliveryID, &existing.originRunID, &existing.originRouteIdentity, &existing.originClaimToken, &existing.originClaimVersion, &existing.originSubscriberType, &existing.originSubscriberID, &existing.originDirectiveID, &existing.originDirectiveOwner, &existing.providerRequestJSON, &existing.authorityEvidence)
 	if err == sql.ErrNoRows {
 		return existingExternalAttempt{}, false, nil
 	}
@@ -1713,8 +1738,22 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	return externalAuthorizedAttempt(authority, req, req.AttemptID, 1), nil
 }
 
-func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffects.Authority) (string, error) {
+func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffects.Authority) (any, error) {
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	evidence, err := json.Marshal(authority.Evidence())
+	if err != nil {
+		return nil, err
+	}
+	parent, err := runtimeauthoractivity.DeploymentEffectParent(string(authority.Kind), authority.ID, evidence)
+	if err != nil {
+		return nil, err
+	}
+	if parent != nil {
+		if !authority.Valid() || !ok || scope.Kind != runtimeauthoractivity.ScopeRuntime || scope.RuntimeInstanceID == "" || scope.BundleHash != "" {
+			return nil, fmt.Errorf("deployment effect requires valid authority and exact runtime scope")
+		}
+		return nil, nil
+	}
 	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.BundleHash) == "" {
 		return "", fmt.Errorf("external effect operation requires exact author activity bundle scope")
 	}

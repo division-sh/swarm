@@ -1399,6 +1399,15 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 						return Result{}, errors.Join(ErrRevisionConflict, err, authorityErr)
 					}
 					op.BindingRevision = binding.Revision
+					if op.Provider == "whatsapp" {
+						sender, ok := s.sessions.(RegisteredAcknowledgement)
+						if !ok {
+							return Result{}, fmt.Errorf("registered operator acknowledgement owner is unavailable")
+						}
+						if err := sender.AcknowledgeRegisteredOperator(ctx, op, identity, binding); err != nil {
+							return Result{}, err
+						}
+					}
 				}
 				finished, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseSucceeded, BindingRevision: op.BindingRevision, Now: s.now().UTC()})

@@ -139,6 +139,7 @@ func validateOccurrenceForRender(occurrence Occurrence) error {
 		DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, RunID: occurrence.RunID,
 		EntityID: occurrence.EntityID, AgentID: occurrence.AgentID, FlowID: occurrence.FlowID,
 		Scope: occurrence.Scope, Projection: occurrence.Projection, Failure: occurrence.Failure,
+		EffectAuthorityEvidence: occurrence.EffectAuthorityEvidence,
 	}); err != nil {
 		return fmt.Errorf("render author activity occurrence: %w", err)
 	}

@@ -14,6 +14,10 @@ type DeploymentSessionOwner interface {
 	CloseRegistration(context.Context, Operation) error
 }
 
+type RegisteredAcknowledgement interface {
+	AcknowledgeRegisteredOperator(context.Context, Operation, operatorchannel.Operation, operatorchannel.Binding) error
+}
+
 // PendingDeploymentClaim selects only the confirmed account's open ceremony.
 func (op Operation) PendingDeploymentClaim(account AccountReference) bool {
 	return op.DeploymentRegistration && op.Provider == account.Provider && op.AccountReference == account.Account &&

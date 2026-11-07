@@ -130,6 +130,8 @@ type Projection struct {
 }
 
 type Draft struct {
+	EffectAuthorityEvidence []byte
+
 	OccurrenceID   string
 	Kind           Kind
 	Version        int
@@ -148,6 +150,8 @@ type Draft struct {
 }
 
 type Occurrence struct {
+	EffectAuthorityEvidence []byte `json:"-"`
+
 	OccurrenceID   string                    `json:"occurrence_id"`
 	Sequence       int64                     `json:"sequence"`
 	Kind           Kind                      `json:"kind"`
@@ -389,7 +393,15 @@ func ValidateDraft(d Draft) error {
 	if d.OccurredAt.IsZero() {
 		return fmt.Errorf("author activity %s occurred_at is required", d.Kind)
 	}
-	if err := validateScope(d.Kind, transition, d.Scope); err != nil {
+	deploymentEffect := false
+	if d.Kind == KindEffectLifecycle && d.Scope.Kind == ScopeRuntime {
+		parent, err := DeploymentEffectParent(d.Projection.AuthorityKind, d.Projection.AuthorityID, d.EffectAuthorityEvidence)
+		if err != nil || parent == nil || d.Scope.RuntimeInstanceID == "" || d.Scope.BundleHash != "" {
+			return fmt.Errorf("runtime effect lifecycle requires exact deployment evidence: %v", err)
+		}
+		deploymentEffect = true
+	}
+	if err := validateScope(d.Kind, transition, d.Scope, deploymentEffect); err != nil {
 		return err
 	}
 	if err := validateProjection(d.Kind, contract, d.Projection); err != nil {
@@ -406,7 +418,7 @@ func ValidateDraft(d Draft) error {
 	return nil
 }
 
-func validateScope(kind Kind, transition string, scope Scope) error {
+func validateScope(kind Kind, transition string, scope Scope, deploymentEffect bool) error {
 	contract, ok := kindContracts[kind]
 	if !ok {
 		return fmt.Errorf("author activity kind %q is not registered", kind)
@@ -414,6 +426,9 @@ func validateScope(kind Kind, transition string, scope Scope) error {
 	want, ok := contract.ScopeByTransition[strings.TrimSpace(transition)]
 	if !ok {
 		return fmt.Errorf("author activity %s/%s scope policy is not registered", kind, transition)
+	}
+	if kind == KindEffectLifecycle && deploymentEffect {
+		want = ScopeRuntime
 	}
 	scope.Kind = ScopeKind(strings.TrimSpace(string(scope.Kind)))
 	scope.RuntimeInstanceID = strings.TrimSpace(scope.RuntimeInstanceID)
