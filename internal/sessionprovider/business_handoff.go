@@ -13,7 +13,15 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 )
+
+type retainedPublicationOwner interface {
+	pendingPublications(context.Context) ([]pendingCapture, error)
+	reconcilePublished(context.Context, capturedEvent, publicationReader) (bool, error)
+	stagePublication(context.Context, capturedEvent, runtimeinbound.Request) error
+	retirePublished(context.Context, capturedEvent, publicationReader) error
+}
 
 // This is the incoming handoff, not an outgoing retry queue. The private capture
 // and selected publication owners retain all durable state and retirement rules.
@@ -37,7 +45,7 @@ func (h *sessionBusinessHandoff) drain(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	rows, err := h.input.native.spool.pendingPublications(ctx)
+	rows, err := h.input.native.capturePublications().pendingPublications(ctx)
 	if err != nil {
 		return err
 	}
@@ -55,7 +63,7 @@ func (h *sessionBusinessHandoff) drain(ctx context.Context) error {
 }
 
 func (h *sessionBusinessHandoff) publish(ctx context.Context, event capturedEvent) error {
-	spool := h.input.native.spool
+	spool := h.input.native.capturePublications()
 	settled, err := spool.reconcilePublished(ctx, event, h.store)
 	if err != nil || settled {
 		return err

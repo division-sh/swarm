@@ -125,7 +125,7 @@ func TestWhatsAppChannelDeliveryJournalBothStores(t *testing.T) {
 			}
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				f := newNativeConfirmationFixture(t, backend)
-				executor := sessionChannelExecutor{owner: f.authority, plan: f.channel}
+				executor := sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}
 				confirmation := map[string]any{"destination": f.binding.ConversationRef, "text": "Swarm channel connected."}
 				confirmationCtx := f.confirmationContext(t)
 				proveNativeJournalWrite(t, f, confirmationCtx, confirmation["text"].(string), true,
@@ -285,7 +285,7 @@ func TestWhatsAppChannelConfirmationJournalBothStores(t *testing.T) {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				f := newNativeConfirmationFixture(t, backend)
 				ctx := f.confirmationContext(t)
-				executor := sessionChannelExecutor{owner: f.authority, plan: f.channel}
+				executor := sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}
 				input := map[string]any{"destination": f.binding.ConversationRef, "text": "Swarm channel connected."}
 				type result struct {
 					delivery registration.DeliveryResult
@@ -347,7 +347,7 @@ func TestWhatsAppChannelConfirmationJournalBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				executor = sessionChannelExecutor{owner: f.authority, plan: f.channel}
+				executor = sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}
 				ctx = f.confirmationContext(t)
 				if _, err := executor.DeliverChannelConfirmation(ctx, "deliver", input, nil); err == nil {
 					t.Fatal("normal SDK/standing restart replayed the original settled or uncertain send")
@@ -392,7 +392,7 @@ func TestWhatsAppChannelPrelaunchResumeAndRecoveryBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				executor := sessionChannelExecutor{owner: f.authority, plan: f.channel}
+				executor := sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}
 				proveNativeJournalWrite(t, f, ctx, input["text"].(string), true,
 					func() (registration.DeliveryResult, error) {
 						return executor.DeliverChannelConfirmation(ctx, "deliver", input, nil)
@@ -409,7 +409,7 @@ func TestWhatsAppChannelConfirmationRejectsForeignAndRetiredAuthorityBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newNativeConfirmationFixture(t, backend)
-			executor := sessionChannelExecutor{owner: f.authority, plan: f.channel}
+			executor := sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}
 			ctx := f.confirmationContext(t)
 			for _, input := range []map[string]any{
 				{"destination": "100000000004@s.whatsapp.net", "text": "wrong conversation"},

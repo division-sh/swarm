@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
+
+const whatsAppReadyTeaching = "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`."
 
 func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.T) {
 	expires := time.Date(2026, 11, 6, 22, 42, 17, 123000, time.UTC)
@@ -98,7 +101,8 @@ func TestWhatsAppClaimInstructionsRefuseMissingOrMaskedDestination(t *testing.T)
 
 func TestWhatsAppReadyTeachingUsesRuledCommands(t *testing.T) {
 	var out bytes.Buffer
-	writeWhatsAppConnection(&out, nil, true)
+	binding, _ := channelprovider.Lookup("whatsapp")
+	writeProviderConnection(&out, binding, nil, true)
 	const want = "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.\n"
 	if out.String() != want {
 		t.Fatalf("readiness teaching=%q", out.String())
