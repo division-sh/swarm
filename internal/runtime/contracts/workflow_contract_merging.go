@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 )
@@ -49,7 +50,7 @@ func mergeEventContracts(bundle *WorkflowContractBundle, entries map[string]Even
 		}
 		scopedKey := contractScopeKey(source, key)
 		if existing, ok := bundle.scopedEventSources[scopedKey]; ok {
-			if reflect.DeepEqual(bundle.scopedEvents[scopedKey], entry) {
+			if reflect.DeepEqual(eventDeclarationSemantics(bundle.scopedEvents[scopedKey]), eventDeclarationSemantics(entry)) {
 				continue
 			}
 			return fmt.Errorf("duplicate scoped event id %q from %s and %s", scopedKey, existing.File, source.File)
@@ -61,7 +62,7 @@ func mergeEventContracts(bundle *WorkflowContractBundle, entries map[string]Even
 		}
 		if existing, ok := bundle.eventSources[key]; ok {
 			if contractSameScope(existing, source) {
-				if reflect.DeepEqual(bundle.Events[key], entry) {
+				if reflect.DeepEqual(eventDeclarationSemantics(bundle.Events[key]), eventDeclarationSemantics(entry)) {
 					continue
 				}
 				return fmt.Errorf("duplicate merged event id %q from %s and %s", key, existing.File, source.File)
@@ -76,6 +77,18 @@ func mergeEventContracts(bundle *WorkflowContractBundle, entries map[string]Even
 	}
 	return nil
 }
+
+// Source coordinates do not decide duplicate admission. Compare every other
+// field, including private platform authority, without mutating either input.
+func eventDeclarationSemantics(entry EventCatalogEntry) EventCatalogEntry {
+	entry.Payload.Properties = maps.Clone(entry.Payload.Properties)
+	for name, field := range entry.Payload.Properties {
+		field.origin = fieldOrigin{}
+		entry.Payload.Properties[name] = field
+	}
+	return entry
+}
+
 func mergeAgentContracts(bundle *WorkflowContractBundle, entries map[string]AgentRegistryEntry, source ContractItemSource) error {
 	for id, entry := range entries {
 		key := strings.TrimSpace(id)
