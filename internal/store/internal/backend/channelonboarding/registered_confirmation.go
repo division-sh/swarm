@@ -43,6 +43,11 @@ func RegisteredConfirmationCurrent(ctx context.Context, q queryer, a effects.Aut
 	if err != nil {
 		return false, err
 	}
+	return registeredConfirmationBindingMatches(op, c, binding, child), nil
+}
+
+func registeredConfirmationBindingMatches(op domain.Operation, c effects.ChannelConfirmationAuthority, binding operatorchannel.Binding, child operatorchannel.Operation) bool {
+	parent := c.TransportParent
 	return binding.Status == operatorchannel.BindingCurrent && binding.Revision == c.BindingRevision &&
 		binding.OperationID == parent.BindingOperationID && binding.PrincipalID == op.PrincipalID &&
 		binding.ConversationRef == c.Destination && binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession &&
@@ -52,5 +57,5 @@ func RegisteredConfirmationCurrent(ctx context.Context, q queryer, a effects.Aut
 		child.OnboardingOperationID == parent.ID && child.PrincipalID == op.PrincipalID && child.Interface == op.Interface &&
 		child.BindingRevision == binding.Revision && child.ProviderAuthority == binding.ProviderAuthority &&
 		child.ExternalAccountRef == binding.ExternalAccountRef && child.ConversationRef == binding.ConversationRef &&
-		child.ConversationScope == binding.ConversationScope && child.ProofID == binding.ProofID && child.ProofRevision == binding.ProofRevision, nil
+		child.ConversationScope == binding.ConversationScope && child.ProofID == binding.ProofID && child.ProofRevision == binding.ProofRevision
 }

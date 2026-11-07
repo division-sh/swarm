@@ -432,15 +432,8 @@ func (a Authority) Valid() bool {
 			registration.ContextPublicationGeneration > 0 && registration.PlanGeneration.Valid()
 	case AuthorityChannelConfirmation:
 		confirmation := a.ChannelConfirmation
-		if parent := confirmation.TransportParent; parent != nil {
-			return parent.Valid() && validUUIDs(confirmation.EffectOperationID, confirmation.PrincipalID) &&
-				a.FenceGeneration == uint64(parent.Revision) &&
-				confirmation.EffectOperationID == RegisteredOperatorAcknowledgementID(parent.BindingOperationID, confirmation.BindingRevision) &&
-				a.ID == confirmation.EffectOperationID && confirmation.OnboardingOperationID == parent.ID &&
-				confirmation.OnboardingRevision == parent.Revision && confirmation.BindingRevision > 0 &&
-				confirmation.Destination != "" && confirmation.ActivationID == "" && confirmation.ActivationRevision == 0 &&
-				confirmation.BundleHash == "" && confirmation.BundleIdentity == "" && confirmation.PackInventoryGeneration == "" &&
-				confirmation.RuntimeInstanceID == "" && confirmation.ContextPublicationGeneration == 0 && !confirmation.PlanGeneration.Valid()
+		if confirmation.TransportParent != nil {
+			return a.validRegisteredConfirmation()
 		}
 		return confirmation.Destination == "" && validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
 			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
@@ -487,6 +480,16 @@ func (a Authority) Valid() bool {
 	default:
 		return false
 	}
+}
+
+func (a Authority) validRegisteredConfirmation() bool {
+	c, parent := a.ChannelConfirmation, a.ChannelConfirmation.TransportParent
+	return parent.Valid() && validUUIDs(c.EffectOperationID, c.PrincipalID) && a.FenceGeneration == uint64(parent.Revision) &&
+		c.EffectOperationID == RegisteredOperatorAcknowledgementID(parent.BindingOperationID, c.BindingRevision) &&
+		a.ID == c.EffectOperationID && c.OnboardingOperationID == parent.ID && c.OnboardingRevision == parent.Revision &&
+		c.BindingRevision > 0 && c.Destination != "" && c.ActivationID == "" && c.ActivationRevision == 0 &&
+		c.BundleHash == "" && c.BundleIdentity == "" && c.PackInventoryGeneration == "" && c.RuntimeInstanceID == "" &&
+		c.ContextPublicationGeneration == 0 && !c.PlanGeneration.Valid()
 }
 
 func (a Authority) Generation() uint64 {
