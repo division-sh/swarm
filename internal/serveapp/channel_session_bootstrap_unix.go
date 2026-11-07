@@ -38,7 +38,7 @@ type serveSessionBootstrap struct {
 type serveSessionBootstrapAttempt struct {
 	mu          sync.Mutex
 	operation   channelonboarding.Operation
-	connection  *sessionprovider.RuntimeConnection
+	connection  serveSessionConnection
 	done        chan struct{}
 	err         error
 	bootstrap   bool
@@ -49,7 +49,7 @@ type serveSessionBootstrapAttempt struct {
 	connectDone chan struct{}
 }
 
-func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
+func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (serveSessionConnection, error) {
 	connection, err := a.finishedConnection(ctx)
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionpro
 
 // Completed preparation/transport is historical ownership, not current health
 // or execution authority. Those consumers retain their own exact checks.
-func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
+func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (serveSessionConnection, error) {
 	if ctx == nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
@@ -94,7 +94,7 @@ func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (
 	}
 }
 
-func (s *serveSessionBootstrap) currentConnection(ctx context.Context, operationID string) (*sessionprovider.RuntimeConnection, error) {
+func (s *serveSessionBootstrap) currentConnection(ctx context.Context, operationID string) (serveSessionConnection, error) {
 	s.mu.Lock()
 	attempt := s.connections[operationID]
 	s.mu.Unlock()
@@ -129,7 +129,7 @@ func (s *serveSessionBootstrap) QualifySessionPlan(candidate channelonboarding.C
 	return sessionprovider.QualifyBootstrapPlan(candidate.Plan)
 }
 
-func (s *serveSessionBootstrap) connection(operationID string) *sessionprovider.RuntimeConnection {
+func (s *serveSessionBootstrap) connection(operationID string) serveSessionConnection {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if attempt := s.connections[operationID]; attempt != nil {
@@ -351,7 +351,7 @@ func (s *serveSessionBootstrap) operationsFor(op channelonboarding.Operation) (c
 	return scoped.DeploymentChannelOperations(), nil
 }
 
-func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboarding.Operation, connection *sessionprovider.RuntimeConnection) error {
+func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboarding.Operation, connection serveSessionConnection) error {
 	if !op.DeploymentRegistration || connection == nil || connection.ConnectionID() != op.SessionConnectionID {
 		return channelonboarding.ErrInvalidRequest
 	}
@@ -605,7 +605,9 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 		connection, err = sessionprovider.OpenRuntimeConnection(owned, options)
 	}
 	s.mu.Lock()
-	attempt.connection = connection
+	if connection != nil {
+		attempt.connection = connection
+	}
 	s.mu.Unlock()
 	return err
 }
