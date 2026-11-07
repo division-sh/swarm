@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -14,6 +15,8 @@ import (
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
+
+const whatsAppAccountMismatchWarning = "This flow's operator_account does not match the registered WhatsApp account; customer messages on the unmatched account will not reach this flow. Check the configured account."
 
 func TestWhatsAppBootAccountMismatchWarningOnly(t *testing.T) {
 	for _, account := range []string{"+15551234567", "+1 (555) 123-4567"} {
@@ -35,6 +38,7 @@ func requireWhatsAppBootAccountMismatchWarning(t *testing.T, account string) {
 	definition := runtime.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
 		RootAdmission: rooted.Admission(), RuntimeInstanceID: uuid.NewString(), PublicationGeneration: 1,
 		PackInventoryDigest: "sha256:discovery-inventory", ProviderTriggerCatalog: catalog, ChannelPlans: []packs.SatisfactionPlan{plan}, BundleIdentity: identity}
+	binding, _ := channelprovider.Lookup("whatsapp")
 	for _, test := range []struct {
 		name, account, provider string
 		phase                   channelonboarding.Phase
@@ -48,14 +52,14 @@ func requireWhatsAppBootAccountMismatchWarning(t *testing.T, account string) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			operations := []channelonboarding.Operation{{DeploymentRegistration: true, Provider: test.provider, AccountReference: test.account, AccountConfirmed: test.confirmed, Phase: test.phase}}
-			mismatch, err := whatsAppAccountMismatch([]runtime.BundleContext{definition}, operations)
+			mismatch, err := registeredAccountMismatch(binding, []runtime.BundleContext{definition}, operations)
 			if err != nil || mismatch != test.mismatch {
 				t.Fatalf("mismatch=%t want=%t error=%v", mismatch, test.mismatch, err)
 			}
 			var out, diagnostic bytes.Buffer
 			presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &out, ErrorOutput: &diagnostic})
 			if mismatch {
-				presenter.recordWhatsAppAccountMismatch()
+				presenter.recordAccountMismatch(binding)
 			}
 			presenter.readyPresentation(serveLifecycleReadyFacts{})
 			presenter.finish()
