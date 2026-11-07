@@ -371,13 +371,10 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if provider == "" {
 		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
 	}
-	closeInput, deferAccountInput, err := opts.prepareConnectConfirmationInput(ctx, provider)
+	deferAccountInput, err := opts.validateConnectConfirmationInput(provider)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	defer func() {
-		finishChannelConfirmationInput(closeInput, &resultErr)
-	}()
 	bundleHash := ""
 	if opts.sourceSet {
 		sourceHash, err := admitCLIIdentitySource(opts.apiOptions.invocationRoot, opts.source)
@@ -406,8 +403,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			return nil
 		}
 		if deferAccountInput && !begun.Operation.AccountConfirmed {
-			closeInput, err = opts.prepareConfirmationInput(ctx)
-			if err != nil {
+			if err := opts.validateConfirmationInput(); err != nil {
 				return returnCLIValidationError(errOut, err)
 			}
 		}
@@ -448,7 +444,8 @@ func (opts channelConnectOptions) onboardingStartParams(provider, bundleHash str
 }
 
 func finishChannelOnboarding(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) error {
-	if opts.waitForPairing && opts.apiOptions.input != nil {
+	_, terminalAware := opts.apiOptions.input.(interface{ Fd() uintptr })
+	if opts.waitForPairing && opts.apiOptions.input != nil && !terminalAware {
 		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
 	}
 	if opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
@@ -516,11 +513,9 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
 	}
-	closeInput, err := opts.prepareConfirmationInput(ctx)
-	if err != nil {
+	if err := opts.validateConfirmationInput(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	defer finishChannelConfirmationInput(closeInput, &resultErr)
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
 		progressOut = io.Discard
@@ -1067,13 +1062,18 @@ func channelOperationRenderers(result channelOperationEnvelope, packID string) (
 	return human, quiet
 }
 
-func confirmChannelAccount(ctx context.Context, input io.Reader, out io.Writer, prompt string) (bool, error) {
+func confirmChannelAccount(ctx context.Context, input io.Reader, out io.Writer, prompt string) (approved bool, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	if input == nil {
 		input = strings.NewReader("")
 	}
+	input, closeInput, err := channelConfirmationReader(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	defer finishChannelConfirmationInput(closeInput, &resultErr)
 	fmt.Fprint(out, prompt)
 	reader, ok := input.(*bufio.Reader)
 	if !ok {

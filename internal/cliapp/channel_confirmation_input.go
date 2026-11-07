@@ -1,32 +1,20 @@
 package cliapp
 
-import (
-	"context"
-	"errors"
-)
+import "errors"
 
-func (opts *channelConnectOptions) prepareConnectConfirmationInput(ctx context.Context, provider string) (func() error, bool, error) {
+func (opts channelConnectOptions) validateConnectConfirmationInput(provider string) (bool, error) {
 	deferred := provider == "telegram" && opts.verb == "connect" && opts.account != "" && opts.apiOptions.channelRegistration != nil
 	if deferred {
-		return nil, true, nil
+		return true, nil
 	}
-	closeInput, err := opts.prepareConfirmationInput(ctx)
-	return closeInput, false, err
+	return false, opts.validateConfirmationInput()
 }
 
-func (opts *channelConnectOptions) prepareConfirmationInput(ctx context.Context) (func() error, error) {
+func (opts channelConnectOptions) validateConfirmationInput() error {
 	if (opts.verb == "connect" || opts.verb == "rebind") && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
-		return nil, errors.New("channel account confirmation requires a terminal or --yes")
+		return errors.New("channel account confirmation requires a terminal or --yes")
 	}
-	if opts.yes {
-		return func() error { return nil }, nil
-	}
-	input, closeInput, err := channelConfirmationReader(ctx, opts.apiOptions.input)
-	if err != nil {
-		return nil, err
-	}
-	opts.apiOptions.input = input
-	return closeInput, nil
+	return nil
 }
 
 func finishChannelConfirmationInput(closeInput func() error, resultErr *error) {

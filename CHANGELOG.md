@@ -24,6 +24,8 @@ release approval or a promise of old-store migration.
   connect, serve, restart and reset do not resend it. Account approval and
   provider credential/intake checks are unchanged. Human claim deadlines for
   both providers show local date/time to seconds with the timezone. (#2988)
+  Interactive provider credentials keep hidden terminal entry before cancellable
+  account confirmation.
 
 - A newly bound registered WhatsApp operator receives one journaled
   `Swarm operator successfully connected` acknowledgement before connect reports
