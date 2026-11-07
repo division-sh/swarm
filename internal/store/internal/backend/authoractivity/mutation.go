@@ -179,7 +179,7 @@ func (m *Mutation) updateLast(ctx context.Context, last int64) error {
 	return nil
 }
 
-const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at FROM author_activity_occurrences`
+const occurrenceSelect = authoractivityadapter.OccurrenceSelect
 
 func (m *Mutation) loadByDedup(ctx context.Context, key string) (runtimeauthoractivity.Occurrence, bool, error) {
 	key = strings.TrimSpace(key)

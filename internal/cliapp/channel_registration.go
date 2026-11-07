@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 // ChannelRegistrationSession is the invocation-owned composition of existing
@@ -19,6 +20,7 @@ type ChannelRegistrationSession interface {
 	operatorchannel.CredentialCurrentness
 	operatorchannel.SessionAdmissionOwner
 	channelonboarding.DeploymentSessionOwner
+	channelonboarding.RegisteredAcknowledgement
 	PollOperatorClaim(context.Context, channelonboarding.Operation) error
 	ConsumeWebhookClaim(context.Context, channelonboarding.AccountReference, func(channelonboarding.CredentialAdmission) bool, func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), func() bool) (bool, error)
 	ReadSessionConnection(context.Context, channelonboarding.Operation) (channelonboarding.SessionConnectionReadback, error)
@@ -26,6 +28,7 @@ type ChannelRegistrationSession interface {
 }
 
 type ChannelRegistrationOptions struct {
+	Effects        effects.Store
 	Directory      string
 	Principal      operatorchannel.Principal
 	Process        *worklifetime.Process

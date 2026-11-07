@@ -224,6 +224,8 @@ type ServeRegistrationAuthority struct {
 }
 
 type ChannelConfirmationAuthority struct {
+	TransportParent              *channelnative.TransportParent
+	Destination                  string
 	EffectOperationID            string
 	OnboardingOperationID        string
 	OnboardingRevision           int64
@@ -426,6 +428,14 @@ func (a Authority) Valid() bool {
 			registration.ContextPublicationGeneration > 0 && registration.PlanGeneration.Valid()
 	case AuthorityChannelConfirmation:
 		confirmation := a.ChannelConfirmation
+		if parent := confirmation.TransportParent; parent != nil {
+			return parent.Valid() && validUUIDs(confirmation.EffectOperationID, confirmation.PrincipalID) &&
+				a.ID == confirmation.EffectOperationID && confirmation.OnboardingOperationID == parent.ID &&
+				confirmation.OnboardingRevision == parent.Revision && confirmation.BindingRevision > 0 &&
+				confirmation.Destination != "" && confirmation.ActivationID == "" && confirmation.ActivationRevision == 0 &&
+				confirmation.BundleHash == "" && confirmation.BundleIdentity == "" && confirmation.PackInventoryGeneration == "" &&
+				confirmation.RuntimeInstanceID == "" && confirmation.ContextPublicationGeneration == 0 && !confirmation.PlanGeneration.Valid()
+		}
 		return validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
 			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
 			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
@@ -565,6 +575,13 @@ func (a Authority) Evidence() map[string]any {
 		evidence["effect_operation_id"] = confirmation.EffectOperationID
 		evidence["onboarding_operation_id"] = confirmation.OnboardingOperationID
 		evidence["onboarding_revision"] = confirmation.OnboardingRevision
+		if confirmation.TransportParent != nil {
+			evidence["transport_parent"] = *confirmation.TransportParent
+			evidence["binding_revision"] = confirmation.BindingRevision
+			evidence["principal_id"] = confirmation.PrincipalID
+			evidence["destination"] = confirmation.Destination
+			break
+		}
 		evidence["activation_id"] = confirmation.ActivationID
 		evidence["activation_revision"] = confirmation.ActivationRevision
 		evidence["binding_revision"] = confirmation.BindingRevision

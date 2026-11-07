@@ -26,6 +26,21 @@ func LockBindingTx(ctx context.Context, tx *sql.Tx, postgres bool, identity doma
 	return loadBinding(ctx, tx, d, identity.Key(), true)
 }
 
+// ReadEffectBinding preserves the identity codec for the effect owner's exact
+// currentness read. Its mutation caller already holds the principal fence.
+func ReadEffectBinding(ctx context.Context, q queryer, postgres, lock bool, identity domain.InterfaceIdentity, childID string) (domain.Binding, domain.Operation, error) {
+	d := dialectSQLite
+	if postgres {
+		d = dialectPostgres
+	}
+	binding, found, err := loadBinding(ctx, q, d, identity.Key(), lock)
+	if err != nil || !found {
+		return binding, domain.Operation{}, err
+	}
+	child, _, err := loadOperationByID(ctx, q, d, childID, false)
+	return binding, child, err
+}
+
 // RequireOnboardingBinding consumes the identity owner's decoders inside the
 // caller's parent-locked transaction. Bound child identity is immutable; reading
 // it without a child lock preserves confirmation's child-before-parent ordering.

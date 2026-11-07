@@ -53,6 +53,9 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 	case runtimeeffects.AuthorityServeRegistration:
 		return serveRegistrationAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelConfirmation:
+		if authority.ChannelConfirmation.TransportParent != nil {
+			return channelonboarding.RegisteredConfirmationCurrent(ctx, q, authority, true, false)
+		}
 		return channelConfirmationAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelDelivery:
 		return channelDeliveryAuthorityCurrent(ctx, q, authority, true, false)
@@ -109,6 +112,9 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	case runtimeeffects.AuthorityServeRegistration:
 		return serveRegistrationAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelConfirmation:
+		if authority.ChannelConfirmation.TransportParent != nil {
+			return channelonboarding.RegisteredConfirmationCurrent(ctx, q, authority, false, false)
+		}
 		return channelConfirmationAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelDelivery:
 		return channelDeliveryAuthorityCurrent(ctx, q, authority, false, false)
@@ -297,6 +303,9 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityChannelConfirmation:
 		confirmation := authority.ChannelConfirmation
+		if confirmation.TransportParent != nil {
+			return requireRegisteredConfirmation(ctx, tx, authority, true)
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE connected_channel_activations activation SET updated_at=activation.updated_at
 			FROM channel_onboarding_operations operation
@@ -399,6 +408,9 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityChannelConfirmation:
 		confirmation := authority.ChannelConfirmation
+		if confirmation.TransportParent != nil {
+			return requireRegisteredConfirmation(ctx, tx, authority, false)
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE connected_channel_activations SET updated_at=updated_at
 			WHERE activation_id=? AND status='current' AND activation_revision=?

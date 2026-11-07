@@ -263,6 +263,14 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			if registered.Operation.OperationID != pairing.Operation.OperationID || registered.Operation.Phase != channelonboarding.PhaseSucceeded || !registered.Operation.AccountConfirmed || registered.Operation.IdentityOperationID == "" || registered.Binding == nil || registered.Binding.ExternalAccountRef != "15551234568@s.whatsapp.net" {
 				t.Fatal("public enrollment lost the original account or exact operator")
 			}
+			select {
+			case sent := <-peer.sent:
+				if sent.To.ToNonAD().String() != registered.Binding.ConversationRef || sent.Body.GetConversation() != "Swarm operator successfully connected" {
+					t.Fatalf("registered operator acknowledgement mismatch: to=%s body=%v", sent.To, sent.Body)
+				}
+			case <-ctx.Done():
+				t.Fatal("public enrollment succeeded without the operator acknowledgement")
+			}
 			requireOfflinePairedWhatsAppServiceRoundTrip(t, opts, peer, registered.Operation)
 		})
 	}
