@@ -30,6 +30,9 @@ func DeploymentEffectParent(kind, id string, evidence []byte) (*channelnative.Tr
 		return nil, err
 	}
 	if parent.Kind == channelnative.TransportRuntimeActivation {
+		if kind == "channel_confirmation" {
+			return nil, fmt.Errorf("registered acknowledgement requires its deployment parent")
+		}
 		return nil, nil
 	}
 	switch kind {

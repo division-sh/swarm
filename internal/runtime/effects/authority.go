@@ -507,7 +507,8 @@ func (a Authority) validRegisteredConfirmation() bool {
 	if c.RegisteredRequest != "" && channelnative.ValidateTelegramConfirmation(c.RegisteredRequest, c.Destination, RegisteredOperatorAcknowledgementText) != nil {
 		return false
 	}
-	return parent.Valid() && validUUIDs(c.EffectOperationID, c.PrincipalID) && a.FenceGeneration == uint64(parent.Revision) &&
+	return parent.Kind == channelnative.TransportDeploymentRegistration && parent.Valid() &&
+		validUUIDs(c.EffectOperationID, c.PrincipalID) && a.FenceGeneration == uint64(parent.Revision) &&
 		c.EffectOperationID == RegisteredOperatorAcknowledgementID(parent.BindingOperationID, c.BindingRevision) &&
 		a.ID == c.EffectOperationID && c.OnboardingOperationID == parent.ID && c.OnboardingRevision == parent.Revision &&
 		c.BindingRevision > 0 && c.Destination != "" && c.ActivationID == "" && c.ActivationRevision == 0 &&
