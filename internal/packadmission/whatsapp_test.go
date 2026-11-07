@@ -81,7 +81,7 @@ func TestEmbeddedWhatsAppPackConsumesExactInventoryWithoutInventingExecution(t *
 		}
 		id, tool, err := plan.ConnectorOperation("deliver")
 		target, native := tool.InProcess()
-		if err != nil || id != "whatsapp.send_text" || !native || target != contracts.ToolInProcessWhatsAppSendText {
+		if err != nil || id != "whatsapp.send_text" || !native || target != contracts.ToolInProcessWhatsAppSendText || target.Provider() != plan.Provider() {
 			t.Fatal("installed delivery lost exact native implementation", id, err)
 		}
 		var unavailable *operatorchannel.SessionProviderUnavailableError
