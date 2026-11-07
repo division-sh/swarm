@@ -163,6 +163,9 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			var pairing channelonboarding.Result
 			select {
 			case pairing = <-qr:
+			case code := <-done:
+				joined = true
+				t.Fatalf("public enrollment exited before QR: exit=%d err=%s", code, errOut.String())
 			case <-ctx.Done():
 				t.Fatal("public CLI did not offer its QR")
 			}
