@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -25,17 +26,27 @@ type SessionInputReference struct {
 	Kind         string
 }
 
+// Only the provider subtree can supply original retained evidence. The issuer
+// still validates responsibility/currentness and owns the input seal.
+type retainedSessionInputReader interface {
+	readOwnedInput(context.Context, SessionInputReference) (nativeSessionInput, error)
+	readPendingBusinessInput(context.Context, SessionInputReference) (nativeSessionInput, error)
+	readPendingClaimInput(context.Context, SessionInputReference) (nativeSessionInput, error)
+	capturePublications() retainedPublicationOwner
+}
+
 type sessionInputOwner struct {
 	store           channelonboarding.Store
 	operations      channelonboarding.OperationStore
-	native          *sessionInputReader
+	native          retainedSessionInputReader
 	operation       string
 	registered      *RegisteredBusinessBinding
 	operatorAccount channelonboarding.AccountReference
 }
 
-func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native *sessionInputReader, operation string) (*sessionInputOwner, error) {
-	if store == nil || operations == nil || native == nil || operation == "" {
+func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native retainedSessionInputReader, operation string) (*sessionInputOwner, error) {
+	if store == nil || operations == nil || native == nil || operation == "" ||
+		reflect.ValueOf(native).Kind() == reflect.Pointer && reflect.ValueOf(native).IsNil() {
 		return nil, fmt.Errorf("native input requires its owned SDK/capture and exact declared responsibility")
 	}
 	return &sessionInputOwner{store: store, operations: operations, native: native, operation: operation}, nil

@@ -148,12 +148,12 @@ func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, i
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if operationID == "whatsapp" {
+	if binding, installed := channelprovider.Lookup(operationID); installed && binding.Session() {
 		list, err := fetchChannelList(ctx, client)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
-		operationID, err = list.linkedSessionOperation("whatsapp")
+		operationID, err = list.linkedSessionOperation(binding.Provider())
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -541,8 +541,9 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 	if qualification.Reason != "" {
 		fmt.Fprintln(out, qualification.Reason)
 	}
-	if result.Operation.Provider == "telegram" && result.Operation.ClientLanguage == "" {
-		fmt.Fprintf(out, "Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", result.Operation.OperationID)
+	if result.Operation.ClientLanguage == "" {
+		binding, _ := channelprovider.Lookup(result.Operation.Provider)
+		fmt.Fprint(out, binding.LanguageHelp(result.Operation.OperationID))
 	}
 }
 
@@ -1165,8 +1166,14 @@ func writeChannelList(out io.Writer, result channelListResult) {
 	footers := []string{}
 	wroteSession := false
 	for _, row := range result.Channels {
-		if row.Identity.Interface.ChannelPackID == "whatsapp" || row.Operation != nil && row.Operation.Provider == "whatsapp" {
-			writeWhatsAppConnection(out, row.Connection, false)
+		binding, _ := channelprovider.Lookup(row.Identity.Interface.ChannelPackID)
+		if row.Operation != nil {
+			if current, _ := channelprovider.Lookup(row.Operation.Provider); current.ReadyTeaching() != "" {
+				binding = current
+			}
+		}
+		if binding.ReadyTeaching() != "" {
+			writeProviderConnection(out, binding, row.Connection, false)
 			wroteSession = true
 			continue
 		}
