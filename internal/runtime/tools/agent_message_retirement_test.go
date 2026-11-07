@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/llm"
-	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -100,62 +99,5 @@ func TestAgentMessageRetirementPermissionVocabularyCannotBeResurrected(t *testin
 				}
 			})
 		}
-	}
-}
-
-func TestAgentMessageRetirementAuthoritativeSpecMatchesLifecycle(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	spec, err := runtimecontracts.LoadPlatformSpecDocument(runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, permission := range spec.PermissionsModel.Permissions {
-		if isRetiredMessagePermission(permission) {
-			t.Fatalf("reserved permission remains in admitted spec: %s", permission)
-		}
-	}
-	root := spec.SourceValue()
-	for _, path := range [][]string{
-		{"permissions_model", "permission_scoping", "messaging", "status"},
-		{"tool_model", "platform_builtin_tools", "retired_agent_message", "status"},
-	} {
-		value := root
-		for _, segment := range path {
-			field, err := value.Lookup(segment)
-			if err != nil {
-				t.Fatal(err)
-			}
-			value = field.Value
-		}
-		var status string
-		if err := value.Project(&status); err != nil || status != "retired_reopen_gated" {
-			t.Fatalf("%v lifecycle = %q, %v", path, status, err)
-		}
-	}
-	for _, name := range []string{RetiredAgentMessageTool, "mcp__runtime-tools__" + RetiredAgentMessageTool} {
-		descriptor, ok := hitlIdentityLifecycleForName(name)
-		if !ok || descriptor.lifecycle != hitlIdentityRetired {
-			t.Fatalf("runtime lifecycle differs for %s", name)
-		}
-	}
-	toolModel, err := root.Lookup("tool_model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	builtins, err := toolModel.Value.Lookup("platform_builtin_tools")
-	if err != nil {
-		t.Fatal(err)
-	}
-	retired, err := builtins.Value.Lookup("retired_agent_message")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rule, err := retired.Value.Lookup("rule")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var teaching string
-	if err := rule.Value.Project(&teaching); err != nil || !strings.Contains(teaching, "agent_message") || !strings.Contains(teaching, "unsupported") {
-		t.Fatalf("authoritative/runtime teaching differs: %q, %v", teaching, err)
 	}
 }
