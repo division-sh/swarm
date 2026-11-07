@@ -52,7 +52,7 @@ func TestChannelClaimWaitUsesStoredExpiry(t *testing.T) {
 				if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "stopped waiting") {
 					t.Fatal("earlier caller cancellation was not preserved", err)
 				}
-			} else if !strings.Contains(err.Error(), expires.Local().Format(time.RFC3339Nano)) {
+			} else if !strings.Contains(err.Error(), expires.Local().Format("2006-01-02 15:04:05 MST (-07:00)")) {
 				t.Fatal("wait did not report its original stored expiry", err)
 			}
 		})

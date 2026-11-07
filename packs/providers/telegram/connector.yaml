@@ -390,15 +390,17 @@ tools:
     output_schema:
       type: object
       additionalProperties: false
-      required: [bot_id]
+      required: [bot_id, username]
       properties:
         bot_id: {type: integer, minimum: 1, maximum: 4503599627370495}
+        username: {type: string, pattern: '^[A-Za-z0-9_]{5,32}$', minLength: 5, maxLength: 32}
     response_success:
       kind: json_field_equals
       path: response.body.ok
       equals: true
     response_mapping:
       bot_id: "{{response.body.result.id}}"
+      username: "{{response.body.result.username}}"
     http:
       method: GET
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMe

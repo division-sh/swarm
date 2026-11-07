@@ -47,7 +47,7 @@ func (c *RuntimeConnection) AcknowledgeRegisteredOperator(ctx context.Context, s
 	if !ok || !a.Valid() || process.RuntimeInstanceID == "" {
 		return fmt.Errorf("registered acknowledgement requires its exact journal and process authority")
 	}
-	if settled, err := registeredAcknowledgementSettled(ctx, reader, id); err != nil || settled {
+	if settled, err := effects.RegisteredAcknowledgementSettled(ctx, reader, id); err != nil || settled {
 		return err
 	}
 	ctx = authoractivity.WithScope(ctx, authoractivity.RuntimeScope(process.RuntimeInstanceID))
@@ -93,21 +93,4 @@ func (c *RuntimeConnection) AcknowledgeRegisteredOperator(ctx context.Context, s
 		return errors.Join(launchErr, err)
 	}
 	return errors.Join(launchErr, handle.Succeed(ctx, evidence))
-}
-
-func registeredAcknowledgementSettled(ctx context.Context, reader effects.OutcomeStore, id string) (bool, error) {
-	outcome, found, err := reader.GetExternalEffectOutcome(ctx, id)
-	if err != nil || !found {
-		return false, err
-	}
-	if outcome.OperationID != id || outcome.Kind != effects.KindChannelConfirmation || outcome.AuthorityKind != effects.AuthorityChannelConfirmation || outcome.AuthorityID != id {
-		return false, fmt.Errorf("registered acknowledgement journal identity contradicts the binding")
-	}
-	if outcome.TerminalSuccess() {
-		return true, nil
-	}
-	if outcome.AttemptState != effects.StateAuthorized && outcome.AttemptState != effects.StateTerminalFailure {
-		return false, fmt.Errorf("registered acknowledgement outcome is %s; refusing blind resend", outcome.AttemptState)
-	}
-	return false, nil
 }

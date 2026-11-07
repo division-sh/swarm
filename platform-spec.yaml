@@ -12608,6 +12608,15 @@ tool_model:
         requires --yes only while that operation and its nested identity operation are currently awaiting claimant
         confirmation, never while provider activation, credential admission, claim polling, activation publication, or
         confirmation delivery owns the next step.
+        Default Telegram deployment connect retains account approval, prints the authenticated bot's username,
+        readable code, stored expiry and prefilled send-code link, and accepts the authenticated code without a
+        second claimant yes/no prompt. It reports Code received from and the operator-ready serve/mailbox commands,
+        not an activation revision or a client-language qualification. Human expiry text for both providers uses
+        local date/time to seconds with an explicit timezone; stored/API precision and the actual deadline are unchanged.
+        A newly committed Telegram operator binding sends Swarm operator successfully connected to that exact chat
+        before terminal success through the existing deployment-parent journal and exact credential-backed HTTP request.
+        Later connect, serve, restart and reset do not resend it; an uncertain send never becomes a blind retry.
+        Normal Telegram claim timeout text does not expose an operation ID; structured identities remain intact.
       declaration_to_execution: >
         A structurally admitted webhook ingress is discoverable before credentials exist. Its candidate and reserved
         operation retain exact source, inventory, channel-plan and declaration identity with target_generation=0 and
