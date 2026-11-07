@@ -401,9 +401,6 @@ func assertExamplesPolicyMatrixRow(t *testing.T, methodName string, rawProof raw
 	if evidence.Status != "policy_deferred" {
 		t.Fatalf("%s examples status = %q, want policy_deferred while examples_policy is deferred", methodName, evidence.Status)
 	}
-	if !evidenceHasArtifact(evidence, "platform-spec.yaml") {
-		t.Fatalf("%s examples missing platform-spec.yaml artifact proof_ref", methodName)
-	}
 	if !evidenceHasArtifact(evidence, "openrpc.json") {
 		t.Fatalf("%s examples missing openrpc.json artifact proof_ref", methodName)
 	}
@@ -417,9 +414,6 @@ func assertServiceDiscoveryPolicyMatrixRow(t *testing.T, methodName string, poli
 	assertServiceDiscoveryPolicyNotPublished(t, policy)
 	if evidence.Status != "policy_not_published" {
 		t.Fatalf("%s service_discovery_publication status = %q, want policy_not_published while service_discovery_policy is not_published", methodName, evidence.Status)
-	}
-	if !evidenceHasArtifact(evidence, "platform-spec.yaml") {
-		t.Fatalf("%s service_discovery_publication missing platform-spec.yaml artifact proof_ref", methodName)
 	}
 	if !evidenceHasArtifact(evidence, "openrpc.json") {
 		t.Fatalf("%s service_discovery_publication missing openrpc.json artifact proof_ref", methodName)

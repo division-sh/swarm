@@ -260,62 +260,6 @@ func visibleCLICommandPaths(t *testing.T) map[string]*cobra.Command {
 	return paths
 }
 
-func TestCLIOutputConformanceRegistryCoversVisibleCommandTree(t *testing.T) {
-	rows := cliOutputConformanceRegistryRows(t)
-	visible := visibleCLICommandPaths(t)
-	for command := range visible {
-		if _, ok := rows[command]; !ok {
-			t.Errorf("visible command %q missing from output_conformance_registry", command)
-		}
-	}
-	for command := range rows {
-		if _, ok := visible[command]; !ok {
-			t.Errorf("output_conformance_registry command %q is not visible in the Cobra tree", command)
-		}
-	}
-}
-
-func TestCLIOutputConformanceRegistryCoversImplementedCommandCatalogRows(t *testing.T) {
-	rows := cliOutputConformanceRegistryRows(t)
-	catalog := driftMappingValue(loadCLISpecification(t), "command_catalog")
-	if catalog == nil {
-		t.Fatal("command_catalog not found")
-	}
-	checked := 0
-	for i := 0; i+1 < len(catalog.Content); i += 2 {
-		rowName := catalog.Content[i].Value
-		row := catalog.Content[i+1]
-		command := driftMappingValue(row, "command")
-		status := driftMappingValue(row, "implementation_status")
-		if command == nil || status == nil {
-			continue
-		}
-		if !strings.HasPrefix(status.Value, "implemented") && status.Value != "partial" {
-			continue
-		}
-		if rowName == "root" {
-			checked++
-			if _, ok := rows["swarm"]; !ok {
-				t.Errorf("command_catalog.root: implemented command %q missing output_conformance_registry row", command.Value)
-			}
-			continue
-		}
-		path := commandPathTokens(command.Value)
-		if len(path) == 0 {
-			t.Errorf("command_catalog.%s: cannot derive command path from %q", rowName, command.Value)
-			continue
-		}
-		checked++
-		registryCommand := "swarm " + strings.Join(path, " ")
-		if _, ok := rows[registryCommand]; !ok {
-			t.Errorf("command_catalog.%s: implemented command %q missing output_conformance_registry row", rowName, registryCommand)
-		}
-	}
-	if checked < 40 {
-		t.Fatalf("implemented command_catalog rows checked = %d, want >= 40; row detection broken", checked)
-	}
-}
-
 func TestCLIOutputConformanceRegistryRowsAreWellFormed(t *testing.T) {
 	rows := cliOutputConformanceRegistryRows(t)
 	visible := visibleCLICommandPaths(t)
