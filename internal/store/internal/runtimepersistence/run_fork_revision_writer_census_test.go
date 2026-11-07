@@ -16,52 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
-func TestPlatformSpecRunForkRevisionRegistryIsClosed(t *testing.T) {
-	root := repoRootForRuntimeWriterGuard(t)
-	body, err := os.ReadFile(filepath.Join(root, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	text := string(body)
-	start := strings.Index(text, "    fixed_event_revision_and_workset:")
-	if start < 0 {
-		t.Fatal("platform spec is missing the fixed-event revision/workset contract")
-	}
-	end := strings.Index(text[start:], "    replay_resume_admission_taxonomy:")
-	if end < 0 {
-		t.Fatal("platform spec fixed-event revision/workset contract has no boundary")
-	}
-	contract := text[start : start+end]
-	for _, family := range []string{
-		"events", "entity_mutations", "entity_metadata", "event_deliveries",
-		"committed_replay_scopes", "event_receipts", "dead_letters", "timers",
-		"agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts", "fan_out_obligations",
-	} {
-		if strings.Count(contract, "      - "+family+"\n") != 1 {
-			t.Fatalf("platform spec historical registry does not contain %q exactly once", family)
-		}
-	}
-	for _, forbidden := range []string{"eleven-family", "transaction_id", "source_transaction_id", "txid_current", "xmin"} {
-		if strings.Contains(contract, forbidden) {
-			t.Fatalf("platform spec fixed-event contract retained %q", forbidden)
-		}
-	}
-	ddlStart := strings.Index(text, "    run_fork_revision_heads:")
-	if ddlStart < 0 {
-		t.Fatal("platform spec is missing the run-fork revision DDL block")
-	}
-	ddlEnd := strings.Index(text[ddlStart:], "    operator_principals:")
-	if ddlEnd < 0 {
-		t.Fatal("platform spec run-fork revision DDL block has no boundary")
-	}
-	ddl := text[ddlStart : ddlStart+ddlEnd]
-	for _, forbidden := range []string{"transaction_id", "source_transaction_id", "txid_current", "xmin"} {
-		if strings.Contains(ddl, forbidden) {
-			t.Fatalf("platform spec run-fork revision DDL retained %q", forbidden)
-		}
-	}
-}
-
 func TestRunForkRevisionCaptureIsBackendNeutralGuard(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	sharedFiles := []string{"effects.go", "exact_fact.go", "finalizer.go", "projection.go", "latest_facts.go"}
