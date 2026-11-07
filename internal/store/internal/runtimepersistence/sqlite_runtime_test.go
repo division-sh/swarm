@@ -1487,7 +1487,9 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	constructDefaultRootPublicationSourceFixture(t, ctx, store)
 	bus, err := newStoreTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

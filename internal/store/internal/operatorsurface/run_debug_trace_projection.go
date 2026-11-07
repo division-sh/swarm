@@ -64,8 +64,12 @@ func (s *RunSQLite) loadProjectedRunDebugTrace(ctx context.Context, runID string
 }
 
 func runDebugTracePageQuery(runID string, opts operatorread.RunDebugTraceQueryOptions) (runtimedelivery.RunTracePageQuery, error) {
+	if err := opts.Filter.ValidateIter(); err != nil {
+		return runtimedelivery.RunTracePageQuery{}, err
+	}
 	query := runtimedelivery.RunTracePageQuery{
 		RunID:              runID,
+		Life:               opts.Filter.Iter,
 		Limit:              opts.Limit,
 		Since:              opts.Since,
 		Until:              opts.Until,

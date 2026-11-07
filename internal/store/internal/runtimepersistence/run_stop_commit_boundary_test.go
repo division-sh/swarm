@@ -455,7 +455,7 @@ func prepareStopRacePublications(t *testing.T, selected selectedFanOutLifecycleO
 	if err != nil {
 		t.Fatal(err)
 	}
-	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+	route := constructGroupProofPublicationSource(t, ctx, selected, semanticview.Wrap(bundle), fixture.runID, "producer", fixture.createdAt)
 	source, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
 		t.Fatal(err)

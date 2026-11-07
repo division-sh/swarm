@@ -160,6 +160,7 @@ func retainedJoinWaitArm(t *testing.T, loop loopruntime.Activation, node, entryI
 		t.Fatal(err)
 	}
 	ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{
+		Life:  1,
 		RunID: "run", FlowScope: ".", InstanceID: "run", InstancePath: "run", EntityID: "run",
 		Stage: "working", Cause: "delivery", EventID: entryID, OccurrenceID: entryID, TransitionID: "transition",
 	}, loop.Generation())

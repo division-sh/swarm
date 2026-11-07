@@ -721,9 +721,9 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(op.AgentIdentity.Description(), runtimeagentcontrol.StatusIdle)
 	}
 	ownerID := uuid.NewString()
-	admission, err := store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+	admission, err := store.AdmitDirectiveExecution(lease.Context, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 		OperationID: op.OperationID, OwnerID: ownerID, Now: time.Now().UTC(), Lease: directiveExecutionLease,
-		ExecutionPosture: am.executionPosture,
+		ExecutionPosture: am.executionPosture, Source: am.semanticSource,
 	})
 	if !admission.Acknowledged {
 		if err == nil {
@@ -743,6 +743,8 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	directiveCtx := runtimecorrelation.WithRunID(lease.Context, strings.TrimSpace(directiveEvent.RunID()))
 	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
 	directiveCtx = runtimeeffects.WithDirectiveCompletionOrigin(directiveCtx, directiveOrigin)
+	directiveCtx = runtimeeffects.WithTurnInstanceSource(directiveCtx, am.semanticSource)
+	directiveCtx = runtimeeffects.WithTurnInstanceOwnership(directiveCtx, admission.Ownership)
 	directiveCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(directiveCtx)
 	heartbeatConfig := am.directiveHeartbeat.normalized()
 	heartbeatLease, err := am.beginWork(ctx, "directive heartbeat")

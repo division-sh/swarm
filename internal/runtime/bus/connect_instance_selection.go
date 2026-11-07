@@ -47,6 +47,9 @@ func (s connectInstanceSelection) ActionCode() string {
 		return ""
 	}
 	if s.Activation != nil {
+		if s.Activation.Restart != nil {
+			return "started over"
+		}
 		return "would_create"
 	}
 	if s.mode == contracts.FlowInputResolutionModeSelectOrCreate {

@@ -71,10 +71,7 @@ func TestClockScheduleOccurrenceAtomicReplayOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
-			if err != nil {
-				t.Fatal(err)
-			}
+			source := constructDefaultRootPublicationSourceFixture(t, ctx, store.(agentFixtureFlowStore))
 			setGenericScheduleClock(t, store, func() time.Time { return time.Now().UTC().Add(-time.Hour) })
 			command := genericschedule.AdmissionCommand{ScheduleKey: "poll", RunID: runID, FlowInstance: runID,
 				OwnerKind: genericschedule.OwnerInstance, OwnerID: ".", EventType: "test.node_emitted",

@@ -279,7 +279,7 @@ func (r connectRoutePlanResolver) matchConnectPlan(ctx context.Context, evt even
 		if err := r.appendMaterializedPlanEvaluation(ctx, evt.RunID(), out, plan, targets); err != nil {
 			return false, err
 		}
-		routes, err = stampConnectExecutionClaims(plan, routes)
+		routes, err = stampConnectExecutionClaims(ctx, evt, plan, routes)
 		if err != nil {
 			return false, err
 		}
@@ -379,16 +379,18 @@ func (r connectRoutePlanResolver) matchConnectPlan(ctx context.Context, evt even
 		}
 		if creation != nil {
 			out.ReplyCreations = append(out.ReplyCreations, *creation)
+			liveRoutes = bindReplyRequestRoutes(liveRoutes, creation.ID)
 		}
 		if continuation != nil {
 			out.ReplyContinuations = append(out.ReplyContinuations, runtimepinrouting.ReplyRequestContinuation{Record: *continuation, Plan: plan})
+			liveRoutes = bindReplyRequestRoutes(liveRoutes, continuation.ID)
 		}
 	}
-	routes, err = stampConnectExecutionClaims(plan, routes)
+	routes, err = stampConnectExecutionClaims(ctx, evt, plan, routes)
 	if err != nil {
 		return false, err
 	}
-	liveRoutes, err = stampConnectExecutionClaims(plan, liveRoutes)
+	liveRoutes, err = stampConnectExecutionClaims(ctx, evt, plan, liveRoutes)
 	if err != nil {
 		return false, err
 	}
@@ -445,8 +447,18 @@ func replyResponseDeliveryIntents(runID string, plan runtimepinrouting.ConnectRo
 	return intents, nil
 }
 
-func stampConnectExecutionClaims(plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute) ([]runtimepinrouting.ConnectDeliveryRoute, error) {
+func stampConnectExecutionClaims(ctx context.Context, event events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute) ([]runtimepinrouting.ConnectDeliveryRoute, error) {
+	life := events.DeliveryContextFromContext(ctx).Life
 	for index := range routes {
+		// Bind the same continuation life before hashing, not after the claim.
+		if routes[index].Context.Life == nil {
+			routes[index].Context.Life = life
+			var err error
+			routes[index].Context.Life, err = selectedForkRequestExecutionLife(ctx, event, plan, routes[index])
+			if err != nil {
+				return nil, err
+			}
+		}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, routes[index])
 		if err != nil {
 			return nil, err
@@ -540,6 +552,16 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 	}
 	target := record.Origin.Normalized()
+	life := events.InstanceLife{RunID: record.RunID, FlowInstance: target.FlowInstance, Life: record.OriginLife}
+	if life.FlowInstance == "" && target.EntityID == record.RunID && plan.ReceiverEndpoint().IsRoot() {
+		life.FlowInstance = record.RunID
+	}
+	if err := life.Validate(); err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
+	returnContext := events.DeliveryContextFromContext(ctx)
+	returnContext.Life = &life
+	ctx = events.WithDeliveryContext(ctx, returnContext)
 	subscribers, err := r.resolveSelectedReceiverCarriers(ctx, evt.RunID(), plan, target)
 	if err != nil {
 		return nil, nil, nil, 0, nil, err
@@ -572,7 +594,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 				return nil, nil, nil, 0, nil, fmt.Errorf("project reply agent plan: %w", err)
 			}
 		}
-		deliveryContext := events.DeliveryContext{}
+		deliveryContext := events.DeliveryContext{Life: &life}
 		if record.EnclosingReplyContextID != "" {
 			deliveryContext.Reply = &events.ReplyContextRef{ID: record.EnclosingReplyContextID}
 		}

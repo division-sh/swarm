@@ -269,7 +269,7 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 						}
 						defer tx.Rollback()
 						entered := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-						metadata := &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "receiver", StageDefined: staged, Status: "active", CreatedAt: entered, UpdatedAt: entered}
+						metadata := &runfork.RunForkMaterializedEntitySnapshotMetadata{Life: 1, Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "receiver", StageDefined: staged, Status: "active", CreatedAt: entered, UpdatedAt: entered}
 						sourceRun, childRun, sourceEntity := uuid.NewString(), uuid.NewString(), flowidentity.EntityID(metadata.FlowInstance)
 						projection, err := runfork.ProjectEntityOwnership(sourceRun, childRun, sourceEntity, metadata.FlowInstance)
 						if err != nil {
@@ -463,6 +463,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	}
 	record := workflowOwnershipConstructionRecord(t, source, runID, instance, entityType, mode, instanceKey, initial.ID(), graph.StageCount() != 0, enteredAt)
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: mutationlog.PresentLifecycleState(initial.ID()), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Life:  record.State.Life,
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: path, EntityType: entityType, StageDefined: graph.StageCount() != 0,
 		FlowTemplate: flow, Mode: mode, FlowConfig: config,
 		ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: instanceKey, InitialMaterialization: record.InitialMaterialization,
@@ -622,7 +623,7 @@ func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 	// crosses full-schema materialization, revision, and rollback ownership.
 	for _, query := range []string{
 		fmt.Sprintf(`CREATE TEMP TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, PRIMARY KEY(run_id,entity_id))`, idType, idType),
-		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, entity_id %s NOT NULL, entity_type TEXT, slug TEXT, name TEXT, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, config %s, status TEXT, stage_defined BOOLEAN NOT NULL, current_state TEXT NOT NULL, bookkeeping %s NOT NULL, accumulator %s NOT NULL, revision BIGINT NOT NULL, entered_state_at %s NOT NULL, created_at %s, updated_at %s NOT NULL, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, jsonType, jsonType, timeType, timeType, timeType, timeType),
+		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, entity_id %s NOT NULL, entity_type TEXT, slug TEXT, name TEXT, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, config %s, status TEXT, stage_defined BOOLEAN NOT NULL, current_state TEXT NOT NULL, bookkeeping %s NOT NULL, accumulator %s NOT NULL, revision BIGINT NOT NULL, entered_state_at %s NOT NULL, created_at %s, updated_at %s NOT NULL, terminated_at %s, life INTEGER NOT NULL DEFAULT 1 CHECK (life > 0), PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, jsonType, jsonType, timeType, timeType, timeType, timeType),
 		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, plan_hash TEXT NOT NULL, activation_attempt_id BIGINT NOT NULL DEFAULT 1, activation_attempt_grant_id %s, activation_attempt_state TEXT NOT NULL DEFAULT 'planned', phase TEXT NOT NULL DEFAULT 'planned', creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, idType, timeType, timeType, timeType),
 		fmt.Sprintf(`CREATE TEMP TABLE workflow_instance_initial_materializations (run_id %s, entity_id %s, instance_path TEXT, projection_version INTEGER NOT NULL, projection %s NOT NULL, occurred_at %s NOT NULL, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, timeType),
 	} {

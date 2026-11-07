@@ -25,13 +25,16 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -42,6 +45,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -1172,6 +1176,35 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	bus := eventReplayTestBus(t, pg)
 	ctx = admittedAPICompiledSourceContext(t, ctx, pg, semanticview.Wrap(runStartTestBundle(t, "scan.requested")))
 	seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
+	flow := semanticview.RootExecutionFlowID(source)
+	schema, declared := source.FlowSchemaByID(flow)
+	topology, staged := semanticview.WorkflowStageTopology(source, flow)
+	if !declared || !staged || !schema.Instance.Empty() {
+		t.Fatal("replay filler requires its admitted keyless root")
+	}
+	initial, err := topology.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := flowidentity.StandingForGeneration(source, flow, operatorReplayRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	constructionCtx := effects.WithExecutionMode(correlation.WithRunID(ctx, operatorReplayRunID), executionmode.Live)
+	command, err := flowactivationfixture.Command(constructionCtx, pipeline.WorkflowInstance{
+		Life: 1, WorkflowName: flow, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(),
+		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+		CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), CreatedAt: at, EnteredStageAt: at,
+	}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := pg.CommitFlowInstanceActivation(constructionCtx, command)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct exact replay filler source: %+v %v", committed, err)
+	}
 	ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
 	fillAgentChannel(t, ctx, bus, "agent-a", cap(ch))

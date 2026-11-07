@@ -18,6 +18,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -353,6 +354,12 @@ func (s *AgentPostgresOwner) commitAgentLifecycleTransitionTx(ctx context.Contex
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if req.OperationKind == "process_takeover" && s.providerDrains != nil {
+			ctx, err = s.providerDrains.PrepareStartupTurnOwnershipTx(ctx, tx, req.Identity)
+			if err != nil {
+				return err
+			}
+		}
 		if err := AuthorizeGenerationMutationTx(ctx, tx, req, false); err != nil {
 			return err
 		}
@@ -385,6 +392,12 @@ func (s *AgentSQLiteOwner) commitAgentLifecycleTransitionTx(ctx context.Context,
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
 	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if req.OperationKind == "process_takeover" && s.providerDrains != nil {
+			ctx, err = s.providerDrains.PrepareStartupTurnOwnershipTx(ctx, tx, req.Identity)
+			if err != nil {
+				return err
+			}
+		}
 		if err := AuthorizeGenerationMutationTx(ctx, tx, req, true); err != nil {
 			return err
 		}
@@ -398,11 +411,7 @@ func (s *AgentSQLiteOwner) commitAgentLifecycleTransitionTx(ctx context.Context,
 }
 
 func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator, instanceRebind bool) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	fingerprint, err := req.Identity.Fingerprint()
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+fingerprint); err != nil {
+	if err := lockLifecycleIdentityTx(ctx, tx, req.Identity, false); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	previous, _, exists, err := loadAgentLifecycleState(ctx, tx, req.Identity, false, true)
@@ -1152,7 +1161,7 @@ func lifecycleDiagnosticProducerPayload(ctx context.Context, runID string, resul
 		}
 		payload.ProducerLineage = &lineage
 	}
-	if origin := result.DiagnosticProvenance.Origin; origin.Causality == runtimemanager.LifecycleDiagnosticAcceptedEvent {
+	if origin := result.DiagnosticProvenance.Origin; origin.Causality == runfork.LifecycleDiagnosticAcceptedEvent {
 		if payload.ProducerLineage == nil {
 			payload.ProducerLineage = &runtimecorrelation.RuntimeLineage{RunID: runID, ParentEventID: origin.ParentEventID}
 		} else {

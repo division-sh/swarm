@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -204,7 +205,7 @@ func ProveAgentRowNativeSpawnAdoption(t *testing.T, ownerCtx context.Context, ro
 			ExpectedEpoch: view.RuntimeEpoch, ExpectedGeneration: view.Generation, ExpectedPhase: view.Phase,
 			TargetEpoch: view.RuntimeEpoch, TargetGeneration: view.Generation + 1, TargetPhase: AgentLifecycleRunning,
 			ConfigRevision: view.ConfigRevision, RunMode: AgentRunModeStandard, Topology: view.Topology, Now: time.Now().UTC(),
-			DiagnosticOrigin: LifecycleDiagnosticOrigin{Owner: LifecycleDiagnosticNormal, Causality: LifecycleDiagnosticObservation}}
+			DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}}
 		if _, err := store.CommitAgentLifecycleTransition(TerminalPanicFixtureContext(), terminal); err != nil {
 			t.Fatal(err)
 		}

@@ -57,9 +57,9 @@ func TestSelectedLifecycleDiagnosticUsesExactForkPointBothStores(t *testing.T) {
 					executionID, bindingID, forkID, sourceID, point.Kind, point.Revision, eventID); err != nil {
 					t.Fatal(err)
 				}
-				origin := runtimemanager.LifecycleDiagnosticOrigin{
-					Owner:       runtimemanager.LifecycleDiagnosticSelectedFork,
-					Causality:   runtimemanager.LifecycleDiagnosticObservation,
+				origin := runfork.LifecycleDiagnosticOrigin{
+					Owner:       runfork.LifecycleDiagnosticSelectedFork,
+					Causality:   runfork.LifecycleDiagnosticObservation,
 					SourceRunID: sourceID, ForkPoint: point, ForkEventID: point.EventID,
 					SelectedFork: runtimeeffects.SelectedContractForkAuthority{
 						ExecutionID: executionID, ForkRunID: forkID, Generation: 1,
@@ -70,7 +70,7 @@ func TestSelectedLifecycleDiagnosticUsesExactForkPointBothStores(t *testing.T) {
 				result := runtimemanager.AgentLifecycleTransitionResult{
 					Identity:             runtimeagentidentity.Identity{RunID: forkID},
 					ProcessBinding:       runtimemanager.ProcessExecutionBinding{BundleHash: bundleHash, RuntimeGeneration: 1},
-					DiagnosticProvenance: runtimemanager.LifecycleDiagnosticProvenance{Origin: origin, BindingID: bindingID},
+					DiagnosticProvenance: runfork.LifecycleDiagnosticProvenance{Origin: origin, BindingID: bindingID},
 				}
 				check := func(wantOK bool) {
 					t.Helper()

@@ -45,19 +45,20 @@ func newCompletionControllerForTest(store completionControllerTestStore) *runtim
 }
 
 type completionSettlementFixture struct {
-	store       completionSettlementTestStore
-	lifecycle   runtimemanager.AgentLifecyclePersistence
-	agentOwner  testing.TB
-	db          *sql.DB
-	sqlite      bool
-	authority   runtimeeffects.Authority
-	origin      runtimedelivery.Claim
-	context     context.Context
-	original    context.Context
-	sessionID   string
-	agentID     string
-	leaseHolder string
-	grantID     string
+	directiveOwnership map[string]events.InstanceOwnership
+	store              completionSettlementTestStore
+	lifecycle          runtimemanager.AgentLifecyclePersistence
+	agentOwner         testing.TB
+	db                 *sql.DB
+	sqlite             bool
+	authority          runtimeeffects.Authority
+	origin             runtimedelivery.Claim
+	context            context.Context
+	original           context.Context
+	sessionID          string
+	agentID            string
+	leaseHolder        string
+	grantID            string
 }
 
 func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
@@ -1617,7 +1618,8 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 		completionCtx = runtimeeffects.WithSessionGrant(completionCtx, runtimeeffects.SessionGrant{SessionID: sessionID, GrantID: grantID, LockOwner: leaseHolder})
 	}
 	return completionSettlementFixture{
-		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx, original: ctx,
+		directiveOwnership: make(map[string]events.InstanceOwnership),
+		store:              store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx, original: ctx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder, grantID: grantID,
 	}
 }

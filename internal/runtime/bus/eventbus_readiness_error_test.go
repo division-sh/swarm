@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
-	"github.com/google/uuid"
 )
 
 func TestCommittedRouteDeferralPreservesJoinedFailure(t *testing.T) {
@@ -34,7 +33,7 @@ func TestCommittedRouteDeferralPreservesJoinedFailure(t *testing.T) {
 			route := events.DeliveryRoute{
 				Recipient:     events.MustAgentDeliveryRecipient("readiness-agent"),
 				AgentIdentity: testAgentRouteIdentity(t, "readiness-agent", ""),
-				Context:       events.DeliveryContext{RunID: uuid.NewString()},
+				Context:       events.DeliveryContext{RunID: evt.RunID()},
 			}
 			result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
 			if result.Disposition() != tc.want {

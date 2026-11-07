@@ -7,7 +7,7 @@ import (
 )
 
 func TestA2StageEntryOriginIsExactInheritedHistory(t *testing.T) {
-	local := StageEntryRef{RunID: "child", FlowScope: "child", InstanceID: "child", InstancePath: "child", EntityID: "child", Stage: "draft", Cause: "construction"}
+	local := StageEntryRef{Life: 1, RunID: "child", FlowScope: "child", InstanceID: "child", InstancePath: "child", EntityID: "child", Stage: "draft", Cause: "construction"}
 	raw, err := json.Marshal(local)
 	if err != nil || local.Validate() != nil || strings.Contains(string(raw), "origin_run_id") {
 		t.Fatalf("fresh entry carries origin: %s %v", raw, err)
@@ -26,6 +26,16 @@ func TestA2StageEntryOriginIsExactInheritedHistory(t *testing.T) {
 		}
 		if _, err := StageEntryRefFromValue(bad); err == nil {
 			t.Fatalf("decoded nonexact/self origin %q", origin)
+		}
+	}
+	for _, life := range []int64{0, -1} {
+		bad := inherited
+		bad.Life = life
+		if bad.Validate() == nil || bad.Key() != "" {
+			t.Fatalf("invalid captured life %d acquired entry identity", life)
+		}
+		if _, err := StageEntryRefFromValue(bad); err == nil {
+			t.Fatalf("decoder repaired captured life %d", life)
 		}
 	}
 }

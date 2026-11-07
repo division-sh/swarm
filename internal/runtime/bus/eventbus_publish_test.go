@@ -734,6 +734,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 		t.Fatal("account fixture lacks its declared entity")
 	}
 	initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(constructionCtx, testRunScopedFlowRoute(instanceRoute), runtimepipeline.WorkflowInstance{
+		Life:       1,
 		InstanceID: "one", InstanceKey: "acct-agent", Mode: runtimecontracts.FlowModeTemplate,
 		StorageRef: instanceRoute.InstancePath, EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath),
 		WorkflowName: "account", WorkflowVersion: source.WorkflowVersion(), EntityType: accountEntity.EntityType, InstanceKind: "template",
@@ -3613,6 +3614,7 @@ func exactEventBusWorkflowFixtures(t *testing.T, source semanticview.Source, ins
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	for i := range instances {
 		instance := &instances[i]
+		instance.Life = 1
 		schema, found := source.FlowSchemaByID(instance.WorkflowName)
 		if !found {
 			t.Fatalf("fixture lacks declared flow %s", instance.WorkflowName)

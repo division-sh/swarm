@@ -18,6 +18,14 @@ func (s *EffectPostgresOwner) RequestTurnTimeout(ctx context.Context, attempt ru
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.TurnCancellation, error) {
 		var cancellation runtimeeffects.TurnCancellation
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			ctx, attempt, err = prepareTurnAttemptOwnershipTx(ctx, tx, true, s.directives, attempt)
+			if err != nil {
+				return err
+			}
+			if err := requireCurrentTurnOwnership(ctx, tx, attempt); err != nil {
+				return err
+			}
 			pending, err := providerTurnPendingTx(ctx, tx, attempt, s.delivery, s.directives)
 			if err != nil {
 				return err
@@ -39,6 +47,14 @@ func (s *EffectSQLiteOwner) RequestTurnTimeout(ctx context.Context, attempt runt
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite request turn timeout", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.TurnCancellation, error) {
 		var cancellation runtimeeffects.TurnCancellation
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			ctx, attempt, err = prepareTurnAttemptOwnershipTx(ctx, tx, false, s.directives, attempt)
+			if err != nil {
+				return err
+			}
+			if err := requireCurrentTurnOwnership(ctx, tx, attempt); err != nil {
+				return err
+			}
 			pending, err := providerTurnPendingTx(ctx, tx, attempt, s.delivery, s.directives)
 			if err != nil {
 				return err

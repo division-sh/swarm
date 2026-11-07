@@ -216,7 +216,11 @@ func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommi
 	if err != nil {
 		t.Fatal(err)
 	}
-	plans, err := bus.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{{Event: event}})
+	publicationContext, err := commit.PublicationContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := bus.PrepareEnginePublications(publicationContext, []runtimeengine.EmitIntent{{Event: event}})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("prepare occurrence publication plans=%d err=%v", len(plans), err)
 	}
@@ -713,7 +717,7 @@ func TestGenericScheduleReplyContextReplayConflictAndRecurringRejectionOnBothSto
 				SourceRunID: runID, SourceRequestEventID: requestEventID,
 				RequesterFlowID: "reply", RequestOutputPin: "requested", ReplyInputPin: "replied",
 				ProviderFlowID: "provider", ProviderInputPin: "requested", ProviderOutputPin: "replied",
-				Origin:               events.RouteIdentity{FlowID: "reply", FlowInstance: "reply/instance", EntityID: command.EntityID},
+				Origin: events.RouteIdentity{FlowID: "reply", FlowInstance: "reply/instance", EntityID: command.EntityID}, OriginLife: 1,
 				RequestCorrelationID: requestEventID, State: runtimereplycontext.StateOpen,
 				CreatedAt: now, UpdatedAt: now,
 			}

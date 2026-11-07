@@ -301,6 +301,7 @@ func constructA2ForkStructuralParent(t *testing.T, fixture *receiverConfigActiva
 func assertA2ForkConstructionMetadata(t *testing.T, entity runfork.RunForkEntityState, record pipeline.FlowInstanceActivationRecord, state pipeline.WorkflowEngineStateRecord) {
 	t.Helper()
 	want := runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Life:                   state.Life,
 		InitialMaterialization: canonicalSnapshotOwnershipJSON(t, record.InitialMaterialization),
 		FlowConfig:             canonicalSnapshotOwnershipJSON(t, state.Config),
 		Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner,

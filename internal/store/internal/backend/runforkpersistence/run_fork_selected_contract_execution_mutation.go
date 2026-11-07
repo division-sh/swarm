@@ -484,7 +484,7 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	record := runtimepipeline.WorkflowEngineStateRecord{
 		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: construction.WorkflowVersion(),
 		ParentInstance: construction.ParentRoute().FlowInstance, InstanceKey: metadata.InstanceKey,
-		Mode: state.Mode, Status: "active", CurrentState: *history.CurrentState, StageDefined: metadata.StageDefined,
+		Mode: state.Mode, Status: "active", CurrentState: *history.CurrentState, StageDefined: metadata.StageDefined, Life: metadata.Life,
 		EntityType: state.EntityType, Slug: metadata.Slug, Name: metadata.Name, Config: config,
 		EnteredStageAt: *history.EnteredStateAt, CreatedAt: now, UpdatedAt: now,
 		Transition: runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion,

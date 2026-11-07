@@ -90,7 +90,7 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 		VALUES (
 			'reply-v1:test-open', $1::uuid, $2::uuid, 'requester',
 			'provider_requested', 'provider_replied', 'provider', 'requested',
-			'replied', '{"flow_instance":"requester"}'::jsonb, $2, 'open',
+			'replied', '{"flow_instance":"requester","life":1}'::jsonb, $2, 'open',
 			$1::uuid, $2::uuid, 'run:' || CAST($1::uuid AS TEXT)
 		)
 	`, runID, requestEventID); err != nil {

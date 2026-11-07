@@ -56,7 +56,7 @@ func TestLogicalTurnDirectiveRetryKeepsExactExecutionOwnerBothStores(t *testing.
 		if err != nil || len(turns) != 1 || !turns[0].Attempt.Origin.Same(retry.Attempt().Origin) || turns[0].Clock == nil || !turns[0].Clock.DeadlineAt.Equal(launch.Turn.DeadlineAt) {
 			t.Fatalf("directive retry recovery changed authority/clock: %+v %v", turns, err)
 		}
-		command := effects.CanceledTurnCommandForAttempt(turns[0].Attempt, prepareCanceledReactionForTest(t, ctx, fixture, *turns[0].Clock, intent.RequestedAt))
+		command := effects.CanceledTurnCommandForAttempt(turns[0].Attempt, prepareCanceledReactionForTest(t, ctx, fixture, turns[0]))
 		defer func() {
 			plan := command.Publication.(bus.EnginePublicationPlan)
 			if err := fixture.store.(storeTestDurableEventBusStore).PipelineObligations().Release(context.WithoutCancel(ctx), plan.PublicationCommand().Commit.PipelineClaim); err != nil {

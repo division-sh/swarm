@@ -42,6 +42,27 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("captured_later_life", func(t *testing.T) {
+		later, execution := intent, delivery
+		later.RoutingSource, err = later.RoutingSource.WithLife(7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		execution.Route.Target, err = execution.Route.Target.WithLife(7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := activityRequestEmitIntentFromAdmittedSource(later)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := FreshActivityRequestLineage(request.Event, parent, source, []ActivityParentExecution{{Delivery: execution}}, nil); err != nil {
+			t.Fatalf("exact captured activity life refused: %v", err)
+		}
+		if _, err := FreshActivityRequestLineage(request.Event, parent, source, []ActivityParentExecution{{Delivery: delivery}}, nil); err == nil {
+			t.Fatal("activity borrowed another delivery life")
+		}
+	})
 	for replay := 0; replay < 3; replay++ {
 		emissions := &pipelineEmissionPlan{}
 		dispatcher := pipelineActivityDispatcher{emissions: emissions}

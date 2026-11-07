@@ -84,8 +84,16 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 		}
 		originalRoute, route := publication.DeliveryRoutes[0], input.DeliveryRoutes[0]
 		projected, err := runfork.ProjectEntityOwnership(sourceRun, staged.ForkRunID, originalRoute.Target.Route().EntityID, originalRoute.Target.Route().FlowInstance)
+		wantContext := originalRoute.Context.Normalized()
+		if wantContext.Life != nil {
+			projectedLife, lifeErr := runfork.ProjectInstanceLifeOwnership(sourceRun, staged.ForkRunID, *wantContext.Life)
+			if lifeErr != nil {
+				t.Fatal(lifeErr)
+			}
+			wantContext.Life = &projectedLife
+		}
 		if err != nil || route.Recipient != originalRoute.Recipient || !route.ConnectClaim.Equal(originalRoute.ConnectClaim) ||
-			!reflect.DeepEqual(route.Context, originalRoute.Context) || route.Context.ReplyContextID() != "" ||
+			!reflect.DeepEqual(route.Context, wantContext) || route.Context.ReplyContextID() != "" ||
 			route.Target.Route() != (events.RouteIdentity{FlowID: originalRoute.Target.Route().FlowID, FlowInstance: projected.Fork.FlowInstance, EntityID: projected.Fork.EntityID}) {
 			t.Fatalf("observer-only continuation changed its exact route: route=%+v error=%v", route, err)
 		}

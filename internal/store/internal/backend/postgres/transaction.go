@@ -106,6 +106,13 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 	return err
 }
 
+// The canceled-turn inventory takes native locks but emits no revision or
+// evidence. Inspection cannot adopt this transaction as mutation authority.
+func (b *Backend) RunLockingReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead}, false, false, operation)
+	return err
+}
+
 func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain, construction bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	if err := b.refuseInspectionMutation(ctx); err != nil {
 		return false, err

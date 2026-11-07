@@ -111,6 +111,7 @@ func constructedScenarioInstanceForTest(t *testing.T, source semanticview.Source
 	contract, _ := entityruntime.ResolveForFlow(source, flowID)
 	at := time.Now().UTC()
 	return WorkflowInstance{
+		Life:       1,
 		InstanceID: constructed.InstanceID, StorageRef: constructed.InstancePath, EntityID: constructed.EntityID,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), Mode: "static",

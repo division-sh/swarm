@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
@@ -30,6 +31,9 @@ func proveProviderCallJournalBinding(t *testing.T, ctx context.Context, req Auth
 	}
 	frame := managedFrameBindingFrame(t, authority, surface, event, req.AgentFrame.Session.SourceArtifact.Hash)
 	req.AgentFrame, req.CapabilitySurface = &frame, &surface
+	// This serializer control supplies an explicit observation, not a native
+	// admission claim; the selected-store controls exercise that owner.
+	req.InstanceOwnership = events.InstanceOwnership{RunOwned: true}
 	req.ProviderCall = &ProviderCall{SessionID: authority.Target.SessionID, Memory: authority.Target.Memory,
 		Messages: []byte(`[{"Role":"user","Content":"continue"}]`), ProviderContract: contract,
 		Request: ProviderCallRequest{Method: "POST", Destination: "https://api.anthropic.com/v1/messages",

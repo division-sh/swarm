@@ -31,7 +31,7 @@ func PrepareExternalEffectResult(ctx context.Context, result effects.Settlement,
 	if ctx == nil || result.OperationID == "" || result.AttemptID == "" || !result.Authority.Valid() {
 		return nil, runtimeownership.ErrMutationAuthorityMissing
 	}
-	authority, err := canonicaljson.Bytes(result.Authority.Evidence())
+	authority, err := externalEffectResultAuthority(result)
 	if err != nil {
 		return nil, err
 	}
@@ -103,8 +103,20 @@ func ExternalEffectResultAccepted(ctx context.Context, tx *sql.Tx, result effect
 	if !scope.active || scope.tx != tx || observed == nil || !observed.accepted || observed.request.OperationID != result.OperationID || observed.request.AttemptID != result.AttemptID {
 		return false
 	}
-	want, err := canonicaljson.Bytes(result.Authority.Evidence())
+	want, err := externalEffectResultAuthority(result)
 	return err == nil && string(observed.authority) == string(want)
+}
+
+func externalEffectResultAuthority(result effects.Settlement) ([]byte, error) {
+	evidence := result.Authority.Evidence()
+	ownership := result.InstanceOwnership
+	if ownership.RunOwned || ownership.Life != nil {
+		if err := ownership.Validate(); err != nil {
+			return nil, err
+		}
+		evidence["instance_ownership"] = ownership.Clone()
+	}
+	return canonicaljson.Bytes(evidence)
 }
 
 func readExternalEffectResultTx(ctx context.Context, tx *sql.Tx, result effects.Settlement, authority []byte, sqlite bool) (bool, error) {

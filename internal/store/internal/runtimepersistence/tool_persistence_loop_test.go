@@ -27,7 +27,7 @@ func TestToolEntityReadbackProjectsLoopsWithoutReservedState(t *testing.T) {
 		SELECT 'run-1', 'entity-1', 'review/primary', 'mvp_spec', '', 'Primary', '{}', ?, ?,
 		       'entity-1', 'review/primary', 'mvp_spec', 'review', 'template', 'active',
 		       ?, 'collecting', TRUE, 1, ?, ?, ?, NULL,
-		       '{}', ?, '', 'primary', 1
+		       '{}', ?, '', 'primary', 1, 1
 	`, now, now, config, now, now, now, accumulated)
 	if err != nil {
 		t.Fatal(err)

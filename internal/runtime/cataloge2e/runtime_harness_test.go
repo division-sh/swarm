@@ -1493,6 +1493,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 			EnteredStageAt:  h.startedAt,
 			CreatedAt:       h.startedAt,
 			EntityType:      entityType,
+			Life:            1,
 		}
 	}
 	if strings.TrimSpace(instance.InstanceID) == "" {

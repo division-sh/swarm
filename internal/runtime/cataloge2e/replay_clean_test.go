@@ -467,14 +467,14 @@ func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture
 		required = map[string]int{"flow.spawn_with_config": 1, "flow.spawned": 1, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a/worker.ready": 1}
 		childPath, childState = "worker-flow/ti-5c59b413ad4dd4f8d1321e7a", "complete"
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate":
-		required = map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1, "flow.finished": 1}
-		childPath, childState = "worker-flow/ti-bc9c6acffc914a7ed5a2793b", "complete"
+		required = map[string]int{"flow.spawn_requested": 2, "flow.spawned": 2, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1, "flow.finished": 1}
+		childPath, childState = "worker-flow/ti-bc9c6acffc914a7ed5a2793b", "awaiting_ready"
 		if len(transcript.groups) != 3 || len(transcript.groups[1].steps) != 1 || len(transcript.groups[2].steps) != 1 || transcript.groups[2].steps[0].Event != "flow.finished" {
-			t.Fatal("duplicate creation proof lost its exact conflicting second root")
+			t.Fatal("finished-create proof lost its exact second constructor and finish")
 		}
-		conflict = transcript.groups[1].steps[0]
-		if conflict.ReceiptOutcome != "dead_letter" || conflict.ReceiptFailureClass != "platform.conflicting_duplicate" || conflict.ReceiptFailureDetail != "flow_instance_already_exists" {
-			t.Fatal("duplicate creation proof lost its exact atomic create-conflict refusal")
+		second := transcript.groups[1].steps[0]
+		if second.Event != "flow.spawn_requested" || second.ReceiptOutcome != "" || second.ReceiptFailureClass != "" || second.ReceiptFailureDetail != "" {
+			t.Fatal("finished-create proof retained a retired create-conflict oracle")
 		}
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance":
 		childPath, childState = "worker-flow/ti-878653cc40fdc8ad8e9c2d85", "complete"
@@ -498,6 +498,9 @@ func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture
 		}
 		if child.CurrentState != childState {
 			t.Fatalf("%s worker state = %q, want %q", fixture.Name, child.CurrentState, childState)
+		}
+		if fixture.RelativePath == "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate" && child.Life != 2 {
+			t.Fatalf("finished-create proof selected life %d, want 2", child.Life)
 		}
 	}
 	if required != nil {

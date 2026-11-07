@@ -169,6 +169,12 @@ func selectedProviderClaimContext(t *testing.T, ctx context.Context, f selectedC
 		t.Fatal(err)
 	}
 	selected := f.store.(agentFixtureFlowStore)
+	state, found, err := selected.LoadAgentLifecycleState(ctx, actor)
+	if err != nil || !found {
+		t.Fatalf("selected fixture lost its admitted actor: found=%t err=%v", found, err)
+	}
+	ctx = effects.WithLifecycleToken(ctx, effects.LifecycleToken{Identity: actor, AgentID: actor.AgentID(), RuntimeEpoch: state.RuntimeEpoch, Generation: state.Generation})
+	ctx = effects.WithTurnInstanceSource(ctx, f.providerSource)
 	commitSelectedReceiverClaimEvent(t, ctx, selected, event, route, deliveryAuthority)
 	claimed, err := selected.ClaimDelivery(ctx, deliveryAuthority, event, route)
 	work, acquired := claimed.Acquired()

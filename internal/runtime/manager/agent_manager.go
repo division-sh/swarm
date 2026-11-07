@@ -24,6 +24,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -224,7 +225,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 	if opts.PersistenceRoles.LifecycleOutcome != nil {
 		lifecycle.outcomeReader = opts.PersistenceRoles.LifecycleOutcome
 	}
-	if opts.LifecycleDiagnosticOrigin != (LifecycleDiagnosticOrigin{}) {
+	if opts.LifecycleDiagnosticOrigin != (runfork.LifecycleDiagnosticOrigin{}) {
 		lifecycle.diagnosticOrigin = opts.LifecycleDiagnosticOrigin
 	}
 	lifecycle.executionPosture = opts.ExecutionPosture

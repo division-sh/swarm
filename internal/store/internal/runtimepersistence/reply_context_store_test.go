@@ -31,7 +31,7 @@ func replyContextFreezeTestRecord(requestEventID, runID, suffix string, now time
 		SourceRunID: runID, SourceRequestEventID: requestEventID,
 		RequesterFlowID: "requester-" + suffix, RequestOutputPin: "provider_requested", ReplyInputPin: "provider_replied",
 		ProviderFlowID: "provider", ProviderInputPin: "provider_requested", ProviderOutputPin: "provider_replied",
-		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/" + suffix, EntityID: uuid.NewString()},
+		Origin: events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/" + suffix, EntityID: uuid.NewString()}, OriginLife: 1,
 		RequestCorrelationID: requestEventID, State: runtimereplycontext.StateOpen, CreatedAt: now, UpdatedAt: now,
 	}
 	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
@@ -76,7 +76,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				ProviderFlowID:       "provider",
 				ProviderInputPin:     "provider_requested",
 				ProviderOutputPin:    "provider_replied",
-				Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()},
+				Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()}, OriginLife: 7,
 				RequestCorrelationID: requestEventID,
 				State:                runtimereplycontext.StateOpen,
 				CreatedAt:            now,
@@ -179,7 +179,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 				ProviderFlowID:       "provider",
 				ProviderInputPin:     "provider_requested",
 				ProviderOutputPin:    "provider_replied",
-				Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()},
+				Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()}, OriginLife: 7,
 				RequestCorrelationID: "same-authored-key",
 				CorrelationKey:       "provider_request_id",
 				State:                runtimereplycontext.StateOpen,
@@ -194,6 +194,11 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			if err := store.CreateReplyContext(ctx, record); err != nil {
 				t.Fatalf("idempotent CreateReplyContext: %v", err)
 			}
+			changedLife := record
+			changedLife.OriginLife++
+			if err := store.CreateReplyContext(ctx, changedLife); err == nil {
+				t.Fatal("existing reply adopted another origin life")
+			}
 			collision := record
 			collision.RequestEventID = collisionEventID
 			collision.SourceRequestEventID = collisionEventID
@@ -206,7 +211,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			if err != nil {
 				t.Fatalf("LoadReplyContext: %v", err)
 			}
-			if loaded.ID != record.ID || loaded.Origin != record.Origin.Normalized() || loaded.RequestCorrelationID != record.RequestCorrelationID {
+			if loaded.ID != record.ID || loaded.Origin != record.Origin.Normalized() || loaded.OriginLife != record.OriginLife || loaded.RequestCorrelationID != record.RequestCorrelationID {
 				t.Fatalf("loaded reply context = %#v, want %#v", loaded, record)
 			}
 
@@ -269,8 +274,11 @@ func requireReplyContextHistory(t *testing.T, ctx context.Context, store replyCo
 	defer rows.Close()
 	var got int
 	var latest struct {
-		ID    string                    `json:"reply_context_id"`
-		State runtimereplycontext.State `json:"state"`
+		ID     string                    `json:"reply_context_id"`
+		State  runtimereplycontext.State `json:"state"`
+		Origin struct {
+			Life int64 `json:"life"`
+		} `json:"origin_route"`
 	}
 	for rows.Next() {
 		var body []byte
@@ -289,7 +297,7 @@ func requireReplyContextHistory(t *testing.T, ctx context.Context, store replyCo
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if got != count || latest.State != state {
+	if got != count || latest.State != state || latest.Origin.Life != record.OriginLife {
 		t.Fatalf("reply history count=%d state=%q, want count=%d state=%q", got, latest.State, count, state)
 	}
 }

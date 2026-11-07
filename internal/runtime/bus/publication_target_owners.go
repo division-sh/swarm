@@ -26,6 +26,7 @@ type publicationTargetOwnerEvidence struct {
 	present            bool
 	origins            map[string]events.RouteIdentity
 	prospective        pipeline.PreparedWorkflowPublicationState
+	runProposal        pipeline.FlowInstanceRunProposal
 	context            context.Context
 	instances          pipeline.FlowInstanceIndexReader
 	agents             map[agentidentity.Identity]ActiveAgentDescriptor
@@ -51,6 +52,12 @@ func (p deliveryPlanner) resolvePreparedRoutePlan(projection publicationTargetOw
 	if p.preparedOwners != nil && len(plan.ActivationPlans) > 0 {
 		projection, err = projection.withActivationPlans(plan.ActivationPlans)
 		if err != nil {
+			return RoutePlan{}, err
+		}
+	}
+	if p.preparedOwners != nil {
+		projection.instances = p.connectPlanner.lifecycle.index
+		if err := projection.requireCurrentSourceLife(p.preparedOwners.event); err != nil {
 			return RoutePlan{}, err
 		}
 	}
@@ -331,7 +338,19 @@ func (p publicationTargetOwnerEvidence) resolveNodeTargetOwners(plan *RoutePlan,
 }
 
 func (p publicationTargetOwnerEvidence) withActivationPlans(plans []pipeline.FlowInstanceActivationPlan) (publicationTargetOwnerEvidence, error) {
-	ordered := newOrderedTargetOwnerCandidates(p.candidates)
+	// A prepared reset replaces only its own finished observation for planning.
+	// Its native compare-and-write remains the prerequisite for publication.
+	candidates := make([]pipeline.DeliveryTargetOwnerCandidate, 0, len(p.candidates))
+	for _, candidate := range p.candidates {
+		restarting := false
+		for _, plan := range plans {
+			restarting = restarting || plan.Restart != nil && plan.Identity.InstancePath == candidate.Route.FlowInstance && plan.Identity.EntityID == candidate.Route.EntityID
+		}
+		if !restarting {
+			candidates = append(candidates, candidate)
+		}
+	}
+	ordered := newOrderedTargetOwnerCandidates(candidates)
 	agents := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
 	maps.Copy(agents, p.agents)
 	constructing := make(map[agentidentity.Identity]struct{}, len(p.constructingAgents))
@@ -357,7 +376,9 @@ func (p publicationTargetOwnerEvidence) withActivationPlans(plans []pipeline.Flo
 			Route: events.RouteIdentity{FlowID: normalized.Identity.TemplateID,
 				FlowInstance: normalized.Identity.InstancePath,
 				EntityID:     normalized.Identity.EntityID},
-			Materializing: true,
+			Materializing: normalized.Restart == nil,
+			Availability:  workflowInstanceTargetAvailability(normalized.Instance),
+			Life:          normalized.Instance.Life,
 		})
 		for _, expected := range normalized.Readiness.Agents {
 			identity := expected.Identity.Normalize()
@@ -401,7 +422,7 @@ func (p deliveryRecipientPolicy) loadPublicationTargetOwners(ctx context.Context
 		if err := p.runProposal.Validate(event.RunID(), fact); err != nil {
 			return publicationTargetOwnerEvidence{}, err
 		}
-		return publicationTargetOwnerEvidence{prospective: p.prospective, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, targetsAvailable: true}, nil
+		return publicationTargetOwnerEvidence{prospective: p.prospective, runProposal: p.runProposal, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, targetsAvailable: true}, nil
 	}
 	agents, agentsAvailable, err := p.loadActiveAgentDescriptors(ctx)
 	if err != nil {

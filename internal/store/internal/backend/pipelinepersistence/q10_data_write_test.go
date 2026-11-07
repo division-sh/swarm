@@ -32,6 +32,7 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 				entity := "3c222222-2222-4222-8222-222222222222"
 				at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 				record := pipeline.WorkflowEngineStateRecord{
+					Life:     1,
 					Identity: flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("work", "work", "work")},
 					EntityID: entity, EntityType: "task", WorkflowName: "work", Mode: "static", Status: "active",
 					CurrentState: "done", ExpectedState: "ready", ExpectedRevision: 1, StageDefined: true,
@@ -39,7 +40,7 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 					CreatedAt: at, EnteredStageAt: at.Add(time.Second), UpdatedAt: at.Add(time.Second),
 				}
 				mock.ExpectQuery(`(?s)^UPDATE flow_instances SET`).WillReturnRows(sqlmock.NewRows([]string{"run_id", "entity_id"}).AddRow(run, entity))
-				columns := []string{"entity_id", "instance_path", "entity_type", "flow_template", "current_state", "revision", "bookkeeping", "accumulator", "field_id", "field_path", "field_type", "fields"}
+				columns := []string{"entity_id", "instance_path", "entity_type", "flow_template", "current_state", "revision", "bookkeeping", "accumulator", "life", "field_id", "field_path", "field_type", "fields"}
 				fieldType := "task"
 				fields := `{"count":1}`
 				var fieldID, fieldPath, fieldTypeValue, fieldsValue any = entity, "work", fieldType, fields
@@ -72,9 +73,9 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 					record.Fields = []byte(`{"count":2}`)
 					record.UpdatedAt = at.Add(-time.Second)
 				}
-				rows := sqlmock.NewRows(columns).AddRow(entity, "work", "task", "work", "done", int64(2), `{}`, `{}`, fieldID, fieldPath, fieldTypeValue, fieldsValue)
+				rows := sqlmock.NewRows(columns).AddRow(entity, "work", "task", "work", "done", int64(2), `{}`, `{}`, int64(1), fieldID, fieldPath, fieldTypeValue, fieldsValue)
 				if caseName == "duplicate" {
-					rows.AddRow(entity, "work", "task", "work", "done", int64(2), `{}`, `{}`, "3c333333-3333-4333-8333-333333333333", "work", "task", fields)
+					rows.AddRow(entity, "work", "task", "work", "done", int64(2), `{}`, `{}`, int64(1), "3c333333-3333-4333-8333-333333333333", "work", "task", fields)
 				}
 				mock.ExpectQuery(`(?s)^SELECT fi.entity_id, fi.instance_path`).WithArgs(run, entity, "work").WillReturnRows(rows)
 				valid := caseName == "unchanged" || caseName == "changed" || caseName == "integer_to_double" || caseName == "absent_to_null" || caseName == "representation_only" || caseName == "slug_only" || caseName == "name_only"

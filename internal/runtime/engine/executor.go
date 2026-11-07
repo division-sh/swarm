@@ -1868,7 +1868,7 @@ func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent 
 	if err != nil {
 		return fanoutbarrier.Registration{}, err
 	}
-	routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String())
+	routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String(), frame.req.ProducerSource.Life())
 	if err != nil {
 		return fanoutbarrier.Registration{}, err
 	}
@@ -1880,16 +1880,23 @@ func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent 
 	return registration, registration.Validate()
 }
 
-func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string) (events.RoutingSource, error) {
+func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string, life int64) (events.RoutingSource, error) {
 	entityID = strings.TrimSpace(entityID)
+	var source events.RoutingSource
+	var err error
 	if ref.FlowPath() == "." {
-		return events.NewRootRoutingSource(entityID)
+		source, err = events.NewRootRoutingSource(entityID)
+	} else {
+		source, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+			FlowID:       ref.FlowPath(),
+			FlowInstance: strings.Trim(strings.TrimSpace(route.InstancePath), "/"),
+			EntityID:     entityID,
+		})
 	}
-	return events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID:       ref.FlowPath(),
-		FlowInstance: strings.Trim(strings.TrimSpace(route.InstancePath), "/"),
-		EntityID:     entityID,
-	})
+	if err != nil {
+		return events.RoutingSource{}, err
+	}
+	return source.WithLife(life)
 }
 
 func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontracts.FanOutCompiledPlan, cardinality int) (fanoutobligation.IntentRequest, error) {
@@ -1919,7 +1926,7 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		delete(entity, source.Field)
 		delete(stateFields, source.Field)
 	}
-	incoming := events.DeliveryContextFromContext(frame.ctx).ReplyOnly()
+	incoming := events.DeliveryContextFromContext(frame.ctx).Continuation()
 	var receiver *fanoutobligation.ExecutionReceiver
 	if route, ok := runtimedelivery.RouteFromContext(frame.ctx); ok {
 		if route.Context.ReplyContextID() != incoming.ReplyContextID() {
@@ -2519,7 +2526,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
-	deliveryContext := events.DeliveryContextFromContext(ctx).ReplyOnly()
+	deliveryContext := events.DeliveryContextFromContext(ctx).Continuation()
 	if !deliveryContext.Empty() {
 		for i := range frame.result.EmitIntents {
 			if frame.result.EmitIntents[i].Context.Empty() {

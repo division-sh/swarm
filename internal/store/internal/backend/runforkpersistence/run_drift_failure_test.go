@@ -76,7 +76,7 @@ func (c runDriftFailureConn) QueryContext(_ context.Context, query string, args 
 			case "state":
 				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "imported", "company", "[]"}
 			case "header":
-				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "worker", nil, "worker", "", int64(1), "{}", "{}", nil, nil, nil, nil}
+				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "worker", nil, "worker", "", int64(1), "{}", "{}", int64(1), nil, nil, nil, nil}
 			}
 			if c.stage == "admission_close" {
 				rows.closeErr = c.cause

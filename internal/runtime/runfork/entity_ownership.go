@@ -19,6 +19,23 @@ type EntityProjection struct {
 	Fork   EntityIdentity
 }
 
+// ProjectInstanceLifeOwnership remaps only execution coordinates. A fixed-cut
+// continuation keeps its captured life, even when a later native check refuses it.
+func ProjectInstanceLifeOwnership(sourceRunID, forkRunID string, source events.InstanceLife) (events.InstanceLife, error) {
+	if err := source.Validate(); err != nil {
+		return events.InstanceLife{}, err
+	}
+	if source.RunID != sourceRunID || sourceRunID == forkRunID || source.FlowInstance == forkRunID {
+		return events.InstanceLife{}, fmt.Errorf("fork continuation requires its exact source run and instance")
+	}
+	child := source
+	child.RunID = forkRunID
+	if child.FlowInstance == sourceRunID {
+		child.FlowInstance = forkRunID
+	}
+	return child, child.Validate()
+}
+
 // ProjectExecutionRoute preserves declaration scope and only replaces the exact
 // admitted root execution coordinate. Entity and producer ownership are separate.
 func ProjectExecutionRoute(sourceRunID, forkRunID, flowID string, route flowidentity.Route) (flowidentity.Route, error) {
@@ -60,7 +77,7 @@ func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.Routi
 		if route.EntityID != "" {
 			route.EntityID = forkRunID
 		}
-		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
+		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode(), source.Life())
 	}
 	root := rootProducerSource(source, sourceRunID, forkRunID)
 	if root {
@@ -68,7 +85,7 @@ func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.Routi
 			return source, fmt.Errorf("root producer belongs to neither admitted run")
 		}
 		route.EntityID = forkRunID
-		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
+		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode(), source.Life())
 	}
 	if route.EntityID == sourceRunID || route.EntityID == forkRunID || route.FlowInstance == sourceRunID || route.FlowInstance == forkRunID {
 		return source, fmt.Errorf("non-root producer cannot own the root entity")

@@ -8,9 +8,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -30,15 +33,19 @@ type LifecycleDiagnosticOriginValidator interface {
 }
 
 type DirectivePipelineOwner interface {
+	ReadRetainedAgentInstanceOwnershipTx(context.Context, *sql.Tx, agentidentity.Identity, string) (events.InstanceOwnership, error)
 	TerminalizePipelineObligationTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Disposition, time.Time) error
+	ReadAgentInstanceOwnershipTx(context.Context, *sql.Tx, semanticview.Source, correlation.SourceArtifactFact, agentidentity.Identity) (events.InstanceOwnership, error)
 }
 
 type ProviderAttemptDrainPostgresCapturer interface {
+	PrepareStartupTurnOwnershipTx(context.Context, *sql.Tx, agentidentity.Identity) (context.Context, error)
 	CaptureProviderAttemptDrainsPostgresTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
 	RecoverStartupProviderAttemptsPostgresTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition, runtimemanager.AgentLifecycleTransitionResult) error
 }
 
 type ProviderAttemptDrainSQLiteCapturer interface {
+	PrepareStartupTurnOwnershipTx(context.Context, *sql.Tx, agentidentity.Identity) (context.Context, error)
 	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
 	RecoverStartupProviderAttemptsSQLiteTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition, runtimemanager.AgentLifecycleTransitionResult) error
 }

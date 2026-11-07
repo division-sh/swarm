@@ -39,6 +39,10 @@ func ResolveWorkflowStageTimerPayloadAdmission(source semanticview.Source, event
 		if err != nil {
 			return refuse(err)
 		}
+		routing, err = routing.WithLife(event.RoutingSource().Life())
+		if err != nil {
+			return refuse(err)
+		}
 		if revision != occurrence.Activation.DeclarationRevision || routing != event.RoutingSource() || eventType != event.Type() {
 			return refuse(fmt.Errorf("stage timer payload contradicts its declaration revision or route"))
 		}

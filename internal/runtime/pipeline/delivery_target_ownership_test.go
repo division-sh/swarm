@@ -35,6 +35,10 @@ func classifyDeliveryTargetOwnershipForTest(r deliveryTargetOwnershipTestRequest
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
+	// These declaration/ownership fixtures all represent first-life instances.
+	for index := range r.Candidates {
+		r.Candidates[index].Life = 1
+	}
 	return ClassifyDeliveryTargetOwnership(lookup, r.Candidates)
 }
 
@@ -348,9 +352,17 @@ func TestTargetLookupCoordinatePreservesDeclaredNonRootAndHandlerIdentity(t *tes
 	request.Handler = DeliveryTargetHandler{}
 	target := coordinate
 	target.EntityID = eventtest.UUID("retained-lookup-owner")
-	owner, err := ClassifyDeliveryTargetOwnership(lookup, []DeliveryTargetOwnerCandidate{{Route: target}})
-	if err != nil || owner.Route() != target {
+	owner, err := ClassifyDeliveryTargetOwnership(lookup, []DeliveryTargetOwnerCandidate{{Route: target, Life: 7}})
+	if err != nil || owner.Route() != target || owner.Life() != 7 {
 		t.Fatalf("lookup did not retain its original admitted request: owner=%+v err=%v", owner, err)
+	}
+	for _, life := range []int64{0, -1} {
+		if _, err := ClassifyDeliveryTargetOwnership(lookup, []DeliveryTargetOwnerCandidate{{Route: target, Life: life}}); err == nil {
+			t.Fatalf("target lookup inferred missing or invalid life %d", life)
+		}
+	}
+	if _, err := ClassifyDeliveryTargetOwnership(lookup, []DeliveryTargetOwnerCandidate{{Route: target, Life: 7}, {Route: target, Life: 8}}); err == nil {
+		t.Fatal("target lookup accepted contradictory lives for one exact receiver")
 	}
 	if _, err := ClassifyDeliveryTargetOwnership(DeliveryTargetLookup{}, []DeliveryTargetOwnerCandidate{{Route: target}}); err == nil {
 		t.Fatal("unadmitted lookup acquired target ownership")

@@ -88,7 +88,7 @@ func admitFlowInstanceObservation(request FlowInstanceLookupRequest, instance Wo
 		return FlowInstanceObservation{}, fmt.Errorf("instance observation requires its exact source, run and revision")
 	}
 	if workflowVersion == "" || instance.WorkflowName != request.flowID || instance.WorkflowVersion != workflowVersion ||
-		instance.Revision <= 0 || instance.CurrentState == "" || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
+		instance.Life <= 0 || instance.Revision <= 0 || instance.CurrentState == "" || instance.CreatedAt.IsZero() || instance.UpdatedAt.IsZero() {
 		return FlowInstanceObservation{}, fmt.Errorf("instance observation has incomplete or crossed header facts")
 	}
 	identity := flowidentity.Instance{
@@ -240,11 +240,7 @@ func cloneIndexReadinessPlan(plan DynamicFlowRuntimeReadinessPlan) DynamicFlowRu
 	if plan.CreationEvent != nil {
 		creation := *plan.CreationEvent
 		creation.Payload = slices.Clone(creation.Payload)
-		creation.DeliveryContext.Joins = slices.Clone(creation.DeliveryContext.Joins)
-		if creation.DeliveryContext.Reply != nil {
-			reply := *creation.DeliveryContext.Reply
-			creation.DeliveryContext.Reply = &reply
-		}
+		creation.DeliveryContext = creation.DeliveryContext.Normalized()
 		plan.CreationEvent = &creation
 	}
 	return plan

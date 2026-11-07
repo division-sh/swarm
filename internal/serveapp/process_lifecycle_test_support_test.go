@@ -259,7 +259,7 @@ func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID
 	header := runtimepipeline.WorkflowInstance{
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
-		CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), Revision: 1, CreatedAt: at, UpdatedAt: at,
+		CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), Revision: 1, Life: 1, CreatedAt: at, UpdatedAt: at,
 	}
 	if entity, declared := entityruntime.ResolveForFlow(source, flowID); declared {
 		header.EntityType = entity.EntityType

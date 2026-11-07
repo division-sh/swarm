@@ -348,7 +348,7 @@ func TestPublishedArrivalTransferRetainsOriginalDeliveryContext(t *testing.T) {
 				t.Fatalf("exact context-bearing transfer refused: %v", err)
 			}
 			projected, err := projectRunForkPublishedJoinRoute(plan, continuation.ChildCommand(), route)
-			if err != nil || len(projected.Context.Joins) != 1 || projected.Context.Joins[0].Disposition != events.JoinAdmissionBound {
+			if err != nil || len(projected.Context.Joins) != 1 || projected.Context.Joins[0].Disposition != events.JoinAdmissionBound || projected.Target.Life() != continuation.ChildCommand().RoutingSource.Life() {
 				t.Fatalf("projected route lost its immutable binding: %+v err=%v", projected, err)
 			}
 			childRef := projected.Context.Joins[0].Ref

@@ -18,7 +18,7 @@ func TestIssue642CapturedReplySettlementRequiresExactAdmittedRow(t *testing.T) {
 		ID: "opaque-reply", RunID: uuid.NewString(), RequestEventID: uuid.NewString(), SourceRequestEventID: uuid.NewString(),
 		RequesterFlowID: "requester", RequestOutputPin: "request", ReplyInputPin: "return",
 		ProviderFlowID: "provider", ProviderInputPin: "request", ProviderOutputPin: "return",
-		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/one", EntityID: uuid.NewString()},
+		Origin: events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/one", EntityID: uuid.NewString()}, OriginLife: 1,
 		RequestCorrelationID: "business-key", State: replycontext.StateTerminal, AcceptedReplyEventID: uuid.NewString(),
 		CreatedAt: born, UpdatedAt: settled, TerminalAt: &settled,
 	}

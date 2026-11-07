@@ -14,6 +14,12 @@ import (
 
 func TestCapsuleFrozenValuesRoundTrip(t *testing.T) {
 	original := validIntentRequest(t).Capsule
+	original.Context.Life = &events.InstanceLife{RunID: original.Lineage.RunID, FlowInstance: original.Route.InstancePath, Life: 7}
+	var err error
+	original.ProducerSource, err = original.ProducerSource.WithLife(7)
+	if err != nil || original.Validate() != nil {
+		t.Fatalf("admit captured fan-out life: %v", err)
+	}
 	original.Entity = map[string]any{"large": json.Number("9007199254740993"), "double": json.Number("1.25"), "revision": "business"}
 	original.Loop = map[string]any{"attempt": 2, "revision_id": "typed-revision"}
 	raw, err := json.Marshal(original)
@@ -80,6 +86,11 @@ func TestMarshalCapsulePreservesEveryDynamicNumericCarrier(t *testing.T) {
 
 func TestIntentRequestRejectsContradictoryDurableIdentityAndCapsuleFacts(t *testing.T) {
 	valid := validIntentRequest(t)
+	valid.Capsule.Context.Life = &events.InstanceLife{RunID: valid.Key.RunID, FlowInstance: valid.Capsule.Route.InstancePath, Life: valid.Capsule.ProducerSource.Life()}
+	valid.Capsule.Lineage.RunID = uuid.NewString()
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name   string
 		mutate func(*IntentRequest)
@@ -97,6 +108,15 @@ func TestIntentRequestRejectsContradictoryDurableIdentityAndCapsuleFacts(t *test
 		{name: "missing route", mutate: func(r *IntentRequest) { r.Capsule.Route = runtimeflowidentity.Route{} }},
 		{name: "missing producer source", mutate: func(r *IntentRequest) { r.Capsule.ProducerSource = events.RoutingSource{} }},
 		{name: "invalid execution mode", mutate: func(r *IntentRequest) { r.Capsule.Lineage.ExecutionMode = "" }},
+		{name: "different continuation run", mutate: func(r *IntentRequest) {
+			r.Capsule.Context.Life = &events.InstanceLife{RunID: uuid.NewString(), FlowInstance: r.Capsule.Route.InstancePath, Life: 1}
+		}},
+		{name: "different continuation instance", mutate: func(r *IntentRequest) {
+			r.Capsule.Context.Life = &events.InstanceLife{RunID: r.Key.RunID, FlowInstance: "sibling", Life: 1}
+		}},
+		{name: "different continuation life", mutate: func(r *IntentRequest) {
+			r.Capsule.Context.Life = &events.InstanceLife{RunID: r.Key.RunID, FlowInstance: r.Capsule.Route.InstancePath, Life: 2}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := valid

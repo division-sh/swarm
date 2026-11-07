@@ -313,7 +313,7 @@ func mustJoinHandleForNode(t *testing.T, kind TimerHandleKind, node runtimeident
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := StageEntryRef{RunID: "run", FlowScope: node.FlowPath(), InstanceID: "one", InstancePath: "instance/one", EntityID: "entity", Stage: stage, Cause: "construction"}
+	entry := StageEntryRef{Life: 1, RunID: "run", FlowScope: node.FlowPath(), InstanceID: "one", InstancePath: "instance/one", EntityID: "entity", Stage: stage, Cause: "construction"}
 	if occurrence != "" {
 		entry.Cause, entry.EventID, entry.OccurrenceID, entry.TransitionID = "delivery", "event", occurrence, "transition"
 	}

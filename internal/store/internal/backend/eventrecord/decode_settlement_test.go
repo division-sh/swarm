@@ -24,6 +24,35 @@ func TestRecordJointDecodeRetainsStrictAdmissionAndFreshEvidence(t *testing.T) {
 	if !reflect.DeepEqual(record, before) {
 		t.Fatal("joint decode mutated its input")
 	}
+	if source, err := record.DecodeRoutingSource(); err != nil || source != admitted.Event().RoutingSource() {
+		t.Fatalf("source-only observation changed recorded source: %+v %v", source, err)
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"missing life": func(value map[string]any) { delete(value, "life") },
+		"zero life":    func(value map[string]any) { value["life"] = 0 },
+		"negative life": func(value map[string]any) {
+			value["life"] = -1
+		},
+		"fractional life": func(value map[string]any) { value["life"] = 1.5 },
+		"unknown field":   func(value map[string]any) { value["unknown"] = true },
+		"normalized path": func(value map[string]any) { value["entity_id"] = " " + value["entity_id"].(string) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			value := map[string]any{}
+			if err := json.Unmarshal(record.SourceRoute, &value); err != nil {
+				t.Fatal(err)
+			}
+			mutate(value)
+			hostile := record.Clone()
+			hostile.SourceRoute, _ = json.Marshal(value)
+			if _, err := hostile.DecodeRoutingSource(); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("source census accepted corrupt coordinate: %v", err)
+			}
+			if _, err := hostile.Decode(); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("complete event admission disagrees with source observation: %v", err)
+			}
+		})
+	}
 	for name, mutate := range map[string]func(*Record){
 		"payload null":          func(r *Record) { r.Payload = []byte(`{"bad":null}`) },
 		"noncanonical identity": func(r *Record) { r.EventID += " " },

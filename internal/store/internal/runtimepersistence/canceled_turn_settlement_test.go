@@ -60,7 +60,7 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if err != nil || !intent.Committed || !intent.Requested {
 			t.Fatalf("timeout: %+v err=%v", intent, err)
 		}
-		command.Publication = prepareCanceledReactionForTest(t, ctx, fixture, *launch.Turn, intent.RequestedAt)
+		command.Publication = prepareCanceledReactionForTest(t, ctx, fixture, runtimeeffects.TurnExecutionResult{Attempt: first.Attempt(), Cancellation: intent, Clock: launch.Turn})
 		if _, err := store.(deliverylifecycle.Store).SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err == nil {
 			t.Fatal("ordinary success bypassed committed cancellation intent")
 		}
@@ -189,7 +189,7 @@ func TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores(t *testing.T) 
 		if err != nil || !intent.Requested {
 			t.Fatalf("timeout: %+v err=%v", intent, err)
 		}
-		command := runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), prepareCanceledReactionForTest(t, ctx, fixture, *launch.Turn, intent.RequestedAt))
+		command := runtimeeffects.CanceledTurnCommandForAttempt(handle.Attempt(), prepareCanceledReactionForTest(t, ctx, fixture, runtimeeffects.TurnExecutionResult{Attempt: handle.Attempt(), Cancellation: intent, Clock: launch.Turn}))
 		failure := runtimefailures.FromError(context.Canceled, "provider-test", "physical_join").Failure
 		if err := handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{"physical_joined": true}); err != nil {
 			t.Fatal(err)

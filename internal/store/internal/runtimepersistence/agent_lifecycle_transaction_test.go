@@ -18,6 +18,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -146,7 +147,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 			if invalid.mutate != nil {
 				request.TargetPhase, request.RunMode = runtimemanager.AgentLifecycleRegistered, runtimemanager.AgentRunModeStopped
 				request.Topology = before.Topology
-				request.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+				request.DiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation}
 				invalid.mutate(&request)
 				if request.Agent != nil {
 					request.Agent.Topology = request.Topology

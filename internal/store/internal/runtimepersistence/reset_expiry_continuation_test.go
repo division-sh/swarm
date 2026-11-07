@@ -21,14 +21,14 @@ func TestResetContinuationReevaluatesDirectiveExpiryBothStores(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
-				seedDirectiveOperationRun(t, ctx, backend.db, backend.name == "postgres")
+				seedDirectiveOperationRun(t, ctx, backend.store, backend.db, backend.name == "postgres")
 				created := time.Now().UTC()
 				reserved, err := backend.store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), "reset-expiry", "reset-expiry", created))
 				if err != nil {
 					t.Fatal(err)
 				}
 				const owner = "reset-expiry-owner"
-				if _, err := admitDirectiveExecutionForTest(ctx, backend.store, reserved.Operation.OperationID, owner, created, time.Minute); err != nil {
+				if _, err := admitDirectiveExecutionForTest(t, ctx, backend.store, reserved.Operation.OperationID, owner, created, time.Minute); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := backend.store.RecordDirectiveExecuted(ctx, reserved.Operation.OperationID, owner, directiveOperationResponseForTest(reserved.Operation), created); err != nil {

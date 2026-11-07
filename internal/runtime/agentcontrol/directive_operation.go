@@ -163,17 +163,27 @@ type DirectiveOperationReconcileResult struct {
 	Deleted       int
 }
 
+// TurnInstanceSource carries the loaded object without importing the semantic
+// compiler into this leaf. Native admission requires the full canonical source;
+// these names alone never establish source identity or instance ownership.
+type TurnInstanceSource interface {
+	WorkflowVersion() string
+	WorkflowName() string
+}
+
 type DirectiveExecutionAdmissionRequest struct {
 	OperationID      string
 	OwnerID          string
 	Now              time.Time
 	Lease            time.Duration
 	ExecutionPosture executionposture.Posture
+	Source           TurnInstanceSource
 }
 
 type DirectiveExecutionAdmission struct {
 	Operation    DirectiveOperation
 	Event        events.AdmittedEvent
+	Ownership    events.InstanceOwnership
 	Acknowledged bool
 }
 

@@ -439,6 +439,7 @@ type H2HubsEvidence struct {
 	Stage    string
 	Fields   []byte
 	Revision int64
+	Life     int64
 	Config   []byte
 }
 
@@ -496,6 +497,10 @@ func observeH2HubsForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2Hu
 		}
 		row.Entity, row.Instance = view.Entity.EntityID, view.Entity.FlowInstance
 		row.Stage, row.Revision = *view.Entity.CurrentState, *view.Entity.Revision
+		if view.Entity.Life == nil || *view.Entity.Life <= 0 {
+			return nil, errors.Join(fmt.Errorf("H2 hub %s lacks its exact life", view.Entity.EntityID), rows.Close())
+		}
+		row.Life = *view.Entity.Life
 		out = append(out, row)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {

@@ -134,6 +134,27 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 	if got := string(bus.event.Type()); got != instancePath+"/"+eventType {
 		t.Fatalf("emitted event type = %q, want declaration-owned concrete path %q", got, instancePath+"/"+eventType)
 	}
+	t.Run("captured_later_life", func(t *testing.T) {
+		loader := exec.workflowInstances.(emitWorkflowInstanceLoader)
+		row := loader.rows[instancePath]
+		row.Life = 3
+		loader.rows[instancePath] = row
+		life := events.InstanceLife{RunID: actor.Identity.RunID, FlowInstance: instancePath, Life: 3}
+		ctx := events.WithDeliveryContext(toolEventTestContext(actor), events.DeliveryContext{Life: &life})
+		if _, err := exec.handleEmitTool(ctx, actor, "emit_telegram_reply_requested", map[string]any{"chat_id": "42", "text": "later"}); err != nil {
+			t.Fatal(err)
+		}
+		if bus.count != 2 || bus.event.RoutingSource().Life() != life.Life || bus.event.RoutingSource().Route() != wantRoute {
+			t.Fatalf("later-life emit lost its captured owner: %+v count=%d", bus.event.RoutingSource(), bus.count)
+		}
+		life.Life = 2
+		ctx = events.WithDeliveryContext(toolEventTestContext(actor), events.DeliveryContext{Life: &life})
+		_, err := exec.handleEmitTool(ctx, actor, "emit_telegram_reply_requested", map[string]any{"chat_id": "42", "text": "stale"})
+		failure, typed := failures.EnvelopeFromError(err)
+		if !typed || failure.Class != failures.ClassStaleArrival || failure.Detail.Code != "instance_restarted" || bus.count != 2 {
+			t.Fatalf("stale actor changed life or published: count=%d error=%v", bus.count, err)
+		}
+	})
 }
 
 type emitPreflightCaptureBus struct {
@@ -631,6 +652,7 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"analyzer-flow/inst-1": {
+				Life:         1,
 				WorkflowName: "analyzer-flow", StorageRef: "analyzer-flow/inst-1", InstanceID: "inst-1", EntityID: "22222222-2222-2222-2222-222222222222",
 				ParentFlowID:       parentRoute.FlowID,
 				ParentFlowInstance: parentRoute.FlowInstance,
@@ -717,6 +739,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"analyzer-flow/inst-1": {
+				Life:         1,
 				WorkflowName: "analyzer-flow", StorageRef: "analyzer-flow/inst-1", InstanceID: "inst-1", EntityID: "22222222-2222-2222-2222-222222222222",
 				ParentFlowID:   "root",
 				ParentEntityID: "11111111-1111-1111-1111-111111111111",
@@ -994,6 +1017,7 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	actor := emitInstanceActor(t, source, root, "cycle.ping")
 	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 	exec.workflowInstances = emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{root.InstancePath: {
+		Life:         1,
 		WorkflowName: root.TemplateID, InstanceID: root.InstanceID, StorageRef: root.InstancePath, EntityID: root.EntityID,
 	}}}
 
@@ -1204,6 +1228,7 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"producer/inst-1": {
+				Life:         1,
 				WorkflowName: "producer", StorageRef: "producer/inst-1", InstanceID: "inst-1", EntityID: actor.EntityID,
 				ParentFlowID: parentRoute.FlowID, ParentFlowInstance: parentRoute.FlowInstance, ParentEntityID: parentRoute.EntityID,
 			},
@@ -1254,6 +1279,7 @@ func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadat
 		}, want: "constructed header contains noncanonical owner facts"},
 		{name: "complete_but_unselected", rows: map[string]runtimepipeline.WorkflowInstance{
 			"producer/inst-1": {
+				Life:         1,
 				WorkflowName: "producer", StorageRef: "producer/inst-1", InstanceID: "inst-1", EntityID: runtimeflowidentity.EntityID("producer-entity"),
 				ParentFlowID: ".", ParentFlowInstance: toolTestRunID, ParentEntityID: runtimeflowidentity.EntityID(toolTestRunID),
 			},

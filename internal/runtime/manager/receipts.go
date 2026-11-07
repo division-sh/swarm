@@ -67,6 +67,7 @@ func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, e
 }
 
 func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Agent, evt events.Event) eventProcessResult {
+	ctx = runtimeeffects.WithTurnInstanceSource(ctx, am.semanticSource)
 	record := startupManagerReplayRecord{
 		Event:   evt,
 		AgentID: agent.ID(),

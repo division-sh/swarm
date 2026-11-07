@@ -468,6 +468,7 @@ type AgentPendingReferencePage struct {
 // run-debug page. Snapshot hydration remains owned by Adapter.
 type RunTracePageQuery struct {
 	RunID              string
+	Life               *int64
 	Limit              int
 	After              *RunTracePosition
 	Since              *time.Time
