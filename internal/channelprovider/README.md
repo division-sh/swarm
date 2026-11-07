@@ -50,7 +50,7 @@ The IDs below refer to E's 58-locus source inventory in issue #2338 comment
 | P02-P07 | Concrete WhatsApp QR, private SDK construction, plan qualification and send implementation; exact finite native-target refusals remain necessary. |
 | P08-P09, D01-D03 | Concrete authenticated Telegram polling/webhook protocol, credential seal and exact receipt-before-ACK. |
 | D04 | Original admitted provider selects the capture codec/provenance key, not a caller-selected alternate backing. |
-| D05-D08 | Existing finite native operation catalog/category/effect contract, not an arbitrary executable string. |
+| D05-D08 | Existing finite native operation/category/effect catalog; its provider projection consumes exact installed target facts, never an arbitrary executable string. |
 
 ## Third Provider / Discord Paper Check
 
