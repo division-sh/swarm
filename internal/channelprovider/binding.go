@@ -21,6 +21,8 @@ type Binding struct {
 	notLinked         string
 	pairingPrompt     string
 	languageHelp      func(string) string
+	claimantFormat    string
+	sanitizeClaimant  bool
 	nativeRead        string
 	nativeWrite       string
 	captureKey        string
@@ -100,6 +102,16 @@ func (b Binding) LanguageHelp(operation string) string {
 		return ""
 	}
 	return b.languageHelp(operation)
+}
+
+func (b Binding) ClaimantObservation(account, oneLineAccount, scope string) string {
+	if b.sanitizeClaimant {
+		account = oneLineAccount
+	}
+	if b.claimantFormat == "" {
+		return ""
+	}
+	return fmt.Sprintf(b.claimantFormat, account, scope)
 }
 
 func (b Binding) NativeRead(target string) bool {
