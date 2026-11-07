@@ -1620,7 +1620,7 @@ func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([8]a
 }
 
 func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
-	bundleHash, err := externalEffectOperationBundle(ctx, authority)
+	bundleHash, err := externalEffectOperationBundle(ctx, authority, req)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -1681,7 +1681,7 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 }
 
 func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
-	bundleHash, err := externalEffectOperationBundle(ctx, authority)
+	bundleHash, err := externalEffectOperationBundle(ctx, authority, req)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -1738,7 +1738,7 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	return externalAuthorizedAttempt(authority, req, req.AttemptID, 1), nil
 }
 
-func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects.Authority) (any, error) {
+func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (any, error) {
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	evidence, err := json.Marshal(authority.Evidence())
 	if err != nil {
@@ -1749,6 +1749,10 @@ func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects
 		return nil, err
 	}
 	if parent != nil {
+		if req.Kind != runtimeeffects.KindChannelConfirmation || req.Class != runtimeeffects.EffectWriteOrUnknown || req.Adapter != "channel_confirmation_whatsapp" || req.Transport != "in_process" ||
+			req.RequestFingerprint != runtimeeffects.Fingerprint([]byte(authority.ChannelConfirmation.Destination+"\n"+runtimeeffects.RegisteredOperatorAcknowledgementText)) {
+			return nil, fmt.Errorf("deployment acknowledgement requires its exact native adapter and fixed message")
+		}
 		if !authority.Valid() || !ok || scope.Kind != runtimeauthoractivity.ScopeRuntime || scope.RuntimeInstanceID == "" || scope.BundleHash != "" {
 			return nil, fmt.Errorf("deployment effect requires valid authority and exact runtime scope")
 		}

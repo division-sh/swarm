@@ -70,11 +70,11 @@ func (c *RuntimeConnection) AcknowledgeRegisteredOperator(ctx context.Context, s
 		}
 		return account.Validate(ctx, op.SessionAccount)
 	}
-	to, message, err := encodeOutboundText(binding.ConversationRef, "Swarm operator successfully connected", nil)
+	to, message, err := encodeOutboundText(binding.ConversationRef, effects.RegisteredOperatorAcknowledgementText, nil)
 	if err != nil {
 		return err
 	}
-	handle, err := effects.BeginInProcessChannelConfirmation(ctx, []byte(to.String()+"\nSwarm operator successfully connected"), nil)
+	handle, err := effects.BeginInProcessChannelConfirmation(ctx, []byte(to.String()+"\n"+effects.RegisteredOperatorAcknowledgementText), nil)
 	if err != nil {
 		return err
 	}

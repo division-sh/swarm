@@ -241,6 +241,8 @@ type ChannelConfirmationAuthority struct {
 	PlanGeneration               plangeneration.Generation
 }
 
+const RegisteredOperatorAcknowledgementText = "Swarm operator successfully connected"
+
 func RegisteredOperatorAcknowledgementID(identityID string, revision int64) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("registered-operator-ack-v1:%s:%d", identityID, revision))).String()
 }
