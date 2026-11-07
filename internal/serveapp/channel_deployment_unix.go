@@ -594,7 +594,8 @@ func (c *deploymentChannelSession) LogoutRegistration(ctx context.Context, op ch
 }
 
 func (c *deploymentChannelSession) CloseRegistration(ctx context.Context, op channelonboarding.Operation) error {
-	if op.Provider != "whatsapp" || c.connection == nil || op.PrincipalID != c.opts.Principal.ID || c.connection.ConnectionID() != op.SessionConnectionID {
+	if !channelprovider.Session(op.Provider) || op.Provider != c.opts.Plan.Provider() || c.connection == nil ||
+		op.PrincipalID != c.opts.Principal.ID || c.connection.ConnectionID() != op.SessionConnectionID {
 		return channelonboarding.ErrRevisionConflict
 	}
 	return c.Close(ctx)
