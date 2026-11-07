@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ const (
 )
 
 type Queryer interface {
+	QueryRower
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
@@ -28,14 +30,7 @@ type QueryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-const OccurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at,
-COALESCE((SELECT CAST(o.authority_evidence AS TEXT) FROM runtime_external_effect_operations o
-JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
-WHERE author_activity_occurrences.kind='effect.lifecycle' AND author_activity_occurrences.source_owner='runtime_external_effect_attempts'
-AND author_activity_occurrences.source_identity=CAST(a.attempt_id AS TEXT)||':'||author_activity_occurrences.transition
-AND o.authority_kind=author_activity_occurrences.projection->>'authority_kind'
-AND o.authority_id=author_activity_occurrences.projection->>'authority_id'), '{}')
-FROM author_activity_occurrences`
+const OccurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at FROM author_activity_occurrences`
 
 const occurrenceSelect = OccurrenceSelect
 
@@ -145,15 +140,22 @@ func List(ctx context.Context, db Queryer, dialect Dialect, opts runtimeauthorac
 	defer rows.Close()
 	result := runtimeauthoractivity.ListResult{Occurrences: make([]runtimeauthoractivity.Occurrence, 0, opts.Limit)}
 	for rows.Next() {
-		occurrence, err := ScanOccurrence(rows)
+		occurrence, err := scanOccurrence(rows)
 		if err != nil {
-			return runtimeauthoractivity.ListResult{}, err
+			return runtimeauthoractivity.ListResult{}, errors.Join(err, rows.Close())
 		}
 		result.Occurrences = append(result.Occurrences, occurrence)
 		result.NextCursor = occurrence.Sequence
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return runtimeauthoractivity.ListResult{}, fmt.Errorf("list author activity: %w", err)
+	}
+	// Release the cursor before a conditional journal read, including when the
+	// selected SQLite store owns only one connection.
+	for i := range result.Occurrences {
+		if err := validateOccurrence(ctx, db, &result.Occurrences[i]); err != nil {
+			return runtimeauthoractivity.ListResult{}, err
+		}
 	}
 	return result, nil
 }
@@ -162,7 +164,15 @@ type RowScanner interface {
 	Scan(...any) error
 }
 
-func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
+func ScanOccurrence(ctx context.Context, db QueryRower, row RowScanner) (runtimeauthoractivity.Occurrence, error) {
+	occurrence, err := scanOccurrence(row)
+	if err == nil {
+		err = validateOccurrence(ctx, db, &occurrence)
+	}
+	return occurrence, err
+}
+
+func scanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 	var occurrence runtimeauthoractivity.Occurrence
 	var projectionRaw []byte
 	var failureRaw []byte
@@ -172,7 +182,7 @@ func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 		&occurrence.Transition, &occurrence.SourceOwner, &occurrence.SourceIdentity, &occurrence.DedupKey,
 		&occurrence.RunID, &occurrence.EntityID, &occurrence.AgentID, &occurrence.FlowID,
 		&occurrence.Scope.Kind, &occurrence.Scope.RuntimeInstanceID, &occurrence.Scope.BundleHash,
-		&projectionRaw, &failureRaw, &occurredAtRaw, &occurrence.EffectAuthorityEvidence,
+		&projectionRaw, &failureRaw, &occurredAtRaw,
 	); err != nil {
 		return runtimeauthoractivity.Occurrence{}, err
 	}
@@ -194,16 +204,26 @@ func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("decode author activity occurred_at: %w", err)
 	}
 	occurrence.OccurredAt = occurredAt
-	if err := runtimeauthoractivity.ValidateDraft(runtimeauthoractivity.Draft{
-		Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
-		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity,
-		DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, Scope: occurrence.Scope,
-		Projection: occurrence.Projection, Failure: occurrence.Failure,
-		EffectAuthorityEvidence: occurrence.EffectAuthorityEvidence,
-	}); err != nil {
-		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("invalid persisted author activity %s: %w", occurrence.OccurrenceID, err)
-	}
 	return occurrence, nil
+}
+
+func validateOccurrence(ctx context.Context, db QueryRower, occurrence *runtimeauthoractivity.Occurrence) error {
+	if occurrence.Kind == runtimeauthoractivity.KindEffectLifecycle && occurrence.Scope.Kind == runtimeauthoractivity.ScopeRuntime {
+		if occurrence.SourceOwner != "runtime_external_effect_attempts" {
+			return fmt.Errorf("runtime effect activity requires its original attempt owner")
+		}
+		const query = `SELECT CAST(o.authority_evidence AS TEXT) FROM runtime_external_effect_operations o
+JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+WHERE CAST(a.attempt_id AS TEXT)||':'||$2=$1 AND o.authority_kind=$3 AND o.authority_id=$4`
+		if err := db.QueryRowContext(ctx, query, occurrence.SourceIdentity, occurrence.Transition,
+			occurrence.Projection.AuthorityKind, occurrence.Projection.AuthorityID).Scan(&occurrence.EffectAuthorityEvidence); err != nil {
+			return fmt.Errorf("read runtime effect activity authority: %w", err)
+		}
+	}
+	if err := runtimeauthoractivity.ValidateDraft(runtimeauthoractivity.DraftFromOccurrence(*occurrence)); err != nil {
+		return fmt.Errorf("invalid persisted author activity %s: %w", occurrence.OccurrenceID, err)
+	}
+	return nil
 }
 
 func decodeTime(raw any) (time.Time, error) {

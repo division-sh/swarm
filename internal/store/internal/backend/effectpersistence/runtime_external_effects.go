@@ -981,12 +981,14 @@ func recordExternalEffectStory(ctx context.Context, story *mutationprotocol.Atte
 	if err != nil {
 		return err
 	}
+	var deploymentEvidence []byte
 	if parent != nil {
 		current, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !ok || current.RuntimeInstanceID == "" || source.BundleHash != "" {
 			return fmt.Errorf("deployment effect lifecycle requires exact runtime scope and no bundle")
 		}
 		scope = runtimeauthoractivity.RuntimeScope(current.RuntimeInstanceID)
+		deploymentEvidence = source.AuthorityEvidence
 	} else if strings.TrimSpace(source.BundleHash) != "" {
 		current, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 		if !ok || strings.TrimSpace(current.RuntimeInstanceID) == "" {
@@ -998,7 +1000,7 @@ func recordExternalEffectStory(ctx context.Context, story *mutationprotocol.Atte
 		Kind: runtimeauthoractivity.KindEffectLifecycle, Transition: transition,
 		SourceOwner: "runtime_external_effect_attempts", SourceIdentity: identity, DedupKey: "effect:" + identity,
 		OccurredAt: occurredAt.UTC(), AgentID: source.AgentID,
-		Scope: scope, EffectAuthorityEvidence: source.AuthorityEvidence,
+		Scope: scope, EffectAuthorityEvidence: deploymentEvidence,
 		Projection: runtimeauthoractivity.Projection{
 			EffectClass: source.Class, Attempt: &attempt, Adapter: source.Adapter, Transport: source.Transport,
 			AuthorityKind: source.AuthorityKind, AuthorityID: source.AuthorityID, ExecutionMode: source.ExecutionMode,
