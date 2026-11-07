@@ -139,7 +139,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 					return nil, err
 				}
 				native, operations = session.(*deploymentChannelSession), options.Operations
-				return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal,
+				return firstConnectPairingObserver{ChannelRegistrationSession: registeredAckCloseObserver{session, cut}, principal: options.Principal,
 					observe: func(result channelonboarding.Result, _ bool) {
 						if view := result.Pairing; view != nil && view.Code != "" {
 							select {

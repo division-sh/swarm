@@ -16,6 +16,10 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- A newly bound registered WhatsApp operator receives one journaled
+  `Swarm operator successfully connected` acknowledgement before connect reports
+  success. Reconnect and restart do not resend it. (#2577)
+
 - `swarm describe pack` lists selected providers and describes their admitted
   events, connector tools, provenance and target-scoped requirements. Tool detail
   and consumption fragments share the same typed readback; credentials and live
@@ -38,6 +42,10 @@ release approval or a promise of old-store migration.
 
 ### Changed
 
+- The registered acknowledgement uses a new closed nullable-bundle journal
+  schema. Incompatible upgrade and downgrade stores refuse boot; there is no
+  migration. Preserve the existing database, SDK state, proofs and credentials;
+  select separate fresh state and pair again rather than transplanting it. (#2577)
 - An rc.1 operator-channel proof store must be removed and the channel re-paired
   before starting v0.7. Strict loading is unchanged; its refusal now includes
   this operator action instead of only the retired-field decode error. (#2942)

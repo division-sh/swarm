@@ -22,10 +22,37 @@ var errRegisteredAckCut = errors.New("controlled registered acknowledgement inte
 
 type registeredAckCut struct {
 	effects.Store
-	options cliapp.ChannelRegistrationOptions
-	mode    string
-	fired   bool
-	id      string
+	options    cliapp.ChannelRegistrationOptions
+	mode       string
+	fired      bool
+	id         string
+	outcome    effects.OperationOutcome
+	bindings   []operatorchannel.Binding
+	operations []channelonboarding.Operation
+	readErr    error
+}
+
+type registeredAckCloseObserver struct {
+	cliapp.ChannelRegistrationSession
+	cut *registeredAckCut
+}
+
+func (s registeredAckCloseObserver) Close(ctx context.Context) error {
+	closed := s.ChannelRegistrationSession.Close(ctx)
+	if s.cut.fired && s.cut.id != "" {
+		var found bool
+		s.cut.outcome, found, s.cut.readErr = s.cut.GetExternalEffectOutcome(ctx, s.cut.id)
+		if s.cut.readErr == nil && !found {
+			s.cut.readErr = errors.New("acknowledgement cut lost its journal")
+		}
+		if s.cut.readErr == nil {
+			s.cut.bindings, s.cut.readErr = s.cut.options.Identities.ListOperatorChannelBindings(ctx, s.cut.options.Principal.ID)
+		}
+		if s.cut.readErr == nil {
+			s.cut.operations, s.cut.readErr = s.cut.options.Operations.ListChannelOnboardingOperations(ctx)
+		}
+	}
+	return errors.Join(closed, s.cut.readErr)
 }
 
 func (s *registeredAckCut) GetExternalEffectOutcome(ctx context.Context, id string) (effects.OperationOutcome, bool, error) {
@@ -108,15 +135,11 @@ func requireRegisteredAckCut(t *testing.T, ctx context.Context, peer *serveNativ
 	if code == 0 || !cut.fired || cut.id == "" {
 		t.Fatal("controlled acknowledgement cut did not stop connect", cut.mode, code, stderr)
 	}
-	outcome, found, err := cut.GetExternalEffectOutcome(ctx, cut.id)
-	if err != nil || !found {
-		t.Fatal("acknowledgement cut lost its journal", found, err)
+	outcome := cut.outcome
+	if cut.readErr != nil || len(cut.bindings) != 1 || len(cut.operations) != 1 {
+		t.Fatal("acknowledgement cut lost its live-owner snapshot", cut.readErr)
 	}
-	bindings, err := cut.options.Identities.ListOperatorChannelBindings(ctx, cut.options.Principal.ID)
-	if err != nil || len(bindings) != 1 {
-		t.Fatal("acknowledgement failure lost binding evidence", err)
-	}
-	binding := bindings[0]
+	binding := cut.bindings[0]
 	if cut.mode != "unbind" && binding.Status != operatorchannel.BindingCurrent {
 		t.Fatal("acknowledgement failure revoked the committed binding")
 	}
@@ -140,12 +163,8 @@ func requireRegisteredAckCut(t *testing.T, ctx context.Context, peer *serveNativ
 	if cut.mode == "unbind" || cut.mode == "logout_pending" {
 		return // These are real retirement writes, not permission to restore them.
 	}
-	ops, err := cut.options.Operations.ListChannelOnboardingOperations(ctx)
-	if err != nil || len(ops) != 1 {
-		t.Fatal("cut lost its exact registration", err)
-	}
 	var out, errOut bytes.Buffer
-	next := cliapp.Execute(ctx, []string{"--config", config, "channel", "connect", "whatsapp", ops[0].AccountReference, "--yes"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	next := cliapp.Execute(ctx, []string{"--config", config, "channel", "connect", "whatsapp", cut.operations[0].AccountReference, "--yes"}, &out, &errOut, nil, nil, OpenChannelRegistration)
 	if cut.mode == "response_observed" {
 		if next == 0 || !strings.Contains(errOut.String(), "refusing blind resend") {
 			t.Fatal("uncertain acknowledgement did not refuse replay", next, errOut.String())
