@@ -955,17 +955,29 @@ func suppressRunTerminalFanOutBarriersTx(
 }
 
 func summarizeFanOutDeliveryBarriersRun(ctx context.Context, queryer pipelineQueryer, runID string) (fanoutbarrier.RunSummary, error) {
+	return summarizeFanOutDeliveryBarriers(ctx, queryer, runID, nil)
+}
+
+func summarizeFanOutDeliveryBarriers(ctx context.Context, queryer pipelineQueryer, runID string, key *fanoutobligation.IntentKey) (fanoutbarrier.RunSummary, error) {
 	summary := fanoutbarrier.RunSummary{RunID: strings.TrimSpace(runID)}
 	if summary.RunID == "" {
 		return summary, fmt.Errorf("fan-out barrier summary requires run identity")
+	}
+	predicate, args := "run_id=$1", []any{summary.RunID}
+	if key != nil {
+		if err := key.Validate(); err != nil || key.RunID != summary.RunID || key.DeploymentFeedID != "" {
+			return summary, errors.Join(err, fmt.Errorf("fan-out barrier summary requires its exact handler intent"))
+		}
+		predicate += " AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5"
+		args = append(args, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
 	}
 	err := queryer.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN status='armed' THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN status='closed_pending' THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN status NOT IN ('armed','closed_pending') THEN 1 ELSE 0 END),0)
-		FROM fan_out_obligation_barriers WHERE run_id=$1
-	`, summary.RunID).Scan(&summary.Intents, &summary.Armed, &summary.ClosedPending, &summary.Terminal)
+		FROM fan_out_obligation_barriers WHERE `+predicate+`
+	`, args...).Scan(&summary.Intents, &summary.Armed, &summary.ClosedPending, &summary.Terminal)
 	if err != nil {
 		return summary, err
 	}

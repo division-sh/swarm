@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -35,9 +36,11 @@ func forkConstructionPlanFixture(t *testing.T, outgoing bool) runfork.RunForkPla
 	}
 	receipt.CreatingInput = pipeline.FlowConstructionInput{EventID: uuid.NewString(), Input: "task.started"}
 	if outgoing {
+		life := events.InstanceLife{RunID: sourceRun, FlowInstance: path, Life: 7}
 		receipt.CreationEvent = &pipeline.DynamicFlowRuntimeCreationEventPlan{
 			EventID: uuid.NewString(), EventType: "review/final.created", RunID: sourceRun, ParentEventID: receipt.CreatingInput.EventID,
 			Payload: json.RawMessage(`{"value":7,"double":7.0}`), CreatedAt: at, ExecutionMode: executionmode.Mock,
+			DeliveryContext: events.DeliveryContext{Life: &life},
 		}
 	}
 	raw, err := pipeline.EncodeFlowConstructionReceipt(receipt)
@@ -89,6 +92,12 @@ func TestForkConstructionReceiptPreservesInitializationAndExactIdentity(t *testi
 		if outgoing && (child.CreationEvent.ParentEventID != child.CreatingInput.EventID || child.CreationEvent.RunID != childRun ||
 			!bytes.Equal(child.CreationEvent.Payload, original.CreationEvent.Payload) || !bytes.Contains(child.CreationEvent.Payload, []byte(`"double":7.0`))) {
 			t.Fatal("child changed frozen business data or occurrence correspondence")
+		}
+		if outgoing {
+			life := child.CreationEvent.DeliveryContext.Life
+			if life == nil || life.RunID != childRun || life.FlowInstance != entity.MaterializationMetadata.FlowInstance || life.Life != 7 || original.CreationEvent.DeliveryContext.Life.RunID != plan.SourceRunID {
+				t.Fatalf("construction continuation lost or reselected its life: %+v", life)
+			}
 		}
 		repeated, err := ProjectRunForkConstructionReceipt(plan, childRun, entity, born)
 		if err != nil || !reflect.DeepEqual(repeated, child) {

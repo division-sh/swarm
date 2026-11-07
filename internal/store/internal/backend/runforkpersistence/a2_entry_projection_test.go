@@ -29,7 +29,7 @@ func a2ForkEntry(t *testing.T, runID, entityID, instancePath, stage, occurrence 
 	if entityID == runID && instancePath == runID {
 		route = flowidentity.StoredRoute(".", runID, runID)
 	}
-	entry := timeridentity.StageEntryRef{RunID: runID, FlowScope: route.ScopeKey, InstanceID: route.InstanceID, InstancePath: route.InstancePath,
+	entry := timeridentity.StageEntryRef{Life: 1, RunID: runID, FlowScope: route.ScopeKey, InstanceID: route.InstanceID, InstancePath: route.InstancePath,
 		EntityID: entityID, Stage: stage, Cause: "delivery", EventID: "event-" + occurrence, OccurrenceID: "delivery-" + occurrence, TransitionID: "transition-" + occurrence}
 	if err := entry.Validate(); err != nil {
 		t.Fatal(err)

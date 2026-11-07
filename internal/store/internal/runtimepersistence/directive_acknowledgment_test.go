@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -530,6 +531,10 @@ func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguity
 	h := &directiveAmbiguityHarness{original: originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)}
 	runID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(runID, agent.id, flowInstance)
+	flowID := "."
+	if flowInstance == "global" {
+		flowID = "global"
+	}
 	seedDirectiveAmbiguityRun(t, backend, runID)
 	faults := &faultingDirectiveIntegrationStore{directiveIntegrationStore: backend.store}
 	bus, err := newStoreTestEventBus(t, faults, runtimebus.EventBusOptions{
@@ -543,7 +548,8 @@ func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguity
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
-		BaseContext:      h.original, MutationContext: h.mutationContext, CarryMutationContext: startupownership.CarryMutationAuthority,
+		SemanticSource:   defaultTurnInstanceSourceForTest(t), SourceArtifactFact: sourceartifactfixture.Fact(),
+		BaseContext: h.original, MutationContext: h.mutationContext, CarryMutationContext: startupownership.CarryMutationAuthority,
 		LifecycleStore: agentfixture.Lifecycle(t, backend.store),
 		WorkOwner:      storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -561,6 +567,7 @@ func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguity
 			ID:            agent.id,
 			Identity:      identity,
 			FlowPath:      identity.FlowInstance(),
+			FlowID:        flowID,
 			Type:          "stub",
 			Role:          "test",
 			Model:         "regular",

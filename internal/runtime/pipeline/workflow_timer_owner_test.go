@@ -593,7 +593,7 @@ func VerifyNativeWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStoresFo
 			inbound := nativeWorkflowJoinEventForTest(ctx, ".", rootRoute.InstancePath, entityID, "timer.arm", []byte(`{}`), createdAt.Add(time.Minute))
 			publishNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, inbound, "timer-owner")
 			if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, rootRoute, entityID, "waiting", "waiting", workflowTimerCause{
-				Kind: workflowTimerCauseEvent, EventID: inbound.ID(), EventType: string(inbound.Type()),
+				Kind: workflowTimerCauseEvent, Life: 1, EventID: inbound.ID(), EventType: string(inbound.Type()),
 				OccurredAt: inbound.CreatedAt(), ExecutionMode: executionmode.Live,
 			}); err != nil {
 				t.Fatalf("reconcile published event through native lifecycle owner: %v", err)
@@ -899,7 +899,7 @@ func VerifyNativeWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalSta
 				}
 
 				cause := workflowTimerCause{
-					Kind: workflowTimerCauseInitial, OccurredAt: activation.CreatedAt, ToState: "waiting", ExecutionMode: executionmode.Live,
+					Kind: workflowTimerCauseInitial, Life: 1, OccurredAt: activation.CreatedAt, ToState: "waiting", ExecutionMode: executionmode.Live,
 				}
 				if err := reconcileWorkflowTimerForTest(ctx, pc, workflowTimerRootRoute(ctx), entityID, "", "waiting", cause); err != nil {
 					t.Fatalf("replay exact activation cause: %v", err)
@@ -1291,7 +1291,7 @@ func VerifyNativeWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnB
 				runtimecorrelation.RunIDFromContext(ctx), entityID, rootRoute, bundle.Semantics.Timers[0],
 				activations[0].Ref.Generation,
 				// A same-stage accepted event carries no synthetic transition coordinates.
-				workflowTimerCause{Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt, ExecutionMode: executionmode.Live},
+				workflowTimerCause{Kind: workflowTimerCauseEvent, Life: 1, EventID: eventID, EventType: "work.created", OccurredAt: createdAt, ExecutionMode: executionmode.Live},
 				time.Hour,
 			)
 			if err != nil {

@@ -5,14 +5,18 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
 // Historical writer controls use the canonical constructor without starting
@@ -44,6 +48,32 @@ func constructHistoricalSourceFixture(t *testing.T, ctx context.Context, selecte
 		t.Fatalf("construct historical source: result=%+v err=%v", committed, err)
 	}
 	return plan
+}
+
+func constructDefaultRootPublicationSourceFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) events.RoutingSource {
+	t.Helper()
+	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	original, err := startupownership.CaptureMutationAuthority(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeID := original.ProcessAuthority().RuntimeInstanceID
+	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, rooted.Artifact().BundleHash()))
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructed := constructStaticPublicationSourceFixture(t, ctx, selected, bundle, semanticview.RootExecutionFlowID(semanticview.Wrap(bundle)))
+	route := constructed.Route()
+	route.EntityID = "" // The clock's original carrier is flow-owned, not entity-targeted.
+	routing, err := events.NewStaticFlowRoutingSource(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return routing
 }
 
 func constructStaticPublicationSourceFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, bundle *contracts.WorkflowContractBundle, flowID string) events.RoutingSource {

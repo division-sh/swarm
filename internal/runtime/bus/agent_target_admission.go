@@ -95,7 +95,7 @@ func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, int
 	}
 	descriptor = descriptor.Normalized()
 	if runtimeCreatedTargetlessAgentIntent(intent) {
-		return intent, nil
+		return p.captureTargetlessAgentLife(intent)
 	}
 	descriptor, found, _, err := p.decisionAgentDescriptor(identity)
 	if err != nil {
@@ -146,6 +146,12 @@ func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, int
 	if err != nil {
 		return intent, err
 	}
+	if !dependency.Empty() {
+		intent.TargetOwnership, err = intent.TargetOwnership.WithLife(construction.Life())
+		if err != nil {
+			return intent, err
+		}
+	}
 	intent.TargetBlueprint, intent.Initialization = intent.TargetOwnership.Route(), dependency
 	if !selected.Empty() {
 		intent.ReceiverBlueprint = selected
@@ -156,6 +162,25 @@ func (p publicationTargetOwnerEvidence) admitAgentTarget(event events.Event, int
 		}
 	}
 	return intent, nil
+}
+
+func (p publicationTargetOwnerEvidence) captureTargetlessAgentLife(intent RoutePlanDeliveryIntent) (RoutePlanDeliveryIntent, error) {
+	selected, owned := p.observedAgents[intent.AgentIdentity.Normalize()]
+	if !owned {
+		// Run-owned runtime actors do not acquire construction ownership merely
+		// because their delivery is durable or shares an instance coordinate.
+		return intent, nil
+	}
+	observed, err := p.decisionObservation(selected)
+	if err != nil {
+		return intent, err
+	}
+	instance, err := observed.WorkflowInstance()
+	if err != nil {
+		return intent, err
+	}
+	intent.Context.Life = &events.InstanceLife{RunID: observed.Owner().RunID, FlowInstance: observed.Identity().InstancePath, Life: instance.Life}
+	return intent, intent.Context.Life.Validate()
 }
 
 func runtimeCreatedTargetlessAgentIntent(intent RoutePlanDeliveryIntent) bool {
@@ -226,18 +251,7 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 		selectedPlan, plannedTarget = plan, target
 	}
 	if !plannedTarget.Empty() {
-		plan, target := selectedPlan, plannedTarget
-		if !requested.Empty() && requested.Normalized() != target {
-			return events.ReceiverInitialization{}, fmt.Errorf("agent receiver contradicts planned construction")
-		}
-		if plan.CreatingInput.EventID != event.ID() {
-			return events.ReceiverInitialization{}, fmt.Errorf("agent construction belongs to another publication")
-		}
-		receiver, err := plan.Identity.Route().AgentIdentityRoute()
-		if err != nil {
-			return events.ReceiverInitialization{}, err
-		}
-		return events.AdmitFlowReceiverInitialization(event, events.MustMaterializingEntityTarget(target), receiver)
+		return p.plannedAgentConstructionDependency(event, actor, requested, selectedPlan, plannedTarget)
 	}
 	if p.context != nil {
 		scope, _ := p.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
@@ -256,7 +270,11 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 			if err != nil {
 				return events.ReceiverInitialization{}, err
 			}
-			return admitObservedAgentConstructionDependency(actor.RunID, selected, requested)
+			instance, err := selected.WorkflowInstance()
+			if err != nil {
+				return events.ReceiverInitialization{}, err
+			}
+			return admitObservedAgentConstructionDependency(actor.RunID, selected, requested, instance.Life)
 		}
 	}
 	if p.source != nil && actor.Name.Source == agentidentity.NameSourceDeclared {
@@ -265,11 +283,36 @@ func (p publicationTargetOwnerEvidence) agentConstructionDependency(event events
 	return events.ReceiverInitialization{}, nil
 }
 
-func admitObservedAgentConstructionDependency(runID string, observation pipeline.FlowInstanceObservation, requested events.RouteIdentity) (events.ReceiverInitialization, error) {
+func (p publicationTargetOwnerEvidence) plannedAgentConstructionDependency(event events.Event, actor agentidentity.Identity, requested events.RouteIdentity, plan pipeline.FlowInstanceActivationPlan, target events.RouteIdentity) (events.ReceiverInitialization, error) {
+	if !requested.Empty() && requested.Normalized() != target {
+		return events.ReceiverInitialization{}, fmt.Errorf("agent receiver contradicts planned construction")
+	}
+	if plan.CreatingInput.EventID != event.ID() {
+		return events.ReceiverInitialization{}, fmt.Errorf("agent construction belongs to another publication")
+	}
+	if plan.Restart != nil {
+		observed, present := p.observedAgents[actor]
+		if !present || observed.Identity() != plan.Identity {
+			return events.ReceiverInitialization{}, fmt.Errorf("restarting agent requires its original physical construction")
+		}
+		return admitObservedAgentConstructionDependency(actor.RunID, observed, requested, plan.Instance.Life)
+	}
+	receiver, err := plan.Identity.Route().AgentIdentityRoute()
+	if err != nil {
+		return events.ReceiverInitialization{}, err
+	}
+	return events.AdmitFlowReceiverInitialization(event, events.MustMaterializingEntityTarget(target), receiver)
+}
+
+func admitObservedAgentConstructionDependency(runID string, observation pipeline.FlowInstanceObservation, requested events.RouteIdentity, life int64) (events.ReceiverInitialization, error) {
 	identity := observation.Identity()
 	target := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 	if !requested.Empty() && requested.Normalized() != target {
 		return events.ReceiverInitialization{}, fmt.Errorf("agent receiver contradicts recorded construction")
+	}
+	owner, err := events.MustExistingEntityTarget(target).WithLife(life)
+	if err != nil {
+		return events.ReceiverInitialization{}, err
 	}
 	receipt, native, err := observation.NativeConstruction()
 	if err != nil {
@@ -288,12 +331,12 @@ func admitObservedAgentConstructionDependency(runID string, observation pipeline
 		if err != nil {
 			return events.ReceiverInitialization{}, err
 		}
-		return events.AdmitHistoricalFlowReceiverInitialization(runID, events.MustExistingEntityTarget(target), receiver,
+		return events.AdmitHistoricalFlowReceiverInitialization(runID, owner, receiver,
 			events.HistoricalReceiverConstruction{SourceRunID: historical.SourceOwner.RunID, SourceRevision: historical.SourceRevision, SourceReceiver: sourceReceiver})
 	}
 	receiver, err := identity.Route().AgentIdentityRoute()
 	if err != nil {
 		return events.ReceiverInitialization{}, err
 	}
-	return events.AdmitStoredFlowReceiverInitialization(runID, receipt.CreatingInput.EventID, events.MustExistingEntityTarget(target), receiver)
+	return events.AdmitStoredFlowReceiverInitialization(runID, receipt.CreatingInput.EventID, owner, receiver)
 }

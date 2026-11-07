@@ -206,6 +206,12 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 	return errors.Join(ctx.Err(), err)
 }
 
+func (b *Backend) RunLockingReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	// Reuse native writer possession/finalization for the bounded inventory;
+	// the callback records no revision, evidence or backfill.
+	return b.RunTransaction(ctx, "read canceled turn ownership", operation)
+}
+
 func (b *Backend) acquireMutation(ctx context.Context, operation mutationOperation) error {
 	if err := ctx.Err(); err != nil {
 		return err

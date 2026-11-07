@@ -43,6 +43,11 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	commit := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, settlement.Settlement, mutationprotocol.Story, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (settlementOutcome, error) {
 		var outcome settlementOutcome
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, attempt, err = prepareTurnAttemptOwnershipTx(txctx, tx, true, s.directives, attempt)
+			if err != nil {
+				return err
+			}
 			attemptSettlement := settlement
 			permit, err := resolveCompletionSettlementPermitPostgres(txctx, tx, attempt)
 			if err != nil {
@@ -191,6 +196,11 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	commit := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite settle completion", settlement.Settlement, mutationprotocol.Story, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (settlementOutcome, error) {
 		var outcome settlementOutcome
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, attempt, err = prepareTurnAttemptOwnershipTx(txctx, tx, false, s.directives, attempt)
+			if err != nil {
+				return err
+			}
 			attemptSettlement := settlement
 			permit, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt)
 			if err != nil {

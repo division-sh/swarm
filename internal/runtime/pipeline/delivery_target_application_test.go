@@ -20,6 +20,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -78,6 +79,23 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	}
 	if application.State().EntityID != identity.EntityID {
 		t.Fatalf("appearing exact target state = %#v", application.State())
+	}
+	incomingLife := events.InstanceLife{RunID: testPipelineRunID, FlowInstance: "producer/one", Life: 7}
+	contextWithSource := events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &incomingLife, Reply: &events.ReplyContextRef{ID: "retained-reply"}})
+	executionContext := withDeliveryTargetApplication(contextWithSource, application)
+	wantLife := events.InstanceLife{RunID: testPipelineRunID, FlowInstance: identity.InstancePath, Life: owner.Life()}
+	installed := events.DeliveryContextFromContext(executionContext)
+	if installed.Life == nil || *installed.Life != wantLife || installed.ReplyContextID() != "retained-reply" || application.Event().DeliveryContext().Life == nil || *application.Event().DeliveryContext().Life != wantLife || incomingLife.FlowInstance != "producer/one" {
+		t.Fatalf("application borrowed producer life or changed continuation evidence: %+v", installed)
+	}
+	foreignLife, err := owner.WithLife(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, foreignLife); err == nil {
+		t.Fatal("captured work from another life became runnable")
+	} else if failure, typed := failures.EnvelopeFromError(err); !typed || failure.Class != failures.ClassStaleArrival || failure.Detail.Code != "instance_restarted" {
+		t.Fatalf("foreign-life work lost its typed refusal: %v", err)
 	}
 
 	siblingID := "later-matching-sibling"

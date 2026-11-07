@@ -116,7 +116,7 @@ func (s ReceiverInitialization) ValidateRoute(route DeliveryRoute) error {
 		if route.Target.MaterializingEntity() && !SameDeliveryTargetOwnership(s.target, route.Target) {
 			return fmt.Errorf("materializing actor contradicts its construction target")
 		}
-		if route.Target.Empty() || route.Target.Validate() != nil || construction.FlowID != actor.FlowID || construction.FlowInstance != actor.FlowInstance {
+		if route.Target.Empty() || route.Target.Validate() != nil || construction.FlowID != actor.FlowID || construction.FlowInstance != actor.FlowInstance || s.target.Life() != route.Target.Life() {
 			return fmt.Errorf("receiver initialization actor flow mismatch")
 		}
 		if route.AgentIdentity.Route != s.receiver {

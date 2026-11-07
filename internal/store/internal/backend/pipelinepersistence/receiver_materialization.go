@@ -76,6 +76,9 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if err != nil {
 		return false, err
 	}
+	if life := route.Initialization.ConstructionTarget().Life(); header.Life != life {
+		return false, pipeline.InstanceRestarted(flow, life, header.Life)
+	}
 	if header.WorkflowName != target.FlowID {
 		return false, fmt.Errorf("receiver dependency contradicts constructed flow declaration")
 	}

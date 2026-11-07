@@ -474,7 +474,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore, source s
 		ProviderFlowID:       "provider",
 		ProviderInputPin:     "provider_requested",
 		ProviderOutputPin:    "provider_replied",
-		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()},
+		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()}, OriginLife: 1,
 		RequestCorrelationID: requestEventID,
 		State:                runtimereplycontext.StateOpen,
 		CreatedAt:            now,

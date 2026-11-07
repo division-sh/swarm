@@ -214,13 +214,18 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	if fixture.authority.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		posture = executionposture.MockOnly
 	}
-	admission, err := store.AdmitDirectiveExecution(fixture.original, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+	ctx := runtimeeffects.WithLifecycleToken(fixture.original, fixture.authority.Normal)
+	admission, err := store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 		OperationID: op.OperationID, OwnerID: uuid.NewString(), Now: time.Now().UTC(), Lease: time.Minute,
-		ExecutionPosture: posture,
+		ExecutionPosture: posture, Source: defaultTurnInstanceSourceForTest(t),
 	})
 	if err != nil {
 		t.Fatalf("admit directive execution: %v", err)
 	}
+	if !admission.Acknowledged || admission.Ownership.Validate() != nil {
+		t.Fatal("directive admission omitted acknowledged ownership")
+	}
+	fixture.directiveOwnership[event.ID()] = admission.Ownership.Clone()
 	origin, err := runtimeagentcontrol.NewDirectiveExecutionOrigin(admission.Operation)
 	if err != nil {
 		t.Fatalf("construct directive provider origin: %v", err)
@@ -283,6 +288,9 @@ func providerDirectiveBaseContext(t *testing.T, fixture completionSettlementFixt
 	}
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-directive:"+operation)
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
+	if ownership, found := fixture.directiveOwnership[event.ID()]; found {
+		ctx = runtimeeffects.WithTurnInstanceOwnership(ctx, ownership)
+	}
 	return runtimecorrelation.WithInboundEvent(ctx, event)
 }
 

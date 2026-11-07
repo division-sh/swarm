@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 )
@@ -214,7 +215,11 @@ func sameFlowInstancePlanningObservations(a, b []pipeline.FlowInstanceObservatio
 		return false, nil
 	}
 	for i := range a {
-		if a[i].Owner() != b[i].Owner() || a[i].Identity() != b[i].Identity() || a[i].RunState() != b[i].RunState() || !a[i].SourceFact().Matches(b[i].SourceFact()) {
+		// This is an already-accepted group's commit recheck. The separate
+		// new-turn/stop gate still owns admission; pause alone retains this work.
+		acceptedPause := a[i].RunState() == runlifecycle.StateRunning && b[i].RunState() == runlifecycle.StatePaused
+		if a[i].Owner() != b[i].Owner() || a[i].Identity() != b[i].Identity() ||
+			a[i].RunState() != b[i].RunState() && !acceptedPause || !a[i].SourceFact().Matches(b[i].SourceFact()) {
 			return false, nil
 		}
 		x, err := captureFlowInstancePlanningDependencies(a[i], exact)
@@ -224,6 +229,9 @@ func sameFlowInstancePlanningObservations(a, b []pipeline.FlowInstanceObservatio
 		y, err := captureFlowInstancePlanningDependencies(b[i], exact)
 		if err != nil {
 			return false, err
+		}
+		if acceptedPause && x.readiness.RunStatus == "running" && y.readiness.RunStatus == "paused" {
+			y.readiness.RunStatus = x.readiness.RunStatus
 		}
 		if !reflect.DeepEqual(x, y) {
 			return false, nil
@@ -253,6 +261,7 @@ func captureFlowInstancePlanningDependencies(observation pipeline.FlowInstanceOb
 	out.instance = pipeline.WorkflowInstance{
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		EntityType: instance.EntityType, Mode: instance.Mode, InstanceKey: instance.InstanceKey,
+		Life: instance.Life,
 	}
 	if exact {
 		out.instance.Status, out.instance.TerminatedAt = instance.Status, instance.TerminatedAt

@@ -516,7 +516,7 @@ func TestC4F35CreationCrashRecordJSONRetainsCallerRequest(t *testing.T) {
 			ExecutionMode: executionmode.Live, Payload: []byte(`{}`), CreatedAt: at, FireAt: at.Add(time.Hour), Status: "active",
 		}}}},
 	}
-	entry := timeridentity.StageEntryRef{RunID: runID, FlowScope: identity.ScopeKey, InstanceID: identity.InstanceID, InstancePath: identity.InstancePath,
+	entry := timeridentity.StageEntryRef{Life: 1, RunID: runID, FlowScope: identity.ScopeKey, InstanceID: identity.InstanceID, InstancePath: identity.InstancePath,
 		EntityID: entityID, Stage: "waiting", Cause: "construction"}
 	plan.Instance.Bookkeeping = map[string]any{}
 	if err := workflowlifecycle.StoreStageEntry(plan.Instance.Bookkeeping, entry); err != nil {

@@ -117,6 +117,7 @@ func (f *receiverComposedFixture) prepareEngine(t *testing.T, keys []string, lab
 	}
 	state := stateOnlyWorkflowEngineMutationRecord(t, f.seed.runID, ".", f.seed.runID, f.seed.runID, instance.CurrentState, instance.Revision, instance.CreatedAt)
 	state.EntityType, state.Mode, state.StageDefined = instance.EntityType, instance.Mode, instance.StageDefined
+	state.Life = instance.Life
 	state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	return pipeline.WorkflowEngineMutationCommand{State: state, Publications: f.plans, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: f.claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}}
 }

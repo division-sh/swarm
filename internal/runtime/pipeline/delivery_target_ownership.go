@@ -20,6 +20,7 @@ type DeliveryTargetOwnerCandidate struct {
 	Route         events.RouteIdentity
 	Materializing bool
 	Availability  DeliveryTargetAvailability
+	Life          int64
 }
 
 // DeliveryTargetAvailability is immutable state/companion evidence, not a
@@ -322,13 +323,34 @@ func SelectDeliveryTargetOwner(source semanticview.Source, blueprint events.Rout
 	}
 	if len(materializing) == 1 && len(existing) == 0 {
 		owner, err := events.NewMaterializingEntityTarget(materializing[0])
-		return owner, true, err
+		if err != nil {
+			return events.DeliveryTargetOwnership{}, false, err
+		}
+		return captureDeliveryTargetLife(owner, candidates)
 	}
 	if len(existing) == 1 && len(materializing) == 0 {
 		owner, err := events.NewExistingEntityTarget(existing[0])
-		return owner, true, err
+		if err != nil {
+			return events.DeliveryTargetOwnership{}, false, err
+		}
+		return captureDeliveryTargetLife(owner, candidates)
 	}
 	return events.DeliveryTargetOwnership{}, false, nil
+}
+
+func captureDeliveryTargetLife(owner events.DeliveryTargetOwnership, candidates []DeliveryTargetOwnerCandidate) (events.DeliveryTargetOwnership, bool, error) {
+	var life int64
+	for _, candidate := range candidates {
+		if candidate.Route.Normalized().FlowInstance != owner.Route().FlowInstance {
+			continue
+		}
+		if candidate.Life <= 0 || life != 0 && life != candidate.Life {
+			return events.DeliveryTargetOwnership{}, false, fmt.Errorf("receiver target has missing or contradictory life evidence")
+		}
+		life = candidate.Life
+	}
+	owner, err := owner.WithLife(life)
+	return owner, err == nil, err
 }
 
 func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity) (events.RouteIdentity, error) {

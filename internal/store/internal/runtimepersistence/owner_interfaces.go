@@ -321,6 +321,7 @@ type operatorEntityMethods interface {
 	AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error)
 	ListOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
 	LoadOperatorEntity(ctx context.Context, entityID string, runID string) (operatorread.OperatorEntityFull, error)
+	LoadOperatorEntityAtLife(context.Context, string, string, int64) (operatorread.OperatorEntityFull, error)
 }
 
 type operatorObservabilityMethods interface {

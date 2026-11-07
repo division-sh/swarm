@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -317,7 +318,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAut
 	if err != nil {
 		t.Fatalf("ReserveDirectiveOperation: %v", err)
 	}
-	if _, err := admitDirectiveExecutionForTest(ctx, pg, reserved.Operation.OperationID, "reset-active-owner", now.Add(-time.Minute), time.Hour); err != nil {
+	if _, err := admitDirectiveExecutionForTest(t, ctx, pg, reserved.Operation.OperationID, "reset-active-owner", now.Add(-time.Minute), time.Hour); err != nil {
 		t.Fatalf("AdmitDirectiveExecution: %v", err)
 	}
 
@@ -362,7 +363,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 				t.Fatalf("ReserveDirectiveOperation: %v", err)
 			}
 			const ownerID = "reset-terminal-owner"
-			if _, err := admitDirectiveExecutionForTest(ctx, pg, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
+			if _, err := admitDirectiveExecutionForTest(t, ctx, pg, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
 				t.Fatalf("AdmitDirectiveExecution: %v", err)
 			}
 			switch terminalState {
@@ -1408,7 +1409,9 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "handler_failed", nil))); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
-	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentIdentity, "active")
+	if err := agentfixture.UpsertStatic(t, ctx, pg, agentFixtureStaticRecord(t, agentIdentity)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,

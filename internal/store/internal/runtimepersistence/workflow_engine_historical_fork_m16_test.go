@@ -58,6 +58,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			}
 			state := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, instance.CurrentState, instance.Revision, instance.CreatedAt)
 			state.EntityType, state.Mode, state.StageDefined = instance.EntityType, instance.Mode, instance.StageDefined
+			state.Life = instance.Life
 			state.WorkflowVersion = instance.WorkflowVersion
 			state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 			config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(identity.Route, instance.WorkflowVersion)

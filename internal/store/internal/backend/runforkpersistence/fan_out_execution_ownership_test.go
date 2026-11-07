@@ -20,6 +20,15 @@ func TestFanOutExecutionOwnershipProjectionRoles(t *testing.T) {
 		for _, kind := range []string{"existing", "materializing", "entityless"} {
 			t.Run(flow+"/"+kind, func(t *testing.T) {
 				plan, capsule := fanOutOwnershipFixture(t, flow, kind)
+				var err error
+				capsule.ProducerSource, err = capsule.ProducerSource.WithLife(7)
+				if err != nil {
+					t.Fatal(err)
+				}
+				capsule.Receiver.Target, err = capsule.Receiver.Target.WithLife(7)
+				if err != nil {
+					t.Fatal(err)
+				}
 				before, _ := json.Marshal(capsule)
 				got, err := projectRunForkFanOutExecutionOwnership(plan, "child-run", capsule)
 				if err != nil {
@@ -33,7 +42,7 @@ func TestFanOutExecutionOwnershipProjectionRoles(t *testing.T) {
 						wantEntity = "child-run"
 					}
 				}
-				if got.EntityID != wantEntity || got.Route.InstancePath != wantPath || got.Receiver.Target.Route().EntityID != wantEntity || got.Receiver.Target.Route().FlowInstance != wantPath || got.Receiver.Target.Code() != capsule.Receiver.Target.Code() {
+				if got.EntityID != wantEntity || got.Route.InstancePath != wantPath || got.Receiver.Target.Route().EntityID != wantEntity || got.Receiver.Target.Route().FlowInstance != wantPath || got.Receiver.Target.Code() != capsule.Receiver.Target.Code() || got.Receiver.Target.Life() != 7 || got.ProducerSource.Life() != 7 {
 					t.Fatalf("wrong child receiver projection: %+v", got)
 				}
 				if flow == "." {

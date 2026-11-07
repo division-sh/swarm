@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -217,11 +218,11 @@ func (f issue2564H2Fixture) waitDeliveries(t *testing.T, runID string) {
 }
 
 type issue2564H2Hub struct {
-	ID, Entity, Instance, Stage string
-	Count, C1, C2, Revision     int64
-	History                     []pipeline.WorkflowTransitionRecord
-	Cuts                        map[string]pipeline.WorkflowTransitionRecord
-	CutRevisions                map[string]int64
+	ID, Entity, Instance, Stage   string
+	Count, C1, C2, Revision, Life int64
+	History                       []pipeline.WorkflowTransitionRecord
+	Cuts                          map[string]pipeline.WorkflowTransitionRecord
+	CutRevisions                  map[string]int64
 }
 
 type issue2564H2Timer struct {
@@ -270,7 +271,7 @@ func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (is
 		return issue2564H2Snapshot{}, err
 	}
 	for _, row := range evidence.Hubs {
-		hub := issue2564H2Hub{Entity: row.Entity, Instance: row.Instance, Stage: row.Stage, Revision: row.Revision}
+		hub := issue2564H2Hub{Entity: row.Entity, Instance: row.Instance, Stage: row.Stage, Revision: row.Revision, Life: row.Life}
 		hub.ID, hub.Count, hub.C1, hub.C2, err = issue2564H2Counters(row.Fields)
 		if err != nil {
 			return issue2564H2Snapshot{}, err
@@ -497,7 +498,7 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 				if successor.Entity != hub.Entity || successor.Ref.DeclarationKey != keys[next] {
 					continue
 				}
-				want := timeridentity.WorkflowTimerActivationID(run, hub.Entity, hub.Instance, successor.Ref.DeclarationKey, successor.Ref.DeclarationRevision, string(timeridentity.WorkflowTimerActivationCauseTransition), successor.Ref.Generation.KeySuffix(), event.ID, "platform.stage_timer", record.TransitionID, stage, next)
+				want := timeridentity.WorkflowTimerActivationID(run, hub.Entity, hub.Instance, successor.Ref.DeclarationKey, successor.Ref.DeclarationRevision, string(timeridentity.WorkflowTimerActivationCauseTransition), successor.Ref.Generation.KeySuffix(), event.ID, "platform.stage_timer", record.TransitionID, stage, next, strconv.FormatInt(hub.Life, 10))
 				if successor.ID == want && successor.Ref.Cause == timeridentity.WorkflowTimerActivationCauseTransition && successor.Created.Equal(record.FiredAt) {
 					successors++
 					nextTimer = successor

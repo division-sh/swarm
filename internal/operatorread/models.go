@@ -137,6 +137,7 @@ type OperatorEntitySummary struct {
 	FlowInstance       string     `json:"flow_instance"`
 	EntityType         string     `json:"entity_type"`
 	StageDefined       *bool      `json:"stage_defined"`
+	Life               *int64     `json:"life"`
 	CurrentState       *string    `json:"current_state"`
 	Revision           *int64     `json:"revision"`
 	EnteredStateAt     *time.Time `json:"entered_state_at"`
@@ -971,11 +972,25 @@ type RunDebugTraceQueryOptions struct {
 }
 
 type RunDebugTraceFilter struct {
+	Iter             *int64
 	EventNames       []string
 	EntityIDs        []string
 	DeliveryStatuses []string
 	SubscriberIDs    []string
 	SubscriberTypes  []string
+}
+
+func (f RunDebugTraceFilter) ValidateIter() error {
+	if f.Iter == nil {
+		return nil
+	}
+	if *f.Iter <= 0 {
+		return &TraceIterError{Reason: TraceIterPositiveRequired}
+	}
+	if len(f.EntityIDs) != 1 {
+		return &TraceIterError{Reason: TraceIterOneEntityRequired}
+	}
+	return nil
 }
 
 type RunDebugTraceRow struct {

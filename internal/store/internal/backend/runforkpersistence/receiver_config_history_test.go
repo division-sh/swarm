@@ -56,7 +56,7 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				fmt.Sprintf(`CREATE TEMP TABLE run_fork_fact_revisions (run_id TEXT, revision BIGINT, family TEXT, fact_key TEXT, fact %s, present BOOLEAN)`, jsonType),
 				`CREATE TEMP TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, updated_at TEXT)`,
 				fmt.Sprintf(`CREATE TEMP TABLE entity_mutations (run_id TEXT, mutation_id TEXT, entity_id TEXT, domain TEXT, path TEXT, new_value %s, caused_by_event TEXT, created_at TEXT)`, jsonType),
-				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, config %s, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, created_at TEXT, updated_at TEXT, terminated_at TEXT)`, jsonType),
+				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, config %s, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, created_at TEXT, updated_at TEXT, terminated_at TEXT, life INTEGER NOT NULL DEFAULT 1 CHECK (life > 0), revision BIGINT NOT NULL DEFAULT 1)`, jsonType),
 				fmt.Sprintf(`CREATE TEMP TABLE workflow_instance_initial_materializations (run_id TEXT, instance_path TEXT, entity_id TEXT, projection_version INTEGER NOT NULL, projection %s)`, jsonType),
 			} {
 				if _, err := tx.Exec(ddl); err != nil {

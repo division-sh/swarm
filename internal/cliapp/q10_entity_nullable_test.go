@@ -12,7 +12,7 @@ func entityTestPointer[T any](value T) *T { return &value }
 func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 	base := map[string]any{"entity_id": "entity-1", "run_id": "run-1", "flow_instance": "work/one", "entity_type": "task",
 		"created_at": "2026-10-09T01:00:00Z", "updated_at": "2026-10-09T01:00:00Z", "stage_defined": nil,
-		"current_state": nil, "revision": nil, "entered_state_at": nil, "lifecycle_created_at": nil, "lifecycle_updated_at": nil}
+		"life": nil, "current_state": nil, "revision": nil, "entered_state_at": nil, "lifecycle_created_at": nil, "lifecycle_updated_at": nil}
 	for _, kind := range []string{"import", "no_stage", "unknown"} {
 		t.Run(kind, func(t *testing.T) {
 			data := make(map[string]any, len(base))
@@ -22,6 +22,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 			full := map[string]any{"entity": data, "fields": map[string]any{"current_state": "business"}, "bookkeeping": nil, "accumulated": nil, "loops": nil}
 			want := "no lifecycle"
 			if kind != "import" {
+				data["life"] = 1
 				data["stage_defined"], data["revision"] = kind == "unknown", 3
 				data["lifecycle_created_at"], data["lifecycle_updated_at"] = base["created_at"], base["updated_at"]
 				full["bookkeeping"], full["accumulated"], full["loops"] = map[string]any{}, map[string]any{}, []any{}
@@ -50,7 +51,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 			if !strings.Contains(text.String(), want) || !strings.Contains(text.String(), "data updated") {
 				t.Fatalf("absence/clock teaching lost: %s", text.String())
 			}
-			for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+			for _, key := range []string{"stage_defined", "life", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
 				value := data[key]
 				delete(data, key)
 				if _, err := decode(full); err == nil {
@@ -81,7 +82,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 			data["updated_at"] = base["updated_at"]
 			if kind == "import" {
 				for key, value := range map[string]any{
-					"stage_defined": false, "current_state": "unknown", "revision": 1,
+					"stage_defined": false, "life": 1, "current_state": "unknown", "revision": 1,
 					"entered_state_at": base["created_at"], "lifecycle_created_at": base["created_at"], "lifecycle_updated_at": base["updated_at"],
 				} {
 					data[key] = value
@@ -100,7 +101,7 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 					full[key] = nil
 				}
 			} else {
-				for _, key := range []string{"revision", "lifecycle_created_at", "lifecycle_updated_at"} {
+				for _, key := range []string{"life", "revision", "lifecycle_created_at", "lifecycle_updated_at"} {
 					value := data[key]
 					data[key] = nil
 					if _, err := decode(full); err == nil {
@@ -115,6 +116,13 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 					}
 				}
 				data["revision"] = 3
+				for _, life := range []any{0, -1, 1.5} {
+					data["life"] = life
+					if _, err := decode(full); err == nil {
+						t.Fatalf("invalid constructed life %v admitted", life)
+					}
+				}
+				data["life"] = 1
 				for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
 					value := full[key]
 					full[key] = nil

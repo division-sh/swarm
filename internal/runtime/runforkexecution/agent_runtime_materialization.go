@@ -571,8 +571,8 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 	}
 	if len(req.AgentRuntime.Records) == 0 && !semanticview.SourceDeclaresAgents(req.LoadedSource.Source) {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
-			LifecycleDiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
-				Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+			LifecycleDiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{
+				Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 				SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID,
 				ForkPoint: req.Admission.ForkPoint, ForkEventID: req.Admission.ForkPoint.EventID,
 			},
@@ -619,8 +619,8 @@ func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelecte
 		}
 	}
 	builder.options.BaseContext = context.WithoutCancel(ctx)
-	builder.options.LifecycleDiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{
-		Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+	builder.options.LifecycleDiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{
+		Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
 		SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID,
 		ForkPoint: req.Admission.ForkPoint, ForkEventID: req.Admission.ForkPoint.EventID,
 	}

@@ -115,7 +115,7 @@ func TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores(t *testing.T
 							if result, err := fixture.store.(effects.TurnLifetimeStore).RequestTurnTimeout(providerCtx, handle.Attempt(), launch.Turn.DeadlineAt); !errors.Is(err, deliverylifecycle.ErrConflict) || result.Committed {
 								t.Fatalf("stale predecessor admitted timeout: %+v %v", result, err)
 							}
-							plan := prepareCanceledReactionForTest(t, retryCtx, fixture, *launch.Turn, intent.RequestedAt)
+							plan := prepareCanceledReactionForTest(t, retryCtx, fixture, effects.TurnExecutionResult{Attempt: retry.Attempt(), Cancellation: intent, Clock: launch.Turn})
 							command := effects.CanceledTurnCommandForAttempt(retry.Attempt(), plan)
 							defer func() {
 								if err := fixture.store.(storeTestDurableEventBusStore).PipelineObligations().Release(context.WithoutCancel(ctx), plan.(bus.EnginePublicationPlan).PublicationCommand().Commit.PipelineClaim); err != nil {

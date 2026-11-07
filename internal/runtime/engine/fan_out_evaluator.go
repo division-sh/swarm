@@ -231,13 +231,13 @@ func (p *FanOutEvaluation) EvaluateOrdinal(ctx context.Context, item any, ordina
 	if err != nil {
 		return EmitIntent{}, err
 	}
-	emit.Context = p.intent.Request.Capsule.Context.ReplyOnly()
+	emit.Context = p.intent.Request.Capsule.Context.Continuation()
 	return emit, nil
 }
 
 func cloneFanOutCapsule(c fanoutobligation.Capsule) fanoutobligation.Capsule {
 	c.SourceProjection = c.SourceProjection.Clone()
-	c.Context = c.Context.ReplyOnly()
+	c.Context = c.Context.Continuation()
 	c.Entity, c.PlatformEntity = cloneStringAnyMap(c.Entity), cloneStringAnyMap(c.PlatformEntity)
 	c.Computed, c.Accumulated = cloneStringAnyMap(c.Computed), cloneStringAnyMap(c.Accumulated)
 	c.Join, c.Loop = cloneStringAnyMap(c.Join), cloneStringAnyMap(c.Loop)

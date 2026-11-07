@@ -26,6 +26,7 @@ import (
 
 func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell string, live bool) {
 	t.Helper()
+	selectedSHA := os.Getenv(realModelSHAEnv)
 	credentialPath := os.Getenv("SWARM_CREDENTIALS_FILE")
 	if live && credentialPath == "" {
 		var err error
@@ -64,35 +65,99 @@ func runProviderEvidenceJourney(t *testing.T, backend servedparity.Backend, cell
 	configureProviderJourneyLLM(t, h.opts.ConfigPath, "openai_compatible", baseURL, "deepseek-flash")
 	observation := &providerEvidenceObservation{base: http.DefaultTransport, live: live}
 	http.DefaultTransport = observation
+	if cell == "instance_life" && live {
+		recorder := &turnRenderingRecorder{base: observation, sourceSHA: selectedSHA, evidenceDir: os.Getenv("SWARM_RENDERING_EVIDENCE_DIR")}
+		unsetEnvForTest(t, "SWARM_RENDERING_EVIDENCE_DIR")
+		http.DefaultTransport = recorder
+		t.Cleanup(func() { recorder.save(t, backend, cell) })
+	}
 	t.Cleanup(func() { http.DefaultTransport = observation.base })
 	t.Cleanup(func() { observation.report(t) })
 	h.start(t)
 	defer h.stop(t)
 	turns := 1
-	if cell == "memory" || cell == "empty_content" {
+	if cell == "memory" || cell == "empty_content" || cell == "instance_life" {
 		turns = 2
 	}
 	var runID, sessionID string
+	var originalInstance instanceLifeJourneyReadback
+	var originalTrace map[string]bool
 	for sequence := 1; sequence <= turns; sequence++ {
 		input := map[string]any{"bundle_hash": servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot), "event_name": "evidence.requested",
 			"payload": map[string]any{"conversation": "synthetic", "sequence": sequence}, "idempotency_key": fmt.Sprintf("evidence-%d", sequence)}
 		if runID != "" {
 			input["run_id"] = runID
 		}
-		published := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), input)
+		var published servedEventPublishRPCResult
+		if cell == "instance_life" && sequence == 2 {
+			payload, err := json.Marshal(input["payload"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, code := runServedCLICommand(t, h.endpoint, []string{"event", "publish", "evidence.requested", "--run-id", runID, "--payload-json", string(payload), "--idempotency-key", "evidence-2"})
+			if code != 0 {
+				t.Fatalf("public constructor restart exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			result := parseServedEventPublishOutput(t, stdout)
+			published.RunID, published.EventID = result["run_id"], result["event_id"]
+		} else {
+			published = requireServedEventPublishRPCResult(t, h.rpcEndpoint(), input)
+		}
 		if runID != "" && published.RunID != runID {
 			t.Fatal("evidence conversation changed its run")
 		}
 		runID = published.RunID
-		session, refusal := waitProviderEvidenceTurn(t, h, runID, published.EventID, observation, cell == "refusal")
-		if sessionID != "" && sessionID != session {
+		predecessor := ""
+		if cell == "instance_life" {
+			predecessor = sessionID
+		}
+		session, refusal := waitProviderEvidenceTurn(t, h, runID, published.EventID, observation, cell == "refusal", predecessor)
+		if cell == "instance_life" && sessionID != "" && sessionID == session {
+			t.Fatal("instance restart reused the preceding life's session")
+		}
+		if cell != "instance_life" && sessionID != "" && sessionID != session {
 			t.Fatal("evidence conversation changed its session")
 		}
 		sessionID = session
 		if refusal {
 			return
 		}
-		requireProviderEvidenceOutput(t, h, runID, published.EventID, sequence)
+		if cell == "instance_life" {
+			requireProviderEvidenceOutput(t, h, runID, published.EventID, sequence, identitytest.FlowNode(t, "worker", "finish").Key())
+			current := waitInstanceLifeFinished(t, h, runID, published.EventID)
+			if sequence == 1 {
+				originalInstance = current
+				originalTrace = readInstanceLifeTrace(t, h, runID, current.EntityID, nil)
+			} else {
+				if current.EntityID != originalInstance.EntityID || current.Life == nil || *current.Life != 2 {
+					t.Fatalf("constructor restart changed identity or wrong life: before=%+v after=%+v", originalInstance, current)
+				}
+				var prior struct {
+					Entity instanceLifeJourneyReadback `json:"entity"`
+				}
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "entity.get", map[string]any{"run_id": runID, "entity_id": current.EntityID, "iter": 1}, &prior)
+				if prior.Entity.EntityID != current.EntityID || prior.Entity.Life == nil || *prior.Entity.Life != 1 || prior.Entity.State == nil || *prior.Entity.State != "done" {
+					t.Fatalf("explicit prior life lost history: %+v", prior.Entity)
+				}
+				one := int64(1)
+				retained := readInstanceLifeTrace(t, h, runID, current.EntityID, &one)
+				for id := range originalTrace {
+					if !retained[id] {
+						t.Fatal("prior-life trace mixed or replaced its captured event identity")
+					}
+				}
+				for id := range readInstanceLifeTrace(t, h, runID, current.EntityID, nil) {
+					if retained[id] {
+						t.Fatal("current-life trace exposed the preceding life's event")
+					}
+				}
+				requireInstanceLifeReadPresentation(t, h, runID, current.EntityID)
+			}
+			h.stop(t)
+			h.start(t)
+		} else {
+			requireProviderEvidenceOutput(t, h, runID, published.EventID, sequence)
+		}
 	}
 	if cell == "refusal" {
 		t.Log("boundary=request_refusal outcome=NOT_EXERCISED (provider accepted the journey)")
@@ -121,6 +186,10 @@ func writeProviderEvidenceSource(t *testing.T, cell string) string {
 	}})
 	write("worker/manifest.yaml", manifest)
 	write("worker/schema.yaml", map[string]any{"instance": "conversation", "inputs": []string{"evidence.requested"}, "outputs": []string{"evidence.completed"}})
+	if cell == "instance_life" {
+		write("worker/schema.yaml", map[string]any{"instance": "conversation", "stages": map[string]any{"active": map[string]any{}, "done": map[string]any{"final": true}}, "inputs": []string{"evidence.requested"}, "outputs": []string{"evidence.completed"}})
+		write("worker/nodes.yaml", map[string]any{"finish": map[string]any{"evidence.completed": map[string]any{"advances_to": "done"}}})
+	}
 	write("worker/state.yaml", map[string]any{"conversation": "text"})
 	write("worker/events.yaml", map[string]any{"evidence.completed": map[string]any{"sequence": "integer"}})
 	agent := map[string]any{"role": "evidence", "model": "regular", "memory": true, "subscriptions": []string{"evidence.requested"}, "emit_events": []string{"evidence.completed"},
@@ -173,6 +242,7 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		}
 	}
 	sequence := 0
+	userFrames := 0
 	linked := map[string]bool{}
 	for _, message := range body.Messages {
 		if message.Role == "assistant" {
@@ -191,8 +261,12 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 			Sequence int `json:"sequence"`
 		}
 		if message.Role == "user" && json.Unmarshal([]byte(message.Content), &payload) == nil && payload.Sequence > 0 {
+			userFrames++
 			sequence = payload.Sequence
 		}
+	}
+	if cell == "instance_life" && userFrames != 1 {
+		return llmapi.Reply{}, fmt.Errorf("restarted instance replayed another life's conversation")
 	}
 	if cell == "tool_round" && request.Number == 1 {
 		for _, tool := range body.Tools {
@@ -218,7 +292,7 @@ func providerEvidenceReply(request llmapi.Request, cell string) (llmapi.Reply, e
 		Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("emit-%d", request.Number), Name: "emit_evidence_completed", Arguments: args}}}, nil
 }
 
-func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, observation *providerEvidenceObservation, refusal bool) (string, bool) {
+func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, observation *providerEvidenceObservation, refusal bool, predecessor ...string) (string, bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
@@ -230,6 +304,27 @@ func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runI
 		}
 		var sessions operatorread.OperatorConversationListResult
 		requireServedJSONRPCResult(t, h.rpcEndpoint(), "conversation.list", map[string]any{"run_id": runID}, &sessions)
+		if len(predecessor) == 1 && predecessor[0] != "" {
+			if len(sessions.Conversations) != 2 {
+				t.Fatalf("instance restart must retain one predecessor and one successor conversation, got %d", len(sessions.Conversations))
+			}
+			var successor []operatorread.OperatorConversationSummary
+			found := false
+			for _, session := range sessions.Conversations {
+				if session.SessionID != predecessor[0] {
+					successor = append(successor, session)
+					continue
+				}
+				found = true
+				if session.Status != "terminated" || session.EndedAt == nil || session.TurnCount != 1 {
+					t.Fatalf("instance restart lost its terminated predecessor history: %+v", session)
+				}
+			}
+			if !found || len(successor) != 1 || successor[0].Status != "active" {
+				t.Fatal("instance restart did not expose its exact sole successor")
+			}
+			sessions.Conversations = successor
+		}
 		if len(sessions.Conversations) == 1 {
 			session := sessions.Conversations[0].SessionID
 			var turns operatorread.OperatorConversationTurnListResult
@@ -263,7 +358,7 @@ func waitProviderEvidenceTurn(t *testing.T, h *channelOnboardingE2EHarness, runI
 	return "", false
 }
 
-func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, sequence int) {
+func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness, runID, inputID string, sequence int, additionalReceivers ...string) {
 	t.Helper()
 	var input operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.get", map[string]any{"event_id": inputID}, &input)
@@ -274,6 +369,10 @@ func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness,
 	deadline := time.Now().Add(15 * time.Second)
 	var last operatorread.OperatorEventListResult
 	observer := identitytest.RootNode(t, "observer").Key()
+	wantReceivers := map[string]bool{observer: true}
+	for _, receiver := range additionalReceivers {
+		wantReceivers[receiver] = true
+	}
 	for time.Now().Before(deadline) {
 		var page operatorread.OperatorEventListResult
 		requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": eventName}, "limit": 100}, &page)
@@ -283,8 +382,15 @@ func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness,
 		for _, event := range page.Events {
 			if event.Payload["sequence"] == float64(sequence) {
 				matches++
-				if len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberID != observer || event.Deliveries[0].Status != "delivered" || len(event.DeadLetters) != 0 {
+				if len(event.Deliveries) != len(wantReceivers) || len(event.DeadLetters) != 0 {
 					settled = false
+				}
+				seen := map[string]bool{}
+				for _, delivery := range event.Deliveries {
+					if !wantReceivers[delivery.SubscriberID] || seen[delivery.SubscriberID] || delivery.Status != "delivered" {
+						settled = false
+					}
+					seen[delivery.SubscriberID] = true
 				}
 			}
 		}
@@ -302,6 +408,9 @@ func requireProviderEvidenceOutput(t *testing.T, h *channelOnboardingE2EHarness,
 			statuses = append(statuses, delivery.Status)
 		}
 		t.Logf("evidence output observation: event=%s sequence_type=%T deliveries=%v dead_letters=%d", event.EventName, event.Payload["sequence"], statuses, len(event.DeadLetters))
+		for _, dead := range event.DeadLetters {
+			t.Logf("evidence observer failure: class=%s code=%s component=%s operation=%s", dead.Failure.Class, dead.Failure.Detail.Code, dead.Failure.Component, dead.Failure.Operation)
+		}
 	}
 	t.Fatal("authored evidence output did not settle at its observer")
 }

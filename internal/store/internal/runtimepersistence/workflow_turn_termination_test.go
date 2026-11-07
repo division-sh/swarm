@@ -59,10 +59,12 @@ func TestAuthoredTurnTerminationCommitsWithExactStageBothStores(t *testing.T) {
 				entityID := uuid.NewString()
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				record := seedTurnTerminationHeaderForDeclaration(t, fixture, owner, entityID, now, declaration, key)
+				entityID = record.EntityID
 				if mode == "other_instance" {
 					owner.Route = flowidentity.RouteForInstancePath("global/other")
 					entityID = uuid.NewString()
 					record = seedTurnTerminationHeaderForDeclaration(t, fixture, owner, entityID, now, declaration, "other")
+					entityID = record.EntityID
 				}
 				event := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")
 				node, err := identity.AdmitExecutableNodeDeclaration(owner.Route.ScopeKey, "router")
@@ -293,6 +295,13 @@ func seedTurnTerminationHeaderForDeclaration(t *testing.T, fixture completionSet
 				}, now)
 			}
 			instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = root.TemplateID, root.InstancePath, root.EntityID
+			child, err := flowidentity.KeylessChild(source, root, "global")
+			if err != nil || child.Route() != owner.Route {
+				t.Fatalf("termination fixture differs from its canonical static child: %+v %v", child, err)
+			}
+			instance.EntityID = child.EntityID
+		} else {
+			instance.EntityID = owner.RunID
 		}
 	}
 	return commitPreparedWorkflowAggregateFixture(t, fixture.original, fixture.store.(agentFixtureFlowStore), owner.RunID, instance, now)

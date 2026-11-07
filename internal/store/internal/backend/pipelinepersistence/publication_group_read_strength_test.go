@@ -18,7 +18,7 @@ import (
 )
 
 func TestGroupInstancePlanningInventoryKeepsImmutableFactsAndExactReadStrength(t *testing.T) {
-	for _, change := range []string{"stage", "termination", "attachment", "attempt", "emitted", "agent", "creation", "native_input", "native_fields", "run_state", "membership"} {
+	for _, change := range []string{"stage", "termination", "attachment", "attempt", "emitted", "agent", "creation", "native_input", "native_fields", "run_state", "paused_life", "paused_stage", "paused_attachment", "stopped", "membership", "life"} {
 		t.Run(change, func(t *testing.T) {
 			before, after := groupReadStrengthObservations(t, change)
 			scope, err := pipeline.NewFlowInstanceLookupScope(before.Selection().Source(), before.SourceFact(), before.Owner().RunID, []string{"."}, nil)
@@ -32,13 +32,13 @@ func TestGroupInstancePlanningInventoryKeepsImmutableFactsAndExactReadStrength(t
 			reads := flowInstancePlanningReadSet{reads: []flowInstancePlanningRead{{scope: &scope, observations: previous}}}
 			snapshot := flowInstanceIndexSnapshot{source: scope.Source(), run: runlifecycle.Snapshot{RunID: scope.RunID()}, declarations: map[string][]pipeline.FlowInstanceObservation{".": current}}
 			changed, err := reads.reobserve(context.Background(), &snapshot)
-			mutable := change == "stage" || change == "termination" || change == "attachment" || change == "attempt" || change == "emitted"
+			mutable := change == "stage" || change == "termination" || change == "attachment" || change == "attempt" || change == "emitted" || change == "run_state" || change == "paused_stage" || change == "paused_attachment"
 			if err != nil || changed == mutable {
 				t.Fatalf("inventory change=%s stale=%v mutable=%v err=%v", change, changed, mutable, err)
 			}
 			// The same observation, when actually looked up, retains its full
 			// availability/readiness dependency instead of borrowing list strength.
-			if same, err := sameFlowInstancePlanningObservations(previous, current, true); err != nil || same {
+			if same, err := sameFlowInstancePlanningObservations(previous, current, true); err != nil || same != (change == "run_state") {
 				t.Fatalf("exact read lost %s: same=%v err=%v", change, same, err)
 			}
 		})
@@ -97,7 +97,7 @@ func groupReadStrengthObservations(t *testing.T, change string) (pipeline.FlowIn
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
-	instance := pipeline.WorkflowInstance{WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active", InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "pending", StageDefined: true, Revision: 1, CreatedAt: at, UpdatedAt: at}
+	instance := pipeline.WorkflowInstance{Life: 1, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static", Status: "active", InstanceID: runID, StorageRef: runID, EntityID: runID, CurrentState: "pending", StageDefined: true, Revision: 1, CreatedAt: at, UpdatedAt: at}
 	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := pipeline.FlowConstructionPublicationEvidence{Identity: identity, WorkflowVersion: source.WorkflowVersion(), BundleHash: fact.BundleHash(), Fields: map[string]any{"seed": "original"}}
 	readiness := pipeline.DynamicFlowRuntimeReadiness{Plan: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live}, OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentReady, AttemptState: "accepted", AttemptOrdinal: 1}
@@ -155,6 +155,22 @@ func groupReadStrengthObservations(t *testing.T, change string) (pipeline.FlowIn
 	case "run_state":
 		run.State = runlifecycle.StatePaused
 		readiness.RunStatus = "paused"
+	case "life":
+		instance.Life++
+	case "paused_life", "paused_stage", "paused_attachment":
+		run.State, readiness.RunStatus = runlifecycle.StatePaused, "paused"
+		switch change {
+		case "paused_life":
+			instance.Life++
+		case "paused_stage":
+			instance.CurrentState = "completed"
+		case "paused_attachment":
+			readiness.Phase = pipeline.FlowAttachmentPlanned
+		}
+	case "stopped":
+		run.State, readiness.RunStatus = runlifecycle.StateCancelled, "cancelled"
+		ended := at.Add(time.Second)
+		run.EndedAt = &ended
 	}
 	return before, admit()
 }

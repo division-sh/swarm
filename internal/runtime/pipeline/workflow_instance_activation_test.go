@@ -34,6 +34,7 @@ func VerifyWorkflowInitialLifecyclePreparationRejectsUnownedEmissionsForTest(t *
 	store.lifecycleOwner = &workflowInitialMaterializationTestOwner{emissions: 1}
 	ctx := withLiveWorkflowInitialEntry(fixture.Context)
 	instance := WorkflowInstance{
+		Life:       1,
 		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 		WorkflowVersion: "1.0.0", CurrentState: "pending",
 		Fields:     map[string]any{},

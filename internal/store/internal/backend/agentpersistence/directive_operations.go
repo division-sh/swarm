@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -266,10 +267,15 @@ func insertSQLiteDirectiveOperationTx(ctx context.Context, tx *sql.Tx, op runtim
 
 func (s *AgentPostgresOwner) AdmitDirectiveExecution(ctx context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
 	var event events.AdmittedEvent
-	op, acknowledged, err := s.transitionPostgresDirectiveOperation(ctx, req.OperationID, func(txctx context.Context, tx *sql.Tx) error {
+	var ownership events.InstanceOwnership
+	token, _ := runtimeeffects.LifecycleTokenFromContext(ctx)
+	op, acknowledged, err := s.transitionPostgresDirectiveOperationWithPrefix(ctx, req.OperationID, func(txctx context.Context, tx *sql.Tx) error {
 		current, found, err := loadPostgresDirectiveOperationByID(txctx, tx, req.OperationID, false)
 		if err != nil || !found {
 			return errors.Join(err, fmt.Errorf("directive operation not found"))
+		}
+		if current.AgentIdentity != token.Identity || current.ResolvedRunID != token.Identity.RunID {
+			return fmt.Errorf("directive coordinates changed after actor admission")
 		}
 		event, err = s.loadAndAdmitDirectiveEvent(txctx, tx, current, req.ExecutionPosture)
 		if err != nil {
@@ -277,19 +283,31 @@ func (s *AgentPostgresOwner) AdmitDirectiveExecution(ctx context.Context, req ru
 		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executing', execution_owner_id = $2, execution_admitted_at = $3, execution_lease_expires_at = $4, updated_at = $3 WHERE operation_id = $1::uuid AND state = 'prepared'`, req.OperationID, req.OwnerID, req.Now.UTC(), req.Now.Add(normalizeDirectiveLease(req.Lease)).UTC())
 		return requireDirectiveTransition(res, err)
+	}, func(txctx context.Context, tx *sql.Tx) error {
+		peek, found, err := loadPostgresDirectiveOperationByID(txctx, tx, req.OperationID, false)
+		if err != nil || !found || peek.AgentIdentity != token.Identity || peek.ResolvedRunID != token.Identity.RunID {
+			return errors.Join(err, fmt.Errorf("directive admission requires its exact acquired actor"))
+		}
+		ownership, err = s.PrepareAgentTurnOwnershipTx(txctx, tx, req.Source, token)
+		return err
 	})
 	if !acknowledged {
 		return runtimeagentcontrol.DirectiveExecutionAdmission{}, err
 	}
-	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event, Acknowledged: true}, err
+	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event, Ownership: ownership, Acknowledged: true}, err
 }
 
 func (s *AgentSQLiteOwner) AdmitDirectiveExecution(ctx context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
 	var event events.AdmittedEvent
-	op, acknowledged, err := s.transitionSQLiteDirectiveOperation(ctx, req.OperationID, func(txctx context.Context, tx *sql.Tx) error {
+	var ownership events.InstanceOwnership
+	token, _ := runtimeeffects.LifecycleTokenFromContext(ctx)
+	op, acknowledged, err := s.transitionSQLiteDirectiveOperationWithPrefix(ctx, req.OperationID, func(txctx context.Context, tx *sql.Tx) error {
 		current, found, err := loadSQLiteDirectiveOperationByID(txctx, tx, req.OperationID)
 		if err != nil || !found {
 			return errors.Join(err, fmt.Errorf("directive operation not found"))
+		}
+		if current.AgentIdentity != token.Identity || current.ResolvedRunID != token.Identity.RunID {
+			return fmt.Errorf("directive coordinates changed after actor admission")
 		}
 		event, err = s.loadAndAdmitDirectiveEvent(txctx, tx, current, req.ExecutionPosture)
 		if err != nil {
@@ -297,11 +315,18 @@ func (s *AgentSQLiteOwner) AdmitDirectiveExecution(ctx context.Context, req runt
 		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executing', execution_owner_id = ?, execution_admitted_at = ?, execution_lease_expires_at = ?, updated_at = ? WHERE operation_id = ? AND state = 'prepared'`, req.OwnerID, req.Now.UTC(), req.Now.Add(normalizeDirectiveLease(req.Lease)).UTC(), req.Now.UTC(), req.OperationID)
 		return requireDirectiveTransition(res, err)
+	}, func(txctx context.Context, tx *sql.Tx) error {
+		peek, found, err := loadSQLiteDirectiveOperationByID(txctx, tx, req.OperationID)
+		if err != nil || !found || peek.AgentIdentity != token.Identity || peek.ResolvedRunID != token.Identity.RunID {
+			return errors.Join(err, fmt.Errorf("directive admission requires its exact acquired actor"))
+		}
+		ownership, err = s.PrepareAgentTurnOwnershipTx(txctx, tx, req.Source, token)
+		return err
 	})
 	if !acknowledged {
 		return runtimeagentcontrol.DirectiveExecutionAdmission{}, err
 	}
-	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event, Acknowledged: true}, err
+	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event, Ownership: ownership, Acknowledged: true}, err
 }
 
 func (s *AgentPostgresOwner) loadAndAdmitDirectiveEvent(ctx context.Context, tx *sql.Tx, op runtimeagentcontrol.DirectiveOperation, posture executionposture.Posture) (events.AdmittedEvent, error) {
@@ -684,9 +709,18 @@ func (s *AgentSQLiteOwner) LoadDirectiveOperationByKey(ctx context.Context, meth
 }
 
 func (s *AgentPostgresOwner) transitionPostgresDirectiveOperation(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, bool, error) {
+	return s.transitionPostgresDirectiveOperationWithPrefix(ctx, operationID, transition, nil)
+}
+
+func (s *AgentPostgresOwner) transitionPostgresDirectiveOperationWithPrefix(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error, prefix func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, bool, error) {
 	var out runtimeagentcontrol.DirectiveOperation
 	acknowledged, err := s.runDirectiveMutation(ctx, mutationprotocol.Story, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		out = runtimeagentcontrol.DirectiveOperation{}
+		if prefix != nil {
+			if err := prefix(txctx, tx); err != nil {
+				return err
+			}
+		}
 		if _, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID); err != nil {
 			return err
 		}
@@ -720,9 +754,18 @@ func (s *AgentPostgresOwner) transitionPostgresDirectiveOperation(ctx context.Co
 }
 
 func (s *AgentSQLiteOwner) transitionSQLiteDirectiveOperation(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, bool, error) {
+	return s.transitionSQLiteDirectiveOperationWithPrefix(ctx, operationID, transition, nil)
+}
+
+func (s *AgentSQLiteOwner) transitionSQLiteDirectiveOperationWithPrefix(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error, prefix func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, bool, error) {
 	var out runtimeagentcontrol.DirectiveOperation
 	acknowledged, err := s.runDirectiveMutation(ctx, "sqlite transition directive operation", mutationprotocol.Story, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		out = runtimeagentcontrol.DirectiveOperation{}
+		if prefix != nil {
+			if err := prefix(txctx, tx); err != nil {
+				return err
+			}
+		}
 		if _, err := requireActiveSQLiteDirectiveOperation(txctx, tx, operationID); err != nil {
 			return err
 		}

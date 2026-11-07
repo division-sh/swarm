@@ -19176,7 +19176,10 @@ platform_tables:
         insert/update constraint. Ordinary delivery event/run equality remains structurally enforced.
         RouteIdentity equality compares all normalized
         route fields without inferring or completing missing fields. DeliveryTargetOwnership equality additionally includes
-        its closed ownership kind; existing_entity and materializing_entity for the same receiver route are contradictory,
+        its closed ownership kind and positive captured instance life; life is not part of instance identity. Retained
+        deliveries preserve their captured life and refuse as instance_restarted when it differs from the receiver's
+        authoritative header before effects. Missing or nonpositive persisted life refuses; it is never inferred from
+        the current header. existing_entity and materializing_entity for the same receiver route are contradictory,
         not distinct executable obligations. Validation keys cross-route ownership and payload-projection agreement by one
         exact execution slot: concrete AgentIdentity plus recipient and reply context for agents, or exact receiver route plus
         recipient and reply context for nodes. Distinct concrete agent identities sharing one authored agent ID remain
@@ -20392,6 +20395,7 @@ platform_tables:
         CREATE TABLE flow_instances (
             run_id            UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             instance_path     TEXT NOT NULL,
+            life              INTEGER NOT NULL DEFAULT 1 CHECK (life > 0),
             entity_id         UUID NOT NULL,
             entity_type       TEXT CHECK (entity_type IS NULL OR LENGTH(TRIM(entity_type)) > 0),
             slug              TEXT,
@@ -31030,7 +31034,7 @@ cli_specification:
         present. Test/internal labels such as test_quiescence_ready, heuristics, blocking_layer, and blocking_reason
         never appear in human output. JSON preserves the exact run.diagnose or run.get result shape.
     trace:
-      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <RFC3339-or-relative-duration>] [--until <RFC3339-or-relative-duration>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <RFC3339-or-relative-duration>] [--until <RFC3339-or-relative-duration>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--iter <n>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       group: run_operate
       tier: must_have
       implementation_status: implemented
@@ -31054,6 +31058,7 @@ cli_specification:
         filter_fields:
           event_name: Repeatable event-name predicate. The CLI sends an array of non-empty names as `filter.event_name` and the server matches any value against RunTraceRow.event_name.
           entity_id: Repeatable entity-id predicate. The CLI sends an array of OpaqueId values as `filter.entity_id` and the server matches any value against RunTraceRow.entity_id.
+          iter: Positive instance life under filter.iter, accepted by run.trace and run.subscribe_trace only with exactly one entity filter. Zero or several entities refuse with trace_iter_one_entity_required. A single-entity instance trace defaults to its current life; explicit iter matches the exact retained receiver life when that instance owns the row, otherwise its producer life, never a time or cursor cut. Run-owned and imported rows without an instance retain their existing default trace behavior.
           delivery_status: Repeatable delivery-status predicate. The CLI sends an array of DeliveryStatus enum values as `filter.delivery_status` and the server matches any value against RunTraceRow.delivery_status.
           subscriber_id: Repeatable subscriber identity predicate. The CLI sends an array of non-empty subscriber ids as `filter.subscriber_id` and the server matches any value against RunTraceRow.subscriber_id.
           subscriber_type: Repeatable subscriber type predicate. The CLI sends an array of SubscriberType enum values as `filter.subscriber_type` and the server matches any value against RunTraceRow.subscriber_type.
@@ -31092,6 +31097,19 @@ cli_specification:
           and delivery_status, derives queue and execution timing only from same-row RunTraceRow timestamps, treats
           event-only rows as non-delivery trace rows, and renders point-in-time snapshot wording. `--delivery-summary`
           is invalid with `--follow` and is mutually exclusive with `--delivery-detail`.
+          Snapshot and summary `--iter <n>` send filter.iter unchanged on every page and require exactly one
+          --entity-id. CLI --follow with --iter refuses before requests with trace_iter_follow_refused:
+          a prior life is finished, so there is nothing to follow. The API subscription retains the same typed
+          iter/entity filter without changing its existing stream lifecycle. Prior-life reads use retained rows;
+          no header/state-row redesign or prior-life children selector is introduced.
+          A finite single-entity snapshot/summary composes entity.get for life/start-date presentation, with
+          the same exact run/entity and unchanged explicit iter. With iter omitted, current metadata reads
+          bracket the entire finite fetch including every summary page; the exact run/entity/instance, positive
+          life and retained start date must still agree before any output. Data-only entities preserve their
+          validated lifecycle absence without an instance sentence; construction during the read also refuses.
+          Changed or unreadable metadata
+          fails read validation, without retry, hidden iter, inferred date or a new response field. This does
+          not apply a stream-wide currentness promise to follow mode.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
         - default trace requests omit include_internal or send false and the API excludes platform.runtime_log; --verbose sends include_internal=true and reveals platform.runtime_log through the API owner
@@ -32152,10 +32170,15 @@ cli_specification:
         required: false
         api_param: run_id
         validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
+      - name: iter
+        flag: --iter <n>
+        required: false
+        api_param: iter
+        validation: Positive instance life; omitted selects the current life. Prior-life status reads use retained rows.
       output:
         default_text:
           heading: Entity <entity-id>
-          identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
+          identity_rows: Labeled run, flow, type, state, life, revision, created, updated, slug, and name rows; lifecycle rows are absent for data-only entities. A restarted instance adds `started over on <date>` from its exact retained life-start fact, never stage-entry or event time. Omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
           sections: Labeled Fields rows plus an Accumulated presence count and `Bookkeeping <N> facts (--verbose to expand)` or `Bookkeeping none`; empty sections render explicitly as `none`.
           field_projection: Fields contains authored values only. Bookkeeping is a required independent API projection and is never inferred from field names.
         verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and an expanded Bookkeeping section.
@@ -32168,7 +32191,7 @@ cli_specification:
         auth_or_missing_token: 4
         entity_not_found: 5
       proof_expectations:
-      - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
+      - exact /v1/rpc entity.get call with required entity_id and optional run_id and positive iter params
       - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing explicit token for non-loopback API targets make zero API calls
       - ENTITY_NOT_FOUND maps to resource-not-found exit 5
       - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/bookkeeping/accumulated maps fail closed with tested exit-code behavior
@@ -34005,7 +34028,9 @@ api_specification:
         description: >-
           Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every
           lifecycle property. Instances with no data row have null data clocks. Constructed no-stage members have stage_defined false, a positive header revision and
-          lifecycle clocks, but null current_state and entered_state_at. Staged members expose the exact declared stage.
+          lifecycle clocks and a positive life, but null current_state and entered_state_at. Life is not identity;
+          instance-taking reads default to the current life and accept iter only for an explicit prior life.
+          Staged members expose the exact declared stage.
           created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.
         type: object
         additionalProperties: false
@@ -34015,6 +34040,7 @@ api_specification:
         - flow_instance
         - entity_type
         - stage_defined
+        - life
         - current_state
         - revision
         - entered_state_at
@@ -34033,6 +34059,8 @@ api_specification:
             type: string
           stage_defined:
             oneOf: [{type: boolean}, {type: 'null'}]
+          life:
+            oneOf: [{type: integer, minimum: 1}, {type: 'null'}]
           current_state:
             oneOf: [{type: string}, {type: 'null'}]
           slug:
@@ -34801,10 +34829,11 @@ api_specification:
       DecisionCardRoutingSource:
         type: object
         additionalProperties: false
-        required: [kind, route]
+        required: [kind, route, life]
         properties:
           kind: {type: string, enum: [root, static_flow, concrete_template_instance]}
           route: {$ref: '#/components/schemas/DecisionCardRoutingSourceRoute'}
+          life: {type: integer, minimum: 1}
       StageGateDecisionCardAnchor:
         type: object
         additionalProperties: false
@@ -36889,7 +36918,7 @@ api_specification:
           next_cursor:
             $ref: '#/components/schemas/Cursor'
       RunTraceFilter:
-        description: Typed predicates for the canonical composed RunTraceRow owner. Each present field is an OR-list for that field; different fields compose with AND. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.
+        description: Typed predicates for the canonical composed RunTraceRow owner. List fields are OR-lists; different fields compose with AND. The scalar iter selects one positive captured instance life and requires exactly one entity_id. This schema is consumed by /v1/rpc run.trace and /v1/ws run.subscribe_trace.
         type: object
         additionalProperties: false
         properties:
@@ -36906,6 +36935,10 @@ api_specification:
             uniqueItems: true
             items:
               $ref: '#/components/schemas/OpaqueId'
+          iter:
+            type: integer
+            minimum: 1
+            description: Selected instance life; requires exactly one entity_id filter, otherwise trace_iter_one_entity_required.
           delivery_status:
             type: array
             minItems: 1
@@ -40102,7 +40135,7 @@ api_specification:
           $ref: '#/components/schemas/Timestamp'
       - name: filter
         required: false
-        description: Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
+        description: Typed predicates over canonical RunTraceRow facts. List fields are OR-lists within the field and AND-composed across fields; scalar iter requires exactly one entity_id and selects its captured instance life.
         schema:
           $ref: '#/components/schemas/RunTraceFilter'
       - name: include_internal
@@ -40222,7 +40255,7 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: filter
         required: false
-        description: Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
+        description: Typed predicates over canonical RunTraceRow facts. List fields are OR-lists within the field and AND-composed across fields; scalar iter requires exactly one entity_id and selects its captured instance life.
         schema:
           $ref: '#/components/schemas/RunTraceFilter'
       - name: include_internal
@@ -40313,6 +40346,12 @@ api_specification:
         description: Disambiguates entities reused across runs.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: iter
+        required: false
+        description: Positive instance life; omitted selects the current life. Prior-life reads use retained state and revision rows.
+        schema:
+          type: integer
+          minimum: 1
       result:
         name: result
         required: true

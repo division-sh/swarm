@@ -180,7 +180,7 @@ normalized_events:
 			body = `{"delivery_id":"valid-user","input":` + body + `}`
 			code, accepted := a9PostSignedRawIngress(t, endpoint, secret, body)
 			if code != http.StatusAccepted {
-				t.Fatalf("valid typed input status=%d receipt=%s", code, accepted)
+				t.Fatalf("valid typed input status=%d receipt=%s\n%s", code, accepted, process.outputString())
 			}
 			var receipt struct {
 				RunID    string   `json:"run_id"`

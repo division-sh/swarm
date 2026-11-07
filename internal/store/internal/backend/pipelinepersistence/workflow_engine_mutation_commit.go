@@ -86,6 +86,8 @@ func decideWorkflowEngineState(transition runtimepipeline.WorkflowEngineStateTra
 		return workflowEngineStateDecision{createState: true, historyStep: "create"}, nil
 	case runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion:
 		return workflowEngineStateDecision{historyStep: "mutate"}, nil
+	case runtimepipeline.WorkflowEngineStateTransitionRestartStateAndCompanion:
+		return workflowEngineStateDecision{historyStep: "restart"}, nil
 	case runtimepipeline.WorkflowEngineStateTransitionPreserveStateAndCompanion:
 		return workflowEngineStateDecision{}, nil
 	default:
@@ -480,6 +482,20 @@ func commitWorkflowEngineMutation(
 		}
 		var err error
 		err = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			owners := []flowidentity.RunScopedFlowInstance{command.State.Identity}
+			publications := make([]runtimebus.PublicationCommand, 0, len(command.Publications))
+			for index, value := range command.Publications {
+				plan, ok := value.(runtimebus.EnginePublicationPlan)
+				if !ok {
+					return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
+				}
+				publications = append(publications, plan.PublicationCommand())
+			}
+			var err error
+			txctx, err = prepareWorkflowTerminationOwnershipTx(txctx, tx, store.workflowTurnTerminationOwner(), command.Lifecycle.TurnTermination, publications)
+			if err != nil {
+				return err
+			}
 			// Run authority precedes the paired header/field projection. A stop
 			// holding that authority must never wait for this writer's header lock.
 			current, err := store.RequireActiveSourceTx(txctx, tx, command.State.Identity.RunID)
@@ -490,15 +506,6 @@ func commitWorkflowEngineMutation(
 				if !current.Matches(command.WriterSource) {
 					return fmt.Errorf("entity mutation source does not match active run source")
 				}
-			}
-			owners := []flowidentity.RunScopedFlowInstance{command.State.Identity}
-			publications := make([]runtimebus.PublicationCommand, 0, len(command.Publications))
-			for index, value := range command.Publications {
-				plan, ok := value.(runtimebus.EnginePublicationPlan)
-				if !ok {
-					return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
-				}
-				publications = append(publications, plan.PublicationCommand())
 			}
 			if err := lockWorkflowPublicationFootprintTx(txctx, tx, postgres, owners, publications); err != nil {
 				return err

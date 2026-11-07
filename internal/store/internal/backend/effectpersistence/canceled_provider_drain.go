@@ -58,7 +58,7 @@ func readProviderOriginCancellation(ctx context.Context, tx *sql.Tx, postgres bo
 	if err != nil || !valid || !cause.Valid {
 		return providerOriginCancellation{}, fmt.Errorf("captured turn cancellation has incomplete intent")
 	}
-	if err := requireBusinessTurnBindingTx(ctx, tx, postgres, turnID, attempt, at); err != nil {
+	if err := requireBusinessTurnBindingTx(ctx, tx, postgres, turnID, attempt, at, mode...); err != nil {
 		return providerOriginCancellation{}, err
 	}
 	intent := runtimeeffects.TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: deliverylifecycle.CancellationReason(reason.String), CauseEvent: cause.String, RequestedAt: at}

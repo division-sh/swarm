@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -24,6 +25,8 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
@@ -471,6 +474,17 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	return nil
 }
 
+func defaultTurnInstanceSourceForTest(t testing.TB) semanticview.Source {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, adapter string) context.Context {
 	t.Helper()
 	kind := managedexecution.KindNormalRuntime
@@ -486,6 +500,9 @@ func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authori
 	bundleHash := sourceartifactfixture.BundleHash
 	if source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
 		bundleHash = source.BundleHash()
+	}
+	if bundleHash == sourceartifactfixture.BundleHash {
+		ctx = runtimeeffects.WithTurnInstanceSource(ctx, defaultTurnInstanceSourceForTest(t))
 	}
 	admission, err := managedexecution.New(
 		kind,

@@ -29,7 +29,7 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	reader := &publicationDecisionTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observation}}}
 	bounded := withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(ctx, event), selectedTargetOwnerLookupScope{lookup: scope, observations: []pipeline.FlowInstanceObservation{observation}})
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin,
+	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin, OriginLife: 1,
 		RequesterFlowID: ".", RequestOutputPin: "work.requested", ReplyInputPin: "work.completed",
 		ProviderFlowID: "producer", ProviderInputPin: "work.requested", ProviderOutputPin: "work.completed", RequestCorrelationID: event.ID()}
 	base := publicationTargetOwnerEvidence{
@@ -53,7 +53,7 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	if owner, err := base.returnOwner(ctx, event, &plan, record); err != nil || owner.Route() != origin || !owner.ExistingEntity() {
 		t.Fatalf("exact prepared return = %+v, %v", owner, err)
 	}
-	if len(reader.lookups) != 1 || reader.lookups[0].ExactPath() != root.InstancePath {
+	if len(reader.lookups) != 2 || reader.lookups[0].ExactPath() != root.InstancePath || reader.lookups[1].ExactPath() != root.InstancePath {
 		t.Fatalf("covered reply used inventory instead of its live exact reader: %+v", reader.lookups)
 	}
 	readFailure := errors.New("independent covered reply read failure")
@@ -152,7 +152,7 @@ func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin}
+	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin, OriginLife: 1}
 	evidence := publicationTargetOwnerEvidence{event: event, present: true, planner: planner,
 		origins: map[string]events.RouteIdentity{record.ID: origin}}
 	evidence.replacePlanningEvidence(projection)
@@ -182,6 +182,23 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 	proposal, err := pipeline.NewFlowInstanceRunProposal(fact, admitted)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := proposal.ValidateRootPublication(fact, event); err != nil {
+		t.Fatalf("new run's exact root source requires no invented instance: %v", err)
+	}
+	for _, wrongLife := range []int64{2, 3} {
+		routing, err := event.RoutingSource().WithLife(wrongLife)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign := eventtest.RunCreatingRootIngressWithRoutingSource(event.ID(), event.Type(), "operator", "", event.Payload(), 0, event.RunID(), "", events.EventEnvelope{}, routing, event.CreatedAt())
+		if err := proposal.ValidateRootPublication(fact, foreign); err == nil {
+			t.Fatal("new run proposal authorized a later captured source life")
+		}
+	}
+	foreign := eventtest.RunCreatingRootIngress(eventtest.UUID("foreign-proposed-source"), event.Type(), "operator", "", event.Payload(), 0, event.RunID(), "", events.EventEnvelope{}, event.CreatedAt())
+	if err := proposal.ValidateRootPublication(fact, foreign); err == nil {
+		t.Fatal("new run proposal authorized another publication")
 	}
 	root := flowidentity.Stored(source, ".", event.RunID(), event.RunID(), event.RunID(), "")
 	child, err := flowidentity.KeylessChild(source, root, "producer")
@@ -218,7 +235,7 @@ func TestClosedPublicationOwnersKeepProposedRunAndFinalConstruction(t *testing.T
 		t.Fatal(err)
 	}
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	reply := replycontext.Record{ID: "proposed-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin,
+	reply := replycontext.Record{ID: "proposed-reply", RunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(), Origin: origin, OriginLife: 1,
 		RequesterFlowID: ".", RequestOutputPin: "work.requested", ReplyInputPin: "work.completed",
 		ProviderFlowID: "producer", ProviderInputPin: "work.requested", ProviderOutputPin: "work.completed", RequestCorrelationID: event.ID()}
 	plan, err := planner.resolvePreparedRoutePlan(projection, RoutePlan{Event: event, ActivationPlans: activations, ReplyCreations: []replycontext.Record{reply}})

@@ -1084,7 +1084,20 @@ func OperatorEntityHandlers(opts EntityHandlerOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
-			entity, err := reads.LoadOperatorEntity(ctx, entityID, runID)
+			var entity operatorread.OperatorEntityFull
+			if raw, present := req.Params["iter"]; present {
+				life, valid := integerParam(raw)
+				if !valid || life <= 0 {
+					return nil, NewInvalidParamsError(map[string]any{"field": "iter", "reason": "must be a positive integer"})
+				}
+				lifeReads, ok := reads.(operatorread.EntityLifeReader)
+				if !ok {
+					return nil, fmt.Errorf("entity life read owner is unavailable")
+				}
+				entity, err = lifeReads.LoadOperatorEntityAtLife(ctx, entityID, runID, int64(life))
+			} else {
+				entity, err = reads.LoadOperatorEntity(ctx, entityID, runID)
+			}
 			if errors.Is(err, operatorread.ErrEntityNotFound) {
 				return nil, NewApplicationError(EntityNotFoundCode, false, map[string]any{"entity_id": entityID})
 			}
@@ -1482,13 +1495,8 @@ func runTraceFilterParam(params map[string]any) (operatorread.RunDebugTraceFilte
 	if out.EventNames, err = requiredRunTraceStringListFilter(filter, "event_name"); err != nil {
 		return operatorread.RunDebugTraceFilter{}, err
 	}
-	if out.EntityIDs, err = requiredRunTraceStringListFilter(filter, "entity_id"); err != nil {
+	if out.EntityIDs, out.Iter, err = runTraceEntityLifeFilter(filter); err != nil {
 		return operatorread.RunDebugTraceFilter{}, err
-	}
-	for _, entityID := range out.EntityIDs {
-		if !opaqueIDPattern.MatchString(entityID) {
-			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must contain only OpaqueId values"})
-		}
 	}
 	if out.DeliveryStatuses, err = requiredRunTraceStringListFilter(filter, "delivery_status"); err != nil {
 		return operatorread.RunDebugTraceFilter{}, err
@@ -1510,6 +1518,38 @@ func runTraceFilterParam(params map[string]any) (operatorread.RunDebugTraceFilte
 		}
 	}
 	return out, nil
+}
+
+func runTraceEntityLifeFilter(filter map[string]any) ([]string, *int64, error) {
+	ids, present, err := optionalStringListParam(filter, "entity_id")
+	if err != nil {
+		return nil, nil, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must be a non-empty array of strings"})
+	}
+	selected := operatorread.RunDebugTraceFilter{EntityIDs: ids}
+	if raw, present := filter["iter"]; present {
+		life, valid := integerParam(raw)
+		if !valid || life <= 0 {
+			return nil, nil, NewInvalidParamsError(map[string]any{"field": "filter.iter", "reason": operatorread.TraceIterPositiveRequired})
+		}
+		iter := int64(life)
+		selected.Iter = &iter
+	}
+	if err := selected.ValidateIter(); err != nil {
+		var selection *operatorread.TraceIterError
+		if errors.As(err, &selection) {
+			return nil, nil, NewInvalidParamsError(map[string]any{"field": "filter.iter", "reason": selection.Reason})
+		}
+		return nil, nil, err
+	}
+	if present && len(ids) == 0 {
+		return nil, nil, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must be a non-empty array of strings"})
+	}
+	for _, entityID := range ids {
+		if !opaqueIDPattern.MatchString(entityID) {
+			return nil, nil, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must contain only OpaqueId values"})
+		}
+	}
+	return ids, selected.Iter, nil
 }
 
 func requiredRunTraceStringListFilter(filter map[string]any, name string) ([]string, error) {
@@ -1535,6 +1575,7 @@ var eventListFilterFields = map[string]struct{}{
 }
 
 var runTraceFilterFields = map[string]struct{}{
+	"iter":            {},
 	"event_name":      {},
 	"entity_id":       {},
 	"delivery_status": {},

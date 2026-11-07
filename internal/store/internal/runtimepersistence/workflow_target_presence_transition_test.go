@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -157,9 +158,9 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 	}
 }
 
-func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
+func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restartable ...bool) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
 	t.Helper()
-	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+	documents := map[string]string{
 		"schema.yaml":        "stages: []\n",
 		"review/schema.yaml": "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
 		"review/state.yaml":  "account_id: text\nhandled: false\n",
@@ -170,7 +171,24 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
   settle.requested:
     advances_to: settled
 `, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-	}, nil)
+	}
+	withAgents := len(restartable) == 1 && restartable[0]
+	if withAgents {
+		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  active: {}", "  active:\n    timers:\n      - {after: 1h, emit: timer.elapsed}", 1)
+		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  done: {}", "  done: {final: true}", 1)
+		documents["review/events.yaml"] += "timer.elapsed:\ntask.started:\n"
+		documents["review/agents.yaml"] = "reviewer:\n  model: regular\n  memory: true\n  intent: {inline: Review the task.}\n  subscriptions: [task.started]\n"
+	}
+	var f receiverConfigActivationFixture
+	if withAgents {
+		scheduler := runtimepipeline.NewSchedulerWithWorkOwner(storeTestWorkOwner(t))
+		f = newReceiverConfigActivationFixtureWithOwnership(t, backend, false, documents, nil, ownStoreTestAgentManager, func(options *runtimepipeline.PipelineCoordinatorOptions) {
+			options.TimerScheduler = scheduler
+		})
+		t.Cleanup(scheduler.Stop)
+	} else {
+		f = newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
+	}
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(f.ctx, sourceartifactfixture.FactFor(f.bundle.SourceArtifact))
 	f.constructKeylessRoot(t)
 	runID := runtimecorrelation.RunIDFromContext(f.ctx)
@@ -180,6 +198,9 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 		t.Fatal(err)
 	}
 	req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
+	if withAgents {
+		req.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
+	}
 	req.Instance = child
 	req.ConstructorInput, req.ResolvedKey = "review.created", "preserved"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "review.created", "constructor-fixture", "", []byte(`{"account_id":"preserved"}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)
@@ -190,21 +211,27 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string) (receive
 	return f, plan
 }
 
-func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string) runtimepipeline.WorkflowEngineStateRecord {
+func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string, capture ...*runtimedelivery.Claim) runtimepipeline.WorkflowEngineStateRecord {
 	t.Helper()
 	// This is the native writer/contender proof, not handler execution: retain
 	// stage-entry authority from an actual declared and claimed occurrence.
 	flowID := record.Identity.Route.ScopeKey
 	node := mustPersistenceNode(flowID, "progress")
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(flowID+"/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
-		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID})}
+	target, err := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID}).WithLife(record.Life)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: target}
 	if err := commitSemanticEventFixtureWithRoutes(f.ctx, f.store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := claimDeliveryFixture(f.ctx, f.store, event, route)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(capture) == 1 {
+		*capture[0] = claimed.Claim
 	}
 	graph, found := f.bundle.WorkflowStageTopology(flowID)
 	if !found {
@@ -219,6 +246,10 @@ func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture
 		t.Fatal(err)
 	}
 	effect, err := workflowlifecycle.NewAcceptedEvent(record.Identity.Route, runtimeidentity.NormalizeEntityID(record.EntityID), event.ID(), string(event.Type()), event.ExecutionMode(), event.CreatedAt(), &transition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err = effect.WithLife(record.Life)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,6 +428,7 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "", 0, 0)
 					before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+					record.Life = 1 // A syntactically complete attempt must still lack construction authority.
 					schema, found := source.FlowSchemaByID(flowID)
 					if !found {
 						t.Fatal("state-only producer requires its admitted flow schema")

@@ -32,7 +32,7 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := timeridentity.StageEntryRef{RunID: run, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID,
+	entry := timeridentity.StageEntryRef{Life: 1, RunID: run, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID,
 		InstancePath: owner.Route.InstancePath, EntityID: target.EntityID, Stage: "awaiting", Cause: "construction"}
 	declaration, err := timeridentity.NewJoinRef(plan.Node, plan.HandlerEvent, plan.Spec.Stage)
 	if err != nil {
@@ -80,6 +80,13 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	concrete, _, err := PrepareWorkflowJoinAdmission(source, run, target.FlowInstance+"/"+plan.HandlerEvent, route, &instance)
 	if err != nil || !reflect.DeepEqual(concrete, first) {
 		t.Fatalf("exact scoped publication bypassed join admission: %#v err=%v", concrete, err)
+	}
+	wrongLife := instance
+	wrongLife.Life++
+	if _, _, err := PrepareWorkflowJoinAdmission(source, run, plan.HandlerEvent, route, &wrongLife); err == nil {
+		t.Fatal("join admission borrowed another life's stage entry")
+	} else if failure, typed := failures.EnvelopeFromError(err); !typed || failure.Class != failures.ClassStaleArrival || failure.Detail.Code != "instance_restarted" {
+		t.Fatalf("cross-life stage entry lost typed refusal: %v", err)
 	}
 	retainedRoute := route
 	retainedRoute.Context.Joins = first

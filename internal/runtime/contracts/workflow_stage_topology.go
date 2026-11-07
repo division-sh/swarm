@@ -30,6 +30,13 @@ func (r StoredStageRef) ID() string               { return r.id }
 func (r StoredStageRef) IsFinal() bool            { return r.catalog != nil && r.final }
 func (r StoredStageRef) IsStatelessPosture() bool { return r.catalog != nil && r.stateless }
 
+func (r StoredStageRef) FlowID() string {
+	if r.catalog == nil {
+		return ""
+	}
+	return r.catalog.flowID
+}
+
 type workflowStageCatalog struct {
 	flowID  string
 	initial string

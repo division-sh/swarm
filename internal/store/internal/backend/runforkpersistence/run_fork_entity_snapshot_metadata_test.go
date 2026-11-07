@@ -227,7 +227,7 @@ func TestRunForkSnapshotMetadataKeepsConstructedFieldlessHeader(t *testing.T) {
 		for _, change := range []string{"exact", "missing_config", "missing_clock", "missing_entry_clock", "missing_update_clock", "missing_status", "contradictory_stage", "terminal_without_clock", "unknown_kind"} {
 			t.Run(fmt.Sprintf("staged_%t/%s", stageDefined, change), func(t *testing.T) {
 				at := time.Now().UTC()
-				fact := runForkRevisionEntityMetadata{EntityID: "flow-1", FlowInstance: "review", FlowConfig: []byte(`{}`), ConstructionKind: "constructed", StageDefined: stageDefined,
+				fact := runForkRevisionEntityMetadata{Life: 1, InstanceRevision: 1, EntityID: "flow-1", FlowInstance: "review", FlowConfig: []byte(`{}`), ConstructionKind: "constructed", StageDefined: stageDefined,
 					CreatedAt: at, UpdatedAt: at, EnteredStateAt: at, CurrentState: "pending", Status: "active", FlowTemplate: "review", Mode: "static"}
 				switch change {
 				case "missing_config":

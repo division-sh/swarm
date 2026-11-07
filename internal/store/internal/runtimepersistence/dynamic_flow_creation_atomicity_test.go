@@ -336,9 +336,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		events.EventEnvelope{},
 		occurredAt,
 	)
-	if err := eventBus.Publish(ctx, parent); err != nil {
-		t.Fatalf("publish causal parent: %v", err)
-	}
 	am := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: sourceFact,
 		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflow, DeliveryStore: selected,
@@ -351,6 +348,9 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	rootCommitted, err := eventBus.CommitFlowInstanceActivation(ctx, rootPlan)
 	if err != nil || !rootCommitted.Acknowledged {
 		t.Fatalf("construct actual structural parent: acknowledged=%v err=%v", rootCommitted.Acknowledged, err)
+	}
+	if err := eventBus.Publish(ctx, parent); err != nil {
+		t.Fatalf("publish causal parent: %v", err)
 	}
 	activation, err := am.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle), Instance: identity,

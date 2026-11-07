@@ -221,7 +221,7 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			}
 			t.Logf("API listener signed control status=%d body=%s", apiCode, apiReceipt)
 			if apiCode != wantAPI {
-				t.Fatalf("API control is not valid: status=%d, want %d", apiCode, wantAPI)
+				t.Fatalf("API control is not valid: status=%d, want %d\n%s", apiCode, wantAPI, process.outputString())
 			}
 			var receipt struct {
 				RunID    string   `json:"run_id"`

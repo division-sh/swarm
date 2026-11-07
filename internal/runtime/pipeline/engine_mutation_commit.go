@@ -43,13 +43,15 @@ const (
 	WorkflowEngineStateTransitionCreateStateAndCompanion
 	WorkflowEngineStateTransitionUpdateStateAndCompanion
 	WorkflowEngineStateTransitionPreserveStateAndCompanion
+	WorkflowEngineStateTransitionRestartStateAndCompanion
 )
 
 func (t WorkflowEngineStateTransition) Valid() bool {
 	switch t {
 	case WorkflowEngineStateTransitionCreateStateAndCompanion,
 		WorkflowEngineStateTransitionUpdateStateAndCompanion,
-		WorkflowEngineStateTransitionPreserveStateAndCompanion:
+		WorkflowEngineStateTransitionPreserveStateAndCompanion,
+		WorkflowEngineStateTransitionRestartStateAndCompanion:
 		return true
 	default:
 		return false
@@ -66,6 +68,10 @@ func (t WorkflowEngineStateTransition) UpdatesState() bool {
 
 func (t WorkflowEngineStateTransition) PreservesState() bool {
 	return t == WorkflowEngineStateTransitionPreserveStateAndCompanion
+}
+
+func (t WorkflowEngineStateTransition) RestartsState() bool {
+	return t == WorkflowEngineStateTransitionRestartStateAndCompanion
 }
 
 func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistencePresence) (WorkflowEngineStateTransition, error) {
@@ -97,6 +103,7 @@ type WorkflowEngineStateRecord struct {
 	Status           string
 	CurrentState     string
 	StageDefined     bool
+	Life             int64
 	EntityType       string
 	Slug             string
 	Name             string
@@ -115,6 +122,12 @@ type WorkflowEngineStateRecord struct {
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
+	if r.Life <= 0 {
+		return fmt.Errorf("workflow engine state requires its positive captured life")
+	}
+	if r.Transition.RestartsState() && r.Life == 1 {
+		return fmt.Errorf("workflow engine restart requires a successor life")
+	}
 	if err := r.validateConstructionIdentity(); err != nil {
 		return err
 	}
@@ -140,6 +153,23 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("workflow engine state record requires exact persisted times")
 	}
+	if err := r.validateRecordedTimes(); err != nil {
+		return err
+	}
+	if !r.Transition.Valid() {
+		return fmt.Errorf("workflow engine state record requires a closed persistence transition")
+	}
+	if r.Transition.CreatesState() {
+		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
+			return fmt.Errorf("workflow engine state creation cannot carry an expected existing revision")
+		}
+	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
+		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
+	}
+	return nil
+}
+
+func (r WorkflowEngineStateRecord) validateRecordedTimes() error {
 	if r.UpdatedAt.Before(r.CreatedAt) {
 		return fmt.Errorf("workflow engine state record update time %s cannot precede creation %s", r.UpdatedAt.Format(time.RFC3339Nano), r.CreatedAt.Format(time.RFC3339Nano))
 	}
@@ -152,16 +182,6 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		}
 	} else if !r.TerminatedAt.IsZero() {
 		return fmt.Errorf("non-terminal workflow engine state cannot carry termination time")
-	}
-	if !r.Transition.Valid() {
-		return fmt.Errorf("workflow engine state record requires a closed persistence transition")
-	}
-	if r.Transition.CreatesState() {
-		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
-			return fmt.Errorf("workflow engine state creation cannot carry an expected existing revision")
-		}
-	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
-		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
 	}
 	return nil
 }
@@ -263,6 +283,9 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	runID := strings.TrimSpace(c.State.Identity.RunID)
 	if err := c.State.Validate(); err != nil {
 		return err
+	}
+	if c.State.Transition.RestartsState() {
+		return fmt.Errorf("instance restart requires its constructor activation and atomic quiescence owner")
 	}
 	if c.Writer != nil {
 		if c.Writer.Type != "agent" || strings.TrimSpace(c.Writer.ID) == "" || c.Writer.HandlerStep != "save_entity_field" || !c.State.Transition.UpdatesState() || c.State.Status != "active" {
@@ -432,6 +455,7 @@ func workflowEngineStateRecord(
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: identity.RowID(),
+		Life:           instance.Life,
 		ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,

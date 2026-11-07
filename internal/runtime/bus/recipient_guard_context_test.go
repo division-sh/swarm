@@ -119,7 +119,9 @@ func TestConsumedReplyContextPreservesRecipientIntents(t *testing.T) {
 				Handler:   runtimepipeline.MustDeliveryTargetHandler(node).ForEvent("task.started"),
 				Context:   contextBefore,
 			}}}
-			projected := plan.WithDefaultDeliveryContext(events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:consumed"}})
+			life := events.InstanceLife{RunID: busInternalTestRunID, FlowInstance: "review/one", Life: 7}
+			projected := plan.WithDefaultDeliveryContext(events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:consumed"}, Life: &life})
+			contextBefore.Life = &life
 			if len(projected.DeliveryIntents) != 1 || !reflect.DeepEqual(projected.DeliveryIntents[0].Context, contextBefore) {
 				t.Fatalf("consumed reply altered recipient context: %#v", projected.DeliveryIntents)
 			}

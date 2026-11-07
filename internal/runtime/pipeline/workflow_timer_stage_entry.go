@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -50,12 +51,23 @@ func (l *WorkflowTimerLifecycle) stageTimerEntryCurrent(ctx context.Context, ins
 	if !found {
 		return false, fmt.Errorf("stage timer requires its retained lifecycle entry")
 	}
+	owner := flowidentity.RunScopedFlowInstance{RunID: activation.RunID, Route: activation.Route}
+	if entry.Life != instance.Life {
+		return false, InstanceRestarted(owner, entry.Life, instance.Life)
+	}
+	if activation.RoutingSource.Life() != instance.Life {
+		return false, InstanceRestarted(owner, activation.RoutingSource.Life(), instance.Life)
+	}
 	route := activation.Route
 	if err := entry.RequireOwner(activation.RunID, route.ScopeKey, route.InstanceID, route.InstancePath, activation.EntityID, declaration.Stage); err != nil {
 		return false, err
 	}
-	cause := workflowTimerCause{Kind: workflowTimerCauseInitial, EventType: "state:" + entry.Stage, ToState: entry.Stage,
-		OccurredAt: instance.CreatedAt, ExecutionMode: activation.ExecutionMode}
+	startedAt, err := instance.LifeStartedAt()
+	if err != nil {
+		return false, err
+	}
+	cause := workflowTimerCause{Kind: workflowTimerCauseInitial, Life: entry.Life, EventType: "state:" + entry.Stage, ToState: entry.Stage,
+		OccurredAt: startedAt, ExecutionMode: activation.ExecutionMode}
 	if entry.Cause != "construction" {
 		if len(instance.TransitionHistory) == 0 {
 			return false, fmt.Errorf("stage timer entry requires its committed transition")
@@ -71,7 +83,7 @@ func (l *WorkflowTimerLifecycle) stageTimerEntryCurrent(ctx context.Context, ins
 		if !record.FiredAt.Equal(event.CreatedAt()) {
 			return false, fmt.Errorf("stage timer entry disagrees with its immutable transition cause")
 		}
-		cause = workflowTimerCause{Kind: workflowTimerCauseTransition, EventID: entry.EventID, EventType: string(event.Type()),
+		cause = workflowTimerCause{Kind: workflowTimerCauseTransition, Life: entry.Life, EventID: entry.EventID, EventType: string(event.Type()),
 			TransitionID: entry.TransitionID, FromState: record.From, ToState: record.To,
 			OccurredAt: event.CreatedAt(), ExecutionMode: event.ExecutionMode()}
 	}

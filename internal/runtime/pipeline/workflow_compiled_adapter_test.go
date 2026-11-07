@@ -921,6 +921,7 @@ func VerifyNativePipelineCompiledTransitionInitialAdmissionOnBothStoresForTest(t
 
 func (f *compiledAdapterFixture) initialInstance(stage string) WorkflowInstance {
 	return WorkflowInstance{
+		Life:       1,
 		InstanceID: testWorkflowInstanceRoute(f.path).InstanceID, StorageRef: f.path, EntityID: f.entityID,
 		WorkflowName: f.flow, WorkflowVersion: f.pc.SemanticSource().WorkflowVersion(), EntityType: "state", Mode: "static",
 		CurrentState: stage, Fields: map[string]any{"marker": "unchanged"},

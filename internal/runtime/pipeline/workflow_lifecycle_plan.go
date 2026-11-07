@@ -234,6 +234,9 @@ func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateR
 		return fmt.Errorf("lifecycle entry disagrees with the committing state bookkeeping")
 	}
 	if found {
+		if entry.Life != record.Life {
+			return InstanceRestarted(record.Identity, entry.Life, record.Life)
+		}
 		return entry.RequireOwner(record.Identity.RunID, record.Identity.Route.ScopeKey, record.Identity.Route.InstanceID, record.Identity.Route.InstancePath, record.EntityID, record.CurrentState)
 	}
 	return nil
@@ -467,10 +470,13 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 		return err
 	}
 	fromState, toState := "", ""
-	cause := workflowTimerCause{OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
+	cause := workflowTimerCause{Life: effect.Life(), OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
 	switch effect.Kind() {
 	case runtimeworkflowlifecycle.KindInitialEntry:
 		if err := validateWorkflowInitialEntry(pc.SemanticSource(), *instance, effect.InitialStage()); err != nil {
+			return err
+		}
+		if err := retainInstanceLifeStart(instance, effect.OccurredAt()); err != nil {
 			return err
 		}
 		toState = effect.InitialStage()
@@ -504,18 +510,8 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	default:
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
-	entry, enters, err := effect.StageEntry(owner)
-	if err != nil {
-		return fmt.Errorf("admit lifecycle stage entry: %w", err)
-	}
-	if enters {
-		if instance.Bookkeeping == nil {
-			instance.Bookkeeping = map[string]any{}
-		}
-		if err := runtimeworkflowlifecycle.StoreStageEntry(instance.Bookkeeping, entry); err != nil {
-			return err
-		}
-		prepared.Commit.StageEntry = &entry
+	if err := storePreparedStageEntry(owner, instance, effect, prepared); err != nil {
+		return err
 	}
 	if err := pc.planWorkflowTimerEffect(ctx, owner.RunID, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
 		return err
@@ -529,8 +525,28 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	return nil
 }
 
+func storePreparedStageEntry(owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
+	entry, enters, err := effect.StageEntry(owner)
+	if err != nil {
+		return fmt.Errorf("admit lifecycle stage entry: %w", err)
+	}
+	if enters {
+		if instance.Bookkeeping == nil {
+			instance.Bookkeeping = map[string]any{}
+		}
+		if err := runtimeworkflowlifecycle.StoreStageEntry(instance.Bookkeeping, entry); err != nil {
+			return err
+		}
+		prepared.Commit.StageEntry = &entry
+	}
+	return nil
+}
+
 func validateWorkflowLifecycleEffectOwner(owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, effect runtimeworkflowlifecycle.Effect) error {
 	route, entityID := owner.Route, effect.EntityID()
+	if effect.Life() != instance.Life {
+		return InstanceRestarted(owner, effect.Life(), instance.Life)
+	}
 	if effect.OccurredAt().IsZero() {
 		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
 	}
@@ -616,6 +632,10 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runI
 }
 
 func retainWorkflowTimerActivations(source semanticview.Source, instance WorkflowInstance, active []WorkflowTimerActivation, currentState, nextState, eventType string, plan *WorkflowLifecycleMutationPlan) (map[string]WorkflowTimerActivation, error) {
+	active, err := workflowTimersForLife(instance.Life, active)
+	if err != nil {
+		return nil, err
+	}
 	retained := make(map[string]WorkflowTimerActivation, len(active))
 	for _, activation := range active {
 		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.DeclarationKey)
@@ -669,6 +689,9 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 	entry, found, err := runtimeworkflowlifecycle.LoadStageEntry(instance.Bookkeeping)
 	if err != nil || !found {
 		return errors.Join(err, fmt.Errorf("join arm requires its committed lifecycle entry"))
+	}
+	if entry.Life != instance.Life {
+		return InstanceRestarted(owner, entry.Life, instance.Life)
 	}
 	if err := entry.RequireOwner(runID, route.ScopeKey, route.InstanceID, route.InstancePath, entityID.String(), nextStage); err != nil {
 		return err

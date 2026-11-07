@@ -246,6 +246,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
+	if err := pipelineOwner.BindInstanceLifeLifecycle(agentOwner); err != nil {
+		return nil, err
+	}
 	if err := pipelineOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -579,6 +582,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	pipelineOwner, err := storepipeline.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency, durableData, store.now)
 	if err != nil {
+		return nil, err
+	}
+	if err := pipelineOwner.BindInstanceLifeLifecycle(agentOwner); err != nil {
 		return nil, err
 	}
 	if err := pipelineOwner.BindChannelReconciliation(&store.channelChanges); err != nil {

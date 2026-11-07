@@ -2,14 +2,17 @@ package pipelinepersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type WorkflowTurnTerminationTxOwner interface {
+	PrepareWorkflowTurnTerminationTx(context.Context, *sql.Tx, workflowlifecycle.TurnTermination, []agentidentity.Identity) (context.Context, error)
 	RequestWorkflowTurnTerminationTx(context.Context, *mutationprotocol.Attempt, workflowlifecycle.TurnTermination) (effects.WorkflowTurnTerminationResult, error)
 }
 

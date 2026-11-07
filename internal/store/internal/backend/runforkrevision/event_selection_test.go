@@ -1,6 +1,7 @@
 package runforkrevision
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -24,6 +25,29 @@ func TestEventHistoryExcludesOnlyRuntimeLog(t *testing.T) {
 	spec, ok := canonicalProjectionSpec(FamilyEvents)
 	if !ok || spec.source != "events e "+eventrecord.SelectedForkLineageSQL || !strings.Contains(spec.query, "e.event_name <> '"+excludedEventName+"'") {
 		t.Fatal("broad and exact event projections do not consume the canonical exclusion")
+	}
+	for _, life := range []int64{1, 7} {
+		source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/one"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source, err = source.WithLife(life)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var route map[string]any
+		if err := json.Unmarshal(eventrecord.EncodeSourceRoute(source), &route); err != nil {
+			t.Fatal(err)
+		}
+		projected := spec.build(map[string]any{"routing_source_kind": source.Kind().StorageCode(), "source_route": route, "routing_source_authority": ""})
+		raw, err := json.Marshal(projected["routing_source"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored events.RoutingSource
+		if err := json.Unmarshal(raw, &restored); err != nil || restored != source {
+			t.Fatalf("fixed-cut source changed captured life: got=%+v want=%+v err=%v", restored, source, err)
+		}
 	}
 	for _, family := range []Family{FamilyCommittedReplayScopes, FamilyEventReceipts} {
 		spec, ok := canonicalProjectionSpec(family)

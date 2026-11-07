@@ -321,6 +321,21 @@ func typedColumns(kinds map[string]valueKind, names ...string) []projectionColum
 	return out
 }
 
+func buildEventRoutingSource(values map[string]any) map[string]any {
+	source := map[string]any{
+		"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
+	}
+	if route, ok := values["source_route"].(map[string]any); ok {
+		source["life"] = route["life"]
+		delete(route, "life")
+	}
+	values["routing_source"] = source
+	delete(values, "routing_source_kind")
+	delete(values, "source_route")
+	delete(values, "routing_source_authority")
+	return values
+}
+
 func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 	var spec projectionSpec
 	switch family {
@@ -341,15 +356,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
 			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id", "inherited_fan_out_origin", "payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class", "operator_reference_event_id", "selected_fork_source_run_id", "selected_fork_source_event_id", "selected_fork_authority_stamp", "selected_fork_lineage_owners"),
-			build: func(values map[string]any) map[string]any {
-				values["routing_source"] = map[string]any{
-					"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
-				}
-				delete(values, "routing_source_kind")
-				delete(values, "source_route")
-				delete(values, "routing_source_authority")
-				return values
-			},
+			build: buildEventRoutingSource,
 		}
 	case FamilyEntityMutations:
 		spec = projectionSpec{
@@ -362,7 +369,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			query: `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name,
 				e.created_at, e.flow_config, e.construction_kind, e.stage_defined, e.flow_template, e.mode,
 				e.status, e.current_state, e.entered_state_at, e.updated_at, e.terminated_at, e.parent_instance, e.instance_key,
-				e.initial_projection_version, e.initial_materialization, e.data_created_at, e.data_updated_at`,
+				e.initial_projection_version, e.initial_materialization, e.data_created_at, e.data_updated_at, e.life, e.instance_revision`,
 			// Revision projection preserves both explicit producer kinds. A constructed
 			// header owns metadata even without fields; an import with no header is a
 			// different persisted fact, never inferred runnable construction.
@@ -370,7 +377,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				f.created_at, f.config AS flow_config, 'constructed' AS construction_kind, f.stage_defined, f.flow_template, f.mode,
 				f.status, f.current_state, f.entered_state_at, f.updated_at, f.terminated_at, f.parent_instance, f.instance_key,
 				i.projection_version AS initial_projection_version, i.projection AS initial_materialization,
-				d.created_at AS data_created_at, d.updated_at AS data_updated_at
+				d.created_at AS data_created_at, d.updated_at AS data_updated_at, f.life, f.revision AS instance_revision
 				FROM flow_instances f LEFT JOIN workflow_instance_initial_materializations i
 				ON i.run_id=f.run_id AND i.instance_path=f.instance_path AND i.entity_id=f.entity_id
 				LEFT JOIN entity_state d
@@ -379,11 +386,11 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				SELECT s.run_id, s.entity_id, s.flow_instance, s.entity_type, s.slug, s.name,
 					NULL AS created_at, NULL AS flow_config, 'imported_state' AS construction_kind, FALSE AS stage_defined, NULL AS flow_template, NULL AS mode,
 					NULL AS status, NULL AS current_state, NULL AS entered_state_at, NULL AS updated_at, NULL AS terminated_at, NULL AS parent_instance, NULL AS instance_key,
-					NULL AS initial_projection_version, NULL AS initial_materialization, s.created_at AS data_created_at, s.updated_at AS data_updated_at
+					NULL AS initial_projection_version, NULL AS initial_materialization, s.created_at AS data_created_at, s.updated_at AS data_updated_at, NULL AS life, NULL AS instance_revision
 				FROM entity_state s WHERE NOT EXISTS (
 					SELECT 1 FROM flow_instances f WHERE f.run_id = s.run_id AND f.instance_path = s.flow_instance
 				)) e`, runAlias: "e",
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "initial_materialization": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime, "data_created_at": valueTime, "data_updated_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at", "parent_instance", "instance_key", "initial_projection_version", "initial_materialization", "data_created_at", "data_updated_at"),
+			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "initial_materialization": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime, "data_created_at": valueTime, "data_updated_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at", "parent_instance", "instance_key", "initial_projection_version", "initial_materialization", "data_created_at", "data_updated_at", "life", "instance_revision"),
 		}
 	case FamilyEventDeliveries:
 		spec = projectionSpec{

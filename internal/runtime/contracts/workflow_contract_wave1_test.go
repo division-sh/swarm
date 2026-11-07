@@ -340,9 +340,11 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 	for _, cell := range []struct {
 		name, key, stateType string
 		policy               any
+		final                bool
 		want                 string
 	}{
 		{name: "keyed account", key: "operator_account", stateType: "text"},
+		{name: "keyed account with final stage", key: "operator_account", stateType: "text", final: true},
 		{name: "policy before provider emission", policy: "+15550100"},
 		{name: "dynamic state before provider emission", stateType: "text"},
 		{name: "missing account", want: "requires operator_account"},
@@ -365,6 +367,11 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 				RootSchema:   schema,
 				RootEntities: EntityContractsDocument{stateEntityType: {Fields: fields}},
 				Policy:       PolicyDocument{Values: map[string]PolicyValue{}},
+			}
+			if cell.final {
+				candidate.Semantics.StageTopologies = map[string]WorkflowStageTopology{
+					".": BuildWorkflowStageTopology(".", "pending", []string{"pending", "done"}, []string{"done"}, nil, nil, nil),
+				}
 			}
 			if cell.policy != nil {
 				candidate.Policy.Values["operator_account"] = PolicyValue{Value: cell.policy}

@@ -21,6 +21,7 @@ const (
 type DeliveryTargetOwnership struct {
 	kind  deliveryTargetOwnershipKind
 	route RouteIdentity
+	life  int64
 }
 
 func NewExistingEntityTarget(route RouteIdentity) (DeliveryTargetOwnership, error) {
@@ -60,7 +61,7 @@ func MustEntitylessReceiverTarget(route RouteIdentity) DeliveryTargetOwnership {
 }
 
 func newDeliveryTargetOwnership(kind deliveryTargetOwnershipKind, route RouteIdentity) (DeliveryTargetOwnership, error) {
-	owner := DeliveryTargetOwnership{kind: kind, route: route.Normalized()}
+	owner := DeliveryTargetOwnership{kind: kind, route: route.Normalized(), life: 1}
 	if err := owner.Validate(); err != nil {
 		return DeliveryTargetOwnership{}, err
 	}
@@ -68,18 +69,30 @@ func newDeliveryTargetOwnership(kind deliveryTargetOwnershipKind, route RouteIde
 }
 
 func (o DeliveryTargetOwnership) Empty() bool {
-	return o.kind == 0 && o.route.Normalized().Empty()
+	return o.kind == 0 && o.route.Normalized().Empty() && o.life == 0
 }
 
 func (o DeliveryTargetOwnership) Route() RouteIdentity {
 	return o.route.Normalized()
 }
 
+func (o DeliveryTargetOwnership) Life() int64 { return o.life }
+
+// WithLife captures the admitted receiver's life when new work is planned.
+// Retained work must preserve its recorded value rather than call this again.
+func (o DeliveryTargetOwnership) WithLife(life int64) (DeliveryTargetOwnership, error) {
+	o.life = life
+	if err := o.Validate(); err != nil {
+		return DeliveryTargetOwnership{}, err
+	}
+	return o, nil
+}
+
 // SameDeliveryTargetOwnership compares the complete normalized ownership fact.
 // Callers that only need receiver-route equality must use SameRouteIdentity
 // explicitly so ownership kind cannot be dropped accidentally.
 func SameDeliveryTargetOwnership(left, right DeliveryTargetOwnership) bool {
-	return left.kind == right.kind && SameRouteIdentity(left.Route(), right.Route())
+	return left.kind == right.kind && left.life == right.life && SameRouteIdentity(left.Route(), right.Route())
 }
 
 func (o DeliveryTargetOwnership) ExistingEntity() bool {
@@ -115,6 +128,9 @@ func (o DeliveryTargetOwnership) Validate() error {
 	if o.Code() == "" {
 		return fmt.Errorf("delivery target ownership kind is invalid")
 	}
+	if o.life <= 0 {
+		return fmt.Errorf("delivery target ownership requires its positive captured life")
+	}
 	if route.FlowInstance == "" {
 		return fmt.Errorf("delivery target ownership requires exact flow instance")
 	}
@@ -134,6 +150,7 @@ func (o DeliveryTargetOwnership) Validate() error {
 type deliveryTargetOwnershipWire struct {
 	Kind  string        `json:"kind"`
 	Route RouteIdentity `json:"route"`
+	Life  int64         `json:"life"`
 }
 
 func (o DeliveryTargetOwnership) MarshalJSON() ([]byte, error) {
@@ -143,7 +160,7 @@ func (o DeliveryTargetOwnership) MarshalJSON() ([]byte, error) {
 	if err := o.Validate(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(deliveryTargetOwnershipWire{Kind: o.Code(), Route: o.Route()})
+	return json.Marshal(deliveryTargetOwnershipWire{Kind: o.Code(), Route: o.Route(), Life: o.Life()})
 }
 
 func (o *DeliveryTargetOwnership) UnmarshalJSON(raw []byte) error {
@@ -175,6 +192,10 @@ func (o *DeliveryTargetOwnership) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("delivery target ownership kind %q is invalid", wire.Kind)
 	}
 	restored, err := newDeliveryTargetOwnership(kind, wire.Route)
+	if err != nil {
+		return err
+	}
+	restored, err = restored.WithLife(wire.Life)
 	if err != nil {
 		return err
 	}

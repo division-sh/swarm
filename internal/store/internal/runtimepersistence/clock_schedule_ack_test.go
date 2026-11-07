@@ -87,10 +87,7 @@ func TestInstanceClockSchedulerConsumesCommittedReceiptBothStores(t *testing.T) 
 						t.Error(err)
 					}
 				})
-				source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID})
-				if err != nil {
-					t.Fatal(err)
-				}
+				source := constructDefaultRootPublicationSourceFixture(t, ctx, selected.(agentFixtureFlowStore))
 				setGenericScheduleClock(t, selected, func() time.Time { return time.Now().UTC().Add(-time.Minute) })
 				admitted, err := lifecycle.Admit(ctx, genericschedule.AdmissionCommand{
 					ScheduleKey: "poll", RunID: runID, FlowInstance: runID, OwnerKind: genericschedule.OwnerInstance, OwnerID: ".",

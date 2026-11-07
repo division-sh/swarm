@@ -208,6 +208,10 @@ func projectRunForkFanOutExecutionOwnership(plan runfork.RunForkPlan, forkRunID 
 		if err != nil {
 			return capsule, err
 		}
+		delivery.Target, err = delivery.Target.WithLife(capsule.Receiver.Target.Life())
+		if err != nil {
+			return capsule, err
+		}
 		projected.Receiver = &delivery
 	}
 	return projected, projected.Validate()

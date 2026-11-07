@@ -64,6 +64,9 @@ func validateBusinessTurnAnchor(anchor, current runtimeeffects.Attempt) error {
 	if anchorID != currentID || anchorOwner != currentOwner || anchor.Authority.Target.AgentID != current.Authority.Target.AgentID || anchor.Authority.ExecutionMode != current.Authority.ExecutionMode {
 		return fmt.Errorf("business turn history contradicts its current owner")
 	}
+	if !anchor.InstanceOwnership.Equal(current.InstanceOwnership) {
+		return turnInstanceOwnershipChanged(current.Authority, anchor.InstanceOwnership, current.InstanceOwnership)
+	}
 	if anchor.Origin.Kind == runtimeeffects.CompletionOriginDirective {
 		if !anchor.Origin.Same(current.Origin) {
 			return fmt.Errorf("business turn cannot transfer directive execution ownership")
@@ -102,7 +105,7 @@ func bindBusinessTurnAttemptTx(ctx context.Context, tx *sql.Tx, postgres bool, a
 	return requireExternalAttemptTransition(write, err)
 }
 
-func requireBusinessTurnBindingTx(ctx context.Context, tx *sql.Tx, postgres bool, turnID string, attempt runtimeeffects.Attempt, now time.Time) error {
+func requireBusinessTurnBindingTx(ctx context.Context, tx *sql.Tx, postgres bool, turnID string, attempt runtimeeffects.Attempt, now time.Time, mode ...recoveryReadMode) error {
 	var current sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT CAST(current_attempt_id AS TEXT) FROM runtime_agent_turn_lifetimes WHERE turn_id=$1`, turnID).Scan(&current); err != nil {
 		return err
@@ -110,7 +113,7 @@ func requireBusinessTurnBindingTx(ctx context.Context, tx *sql.Tx, postgres bool
 	if !current.Valid {
 		return fmt.Errorf("physical business turn lacks its current attempt binding")
 	}
-	binding, _, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, current.String, now)
+	binding, _, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, current.String, now, mode...)
 	if err != nil {
 		return err
 	}

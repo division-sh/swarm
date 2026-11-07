@@ -77,6 +77,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					}
 					instances := []runtimepipeline.WorkflowInstance{
 						{
+							Life:       1,
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
 							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"receiver_id": exactRoute.InstanceID, "account_id": exactKey, "owner": "exact"},
@@ -84,6 +85,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						},
 						{
 							InstanceID: competingRoute.InstanceID, StorageRef: competingPath, EntityID: competingEntityID,
+							Life:         1,
 							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"receiver_id": competingRoute.InstanceID, "account_id": payloadKey, "owner": "competing"},
 							EntityType: "state",

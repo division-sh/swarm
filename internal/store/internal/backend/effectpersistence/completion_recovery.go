@@ -73,6 +73,7 @@ type completionRecoveryAttempt struct {
 type CompletionRecoveryAttempt = completionRecoveryAttempt
 
 type completionRecoveryAuthorityEvidence struct {
+	InstanceOwnership          json.RawMessage                  `json:"instance_ownership,omitempty"`
 	AuthorityKind              string                           `json:"authority_kind,omitempty"`
 	AuthorityID                string                           `json:"authority_id,omitempty"`
 	ExecutionOwner             string                           `json:"execution_owner,omitempty"`
@@ -444,6 +445,12 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
+		if attempt.Authority.HasBusinessTurnOrigin() {
+			attempt, err = projectRetainedTurnOwnership(ctx, tx, attempt)
+			if err != nil {
+				return runtimeeffects.RecoverySummary{}, err
+			}
+		}
 		resolution := providerDrainRecoveryResolution{Kind: completionSettlementCurrent}
 		if postgres {
 			resolution, err = resolveProviderDrainRecoveryPostgres(ctx, tx, attempt, now)
@@ -465,6 +472,12 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 			attempt, settlement, err = completionRecoverySettlement(recovered, runtimeeffects.StateOutcomeUncertain, &failure, now)
 			if err != nil {
 				return runtimeeffects.RecoverySummary{}, err
+			}
+			if attempt.Authority.HasBusinessTurnOrigin() {
+				attempt, err = projectRetainedTurnOwnership(ctx, tx, attempt)
+				if err != nil {
+					return runtimeeffects.RecoverySummary{}, err
+				}
 			}
 		}
 		disposition, err := providerRecoveryDisposition(ctx, tx, postgres, recovered, attempt, resolution.Expired, now)
@@ -665,6 +678,14 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Kind: runtimeeffects.KindProviderTurn, Adapter: recovered.Adapter, Transport: recovered.Transport,
 		SessionGrantID: recovered.SessionGrantID, SessionLockOwner: recovered.SessionLockOwner,
 	}
+	if len(evidence.InstanceOwnership) != 0 {
+		if err := json.Unmarshal(evidence.InstanceOwnership, &attempt.InstanceOwnership); err != nil {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("decode captured turn ownership: %w", err)
+		}
+		if err := attempt.InstanceOwnership.Validate(); err != nil {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, err
+		}
+	}
 	if authority.HasBusinessTurnOrigin() {
 		origin, err := decodeCompletionOrigin(recovered.OriginKind, recovered.OriginDeliveryID, recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginClaimToken, recovered.OriginClaimVersion, recovered.OriginSubscriber, recovered.OriginDirectiveID, recovered.OriginDirectiveOwner)
 		if err != nil {
@@ -694,7 +715,8 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{
 			OperationID: recovered.OperationID, AttemptID: recovered.AttemptID, Authority: authority,
-			State: state, Failure: failure, Evidence: map[string]any{"recovered": true}, Now: now,
+			InstanceOwnership: attempt.InstanceOwnership.Clone(),
+			State:             state, Failure: failure, Evidence: map[string]any{"recovered": true}, Now: now,
 		},
 		Usage: runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable,
 			Evidence: runtimeeffects.CompletionEvidence{Request: evidence.ProviderRequest, Models: []runtimeeffects.CompletionModelObservation{}, CostProvenance: runtimeeffects.CompletionCostUnavailable}},

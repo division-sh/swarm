@@ -180,6 +180,7 @@ type RoutingSource struct {
 	kind      RoutingSourceKind
 	route     RouteIdentity
 	authority RoutingSourceAuthority
+	life      int64
 }
 
 func NoRoutingSource() RoutingSource { return RoutingSource{kind: RoutingSourceAbsent} }
@@ -248,7 +249,7 @@ func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSourc
 	default:
 		return RoutingSource{}, fmt.Errorf("routing source kind %q cannot carry a flow route", kind.StorageCode())
 	}
-	return RoutingSource{kind: kind, route: route}, nil
+	return RoutingSource{kind: kind, route: route, life: 1}, nil
 }
 
 // AdmitRuntimeControlEventType validates an event identity that was resolved at
@@ -271,7 +272,21 @@ func AdmitRuntimeControlEventType(eventType EventType, source RoutingSource) (Ev
 	}
 }
 
-func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode string) (RoutingSource, error) {
+func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode string, life int64) (RoutingSource, error) {
+	source, err := restoreRoutingSourceIdentity(kindCode, route, authorityCode)
+	if err != nil {
+		return RoutingSource{}, err
+	}
+	if source.life != 0 {
+		return source.WithLife(life)
+	}
+	if life != 0 {
+		return RoutingSource{}, fmt.Errorf("routing source without an instance cannot carry life")
+	}
+	return source, nil
+}
+
+func restoreRoutingSourceIdentity(kindCode string, route RouteIdentity, authorityCode string) (RoutingSource, error) {
 	kind, ok := routingSourceKindFromCode(kindCode)
 	if !ok {
 		return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kindCode)
@@ -334,14 +349,25 @@ func (s RoutingSource) Kind() RoutingSourceKind           { return s.kind }
 func (s RoutingSource) Route() RouteIdentity              { return s.route.Normalized() }
 func (s RoutingSource) Authority() RoutingSourceAuthority { return s.authority }
 func (s RoutingSource) Empty() bool                       { return s.kind == RoutingSourceAbsent }
+func (s RoutingSource) Life() int64                       { return s.life }
+
+// WithLife copies an already captured instance life, never reading current state.
+func (s RoutingSource) WithLife(life int64) (RoutingSource, error) {
+	if s.life == 0 || life <= 0 {
+		return RoutingSource{}, fmt.Errorf("instance routing source requires positive captured life")
+	}
+	s.life = life
+	return s, nil
+}
 
 func (s RoutingSource) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind      string        `json:"kind"`
 		Route     RouteIdentity `json:"route"`
 		Authority string        `json:"authority,omitempty"`
+		Life      int64         `json:"life,omitempty"`
 	}{
-		Kind: s.kind.StorageCode(), Route: s.Route(), Authority: s.authority.StorageCode(),
+		Kind: s.kind.StorageCode(), Route: s.Route(), Authority: s.authority.StorageCode(), Life: s.life,
 	})
 }
 
@@ -353,13 +379,14 @@ func (s *RoutingSource) UnmarshalJSON(raw []byte) error {
 		Kind      string        `json:"kind"`
 		Route     RouteIdentity `json:"route"`
 		Authority string        `json:"authority"`
+		Life      int64         `json:"life"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&encoded); err != nil {
 		return fmt.Errorf("decode routing source: %w", err)
 	}
-	restored, err := RestoreRoutingSource(encoded.Kind, encoded.Route, encoded.Authority)
+	restored, err := RestoreRoutingSource(encoded.Kind, encoded.Route, encoded.Authority, encoded.Life)
 	if err != nil {
 		return err
 	}
@@ -501,10 +528,15 @@ type DeliveryContext struct {
 	RunID string                 `json:"run_id,omitempty"`
 	Reply *ReplyContextRef       `json:"reply,omitempty"`
 	Joins []JoinAdmissionReceipt `json:"joins,omitempty"`
+	Life  *InstanceLife          `json:"instance_life,omitempty"`
 }
 
 func (c DeliveryContext) Normalized() DeliveryContext {
 	normalized := DeliveryContext{RunID: c.RunID, Joins: normalizeJoinAdmissions(c.Joins)}
+	if c.Life != nil {
+		life := *c.Life
+		normalized.Life = &life
+	}
 	if c.Reply == nil {
 		return normalized
 	}
@@ -517,7 +549,7 @@ func (c DeliveryContext) Normalized() DeliveryContext {
 }
 
 func (c DeliveryContext) Empty() bool {
-	return c.RunID == "" && c.Normalized().Reply == nil && len(c.Joins) == 0
+	return c.RunID == "" && c.Normalized().Reply == nil && len(c.Joins) == 0 && c.Life == nil
 }
 
 func (c DeliveryContext) ReplyContextID() string {

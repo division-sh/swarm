@@ -25,7 +25,7 @@ func (e Effect) StageEntry(owner flowidentity.RunScopedFlowInstance) (timerident
 		return timeridentity.StageEntryRef{}, false, fmt.Errorf("stage entry effect disagrees with lifecycle instance")
 	}
 	ref := timeridentity.StageEntryRef{
-		RunID: owner.RunID, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID,
+		RunID: owner.RunID, Life: e.life, FlowScope: owner.Route.ScopeKey, InstanceID: owner.Route.InstanceID,
 		InstancePath: owner.Route.InstancePath, EntityID: e.entityID.String(),
 	}
 	switch e.kind {

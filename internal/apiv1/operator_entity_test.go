@@ -30,6 +30,7 @@ type fakeEntityReadStore struct {
 	lastList      operatorread.OperatorEntityListOptions
 	lastEntityID  string
 	lastRunID     string
+	lastLife      int64
 	lastAggregate operatorread.OperatorEntityAggregateOptions
 }
 
@@ -44,6 +45,11 @@ func (s *fakeEntityReadStore) LoadOperatorEntity(_ context.Context, entityID, ru
 	return s.getResult, s.getErr
 }
 
+func (s *fakeEntityReadStore) LoadOperatorEntityAtLife(ctx context.Context, entityID, runID string, life int64) (operatorread.OperatorEntityFull, error) {
+	s.lastLife = life
+	return s.LoadOperatorEntity(ctx, entityID, runID)
+}
+
 func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	s.lastAggregate = opts
 	return s.aggregate, s.aggregateErr
@@ -51,10 +57,10 @@ func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts 
 
 func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	stageDefined, currentState, revision := true, "collecting", int64(2)
+	stageDefined, currentState, revision, life := true, "collecting", int64(2), int64(1)
 	summary := operatorread.OperatorEntitySummary{
 		EntityID: "entity-1", RunID: "run-1", FlowInstance: "review/primary", EntityType: "mvp_spec",
-		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision,
+		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision, Life: &life,
 		EnteredStateAt: &now, LifecycleCreatedAt: &now, LifecycleUpdatedAt: &now,
 		CreatedAt: &now, UpdatedAt: &now,
 	}
@@ -118,6 +124,17 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	}
 	if entities.lastEntityID != "entity-1" || entities.lastRunID != "run-1" {
 		t.Fatalf("entity.get args = entity_id=%q run_id=%q", entities.lastEntityID, entities.lastRunID)
+	}
+	prior := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"prior","method":"entity.get","params":{"entity_id":"entity-1","run_id":"run-1","iter":1}}`)
+	if prior.Error != nil || entities.lastLife != 1 || entities.lastEntityID != "entity-1" || entities.lastRunID != "run-1" {
+		t.Fatalf("entity.get explicit life lost identity or selection: error=%#v life=%d", prior.Error, entities.lastLife)
+	}
+	for _, invalid := range []string{"0", "-1", "1.5", `"1"`, "null", "true"} {
+		entities.lastLife = 0
+		response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"invalid","method":"entity.get","params":{"entity_id":"entity-1","iter":`+invalid+`}}`)
+		if response.Error == nil || entities.lastLife != 0 {
+			t.Fatalf("invalid iter %s reached the life reader: error=%#v life=%d", invalid, response.Error, entities.lastLife)
+		}
 	}
 
 	aggregate := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg","method":"entity.aggregate","params":{"run_id":"run-1","group_by":"current_state"}}`)

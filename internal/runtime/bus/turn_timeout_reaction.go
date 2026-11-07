@@ -1,11 +1,14 @@
 package bus
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -24,6 +27,34 @@ func (eb *EventBus) PrepareRecoveredTurnTimeoutReaction(ctx context.Context, tur
 type startupTurnTimeoutPublicationKey struct{}
 type startupTurnTimeoutPublication struct{ eventID, runID string }
 type turnTimeoutRecoveryDeliveryAuthorityKey struct{}
+type turnTimeoutPublicationOwnerKey struct{}
+type turnTimeoutPublicationOwner struct {
+	event  events.Event
+	actor  agentidentity.Identity
+	source correlation.SourceArtifactFact
+}
+
+func preparedTurnTimeoutActor(ctx context.Context, event events.Event) (agentidentity.Identity, bool, error) {
+	owner, found := ctx.Value(turnTimeoutPublicationOwnerKey{}).(turnTimeoutPublicationOwner)
+	if !found {
+		return agentidentity.Identity{}, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return agentidentity.Identity{}, true, err
+	}
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	expected := owner.event
+	if !present || !owner.source.Matches(fact) || event.ID() != expected.ID() ||
+		event.RunID() != expected.RunID() || event.AdmissionClass() != expected.AdmissionClass() ||
+		event.Type() != expected.Type() || !event.Producer().Equal(expected.Producer()) ||
+		event.RoutingSource() != expected.RoutingSource() || event.ExecutionMode() != expected.ExecutionMode() ||
+		event.ParentEventID() != expected.ParentEventID() || event.TaskID() != expected.TaskID() ||
+		event.ChainDepth() != expected.ChainDepth() || !event.CreatedAt().Equal(expected.CreatedAt()) ||
+		!bytes.Equal(event.Payload(), expected.Payload()) {
+		return agentidentity.Identity{}, true, fmt.Errorf("timeout publication crosses its acknowledged actor, event or source")
+	}
+	return owner.actor, true, nil
+}
 
 // WithTurnTimeoutRecoveryDeliveryAuthority carries the already-issued startup
 // generation's stamp for durable obligations, without installing bus execution.
@@ -53,6 +84,15 @@ func (eb *EventBus) prepareTurnTimeoutReaction(ctx context.Context, turn effects
 	if err != nil {
 		return nil, err
 	}
+	if err := attempt.InstanceOwnership.Validate(); err != nil {
+		return nil, err
+	}
+	if captured := attempt.InstanceOwnership.Life; captured != nil {
+		source, err = source.WithInstanceLife(target.RunID, *captured)
+		if err != nil {
+			return nil, err
+		}
+	}
 	event, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		RunID: target.RunID,
 		Facts: events.EventFacts{
@@ -68,6 +108,10 @@ func (eb *EventBus) prepareTurnTimeoutReaction(ctx context.Context, turn effects
 	if recovery {
 		ctx = context.WithValue(ctx, startupTurnTimeoutPublicationKey{}, startupTurnTimeoutPublication{eventID: event.ID(), runID: event.RunID()})
 	}
+	// The validated launch/cancellation owns this exact control publication, but
+	// does not imply that its actor belongs to a constructed instance.
+	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+	ctx = context.WithValue(ctx, turnTimeoutPublicationOwnerKey{}, turnTimeoutPublicationOwner{event: event.Clone(), actor: target.AgentIdentity, source: fact})
 	plans, err := eb.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
 	if err != nil {
 		return nil, err

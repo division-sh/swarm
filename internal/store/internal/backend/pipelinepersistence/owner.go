@@ -17,6 +17,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -62,6 +63,8 @@ type eventCommitTxStore interface {
 	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
 	genericScheduleTxOwner() GenericScheduleTxOwner
 	workflowTurnTerminationOwner() WorkflowTurnTerminationTxOwner
+	instanceLifeLifecycleOwner() InstanceLifeLifecycleTxOwner
+	ReadActiveInstanceLifeDeliveriesTx(context.Context, *sql.Tx, events.InstanceLife) ([]runtimedelivery.Snapshot, error)
 	commitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 	SettleWorkflowNodeSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
 	RequireWorkflowAcceptedEventTx(context.Context, *sql.Tx, runtimedelivery.Claim, workflowlifecycle.Effect) error
@@ -71,11 +74,17 @@ type completionCandidateWriter interface {
 	mutationprotocol.CandidateWriter
 }
 
+type InstanceLifeLifecycleTxOwner interface {
+	CommitAgentLifecycleTransitionTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error)
+	ReadAgentLifecycleOutcomeTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error)
+}
+
 func (s *PipelinePostgresOwner) resourceSourceOwner() *storedurabledata.Owner { return s.resourceData }
 func (s *PipelineSQLiteOwner) resourceSourceOwner() *storedurabledata.Owner   { return s.resourceData }
 
 type GenericScheduleTxOwner interface {
 	AdmitTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+	ReadAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error)
 	CancelAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
 	LoadActivationTx(context.Context, *mutationprotocol.Attempt, string) (runtimegenericschedule.Activation, bool, error)
 	CancelActivationTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
@@ -146,6 +155,7 @@ type PipelinePostgresOwner struct {
 	historicalInstances    HistoricalFlowInstanceReader
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
+	instanceLifeLifecycle  InstanceLifeLifecycleTxOwner
 }
 
 type PipelineSQLiteOwner struct {
@@ -169,6 +179,7 @@ type PipelineSQLiteOwner struct {
 	historicalInstances    HistoricalFlowInstanceReader
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
+	instanceLifeLifecycle  InstanceLifeLifecycleTxOwner
 	nowFn                  func() time.Time
 	mutationMu             sync.Mutex
 	pipelineClaimMu        sync.Mutex
@@ -178,6 +189,30 @@ type PipelineSQLiteOwner struct {
 	pipelineScanIssuer     *runtimepipelineobligation.ScanIssuer
 	pipelineScans          map[string]*pipelineScanState
 	testPipelineReleaseErr func() error
+}
+
+func (s *PipelinePostgresOwner) BindInstanceLifeLifecycle(owner InstanceLifeLifecycleTxOwner) error {
+	if s == nil || owner == nil || s.instanceLifeLifecycle != nil {
+		return errors.New("pipeline instance lifecycle requires one composition binding")
+	}
+	s.instanceLifeLifecycle = owner
+	return nil
+}
+
+func (s *PipelineSQLiteOwner) BindInstanceLifeLifecycle(owner InstanceLifeLifecycleTxOwner) error {
+	if s == nil || owner == nil || s.instanceLifeLifecycle != nil {
+		return errors.New("pipeline instance lifecycle requires one composition binding")
+	}
+	s.instanceLifeLifecycle = owner
+	return nil
+}
+
+func (s *PipelinePostgresOwner) instanceLifeLifecycleOwner() InstanceLifeLifecycleTxOwner {
+	return s.instanceLifeLifecycle
+}
+
+func (s *PipelineSQLiteOwner) instanceLifeLifecycleOwner() InstanceLifeLifecycleTxOwner {
+	return s.instanceLifeLifecycle
 }
 
 func (s *PipelinePostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {

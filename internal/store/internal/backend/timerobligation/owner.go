@@ -3,10 +3,12 @@ package timerobligation
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	. "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -111,46 +113,10 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 	if observedAt.IsZero() {
 		return Snapshot{}, fmt.Errorf("timer obligation reader requires exact observation time")
 	}
-
-	query := `
-		SELECT
-			t.task_type,
-			COALESCE(CAST(t.run_id AS TEXT), ''),
-			t.status,
-			t.owner_kind,
-			t.fire_at,
-			COALESCE(r.status, ''),
-			CAST(t.timer_id AS TEXT), t.initial_fire_at,
-			COALESCE(CAST(t.occurrence_event_id AS TEXT), ''), t.occurrence_admitted_at, t.accepted_at,
-			COALESCE(t.cancel_cause, ''), t.cancelled_at,
-			COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
-			COALESCE(t.flow_instance, '')
-		FROM timers t
-		LEFT JOIN runs r ON r.run_id = t.run_id
-		WHERE (? = '' OR t.run_id = ?)
-		ORDER BY t.task_type, t.run_id, t.timer_id
-	`
-	args := []any{scope.RunID(), scope.RunID()}
-	if postgres {
-		query = `
-			SELECT
-				t.task_type,
-				COALESCE(t.run_id::text, ''),
-				t.status,
-				t.owner_kind,
-				t.fire_at,
-				COALESCE(r.status, ''),
-				t.timer_id::text, t.initial_fire_at,
-				COALESCE(t.occurrence_event_id::text, ''), t.occurrence_admitted_at, t.accepted_at,
-				COALESCE(t.cancel_cause, ''), t.cancelled_at,
-				COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
-				COALESCE(t.flow_instance, '')
-			FROM timers t
-			LEFT JOIN runs r ON r.run_id = t.run_id
-			WHERE (NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid)
-			ORDER BY t.task_type, t.run_id, t.timer_id
-		`
-		args = []any{scope.RunID()}
+	life, scopedLife := scope.InstanceLife()
+	query, args, err := timerObligationReadQuery(postgres, scope)
+	if err != nil {
+		return Snapshot{}, err
 	}
 
 	rows, err := queryer.QueryContext(ctx, query, args...)
@@ -175,14 +141,28 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			runStatus                                                          string
 			activation                                                         Activation
 			initialAt, occurrenceAdmittedAt, acceptedAt, cancelledAt, failedAt any
+			sourceRaw                                                          []byte
 		)
-		if err := rows.Scan(
+		destination := []any{
 			&familyValue, &runID, &status, &ownerKind, &fireAtValue, &runStatus,
 			&activation.ActivationID, &initialAt, &activation.OccurrenceEventID,
 			&occurrenceAdmittedAt, &acceptedAt, &activation.CancelCause, &cancelledAt,
 			&activation.FailureCode, &activation.FailureMessage, &failedAt, &activation.FlowInstance,
-		); err != nil {
+		}
+		if scopedLife {
+			destination = append(destination, &sourceRaw)
+		}
+		if err := rows.Scan(destination...); err != nil {
 			return Snapshot{}, fmt.Errorf("scan timer obligation: %w", err)
+		}
+		if scopedLife {
+			matches, err := timerMatchesInstanceLife(sourceRaw, runID, life)
+			if err != nil {
+				return Snapshot{}, err
+			}
+			if !matches {
+				continue
+			}
 		}
 		fireAt, err := timerTimeValue(fireAtValue)
 		if err != nil {
@@ -202,20 +182,8 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		activation.RunID = runID
 		activation.Status = status
 		activation.DueAt = fireAt
-		if activation.InitialDueAt, err = optionalTimerTimeValue(initialAt); err != nil {
-			return Snapshot{}, fmt.Errorf("scan timer obligation initial_fire_at: %w", err)
-		}
-		if activation.OccurrenceEventAdmittedAt, err = optionalTimerTimeValue(occurrenceAdmittedAt); err != nil {
-			return Snapshot{}, fmt.Errorf("scan timer obligation occurrence_admitted_at: %w", err)
-		}
-		if activation.AcceptedAt, err = optionalTimerTimeValue(acceptedAt); err != nil {
-			return Snapshot{}, fmt.Errorf("scan timer obligation accepted_at: %w", err)
-		}
-		if activation.CancelledAt, err = optionalTimerTimeValue(cancelledAt); err != nil {
-			return Snapshot{}, fmt.Errorf("scan timer obligation cancelled_at: %w", err)
-		}
-		if activation.FailedAt, err = optionalTimerTimeValue(failedAt); err != nil {
-			return Snapshot{}, fmt.Errorf("scan timer obligation failed_at: %w", err)
+		if err := decodeTimerActivationTimes(&activation, initialAt, occurrenceAdmittedAt, acceptedAt, cancelledAt, failedAt); err != nil {
+			return Snapshot{}, err
 		}
 
 		target := global
@@ -262,6 +230,99 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		})
 	}
 	return snapshot, nil
+}
+
+func timerObligationReadQuery(postgres bool, scope Scope) (string, []any, error) {
+	life, scopedLife := scope.InstanceLife()
+	lifeColumn := ""
+	if scopedLife {
+		if err := life.Validate(); err != nil || life.RunID != scope.RunID() {
+			return "", nil, fmt.Errorf("timer obligation instance scope is invalid")
+		}
+		lifeColumn = ", t.routing_source"
+	}
+	query := `
+		SELECT
+			t.task_type,
+			COALESCE(CAST(t.run_id AS TEXT), ''),
+			t.status,
+			t.owner_kind,
+			t.fire_at,
+			COALESCE(r.status, ''),
+			CAST(t.timer_id AS TEXT), t.initial_fire_at,
+			COALESCE(CAST(t.occurrence_event_id AS TEXT), ''), t.occurrence_admitted_at, t.accepted_at,
+			COALESCE(t.cancel_cause, ''), t.cancelled_at,
+			COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
+			COALESCE(t.flow_instance, '')` + lifeColumn + `
+		FROM timers t
+		LEFT JOIN runs r ON r.run_id = t.run_id
+		WHERE (? = '' OR t.run_id = ?)
+	`
+	args := []any{scope.RunID(), scope.RunID()}
+	if postgres {
+		query = `
+			SELECT
+				t.task_type,
+				COALESCE(t.run_id::text, ''),
+				t.status,
+				t.owner_kind,
+				t.fire_at,
+				COALESCE(r.status, ''),
+				t.timer_id::text, t.initial_fire_at,
+				COALESCE(t.occurrence_event_id::text, ''), t.occurrence_admitted_at, t.accepted_at,
+				COALESCE(t.cancel_cause, ''), t.cancelled_at,
+				COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
+				COALESCE(t.flow_instance, '')` + lifeColumn + `
+			FROM timers t
+			LEFT JOIN runs r ON r.run_id = t.run_id
+			WHERE (NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid)
+		`
+		args = []any{scope.RunID()}
+	}
+	if scopedLife {
+		if postgres {
+			query += ` AND (t.flow_instance=$2 OR (COALESCE(t.flow_instance,'')='' AND $2=$1))`
+			args = append(args, life.FlowInstance)
+		} else {
+			query += ` AND (t.flow_instance=? OR (COALESCE(t.flow_instance,'')='' AND ?=?))`
+			args = append(args, life.FlowInstance, life.FlowInstance, life.RunID)
+		}
+	}
+	return query + ` ORDER BY t.task_type, t.run_id, t.timer_id`, args, nil
+}
+
+func decodeTimerActivationTimes(activation *Activation, initialAt, occurrenceAdmittedAt, acceptedAt, cancelledAt, failedAt any) (err error) {
+	if activation.InitialDueAt, err = optionalTimerTimeValue(initialAt); err != nil {
+		return fmt.Errorf("scan timer obligation initial_fire_at: %w", err)
+	}
+	if activation.OccurrenceEventAdmittedAt, err = optionalTimerTimeValue(occurrenceAdmittedAt); err != nil {
+		return fmt.Errorf("scan timer obligation occurrence_admitted_at: %w", err)
+	}
+	if activation.AcceptedAt, err = optionalTimerTimeValue(acceptedAt); err != nil {
+		return fmt.Errorf("scan timer obligation accepted_at: %w", err)
+	}
+	if activation.CancelledAt, err = optionalTimerTimeValue(cancelledAt); err != nil {
+		return fmt.Errorf("scan timer obligation cancelled_at: %w", err)
+	}
+	if activation.FailedAt, err = optionalTimerTimeValue(failedAt); err != nil {
+		return fmt.Errorf("scan timer obligation failed_at: %w", err)
+	}
+	return nil
+}
+
+func timerMatchesInstanceLife(raw []byte, runID string, life events.InstanceLife) (bool, error) {
+	var source events.RoutingSource
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return false, fmt.Errorf("decode instance-life timer source: %w", err)
+	}
+	path := source.Route().FlowInstance
+	if source.Kind() == events.RoutingSourceRoot {
+		path = runID
+	}
+	if runID != life.RunID || path != life.FlowInstance || source.Life() <= 0 {
+		return false, fmt.Errorf("instance-life timer source contradicts its retained owner")
+	}
+	return source.Life() == life.Life, nil
 }
 
 func timerTimeValue(raw any) (time.Time, error) {

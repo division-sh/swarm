@@ -338,6 +338,9 @@ func joinAdmissionEntry(owner flowidentity.RunScopedFlowInstance, runID, entityI
 	if !found {
 		return timeridentity.StageEntryRef{}, nil, fmt.Errorf("existing join receiver is missing lifecycle entry evidence")
 	}
+	if entry.Life != instance.Life {
+		return timeridentity.StageEntryRef{}, nil, InstanceRestarted(owner, entry.Life, instance.Life)
+	}
 	if err := entry.RequireOwner(runID, ownerRoute.ScopeKey, ownerRoute.InstanceID, ownerRoute.InstancePath, entityID, instance.CurrentState); err != nil {
 		return timeridentity.StageEntryRef{}, nil, err
 	}

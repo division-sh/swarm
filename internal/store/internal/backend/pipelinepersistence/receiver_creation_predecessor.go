@@ -82,6 +82,10 @@ func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runl
 	if err != nil {
 		return "", err
 	}
+	if header.Life != route.Target.Life() {
+		owner := flowidentity.RunScopedFlowInstance{RunID: run.RunID, Route: flowidentity.RouteForInstancePath(header.StorageRef)}
+		return "", pipeline.InstanceRestarted(owner, route.Target.Life(), header.Life)
+	}
 	_, historical, err := history.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
 	if err != nil {
 		return "", err
@@ -134,9 +138,10 @@ func receiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, rout
 		return "", err
 	}
 	var entityID string
-	err = tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances
+	var life int64
+	err = tx.QueryRowContext(ctx, `SELECT entity_id, life FROM flow_instances
 		WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`,
-		owner.RunID, owner.Route.InstancePath, owner.Route.ScopeKey).Scan(&entityID)
+		owner.RunID, owner.Route.InstancePath, owner.Route.ScopeKey).Scan(&entityID, &life)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Absence supplies no predecessor; it does not admit construction or bypass
 		// the independent exact-target validation before handler execution.
@@ -147,6 +152,12 @@ func receiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, rout
 	}
 	if target.EntityID != "" && target.EntityID != entityID {
 		return "", fmt.Errorf("creating-turn target contradicts constructed receiver identity")
+	}
+	if life <= 0 {
+		return "", fmt.Errorf("creating-turn receiver has no positive current life")
+	}
+	if life != route.Target.Life() {
+		return "", pipeline.InstanceRestarted(owner, route.Target.Life(), life)
 	}
 	evidence, err := ReadFlowConstructionPublicationTx(ctx, tx, owner, entityID)
 	if err != nil {

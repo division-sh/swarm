@@ -16,7 +16,7 @@ import (
 
 func insertRunDriftHeader(t *testing.T, db *sql.DB, run, entity, path string, entityType any, stage string) {
 	t.Helper()
-	if _, err := db.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,$4,'worker',$5,1,'{}','{}','terminated')`, run, entity, path, entityType, stage); err != nil {
+	if _, err := db.Exec(`INSERT INTO flow_instances VALUES($1,$2,$3,$4,'worker',$5,1,'{}','{}','terminated',1)`, run, entity, path, entityType, stage); err != nil {
 		t.Fatal(err)
 	}
 }

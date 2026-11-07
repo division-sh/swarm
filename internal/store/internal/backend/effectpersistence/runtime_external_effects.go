@@ -124,6 +124,11 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.RecoverySummary, error) {
 		var summary runtimeeffects.RecoverySummary
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, err = prepareProviderRecoveryOwnershipTx(txctx, tx, true, s.directives, "", nil)
+			if err != nil {
+				return err
+			}
 			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, true, "")
 			if err != nil {
 				return err
@@ -162,6 +167,11 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite reconcile external effect attempts", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.RecoverySummary, error) {
 		var summary runtimeeffects.RecoverySummary
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, err = prepareProviderRecoveryOwnershipTx(txctx, tx, false, s.directives, "", nil)
+			if err != nil {
+				return err
+			}
 			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false, "")
 			if err != nil {
 				return err
@@ -509,6 +519,12 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.Attempt, error) {
 		var attempt runtimeeffects.Attempt
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			req.InstanceOwnership, err = prepareProviderTurnOwnership(ctx, tx, authority, req, s.delivery, s.directives)
+			if err != nil {
+				return err
+			}
+			ctx = withAdmittedTurnOwnership(ctx, tx, authority.Target.AgentIdentity, req.InstanceOwnership)
 			if err := requireExternalEffectAuthorityPostgres(ctx, tx, authority, true); err != nil {
 				return err
 			}
@@ -524,7 +540,6 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			if err := prepareBusinessTurnTx(ctx, tx, true, authority, req); err != nil {
 				return err
 			}
-			var err error
 			authority.LeaseExpiresAt, err = externalEffectAttemptLeasePostgres(ctx, tx, authority)
 			if err != nil {
 				return err
@@ -562,6 +577,7 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 		})
 		if err == nil {
 			err = mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				ctx = withAdmittedTurnOwnership(ctx, tx, authority.Target.AgentIdentity, req.InstanceOwnership)
 				return bindBusinessTurnAttemptTx(ctx, tx, true, attempt, req.Now)
 			})
 		}
@@ -697,6 +713,12 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite authorize external attempt", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.Attempt, error) {
 		var attempt runtimeeffects.Attempt
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			req.InstanceOwnership, err = prepareProviderTurnOwnership(txctx, tx, authority, req, s.delivery, s.directives)
+			if err != nil {
+				return err
+			}
+			txctx = withAdmittedTurnOwnership(txctx, tx, authority.Target.AgentIdentity, req.InstanceOwnership)
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, authority, true); err != nil {
 				return err
 			}
@@ -712,7 +734,6 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			if err := prepareBusinessTurnTx(txctx, tx, false, authority, req); err != nil {
 				return err
 			}
-			var err error
 			authority.LeaseExpiresAt, err = externalEffectAttemptLeaseSQLite(txctx, tx, authority)
 			if err != nil {
 				return err
@@ -735,6 +756,7 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 		})
 		if err == nil {
 			err = mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				txctx = withAdmittedTurnOwnership(txctx, tx, authority.Target.AgentIdentity, req.InstanceOwnership)
 				return bindBusinessTurnAttemptTx(txctx, tx, false, attempt, req.Now)
 			})
 		}
@@ -1508,7 +1530,7 @@ func insertExternalRetryAttemptPostgres(ctx context.Context, tx *sql.Tx, authori
 	}
 	args := []any{attemptID, req.OperationID, ordinal, req.Adapter, req.Transport, authority.RuntimeEpoch(), authority.ExecutionMode, authority.Generation(), authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration, string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	args = append(args, completionOriginValues(req.Origin)...)
-	authorityEvidence, err := json.Marshal(authority.Evidence())
+	authorityEvidence, err := runtimeeffects.EncodeAttemptAuthorityEvidence(authority, req)
 	if err != nil {
 		return runtimeeffects.Attempt{}, false, err
 	}
@@ -1544,7 +1566,7 @@ func insertExternalRetryAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authori
 	}
 	args := []any{attemptID, req.OperationID, ordinal, req.Adapter, req.Transport, authority.RuntimeEpoch(), authority.ExecutionMode, authority.Generation(), authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration, string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	args = append(args, completionOriginValues(req.Origin)...)
-	authorityEvidence, err := json.Marshal(authority.Evidence())
+	authorityEvidence, err := runtimeeffects.EncodeAttemptAuthorityEvidence(authority, req)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -1809,8 +1831,9 @@ func externalEffectStartupAuthorityID(authority runtimeeffects.Authority) string
 
 func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, attemptID string, ordinal int) runtimeeffects.Attempt {
 	return runtimeeffects.Attempt{
-		TurnTimeout: timeridentity.CloneTurnTimeout(req.TurnTimeout),
-		OperationID: req.OperationID, AttemptID: attemptID, Token: authority.Normal, Authority: authority,
+		InstanceOwnership: req.InstanceOwnership.Clone(),
+		TurnTimeout:       timeridentity.CloneTurnTimeout(req.TurnTimeout),
+		OperationID:       req.OperationID, AttemptID: attemptID, Token: authority.Normal, Authority: authority,
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
 		Ordinal: ordinal, AuthorizedAt: req.Now.UTC(), Origin: req.Origin,
 		SessionGrantID: req.SessionGrantID, SessionLockOwner: req.SessionLockOwner,
@@ -1857,6 +1880,14 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.ExternalAttemptLaunch, error) {
 		var launch runtimeeffects.ExternalAttemptLaunch
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, attempt, err = prepareTurnAttemptOwnershipTx(txctx, tx, true, s.directives, attempt)
+			if err != nil {
+				return err
+			}
+			if err := requireCurrentTurnOwnership(txctx, tx, attempt); err != nil {
+				return err
+			}
 			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
 				return err
 			}
@@ -1924,6 +1955,14 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite mark external attempt launched", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (runtimeeffects.ExternalAttemptLaunch, error) {
 		var launch runtimeeffects.ExternalAttemptLaunch
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			txctx, attempt, err = prepareTurnAttemptOwnershipTx(txctx, tx, false, s.directives, attempt)
+			if err != nil {
+				return err
+			}
+			if err := requireCurrentTurnOwnership(txctx, tx, attempt); err != nil {
+				return err
+			}
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
 				return err
 			}
@@ -2118,7 +2157,7 @@ func (s *EffectPostgresOwner) MarkExternalAttemptResponseObserved(ctx context.Co
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority}, mutationprotocol.RevisionOnly, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority, InstanceOwnership: attempt.InstanceOwnership.Clone()}, mutationprotocol.RevisionOnly, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			if _, err := resolveCompletionSettlementPermitPostgres(ctx, tx, attempt); err != nil {
 				return err
@@ -2143,7 +2182,7 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptResponseObserved(ctx context.Cont
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite mark external attempt response observed", runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority}, mutationprotocol.RevisionOnly, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite mark external attempt response observed", runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority, InstanceOwnership: attempt.InstanceOwnership.Clone()}, mutationprotocol.RevisionOnly, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if _, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt); err != nil {
 				return err

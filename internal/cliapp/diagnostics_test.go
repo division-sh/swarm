@@ -697,6 +697,144 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+	for _, mode := range []string{"snapshot", "summary"} {
+		t.Run("iter_"+mode, func(t *testing.T) {
+			wrongRead := false
+			selected, calls := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+				if req.Method == entityGetMethod {
+					if !reflect.DeepEqual(req.Params, map[string]any{"run_id": "run-1", "entity_id": "entity-1", "iter": float64(1)}) {
+						t.Fatalf("selected-life presentation changed scope: %+v", req)
+					}
+					result := validEntityFullResult("entity-1")
+					if wrongRead {
+						result["entity"].(map[string]any)["life"] = 2
+						result["bookkeeping"].(map[string]any)["instance_life_started_at"] = "2026-05-20T01:02:00Z"
+					}
+					return result
+				}
+				want := map[string]any{"entity_id": []any{"entity-1"}, "iter": float64(1)}
+				if req.Method != "run.trace" || req.Params["run_id"] != "run-1" || !reflect.DeepEqual(req.Params["filter"], want) {
+					t.Fatalf("selected-life trace changed scope: %+v", req)
+				}
+				result := map[string]any{"trace": []any{}}
+				if mode == "summary" && req.Params["cursor"] == nil {
+					result["next_cursor"] = "life-page-2"
+				}
+				return result
+			})
+			defer selected.Close()
+			args := []string{"run", "trace", "run-1", "--entity-id", "entity-1", "--iter", "1"}
+			wantCalls := 2
+			if mode == "summary" {
+				args = append(args, "--delivery-summary")
+				wantCalls = 3
+			}
+			var out, warning bytes.Buffer
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &warning, testRootCommandOptions(selected)); code != 0 || len(*calls) != wantCalls {
+				t.Fatalf("iter %s: exit=%d calls=%d stderr=%s", mode, code, len(*calls), warning.String())
+			}
+			wrongRead = true
+			out.Reset()
+			warning.Reset()
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &warning, testRootCommandOptions(selected)); code == 0 || out.Len() != 0 || len(*calls) != wantCalls+1 {
+				t.Fatalf("selected-life trace accepted foreign metadata or retried: exit=%d calls=%d out=%s", code, len(*calls), out.String())
+			}
+		})
+		for _, scenario := range []string{"stable", "data_only", "constructed_during_read", "reset", "start_changed", "wrong_run", "wrong_entity", "wrong_instance", "missing_start", "before_error", "after_error"} {
+			t.Run("current_"+mode+"/"+scenario, func(t *testing.T) {
+				metadataReads, traceReads := 0, 0
+				selected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var req jsonRPCRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Fatal(err)
+					}
+					if req.Method == entityGetMethod {
+						metadataReads++
+						if !reflect.DeepEqual(req.Params, map[string]any{"run_id": "run-1", "entity_id": "entity-1"}) {
+							t.Fatalf("current-life metadata was silently pinned or changed scope: %+v", req)
+						}
+						if scenario == "before_error" || scenario == "after_error" && metadataReads == 2 {
+							writeEntityJSONRPCError(t, w, req.ID, "ENTITY_NOT_FOUND")
+							return
+						}
+						result := validEntityFullResult("entity-1")
+						entity := result["entity"].(map[string]any)
+						entity["life"] = 2
+						start := "2026-05-20T01:02:00Z"
+						if metadataReads == 2 {
+							// Normal same-life progress is not a reset.
+							entity["revision"] = 4
+							entity["entered_state_at"] = "2026-05-20T01:04:00Z"
+							switch scenario {
+							case "reset":
+								entity["life"] = 3
+								start = "2026-05-20T01:03:00Z"
+							case "start_changed":
+								start = "2026-05-20T01:03:00Z"
+							case "wrong_run":
+								entity["run_id"] = "foreign-run"
+							case "wrong_entity":
+								entity["entity_id"] = "foreign-entity"
+							case "wrong_instance":
+								entity["flow_instance"] = "foreign-instance"
+							case "missing_start":
+								start = ""
+							}
+						}
+						result["bookkeeping"].(map[string]any)["instance_life_started_at"] = start
+						if scenario == "data_only" || scenario == "constructed_during_read" && metadataReads == 1 {
+							for _, key := range []string{"stage_defined", "life", "revision", "current_state", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+								entity[key] = nil
+							}
+							for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
+								result[key] = nil
+							}
+						}
+						writeJSONRPCResult(t, w, req.ID, result)
+						return
+					}
+					traceReads++
+					if req.Method != "run.trace" || req.Params["run_id"] != "run-1" || !reflect.DeepEqual(req.Params["filter"], map[string]any{"entity_id": []any{"entity-1"}}) || metadataReads != 1 {
+						t.Fatalf("current trace escaped its finite bracket or injected iter: %+v metadata=%d", req, metadataReads)
+					}
+					result := map[string]any{"trace": []any{map[string]any{"event_id": "trace-event", "event_name": "work.done", "event_created_at": "2026-05-20T01:04:00Z"}}}
+					if mode == "summary" && traceReads == 1 {
+						result["next_cursor"] = "current-page-2"
+					}
+					writeJSONRPCResult(t, w, req.ID, result)
+				}))
+				defer selected.Close()
+				args := []string{"run", "trace", "run-1", "--entity-id", "entity-1"}
+				wantTrace := 1
+				if mode == "summary" {
+					args = append(args, "--delivery-summary")
+					wantTrace = 2
+				}
+				var out, warning bytes.Buffer
+				code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &warning, testRootCommandOptions(selected))
+				if scenario == "before_error" {
+					if code == 0 || out.Len() != 0 || metadataReads != 1 || traceReads != 0 {
+						t.Fatalf("unreadable initial metadata reached trace/output: exit=%d metadata=%d trace=%d", code, metadataReads, traceReads)
+					}
+					return
+				}
+				if metadataReads != 2 || traceReads != wantTrace {
+					t.Fatalf("finite trace did not bracket all pages exactly once: metadata=%d trace=%d", metadataReads, traceReads)
+				}
+				if scenario == "data_only" {
+					if code != 0 || out.Len() == 0 || strings.Contains(out.String(), "instance review life") || strings.Contains(out.String(), "started over on") {
+						t.Fatalf("data-only trace invented an instance or lost its default read: exit=%d out=%s stderr=%s", code, out.String(), warning.String())
+					}
+				} else if scenario == "stable" {
+					if code != 0 || !strings.Contains(out.String(), "instance review life 2 started over on 2026-05-20T01:02:00Z") {
+						t.Fatalf("stable current-life presentation failed: exit=%d out=%s stderr=%s", code, out.String(), warning.String())
+					}
+				} else if code == 0 || out.Len() != 0 {
+					t.Fatalf("changed/unreadable metadata emitted a trace or inferred a date: exit=%d out=%s", code, out.String())
+				}
+			})
+		}
+	}
 }
 
 func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
@@ -1549,6 +1687,11 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "runs invalid limit", args: []string{"run", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
 		{name: "runs invalid since", args: []string{"run", "list", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},
 		{name: "trace extra arg", args: []string{"run", "trace", "run-1", "extra"}, wantStderr: "accepts at most one argument"},
+		{name: "trace iter zero", args: []string{"run", "trace", "run-1", "--iter", "0", "--entity-id", "entity-1"}, wantStderr: operatorread.TraceIterPositiveRequired},
+		{name: "trace iter without entity", args: []string{"run", "trace", "run-1", "--iter", "1"}, wantStderr: operatorread.TraceIterOneEntityRequired},
+		{name: "trace iter several entities", args: []string{"run", "trace", "run-1", "--iter", "1", "--entity-id", "entity-1", "--entity-id", "entity-2"}, wantStderr: operatorread.TraceIterOneEntityRequired},
+		{name: "trace iter follow", args: []string{"run", "trace", "run-1", "--iter", "1", "--entity-id", "entity-1", "--follow"}, wantStderr: operatorread.TraceIterFollowRefused},
+		{name: "trace iter shorthand follow", args: []string{"run", "trace", "run-1", "--iter", "1", "--entity-id", "entity-1", "-f"}, wantStderr: operatorread.TraceIterFollowRefused},
 		{name: "trace invalid limit low", args: []string{"run", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid limit high", args: []string{"run", "trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid since", args: []string{"run", "trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp or a positive relative duration"},

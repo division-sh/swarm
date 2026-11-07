@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"testing"
 	"time"
 
@@ -204,8 +205,8 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		t.Fatalf("lifecycle replay = %#v err=%v", replayed, err)
 	}
 	changedOrigin := start
-	changedOrigin.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{
-		Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticAcceptedEvent,
+	changedOrigin.DiagnosticOrigin = runfork.LifecycleDiagnosticOrigin{
+		Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticAcceptedEvent,
 		ParentEventID: "00000000-0000-0000-0000-000000001999",
 	}
 	if _, err := agentfixture.CommitStatic(t, ctx, store, changedOrigin); err == nil {

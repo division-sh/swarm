@@ -110,6 +110,12 @@ func TestSelectedProviderTurnRetainsActualBusinessOriginBothStores(t *testing.T)
 			}
 			store := selected.(completionSettlementTestStore)
 			ctx = effects.WithController(effects.WithAuthority(ctx, authority), newCompletionControllerForTest(store))
+			state, found, err := selected.LoadAgentLifecycleState(ctx, actor)
+			if err != nil || !found {
+				t.Fatalf("selected turn lost its admitted actor: found=%t err=%v", found, err)
+			}
+			ctx = effects.WithLifecycleToken(ctx, effects.LifecycleToken{Identity: actor, AgentID: actor.AgentID(), RuntimeEpoch: state.RuntimeEpoch, Generation: state.Generation})
+			ctx = effects.WithTurnInstanceSource(ctx, source)
 			admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, fork.ExecutionID, fork.ExecutionGeneration, actor.RunID, fork.ActorCensusFingerprint, evidence.BundleHash, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -125,6 +131,9 @@ func TestSelectedProviderTurnRetainsActualBusinessOriginBothStores(t *testing.T)
 			}
 			if !handle.Attempt().Origin.Delivery.Same(claimed.Claim) {
 				t.Fatal("selected provider authorization omitted its exact business claim")
+			}
+			if !handle.Attempt().InstanceOwnership.RunOwned || handle.Attempt().InstanceOwnership.Life != nil {
+				t.Fatal("entityless dependency was substituted for native actor ownership")
 			}
 			if err := handle.MarkLaunched(ctx); err != nil {
 				t.Fatal(err)
