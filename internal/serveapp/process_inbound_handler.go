@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -26,8 +27,9 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		return
 	}
 	lookup := h.contexts.LookupIngress(alias, provider)
+	binding, _ := channelprovider.Lookup(provider)
 	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.pendingClaim != nil && h.publicRegistration != nil && provider == "telegram" {
+		if h.pendingClaim != nil && h.publicRegistration != nil && binding.Webhook() {
 			consumed, err := h.publicRegistration.ConsumePendingDeploymentClaim(r, lookup.Target.AdmissionPlan, h.pendingClaim)
 			if err != nil {
 				status := http.StatusServiceUnavailable

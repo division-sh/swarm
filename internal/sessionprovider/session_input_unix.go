@@ -97,6 +97,10 @@ func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference Sessi
 	return r.readRetainedInput(ctx, reference, "")
 }
 
+func (r *sessionInputReader) capturePublications() retainedPublicationOwner {
+	return r.spool
+}
+
 func (r *sessionInputReader) readPendingBusinessInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
 	return r.readRetainedInput(ctx, reference, channelonboarding.SessionInputBusiness)
 }
