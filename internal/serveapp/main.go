@@ -1677,9 +1677,10 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 1
 	}
 	var deploymentRegistration *runtimepublicingress.ProviderRegistrationController
+	deploymentTransport := &serveDeploymentTransport{}
 	deploymentChannels, deploymentClaims, restoreDeploymentChannels, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
 		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
-	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.refreshRegisteredAccount, ingress: ready})
+	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.refreshRegisteredAccount, ingress: ready, deployment: deploymentTransport})
 	defer func() {
 		if err := closeDeploymentChannels(); err != nil {
 			log.Printf("deployment channel shutdown failed: %T", err)
@@ -1771,7 +1772,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		deploymentRegistration = registrationController
 		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
 			_, manager := supervisor.PublicIngressState()
-			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController, stores.ChannelDelivery().NotifyChannelPublication)
+			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController, stores.ChannelDelivery().NotifyChannelPublication, deploymentTransport)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
@@ -1941,7 +1942,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			presenter.fail(22, "public_ingress", snapshotErr)
 			return 1
 		}
-		selection, selectionErr := resolveServeRegistrationPairs(ctx, snapshot, manager)
+		selection, selectionErr := resolveServeRegistrationPairs(ctx, snapshot, manager, deploymentTransport)
 		if selectionErr == nil {
 			initialRegistrationPairs = append(initialRegistrationPairs, selection.Pairs...)
 			selection.Release()
@@ -2104,7 +2105,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		channelSelectedDecisions = supervisor.selected
 	}
 	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
-		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
+		deployment: deploymentTransport,
+		store:      stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
 		selectedDecisions: channelSelectedDecisions,

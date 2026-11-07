@@ -4,6 +4,7 @@ package serveapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,11 @@ import (
 func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/whatsapp-session-input"))
 	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, held := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/deployment/held=%t", backend, held), func(t *testing.T) {
+				runDeploymentWhatsAppOrderedInput(t, backend, held)
+			})
+		}
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))

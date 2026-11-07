@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/google/uuid"
 )
 
@@ -47,6 +48,9 @@ func LoadDestinationCurrentPlan(ctx context.Context, tx *sql.Tx, deliveryID stri
 		return Plan{}, false, err
 	}
 	if plan.SourceKind == PlanResponse {
+		if plan.RequestParent.Kind == channelnative.TransportDeploymentRegistration {
+			return loadDeploymentResponseDestination(ctx, tx, plan, postgres)
+		}
 		query := `SELECT b.binding_revision FROM operator_channel_bindings b
 			JOIN channel_delivery_defaults d ON d.singleton_id=1 AND d.state='current'
 			WHERE b.interface_key=? AND b.status='current' AND b.principal_id=?
@@ -113,7 +117,7 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 	if tx == nil || limit < 1 || limit > 500 || (afterDeliveryID != "" && uuid.Validate(afterDeliveryID) != nil) {
 		return nil, fmt.Errorf("channel delivery scan requires a transaction, valid cursor and bounded limit")
 	}
-	query := `SELECT p.delivery_id, p.source_kind, p.source_id, COALESCE(p.request_activation_id, ''), COALESCE(p.summary_count, 0), p.principal_id,
+	query := `SELECT p.delivery_id, p.source_kind, p.source_id, COALESCE(p.request_activation_id, ''), p.request_transport_parent, COALESCE(p.summary_count, 0), p.principal_id,
 		p.interface_key, p.binding_revision, CASE WHEN ` + AcceptedEffectPredicate(false) + ` THEN p.binding_revision WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
 		p.delivery_epoch, p.external_account,
 		p.conversation_reference, p.conversation_scope, p.state,
@@ -124,12 +128,12 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 		AND ((p.source_kind='response' AND b.status='current' AND b.principal_id=p.principal_id
 			AND b.binding_revision>=p.binding_revision AND b.external_account=p.external_account
 			AND b.conversation_reference=p.conversation_reference AND b.conversation_scope=p.conversation_scope
-			AND EXISTS (SELECT 1 FROM connected_channel_activations a
+			AND (` + deploymentParentPredicate("p.request_transport_parent", "p.interface_key", "b.binding_revision", false) + ` OR EXISTS (SELECT 1 FROM connected_channel_activations a
 				JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 				WHERE a.activation_id=p.request_activation_id AND a.interface_key=b.interface_key AND a.status='current'
 				AND a.principal_id=b.principal_id AND a.binding_revision=b.binding_revision
 				AND a.conversation_reference=b.conversation_reference
-				AND o.identity_operation_id=b.operation_id AND o.phase='succeeded'))
+				AND o.identity_operation_id=b.operation_id AND o.phase='succeeded')))
 		OR (p.source_kind<>'response' AND p.interface_key=d.interface_key
 			AND d.binding_revision>=p.binding_revision
 			AND p.external_account=d.external_account
@@ -137,7 +141,7 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 		) AND p.state <> 'retired' AND ` + SendEligibilityPredicate + `) OR ` + AcceptedEffectPredicate(false) + `)
 		AND p.delivery_id > ? ORDER BY p.delivery_id LIMIT ?`
 	if postgres {
-		query = `SELECT p.delivery_id::text, p.source_kind, p.source_id::text, COALESCE(p.request_activation_id::text, ''), COALESCE(p.summary_count, 0), p.principal_id::text,
+		query = `SELECT p.delivery_id::text, p.source_kind, p.source_id::text, COALESCE(p.request_activation_id::text, ''), p.request_transport_parent, COALESCE(p.summary_count, 0), p.principal_id::text,
 			p.interface_key, p.binding_revision, CASE WHEN ` + AcceptedEffectPredicate(true) + ` THEN p.binding_revision WHEN p.source_kind='response' THEN b.binding_revision ELSE d.binding_revision END,
 			p.delivery_epoch, p.external_account,
 			p.conversation_reference, p.conversation_scope, p.state,
@@ -148,12 +152,12 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 			AND ((p.source_kind='response' AND b.status='current' AND b.principal_id=p.principal_id
 				AND b.binding_revision>=p.binding_revision AND b.external_account=p.external_account
 				AND b.conversation_reference=p.conversation_reference AND b.conversation_scope=p.conversation_scope
-				AND EXISTS (SELECT 1 FROM connected_channel_activations a
+				AND (` + deploymentParentPredicate("p.request_transport_parent", "p.interface_key", "b.binding_revision", true) + ` OR EXISTS (SELECT 1 FROM connected_channel_activations a
 					JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 					WHERE a.activation_id=p.request_activation_id AND a.interface_key=b.interface_key AND a.status='current'
 					AND a.principal_id=b.principal_id AND a.binding_revision=b.binding_revision
 					AND a.conversation_reference=b.conversation_reference
-					AND o.identity_operation_id=b.operation_id AND o.phase='succeeded'))
+					AND o.identity_operation_id=b.operation_id AND o.phase='succeeded')))
 			OR (p.source_kind<>'response' AND p.interface_key=d.interface_key
 				AND d.binding_revision>=p.binding_revision
 				AND p.external_account=d.external_account
@@ -174,17 +178,45 @@ func ListCurrentPlans(ctx context.Context, tx *sql.Tx, afterDeliveryID string, l
 	for rows.Next() {
 		var p Plan
 		var scope string
-		if err := rows.Scan(&p.DeliveryID, &p.SourceKind, &p.SourceID, &p.RequestActivationID, &p.SummaryCount,
+		var rawParent []byte
+		if err := rows.Scan(&p.DeliveryID, &p.SourceKind, &p.SourceID, &p.RequestActivationID, &rawParent, &p.SummaryCount,
 			&p.PrincipalID, &p.InterfaceKey, &p.BindingRevision, &p.CurrentBindingRevision, &p.DeliveryEpoch,
 			&p.ExternalAccountRef, &p.ConversationRef, &scope, &p.State,
 			&p.CurrentRenderID, &p.CurrentReceiptID, &p.RecoveryPending); err != nil {
 			return nil, err
 		}
 		p.ConversationScope = operatorchannel.ConversationScope(scope)
+		if len(rawParent) != 0 {
+			p.RequestParent, err = channelnative.DecodeTransportParent(rawParent)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := p.Validate(); err != nil {
 			return nil, err
 		}
 		plans = append(plans, p)
 	}
 	return plans, rows.Err()
+}
+
+func loadDeploymentResponseDestination(ctx context.Context, tx *sql.Tx, plan Plan, postgres bool) (Plan, bool, error) {
+	query := `SELECT b.binding_revision, o.semantic_generation ` + deploymentTransportJoin + `
+		AND o.operation_id=$1 AND b.interface_key=$2 AND b.principal_id=$3 AND b.binding_revision>=$4
+		AND b.external_account=$5 AND b.conversation_reference=$6 AND b.conversation_scope=$7
+		AND EXISTS (SELECT 1 FROM channel_delivery_defaults d WHERE d.singleton_id=1 AND d.state='current'
+		AND d.principal_id=b.principal_id AND d.delivery_epoch=$8)`
+	var generation string
+	err := tx.QueryRowContext(ctx, query, plan.RequestParent.ID, plan.InterfaceKey, plan.PrincipalID, plan.BindingRevision,
+		plan.ExternalAccountRef, plan.ConversationRef, string(plan.ConversationScope), plan.DeliveryEpoch).
+		Scan(&plan.CurrentBindingRevision, &generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Plan{}, false, nil
+	}
+	if err != nil {
+		return Plan{}, false, err
+	}
+	current, err := DeploymentTransportCurrent(ctx, tx, plan.RequestParent, plan.PrincipalID, plan.InterfaceKey,
+		plan.CurrentBindingRevision, plan.ExternalAccountRef, plan.ConversationRef, generation, postgres)
+	return plan, current, err
 }

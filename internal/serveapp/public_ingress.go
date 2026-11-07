@@ -15,11 +15,27 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 )
 
 func serveRegistrationSelectionCurrent(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store, pair runtimepublicingress.RegistrationPair, exactPendingRevision bool) (bool, error) {
+	if pair.Parent != (channelnative.TransportParent{}) {
+		scoped, ok := store.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		})
+		if !ok || pair.Parent.Kind != channelnative.TransportDeploymentRegistration || pair.Parent.Validate() != nil {
+			return false, channelonboarding.ErrInvalidRequest
+		}
+		op, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount})
+		if errors.Is(err, channelonboarding.ErrNotFound) {
+			return false, nil
+		}
+		return err == nil && op.OperationID == pair.Parent.ID && op.Revision == pair.Parent.Revision &&
+			op.IdentityOperationID == pair.Parent.BindingOperationID && op.Phase == channelonboarding.PhaseSucceeded &&
+			slices.Equal(op.CredentialAdmissions, pair.CredentialAdmissions), err
+	}
 	if pair.ActivationSource == channelonboarding.ActivationSourceDeclared {
 		return pair.OnboardingOperationID == "" && pair.ChannelActivationGeneration.Valid(), nil
 	}
@@ -101,7 +117,7 @@ func (s *serveRegistrationSelection) Release() {
 	})
 }
 
-func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelActivationSnapshot, manager *runtime.RuntimeContextManager) (*serveRegistrationSelection, error) {
+func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelActivationSnapshot, manager *runtime.RuntimeContextManager, deployment ...*serveDeploymentTransport) (*serveRegistrationSelection, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("runtime context manager is required for provider registration")
 	}
@@ -145,6 +161,33 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 		}
 		pairs = append(pairs, pair)
 	}
+	if len(deployment) == 1 && deployment[0] != nil && deployment[0].registrations != nil {
+		registrations, err := deployment[0].registrations(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		for _, registration := range registrations {
+			if registration.plan.Transport() != packs.ChannelTransportWebhook {
+				continue
+			}
+			pair, err := deploymentRegistrationPair(registration)
+			if err != nil {
+				return fail(err)
+			}
+			for i := 0; i < len(pairs); i++ {
+				owned := pairs[i]
+				if owned.ActivationSource != channelonboarding.ActivationSourceRegistered || owned.OnboardingOperationID != pair.Parent.ID {
+					continue
+				}
+				// Only routing hints survive. The physical receiver's authority is
+				// the deployment parent, never this holder's execution grant.
+				pair.Target, pair.AccountHolder = owned.Target, owned.AccountHolder
+				pairs = append(pairs[:i], pairs[i+1:]...)
+				i--
+			}
+			pairs = append(pairs, pair)
+		}
+	}
 	sort.Slice(pairs, func(i, j int) bool {
 		if pairs[i].BindingID != pairs[j].BindingID {
 			return pairs[i].BindingID < pairs[j].BindingID
@@ -153,6 +196,25 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 	})
 	selection.Pairs = pairs
 	return selection, nil
+}
+
+func deploymentRegistrationPair(selected serveDeploymentRegistration) (runtimepublicingress.RegistrationPair, error) {
+	parent := deploymentParent(selected.result)
+	definition, exists := selected.plan.Registration()
+	generation, err := selected.plan.PlanGeneration()
+	if err != nil || !exists || parent.Validate() != nil || !selected.trigger.Valid() {
+		return runtimepublicingress.RegistrationPair{}, errors.Join(err, fmt.Errorf("deployment receiver has no exact admitted definition"))
+	}
+	op := selected.result.Operation
+	keys := selected.plan.CredentialStoreKeys()
+	alias := "deployment_" + strings.ReplaceAll(parent.ID, "-", "")
+	return runtimepublicingress.RegistrationPair{Parent: parent, DeploymentAdmission: selected.trigger.Generation(),
+		BindingID: op.OperationID, PlanGeneration: generation, OperatorAccount: op.AccountReference,
+		OnboardingOperationID: parent.ID, OnboardingRevision: parent.Revision,
+		Registration: definition, CredentialKeys: keys, CredentialAdmissions: op.CredentialAdmissions,
+		Target: runtimepublicingress.RegistrationTarget{Selector: op.OperationID, Alias: alias, Provider: op.Provider,
+			RegisteredOperationID: parent.ID, SigningCredentialKey: keys[definition.SigningCredential()],
+			AdmissionPlanGeneration: selected.trigger.Generation()}}, nil
 }
 
 func resolveServeActivationRegistrationPair(ctx context.Context, manager *runtime.RuntimeContextManager, contexts []runtime.BundleContext, activation channelonboarding.CompiledActivation, generation channelonboarding.ChannelActivationGeneration) (runtimepublicingress.RegistrationPair, bool, error) {

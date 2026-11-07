@@ -22,7 +22,7 @@ const nativeQualificationSelect = `SELECT o.client_language, o.client_locale_rev
 	JOIN operator_channel_bindings b ON b.interface_key=a.interface_key AND b.status='current'
 		AND b.operation_id=o.identity_operation_id AND b.principal_id=a.principal_id
 		AND b.binding_revision=a.binding_revision AND b.conversation_reference=a.conversation_reference
-	JOIN channel_native_setting_consumers c ON c.activation_id=a.activation_id AND c.state='current'
+	JOIN channel_native_setting_consumers c ON c.activation_id=a.activation_id AND c.state='current' AND c.parent_kind='runtime_activation'
 		AND c.activation_revision=a.activation_revision AND c.binding_revision=a.binding_revision
 		AND c.context_publication_generation=a.context_publication_generation AND c.interface_key=a.interface_key
 	JOIN channel_native_settings s ON s.setting_id=c.setting_id AND s.principal_id=a.principal_id
@@ -50,7 +50,11 @@ func (facts nativeQualificationFacts) qualificationChanged(req channelnative.Qua
 }
 
 func validateNativeQualificationRequest(tx *sql.Tx, req channelnative.QualificationRequest) error {
-	if tx == nil || uuid.Validate(req.ActivationID) != nil || uuid.Validate(req.SettingID) != nil ||
+	parentValid := uuid.Validate(req.ActivationID) == nil && req.Parent == (channelnative.TransportParent{})
+	if req.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		parentValid = req.Parent.Validate() == nil && req.ActivationID == "" && req.ActivationRevision == 0 && req.ContextGeneration == 0
+	}
+	if tx == nil || !parentValid || uuid.Validate(req.SettingID) != nil ||
 		req.SettingGeneration < 1 || req.LocaleRevision < 1 || req.ObservedAt.IsZero() ||
 		(req.State != channelnative.QualificationQualified && req.State != channelnative.QualificationInvalid && req.State != channelnative.QualificationMissing) ||
 		(req.State == channelnative.QualificationQualified && (req.ReadbackHash == "" || req.ClientLanguage == "")) {
@@ -125,9 +129,13 @@ func ReadNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, activationI
 	if err != nil {
 		return channelnative.Qualification{}, err
 	}
+	return projectNativeQualification(facts, found), nil
+}
+
+func projectNativeQualification(facts nativeQualificationFacts, found bool) channelnative.Qualification {
 	p := facts.projection
 	if !found {
-		return channelnative.Qualification{State: channelnative.QualificationMissing, Reason: "current native setting has not been qualified"}, nil
+		return channelnative.Qualification{State: channelnative.QualificationMissing, Reason: "current native setting has not been qualified"}
 	}
 	if p.ClientLanguage == "" {
 		p.State, p.Reason = channelnative.QualificationMissing, "explicit client language is required"
@@ -138,12 +146,15 @@ func ReadNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, activationI
 		(p.State == channelnative.QualificationQualified && facts.settingState != "installed") {
 		p.State, p.Reason = channelnative.QualificationStale, "native qualification no longer matches its declaration, setting or connection"
 	}
-	return p, nil
+	return p
 }
 
 func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req channelnative.QualificationRequest, postgres bool) (bool, error) {
 	if err := validateNativeQualificationRequest(tx, req); err != nil {
 		return false, err
+	}
+	if req.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		return recordDeploymentNativeQualificationTx(ctx, tx, req, postgres)
 	}
 	facts, found, err := loadNativeQualification(ctx, tx, req.ActivationID, postgres, true)
 	if err != nil {

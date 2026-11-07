@@ -8,11 +8,17 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
 func requireChannelActionAckAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) error {
+	if authority.ChannelActionAck.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if err := channeldelivery.LockTransportParentTx(ctx, tx, authority.ChannelActionAck.Parent, postgres); err != nil {
+			return err
+		}
+	}
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, authority.ChannelActionAck.PrincipalID, postgres); err != nil {
 		return invalidExternalAuthority(authority, "principal_not_current")
 	}
@@ -31,18 +37,18 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 		return false, nil
 	}
 	ack := authority.ChannelActionAck
-	query := `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state
+	query := `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state,transport_parent
 		FROM operator_channel_action_intents WHERE publication_id=?`
 	if postgres {
-		query = `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state
+		query = `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state,transport_parent
 			FROM operator_channel_action_intents WHERE publication_id=$1::uuid`
 		if lock {
 			query += ` FOR UPDATE`
 		}
 	}
 	var provider, eventID, interfaceKey, authorization, state string
-	var raw []byte
-	err := q.QueryRowContext(ctx, query, ack.PublicationID).Scan(&provider, &eventID, &interfaceKey, &raw, &authorization, &state)
+	var raw, parentRaw []byte
+	err := q.QueryRowContext(ctx, query, ack.PublicationID).Scan(&provider, &eventID, &interfaceKey, &raw, &authorization, &state, &parentRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -67,6 +73,16 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 	if !resolved.CurrentRender || resolved.ReceiptOperationID != ack.ReceiptOperationID ||
 		resolved.PrincipalID != ack.PrincipalID || resolved.BindingRevision != ack.BindingRevision ||
 		resolved.ActivationID != ack.ActivationID || resolved.ActivationRevision != ack.ActivationRevision {
+		return false, nil
+	}
+	if ack.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		original, err := channelnative.DecodeTransportParent(parentRaw)
+		if err != nil || original != ack.Parent || resolved.Parent != ack.Parent {
+			return false, err
+		}
+		return channeldelivery.DeploymentParentCurrent(ctx, q, ack.Parent)
+	}
+	if len(parentRaw) != 0 {
 		return false, nil
 	}
 	return channelActionAckActivationCurrent(ctx, q, ack, postgres, lock)

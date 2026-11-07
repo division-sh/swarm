@@ -64,7 +64,7 @@ func (s *Service) DeploymentOperatorBinding(ctx context.Context, ref AccountRefe
 		identity.OnboardingOperationID != op.OperationID || binding.ProviderAuthority != identity.ProviderAuthority || !binding.ProviderAuthority.SameProvenance(expected) {
 		return Result{}, errors.Join(ErrRevisionConflict, err)
 	}
-	return Result{Operation: op, Candidate: &candidate, Binding: &binding}, nil
+	return Result{Operation: op, Candidate: &candidate, Binding: &binding, IdentityOperation: &identity}, nil
 }
 
 // RegisteredAccount selects only confirmed deployment evidence. A pending

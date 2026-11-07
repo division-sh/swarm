@@ -26,11 +26,12 @@ type SessionInputReference struct {
 }
 
 type sessionInputOwner struct {
-	store      channelonboarding.Store
-	operations channelonboarding.OperationStore
-	native     *sessionInputReader
-	operation  string
-	registered *RegisteredBusinessBinding
+	store           channelonboarding.Store
+	operations      channelonboarding.OperationStore
+	native          *sessionInputReader
+	operation       string
+	registered      *RegisteredBusinessBinding
+	operatorAccount channelonboarding.AccountReference
 }
 
 func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native *sessionInputReader, operation string) (*sessionInputOwner, error) {
@@ -118,7 +119,20 @@ func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference Se
 	retained = true
 	frozen := native.OriginalCapture
 	frozen.Body = bytes.Clone(frozen.Body)
+	providerID, err := frozen.PublicationProviderEventID()
+	if err != nil {
+		cancel()
+		retained = false
+		return input.Admission{}, err
+	}
+	fingerprint, err := frozen.PublicationFingerprint()
+	if err != nil {
+		cancel()
+		retained = false
+		return input.Admission{}, err
+	}
 	return inputfact.SealOwnedCapture(inputfact.Capture{Store: o.store, Responsibility: responsibility,
+		OriginalProviderEventID: providerID, OriginalCaptureFingerprint: fingerprint,
 		AccountOnly: native.AccountOnly,
 		Scope:       native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
 		OriginalPublicationRequest: native.OriginalPublicationRequest,
@@ -153,6 +167,12 @@ func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nati
 			return original, fmt.Errorf("native capture is outside its original responsibility")
 		}
 		original.Credentials = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
+		if native.DeploymentRegistration && !native.RegisteredBusiness && op.Phase == channelonboarding.PhaseSucceeded {
+			if native.Scope != channelonboarding.SessionInputOnboarding || o.operatorAccount.Provider != op.Provider || o.operatorAccount.Account != op.AccountReference {
+				return original, errCaptureScopeChanged
+			}
+			original.DeploymentOperator = true
+		}
 		if native.RegisteredBusiness {
 			if o.registered == nil || !o.registered.Coordinate.Matches(native.SourceContext.Coordinate) ||
 				o.registered.TargetSelector != native.TargetSelector || o.registered.Publication != native.PublicationBinding {

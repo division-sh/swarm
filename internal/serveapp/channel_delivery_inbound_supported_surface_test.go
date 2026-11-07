@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/telegramapi"
 	"github.com/google/uuid"
@@ -130,6 +131,9 @@ func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "verdict")
+		})
+		t.Run(backend+"-deployment", func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:verdict")
 		})
 	}
 }
@@ -303,6 +307,8 @@ func (r telegramLongNoticeLLMRuntime) ContinueManagedSession(ctx context.Context
 
 func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario string) {
 	t.Helper()
+	deploymentTransport := strings.HasPrefix(scenario, "deployment:")
+	scenario = strings.TrimPrefix(scenario, "deployment:")
 	retainedInteraction := scenario == "ordered_input_restart" || scenario == "draft_chooser_restart"
 	if retainedInteraction {
 		scenario = strings.TrimSuffix(scenario, "_restart")
@@ -513,7 +519,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 		}
 	}
-	if registered.DeploymentRegistration && scenario != "inbox" {
+	if registered.DeploymentRegistration && scenario != "inbox" && !deploymentTransport {
 		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		runRegisteredChannelCLIInbox(t, h, scenario, retainedInteraction)
 		process = h.process
@@ -570,7 +576,11 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		return
 	}
-	connected := runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
+	connectedOperationID := registered.OperationID
+	if !deploymentTransport {
+		connected := runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
+		connectedOperationID = connected.Operation.OperationID
+	}
 	var preRestartDeliveries int
 	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {
 		deadline := time.Now().Add(15 * time.Second)
@@ -628,7 +638,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		var current channelonboarding.Result
 		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_get", map[string]any{
-			"operation_id": connected.Operation.OperationID,
+			"operation_id": connectedOperationID,
 		}, &current)
 		if current.Readiness == nil || !current.Readiness.NativeInboxRequired || current.Readiness.NativeInbox == nil ||
 			current.Readiness.NativeInbox.State == channelnative.QualificationQualified {
@@ -667,7 +677,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		var current channelonboarding.Result
 		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_get", map[string]any{
-			"operation_id": connected.Operation.OperationID,
+			"operation_id": connectedOperationID,
 		}, &current)
 		if current.Readiness == nil || !current.Readiness.NativeInboxRequired || current.Readiness.NativeInbox == nil ||
 			current.Readiness.NativeInbox.State != channelnative.QualificationInvalid ||
@@ -783,6 +793,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
+		if deploymentTransport {
+			db, err := sql.Open(backend, observerDSN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			cardMessageID = waitChannelCardMessageID(t, db, backend, ".")
+		}
 		if scenario == "quoted_two" || scenario == "draft_chooser" {
 			cardMessageID = cardMessages["."]
 		}
@@ -844,13 +862,17 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusAccepted {
+	deploymentCallback := deploymentTransport && (scenario == "verdict" || scenario == "verdict_ack_loss")
+	if deploymentCallback && (response.StatusCode != http.StatusOK || len(responseBody) != 0) {
+		t.Fatalf("deployment callback admission status=%d body=%s", response.StatusCode, responseBody)
+	}
+	if !deploymentCallback && response.StatusCode != http.StatusAccepted {
 		t.Fatalf("business text admission status=%d body=%s", response.StatusCode, responseBody)
 	}
 	var admitted struct {
 		EventNames []string `json:"event_names"`
 	}
-	if err := json.Unmarshal(responseBody, &admitted); err != nil {
+	if err := json.Unmarshal(responseBody, &admitted); !deploymentCallback && err != nil {
 		t.Fatal(err)
 	}
 	if scenario == "view_full" {
@@ -945,6 +967,15 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		if (scenario == "verdict" || scenario == "verdict_ack_loss") && len(provider.Acknowledgments()) > 0 && len(provider.Edits()) > 0 {
+			if deploymentTransport {
+				reader, err := storetest.OpenChannelObservation(backend, observerDSN)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = reader.Close() }()
+				requireDeploymentEffectActivity(t, reader,
+					"serve_registration", "channel_native_setting", "channel_delivery", "channel_action_ack")
+			}
 			if scenario == "verdict_ack_loss" {
 				time.Sleep(2300 * time.Millisecond)
 				if got := len(provider.Acknowledgments()); got != 1 {

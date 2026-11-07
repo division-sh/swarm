@@ -14,6 +14,22 @@ import (
 )
 
 func requireChannelNativeSettingAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) error {
+	if authority.ChannelNativeSetting.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		if err := channeldelivery.LockTransportParentTx(ctx, tx, authority.ChannelNativeSetting.Parent, postgres); err != nil {
+			return invalidExternalAuthority(authority, "stale")
+		}
+		if err := channeldelivery.LockPrincipalTx(ctx, tx, authority.ChannelNativeSetting.PrincipalID, postgres); err != nil {
+			return invalidExternalAuthority(authority, "principal_not_current")
+		}
+		current, err := deploymentNativeSettingCurrent(ctx, tx, authority, postgres, true)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return invalidExternalAuthority(authority, "stale")
+		}
+		return nil
+	}
 	query := `SELECT operation_id FROM channel_onboarding_operations
 		WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=?)`
 	if postgres {
@@ -44,6 +60,9 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		return false, nil
 	}
 	s := authority.ChannelNativeSetting
+	if s.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		return deploymentNativeSettingCurrent(ctx, q, authority, postgres, lock)
+	}
 	query := `SELECT setting.setting_id, setting.provider, setting.resource_slot_id,
 		setting.conversation_reference, setting.scope_kind, setting.member_reference,
 		setting.principal_id, setting.generation,
@@ -56,7 +75,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		activation.bundle_hash, activation.bundle_identity, activation.pack_inventory_generation,
 		activation.runtime_instance_id, activation.plan_generation
 		FROM channel_native_settings setting
-		JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id
+		JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id AND consumer.parent_kind='runtime_activation'
 		JOIN connected_channel_activations activation ON activation.activation_id=consumer.activation_id
 		JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 		JOIN operator_channel_bindings binding ON binding.interface_key=activation.interface_key
@@ -99,7 +118,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			activation.bundle_hash, activation.bundle_identity, activation.pack_inventory_generation,
 			activation.runtime_instance_id::text, activation.plan_generation
 			FROM channel_native_settings setting
-			JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id
+			JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id AND consumer.parent_kind='runtime_activation'
 			JOIN connected_channel_activations activation ON activation.activation_id=consumer.activation_id
 			JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 			JOIN operator_channel_bindings binding ON binding.interface_key=activation.interface_key

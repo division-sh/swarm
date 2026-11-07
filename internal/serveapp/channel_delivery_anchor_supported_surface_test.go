@@ -837,6 +837,7 @@ func waitChannelAnchorReceipt(t *testing.T, db *sql.DB, cardID string) int {
 			return reference.Delivery.ID
 		}
 		if err != sql.ErrNoRows || time.Now().After(deadline) {
+			logUnsettledChannelDeliveryPlans(t, db)
 			t.Fatalf("real card was not delivered: %v", err)
 		}
 		time.Sleep(20 * time.Millisecond)

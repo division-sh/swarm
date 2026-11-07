@@ -39,8 +39,8 @@ func (s deploymentOperations) AdvanceChannelOnboarding(ctx context.Context, requ
 	return advance(ctx, s, request)
 }
 
-func (s deploymentOperations) SetChannelClientLocale(context.Context, domain.SetClientLocaleRequest) (domain.Operation, error) {
-	return domain.Operation{}, domain.ErrInvalidRequest
+func (s deploymentOperations) SetChannelClientLocale(ctx context.Context, req domain.SetClientLocaleRequest) (domain.Operation, error) {
+	return setClientLocale(ctx, s, req)
 }
 
 func operationTable(deployment bool) string {

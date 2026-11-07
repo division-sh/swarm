@@ -29,8 +29,24 @@ func DeploymentEffectParent(kind, id string, evidence []byte) (*channelnative.Tr
 	if err != nil {
 		return nil, err
 	}
-	// Further released operations extend this switch with their own validators.
-	if kind != "channel_confirmation" {
+	if parent.Kind == channelnative.TransportRuntimeActivation {
+		return nil, nil
+	}
+	switch kind {
+	case "channel_confirmation":
+	case "serve_registration", "channel_delivery", "channel_action_ack", "channel_native_setting":
+		var storedKind, storedID string
+		if json.Unmarshal(fields["authority_kind"], &storedKind) != nil || storedKind != kind ||
+			json.Unmarshal(fields["authority_id"], &storedID) != nil || storedID != id {
+			return nil, fmt.Errorf("deployment effect contradicts original authority")
+		}
+		for _, field := range []string{"activation_id", "activation_revision", "bundle_hash", "bundle_identity", "pack_inventory_generation", "runtime_instance_id", "context_publication_generation"} {
+			if _, exists := fields[field]; exists {
+				return nil, fmt.Errorf("deployment effect contains authored coordinate %s", field)
+			}
+		}
+		return &parent, nil
+	default:
 		return nil, fmt.Errorf("deployment effect kind %q is not admitted", kind)
 	}
 	var operationID, parentID string

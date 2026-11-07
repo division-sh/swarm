@@ -33,7 +33,8 @@ func requireChannelDeliverySettlementAuthorityTx(ctx context.Context, tx *sql.Tx
 			FOR UPDATE OF operation, attempt`
 	}
 	var storedEvidence, originalEvidence, operationEvidence []byte
-	var kind, effectKind, bundleHash, state, owner string
+	var kind, effectKind, state, owner string
+	var bundleHash sql.NullString
 	var fence uint64
 	if err := tx.QueryRowContext(ctx, query, settlement.OperationID, settlement.AttemptID).Scan(
 		&storedEvidence, &originalEvidence, &operationEvidence, &kind, &effectKind, &bundleHash, &state, &owner, &fence,
@@ -41,8 +42,11 @@ func requireChannelDeliverySettlementAuthorityTx(ctx context.Context, tx *sql.Tx
 		return fmt.Errorf("load exact channel delivery settlement attempt: %w", err)
 	}
 	if kind != string(runtimeeffects.AuthorityChannelDelivery) || effectKind != string(runtimeeffects.KindChannelDelivery) ||
-		bundleHash != authority.ChannelDelivery.BundleHash || owner != authority.ExecutionOwner || fence != authority.FenceGeneration {
+		bundleHash.String != authority.ChannelDelivery.BundleHash || owner != authority.ExecutionOwner || fence != authority.FenceGeneration {
 		return fmt.Errorf("channel delivery settlement attempt contradicts authority")
+	}
+	if _, err := validateExternalEffectStoredScope(kind, authority.ID, operationEvidence, bundleHash); err != nil {
+		return err
 	}
 	if err := requireChannelSettlementEvidence(authority, storedEvidence, originalEvidence, operationEvidence); err != nil {
 		return err

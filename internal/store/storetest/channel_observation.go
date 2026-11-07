@@ -3,12 +3,14 @@ package storetest
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
 type ChannelObservation interface {
 	render.Observer
+	ListAuthorActivity(context.Context, authoractivity.ListOptions) (authoractivity.ListResult, error)
 	Close() error
 }
 
@@ -35,6 +37,16 @@ func OpenChannelObservation(backend, location string) (ChannelObservation, error
 }
 
 func (o channelObservation) Close() error { return o.selected.Close() }
+
+func (o channelObservation) ListAuthorActivity(ctx context.Context, opts authoractivity.ListOptions) (authoractivity.ListResult, error) {
+	var result authoractivity.ListResult
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ObserveChannelAuthorActivityForTest(ctx, o.selected, opts)
+		return err
+	})
+	return result, err
+}
 
 func (o channelObservation) ObserveChannelIntent(ctx context.Context, demand render.IntentObservationQuery) (render.IntentObservation, bool, error) {
 	if err := demand.Validate(); err != nil {

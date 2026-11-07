@@ -36,6 +36,7 @@ import (
 )
 
 type serveChannelDeliveryDispatcher struct {
+	deployment         *serveDeploymentTransport
 	store              runtimechanneldelivery.Store
 	native             runtimechannelnative.Store
 	cards              decisioncard.Store
@@ -254,6 +255,9 @@ func (d *serveChannelDeliveryDispatcher) processNoticeAction(ctx context.Context
 		resolved.SourceKind != "notice" || resolved.Action.Kind != "acknowledge_notice" {
 		return fmt.Errorf("channel notice acknowledgment owners or action are invalid")
 	}
+	if resolved.Parent.Kind == runtimechannelnative.TransportDeploymentRegistration {
+		return d.processDeploymentNotice(ctx, pending, resolved)
+	}
 	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
 	if err != nil {
 		return err
@@ -346,6 +350,9 @@ func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Co
 			return fmt.Errorf("channel callback acknowledgment operation identity conflicts")
 		}
 		return nil
+	}
+	if resolved.Parent.Kind == runtimechannelnative.TransportDeploymentRegistration {
+		return d.acknowledgeDeploymentAction(ctx, operationID, pending, resolved)
 	}
 	selected, err := d.currentChannelActionActivation(ctx, pending, resolved)
 	if err != nil {
@@ -545,6 +552,16 @@ func (d *serveChannelDeliveryDispatcher) channelWriteExecutor(ctx context.Contex
 }
 
 func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, packs.CompiledChannelCapabilities, error) {
+	if selected, plan, deployment, err := d.deploymentDelivery(ctx, candidate); deployment || err != nil {
+		if err != nil {
+			return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
+		}
+		if _, err := selectServeChannelWrite(ctx, d.sessions, selected.Operation, plan); err != nil {
+			return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
+		}
+		bounds, err := plan.PresentationBounds()
+		return bounds, plan.Capabilities(), err
+	}
 	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
@@ -577,6 +594,12 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	}
 	if err := validateChannelDispatch(candidate, prepared, operation, previousReference); err != nil {
 		return err
+	}
+	if selected, plan, deployment, err := d.deploymentDelivery(ctx, candidate); deployment || err != nil {
+		if err != nil {
+			return err
+		}
+		return d.dispatchDeploymentChannel(ctx, selected, plan, candidate, prepared, operation, previousReference)
 	}
 	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {

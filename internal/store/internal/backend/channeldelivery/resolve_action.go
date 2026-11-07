@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/google/uuid"
 )
 
@@ -163,6 +164,16 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if uuid.Validate(fact.Token) != nil {
 		return render.ResolvedAction{}, false, nil
 	}
+	deployment, err := bindingUsesDeployment(ctx, tx, fact.Interface.Key())
+	if err != nil {
+		return render.ResolvedAction{}, false, err
+	}
+	if deployment {
+		return resolveDeploymentAction(ctx, tx, fact, postgres, mutation, parent)
+	}
+	if parent != nil && parent.transport.Kind == channelnative.TransportDeploymentRegistration {
+		return render.ResolvedAction{}, false, fmt.Errorf("channel action transport kind changed")
+	}
 	if mutation && (parent == nil || slices.Contains([]string{parent.operationID, parent.activationID}, "") || min(parent.activationRevision, parent.bindingRevision) < 1) {
 		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires its established parent")
 	}
@@ -247,12 +258,24 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if postgres && mutation {
 		query += ` FOR UPDATE OF action, render, plan, receipt, selected, binding, onboarding, activation`
 	}
+	return scanResolvedAction(ctx, tx, query, args, fact, postgres, mutation, channelnative.TransportParent{})
+}
+
+type actionQueryer interface {
+	intentQueryer
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func scanResolvedAction(ctx context.Context, tx actionQueryer, query string, args []any, fact operatorchannel.ActionFact, postgres, mutation bool, parent channelnative.TransportParent) (render.ResolvedAction, bool, error) {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return render.ResolvedAction{}, false, err
 	}
 	defer rows.Close()
 	var resolved render.ResolvedAction
+	resolved.Parent = parent
+	var parentID string
+	var parentRevision int64
 	var referenceRaw []byte
 	var renderRaw []byte
 	var position int
@@ -263,7 +286,7 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if err := rows.Scan(&resolved.Action.Token, &resolved.Action.Kind, &verdict, &resolved.Action.Label, &position,
 		&resolved.DeliveryID, &resolved.RenderID, &resolved.RenderHash, &renderRaw, &resolved.ReceiptOperationID,
 		&resolved.SourceKind, &resolved.SourceID, &resolved.PrincipalID, &resolved.BindingRevision,
-		&resolved.ActivationID, &resolved.ActivationRevision, &resolved.CurrentRender, &referenceRaw); err != nil {
+		&parentID, &parentRevision, &resolved.CurrentRender, &referenceRaw); err != nil {
 		return render.ResolvedAction{}, false, err
 	}
 	if rows.Next() {
@@ -275,13 +298,20 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if verdict.Valid {
 		resolved.Action.Verdict = verdict.String
 	}
+	if parent.Kind == channelnative.TransportDeploymentRegistration {
+		if parentID != parent.ID || parentRevision != parent.Revision || parent.Validate() != nil {
+			return render.ResolvedAction{}, false, fmt.Errorf("channel action deployment parent changed")
+		}
+	} else {
+		resolved.ActivationID, resolved.ActivationRevision = parentID, parentRevision
+	}
 	var frozen render.Frozen
 	resolved.Action, frozen, err = hydrateFrozenChannelAction(resolved.Action, renderRaw, resolved.RenderHash, position)
 	if err != nil {
 		return render.ResolvedAction{}, false, err
 	}
-	if resolved.Action.Token != fact.Token || slices.Contains([]string{resolved.Action.Label, resolved.ActivationID}, "") ||
-		min(resolved.BindingRevision, resolved.ActivationRevision) < 1 {
+	if resolved.Action.Token != fact.Token || resolved.Action.Label == "" || resolved.BindingRevision < 1 ||
+		(parent.Kind != channelnative.TransportDeploymentRegistration && (resolved.ActivationID == "" || resolved.ActivationRevision < 1)) {
 		return render.ResolvedAction{}, false, fmt.Errorf("stored channel action identity is contradictory")
 	}
 	messageRef, err := receiptMessageReference(referenceRaw)

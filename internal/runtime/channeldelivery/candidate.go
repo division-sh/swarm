@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
 
@@ -17,6 +18,7 @@ type Candidate struct {
 	SourceKind          string
 	SourceID            string
 	RequestActivationID string
+	RequestParent       channelnative.TransportParent
 	BindingRevision     int64
 	Audience            Audience
 	State               string
@@ -52,6 +54,7 @@ type Action struct {
 }
 
 type ResolvedAction struct {
+	Parent             channelnative.TransportParent
 	Action             Action
 	DeliveryID         string
 	RenderID           string
@@ -99,6 +102,7 @@ type PendingText struct {
 }
 
 type ResolvedText struct {
+	Parent          channelnative.TransportParent
 	PrincipalID     string
 	InterfaceKey    string
 	BindingRevision int64
@@ -112,6 +116,7 @@ type InputDraftCandidate struct {
 }
 
 type ResolvedInboxEntry struct {
+	Parent            channelnative.TransportParent
 	Kind              InboxEntryKind
 	PrincipalID       string
 	InterfaceKey      string
@@ -169,6 +174,9 @@ type Store interface {
 	SubscribeChannelReconciliation(context.Context) (*ReconcileSubscription, error)
 	NotifyChannelPublication() error
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
+	CurrentChannelDeliveryParent(context.Context) (channelnative.TransportParent, bool, error)
+	AdmitDeploymentChannelInput(context.Context, DeploymentInput) (bool, error)
+	LoadDeploymentChannelInputReceipt(context.Context, string, string) (DeploymentInputReceipt, bool, error)
 	CurrentChannelCardChangeCursor(context.Context) (int64, bool, error)
 	PlanChangedChannelCard(context.Context, int64, string) error
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]Candidate, error)

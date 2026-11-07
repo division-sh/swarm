@@ -23,6 +23,12 @@ func requireCurrentClientLocaleOperationTx(txctx context.Context, tx *sql.Tx, d 
 		return domain.ErrConflict
 	}
 	if op.Phase == domain.PhaseSucceeded {
+		if op.DeploymentRegistration {
+			if !op.AccountConfirmed || op.LogoutCompleted || op.FailureCode != "" {
+				return domain.ErrConflict
+			}
+			return nil
+		}
 		activation, found, err := loadActivationBySlot(txctx, tx, d, op.SlotKey, true)
 		if err != nil {
 			return err
@@ -47,7 +53,7 @@ func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRe
 		changed = 0
 		var found bool
 		var err error
-		op, found, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
+		op, found, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, true, r.deployment())
 		if err != nil {
 			return err
 		}
@@ -63,7 +69,7 @@ func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRe
 		if op.ClientLocaleRevision != req.ExpectedRevision {
 			return domain.ErrRevisionConflict
 		}
-		result, err := tx.ExecContext(txctx, r.dialect().bind(`UPDATE channel_onboarding_operations
+		result, err := tx.ExecContext(txctx, r.dialect().bind(`UPDATE `+operationTable(r.deployment())+`
 			SET client_language=?, client_locale_revision=client_locale_revision+1, updated_at=?
 			WHERE operation_id=? AND client_locale_revision=?`), req.Language, req.Now, op.OperationID, req.ExpectedRevision)
 		if err != nil {

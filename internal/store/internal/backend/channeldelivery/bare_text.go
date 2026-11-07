@@ -220,6 +220,9 @@ func RequireCurrentInputDraftTx(ctx context.Context, tx *sql.Tx, text operatorch
 		return render.InputDraftCandidate{}, render.ResolvedText{}, fmt.Errorf("channel answer has no current principal")
 	}
 	if lock {
+		if err := lockTextParentTx(ctx, tx, text, postgres); err != nil {
+			return render.InputDraftCandidate{}, render.ResolvedText{}, err
+		}
 		if err := LockPrincipalTx(ctx, tx, resolved.PrincipalID, postgres); err != nil {
 			return render.InputDraftCandidate{}, render.ResolvedText{}, err
 		}

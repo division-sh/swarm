@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/registration"
@@ -23,8 +24,9 @@ import (
 )
 
 type sessionChannelExecutor struct {
-	owner *sessionAuthorityOwner
-	plan  packs.SatisfactionPlan
+	owner      *sessionAuthorityOwner
+	plan       packs.SatisfactionPlan
+	deployment func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
 }
 
 func (e sessionChannelExecutor) channelExecution() execution.Channel {
@@ -149,6 +151,9 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 }
 
 func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, selected runtimeeffects.Authority, destination string) error {
+	if e.owner.operation.DeploymentRegistration {
+		return e.requireDeploymentDestination(ctx, selected, destination)
+	}
 	op, err := e.owner.store.GetChannelOnboarding(ctx, e.owner.operation.OperationID)
 	if err != nil {
 		return err
@@ -217,6 +222,35 @@ func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, s
 		}
 	}
 	if matched != 1 || ctx.Err() != nil {
+		return errCaptureScopeChanged
+	}
+	return nil
+}
+
+func (e sessionChannelExecutor) requireDeploymentDestination(ctx context.Context, selected runtimeeffects.Authority, destination string) error {
+	if selected.Kind != runtimeeffects.AuthorityChannelDelivery || e.deployment == nil {
+		return errCaptureScopeChanged
+	}
+	a := selected.ChannelDelivery
+	parent := a.Parent
+	op, err := e.owner.operations.GetChannelOnboarding(ctx, e.owner.operation.OperationID)
+	if err != nil {
+		return err
+	}
+	generation, err := e.plan.Generation()
+	if err != nil || parent.Kind != channelnative.TransportDeploymentRegistration || parent.Validate() != nil ||
+		op.OperationID != parent.ID || op.Revision != parent.Revision || op.PrincipalID != a.PrincipalID ||
+		op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.LogoutCompleted || op.FailureCode != "" ||
+		op.IdentityOperationID != parent.BindingOperationID || op.BindingRevision != a.BindingRevision ||
+		op.SessionAccount != e.owner.operation.SessionAccount || a.InterfaceKey != op.Interface.Key() ||
+		a.ConversationRef != destination || generation.Diagnostic() != op.Interface.SemanticGeneration {
+		return errCaptureScopeChanged
+	}
+	current, binding, err := readDeploymentOperator(ctx, op, e.deployment)
+	if err != nil {
+		return err
+	}
+	if current != parent || binding.ExternalAccountRef != a.ExternalAccountRef || binding.ConversationRef != destination || ctx.Err() != nil {
 		return errCaptureScopeChanged
 	}
 	return nil

@@ -54,6 +54,11 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 	var changed bool
 	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		changed = false
+		if action != nil {
+			if err := storechannel.LockActionInputParentTx(txctx, tx, *action, true); err != nil {
+				return err
+			}
+		}
 		if err := storesource.RequirePostgresSourceArtifactTx(txctx, tx, fact.BundleHash()); err != nil {
 			return err
 		}
@@ -119,6 +124,11 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 	var changed bool
 	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "sqlite notice acknowledgment", func(txctx context.Context, tx *sql.Tx) error {
 		changed = false
+		if action != nil {
+			if err := storechannel.LockActionInputParentTx(txctx, tx, *action, false); err != nil {
+				return err
+			}
+		}
 		if err := storesource.RequireSQLiteSourceArtifactTx(txctx, tx, fact.BundleHash()); err != nil {
 			return err
 		}

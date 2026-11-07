@@ -28,19 +28,21 @@ type ChannelRegistrationSession interface {
 }
 
 type ChannelRegistrationOptions struct {
-	Effects        effects.Store
-	Directory      string
-	Principal      operatorchannel.Principal
-	Process        *worklifetime.Process
-	Operations     channelonboarding.OperationStore
-	Store          channelonboarding.Store
-	Credentials    *credentials.SnapshotOwner
-	Identities     operatorchannel.Store
-	HTTP           *http.Client
-	Plan           packs.SatisfactionPlan
-	Trigger        providertriggers.InboundAdmissionPlan
-	Webhook        providertriggers.InboundAdmissionPlan
-	CurrentWebhook func(context.Context, string, string) bool
+	OperatorAccount channelonboarding.AccountReference
+	OperatorBinding func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
+	Effects         effects.Store
+	Directory       string
+	Principal       operatorchannel.Principal
+	Process         *worklifetime.Process
+	Operations      channelonboarding.OperationStore
+	Store           channelonboarding.Store
+	Credentials     *credentials.SnapshotOwner
+	Identities      operatorchannel.Store
+	HTTP            *http.Client
+	Plan            packs.SatisfactionPlan
+	Trigger         providertriggers.InboundAdmissionPlan
+	Webhook         providertriggers.InboundAdmissionPlan
+	CurrentWebhook  func(context.Context, string, string) bool
 }
 
 type ChannelRegistrationFactory func(context.Context, ChannelRegistrationOptions) (ChannelRegistrationSession, error)

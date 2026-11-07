@@ -23,6 +23,7 @@ type AdmissionResponsibility struct {
 
 	DeploymentRegistration bool
 	RegisteredBusiness     bool
+	DeploymentOperator     bool
 }
 
 // Fresh target promotion borrows the original SDK admission. Confirmed durable
@@ -87,6 +88,10 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 	if !expected.MatchesOperation(op) {
 		return false, nil
 	}
+	if expected.DeploymentOperator {
+		return op.Revision == expected.OperationRevision && op.Phase == PhaseSucceeded &&
+			op.IdentityOperationID != "" && op.BindingRevision > 0 && op.FailureCode == "" && !op.LogoutCompleted, nil
+	}
 	if expected.RegisteredBusiness {
 		return true, nil // The separate current source/run owner fences execution.
 	}
@@ -105,6 +110,10 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 // projection; neither can adopt a newer responsibility from a lookup.
 func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 	if expected.DeploymentRegistration != op.DeploymentRegistration {
+		return false
+	}
+	if expected.DeploymentOperator && (!expected.DeploymentRegistration || expected.RegisteredBusiness ||
+		expected.Coordinate != (ChannelRuntimeContextCoordinate{}) || expected.TargetSelector != "" || expected.ActivationRevision != 0) {
 		return false
 	}
 	if expected.OperationRevision < 1 || op.OperationID != expected.OperationID || op.Revision < expected.OperationRevision ||

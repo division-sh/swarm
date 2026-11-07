@@ -30,6 +30,8 @@ var errRuntimeConnection = errors.New("WhatsApp connection requires its retained
 var errRuntimeIngressUnavailable = errors.New("WhatsApp runtime incoming publication is not installed")
 
 type RuntimeConnectionOptions struct {
+	operatorAccount    channelonboarding.AccountReference
+	operatorBinding    func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
 	Directory          string
 	InvocationState    *InvocationState
 	OperationID        string
@@ -44,6 +46,8 @@ type RuntimeConnectionOptions struct {
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
+	operatorAccount    channelonboarding.AccountReference
+	operatorBinding    func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
 	lifecycle          chan struct{}
 	parent             sessionWorkParent
 	work               *worklifetime.Lease
@@ -109,7 +113,8 @@ func openOwnedConnection(ctx context.Context, parent sessionWorkParent, opts Run
 	}
 	owned, cancel := context.WithCancel(work.Context())
 	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1), operations: operations,
-		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding, registeredBusiness: opts.RegisteredBusiness}
+		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding, registeredBusiness: opts.RegisteredBusiness,
+		operatorAccount: opts.operatorAccount, operatorBinding: opts.operatorBinding}
 	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()
 	if err := c.open(opts.Incoming); err != nil {
@@ -527,7 +532,7 @@ func (c *RuntimeConnection) ObserveSession(ctx context.Context) (operatorchannel
 }
 
 func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any, lineage map[string]string, kind effects.AuthorityKind) (result registration.DeliveryResult, err error) {
-	if c == nil || c.operation.DeploymentRegistration {
+	if c == nil {
 		return result, errRuntimeConnection
 	}
 	work, err := c.begin(ctx)
@@ -543,7 +548,14 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 	if err != nil {
 		return result, err
 	}
-	return (sessionChannelExecutor{owner: owner, plan: c.plan}).ExecuteChannelWrite(work.Context(), operation, toolID, tool, input, lineage, kind)
+	executor := sessionChannelExecutor{owner: owner, plan: c.plan}
+	if op.DeploymentRegistration {
+		executor.deployment = c.operatorBinding
+		if executor.deployment == nil {
+			return result, errRuntimeConnection
+		}
+	}
+	return executor.ExecuteChannelWrite(work.Context(), operation, toolID, tool, input, lineage, kind)
 }
 
 func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any) (result any, err error) {

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/publicingress"
@@ -60,6 +61,72 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 	}
 	var mu sync.Mutex
 	clients := map[string]*cliapp.DeploymentChannelControl{}
+	if runtimeOptions.deployment != nil {
+		runtimeOptions.deployment.registrations = func(ctx context.Context) ([]serveDeploymentRegistration, error) {
+			if rootErr != nil {
+				return nil, rootErr
+			}
+			var selected []serveDeploymentRegistration
+			for _, provider := range []string{"telegram", "whatsapp"} {
+				client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, provider, stores, process, factory)
+				if err != nil {
+					return nil, err
+				}
+				if account := client.DeploymentOperatorAccount(); provider == "whatsapp" && account.Provider == provider {
+					op, readErr := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
+					if readErr != nil && !errors.Is(readErr, channelonboarding.ErrNotFound) {
+						return nil, errors.Join(readErr, client.Close(context.WithoutCancel(ctx)))
+					}
+					if readErr == nil {
+						mu.Lock()
+						owned := clients[provider+":"+op.OperationID]
+						mu.Unlock()
+						if err := client.Close(context.WithoutCancel(ctx)); err != nil {
+							return nil, err
+						}
+						if owned == nil {
+							return nil, fmt.Errorf("deployment operator connection has no exact restored control")
+						}
+						result, plan, err := owned.DeploymentTransport(ctx, channelnative.TransportParent{})
+						if err != nil {
+							return nil, err
+						}
+						selected = append(selected, serveDeploymentRegistration{result: result, plan: plan, trigger: owned.DeploymentTrigger()})
+						continue
+					}
+				}
+				result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
+				trigger := client.DeploymentTrigger()
+				closeErr := client.Close(context.WithoutCancel(ctx))
+				if errors.Is(err, channelonboarding.ErrNotFound) && closeErr == nil {
+					continue
+				}
+				if err != nil || closeErr != nil {
+					return nil, errors.Join(err, closeErr)
+				}
+				selected = append(selected, serveDeploymentRegistration{result: result, plan: plan, trigger: trigger})
+			}
+			return selected, nil
+		}
+		runtimeOptions.deployment.read = func(ctx context.Context, parent channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error) {
+			op, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, parent.ID)
+			if err != nil || rootErr != nil {
+				return channelonboarding.Result{}, packs.OutboundBindingPlan{}, errors.Join(err, rootErr)
+			}
+			key := op.Provider + ":" + op.OperationID
+			mu.Lock()
+			client := clients[key]
+			mu.Unlock()
+			if client == nil {
+				client, err = cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
+				if err != nil {
+					return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
+				}
+				defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
+			}
+			return client.DeploymentTransport(ctx, parent)
+		}
+	}
 	handler := func(ctx context.Context, req apiv1.Request) (any, error) {
 		if rootErr != nil {
 			return nil, rootErr
@@ -120,7 +187,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 }
 
 func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions) publicingress.PendingDeploymentClaim {
-	return func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), claim func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), current func() bool) (bool, error) {
+	return func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), claim func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error), operator func(providertriggers.InboundAdmissionPlan) (providertriggers.AdmittedRequest, error), current func() bool) (bool, error) {
 		work, err := process.Begin(ctx)
 		if err != nil {
 			return false, err
@@ -145,29 +212,7 @@ func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory
 			return false, err
 		}
 		defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
-		var plans []packs.SatisfactionPlan
-		registered, err := channelonboarding.RegisteredAccount(work.Context(), stores.DeploymentChannels(), account)
-		if err != nil {
-			return false, err
-		}
-		if registered.Phase == channelonboarding.PhaseSucceeded && registered.IdentityOperationID != "" {
-			if runtimeOptions.manager == nil {
-				return false, channelonboarding.ErrRevisionConflict
-			}
-			holders, err := runtimeOptions.manager.AccountHolders(work.Context(), account)
-			if err != nil || len(holders) != 1 {
-				return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
-			}
-			use, _, availability, err := runtimeOptions.manager.AcquireRun(work.Context(), holders[0].RunID)
-			if use != nil {
-				defer func() { _ = use.Done() }()
-			}
-			if err != nil || use == nil || !availability.Available() || use.Context.BundleHash() != holders[0].BundleHash {
-				return false, errors.Join(channelonboarding.ErrRevisionConflict, err)
-			}
-			plans = use.Context.ChannelPlans
-		}
-		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, claim, current, plans...)
+		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, claim, operator, current)
 	}
 }
 
@@ -272,7 +317,8 @@ func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op chan
 	var err error
 	c.connection, err = sessionprovider.OpenDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
 		OperationID: op.OperationID, Principal: c.opts.Principal, Process: c.opts.Process, Operations: c.opts.Operations,
-		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger, RegisteredBusiness: c.business})
+		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger, RegisteredBusiness: c.business,
+		OperatorAccount: c.opts.OperatorAccount, OperatorBinding: c.opts.OperatorBinding})
 	if err != nil {
 		return err
 	}
