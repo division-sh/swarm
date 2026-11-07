@@ -217,8 +217,14 @@ func TestNativeDeclarativeEmissionSourcePreservesBusinessCatalogAndHostileField(
 			entry := bundle.Events[tc.name]
 			required := append([]string(nil), entry.Payload.Required...)
 			sort.Strings(required)
-			if len(entry.Payload.Properties) != len(tc.properties) || (len(tc.properties) > 0 && !reflect.DeepEqual(entry.Payload.Properties, tc.properties)) || !reflect.DeepEqual(required, tc.required) {
+			if len(entry.Payload.Properties) != len(tc.properties) || !reflect.DeepEqual(required, tc.required) {
 				t.Fatalf("authored emission catalog changed: got=%+v want=%+v/%v", entry, tc.properties, tc.required)
+			}
+			for name, want := range tc.properties {
+				got, present := entry.Payload.Properties[name]
+				if !present || got.Type != want.Type || !reflect.DeepEqual(got.ExactSchema, want.ExactSchema) {
+					t.Fatalf("authored emission field %q changed: got=%+v present=%t want=%+v", name, got, present, want)
+				}
 			}
 			input := bundle.Events["custom.trigger"]
 			if len(input.Payload.Properties) != 2 || input.Payload.Properties["score"].Type != "float" || input.Payload.Properties["reason"].Type != "text" || len(input.Payload.Required) != 2 {
