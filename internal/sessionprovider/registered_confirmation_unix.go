@@ -100,7 +100,7 @@ func registeredAcknowledgementSettled(ctx context.Context, reader effects.Outcom
 	if err != nil || !found {
 		return false, err
 	}
-	if outcome.Kind != effects.KindChannelConfirmation || outcome.AuthorityKind != effects.AuthorityChannelConfirmation || outcome.AuthorityID != id {
+	if outcome.OperationID != id || outcome.Kind != effects.KindChannelConfirmation || outcome.AuthorityKind != effects.AuthorityChannelConfirmation || outcome.AuthorityID != id {
 		return false, fmt.Errorf("registered acknowledgement journal identity contradicts the binding")
 	}
 	if outcome.TerminalSuccess() {
