@@ -70,6 +70,7 @@ func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.
 	for _, mutate := range []func(*channelOnboardingResult){
 		func(r *channelOnboardingResult) { r.Connection = nil },
 		func(r *channelOnboardingResult) { r.IdentityOperation = nil },
+		func(r *channelOnboardingResult) { r.Connection.AccountName = "" },
 		func(r *channelOnboardingResult) { r.Connection.AccountName = "@masked***" },
 		func(r *channelOnboardingResult) { r.Connection.AccountPresentation = "420080" },
 	} {

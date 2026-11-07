@@ -39,6 +39,16 @@ func TestTelegramPlatformReadsUseCompiledOperationPolicy(t *testing.T) {
 			projected: `{"resource_id":"42"}`,
 		},
 		{
+			tool: "telegram.identify_bot", operation: packs.RegistrationOperationIdentify, registration: true,
+			method: http.MethodGet, path: "/getMe", response: `{"ok":true,"result":{"id":42}}`,
+			projected: `{"resource_id":"42"}`,
+		},
+		{
+			tool: "telegram.identify_bot", operation: packs.RegistrationOperationIdentify, registration: true,
+			method: http.MethodGet, path: "/getMe", response: `{"ok":true,"result":{"id":42,"username":null}}`,
+			projected: `{"resource_id":"42"}`,
+		},
+		{
 			tool: "telegram.read_webhook", operation: packs.RegistrationOperationReadback, registration: true,
 			method: http.MethodGet, path: "/getWebhookInfo", response: `{"ok":true,"result":{"url":"https://hooks.example.test/current"}}`,
 			projected: `{"callback_url":"https://hooks.example.test/current"}`,

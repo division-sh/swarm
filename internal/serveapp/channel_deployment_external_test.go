@@ -82,6 +82,7 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	defer func() { os.Stdin = original }()
 	reads := 0
 	botID := 420079
+	botAddressAvailable := false
 	polls := 0
 	confirmations := 0
 	webhook := false
@@ -115,6 +116,9 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 			switch {
 			case strings.HasSuffix(request.URL.Path, "/getMe"):
 				reads++
+				if !botAddressAvailable {
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"ok":true,"result":{"id":%d}}`, botID)))}, nil
+				}
 			case strings.HasSuffix(request.URL.Path, "/sendMessage"):
 				raw, err := io.ReadAll(request.Body)
 				if err != nil {
@@ -341,6 +345,13 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 		t.Fatal(err)
 	}
 	botID = 420079
+	out.Reset()
+	errOut.Reset()
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
+	if code == 0 || strings.Contains(out.String(), "Send the code") || strings.Contains(out.String(), "t.me/") || telegram.Delivery(0) != nil {
+		t.Fatalf("missing bot address invented a destination or sent an acknowledgement: exit=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	botAddressAvailable = true
 	out.Reset()
 	errOut.Reset()
 	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)

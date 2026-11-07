@@ -375,10 +375,11 @@ func (c *deploymentChannelSession) telegramIdentity(ctx context.Context, op chan
 	}
 	identity := fmt.Sprint(projected["resource_id"])
 	object, ok := output.(map[string]any)
-	name, named := object["username"].(string)
-	if !ok || !named || name == "" || op.AccountReference != "" && identity != op.AccountReference {
+	if !ok || op.AccountReference != "" && identity != op.AccountReference {
 		return "", "", channelonboarding.ErrConflict
 	}
+	metadata, _ := object["profile"].(map[string]any)
+	name, _ := metadata["username"].(string)
 	return identity, name, nil
 }
 
