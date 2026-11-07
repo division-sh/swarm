@@ -10,6 +10,7 @@ var telegram = Binding{
 	id: "telegram", displayName: "Telegram", webhook: true, pollClaims: true, credential: true, signingCredential: true,
 	canonicalAccount:  telegramAccount,
 	claimInstructions: telegramClaimInstructions,
+	claimantFormat:    "Claimed by %s in a %s conversation.\n",
 	languageHelp: func(operation string) string {
 		return fmt.Sprintf("Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", operation)
 	},

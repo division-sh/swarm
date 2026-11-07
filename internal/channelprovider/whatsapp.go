@@ -11,7 +11,8 @@ import (
 var whatsapp = Binding{
 	id: "whatsapp", displayName: "WhatsApp", session: true, canonicalAccount: whatsappAccount,
 	claimInstructions: whatsappClaimInstructions,
-	nativeRead:        "whatsapp.read_account", nativeWrite: "whatsapp.send_text",
+	claimantFormat:    "Code received from %s (%s conversation).\n", sanitizeClaimant: true,
+	nativeRead: "whatsapp.read_account", nativeWrite: "whatsapp.send_text",
 	captureKey:    "whatsapp_capture",
 	readyTeaching: "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
 	notLinked:     "Not linked: run swarm channel connect whatsapp",
