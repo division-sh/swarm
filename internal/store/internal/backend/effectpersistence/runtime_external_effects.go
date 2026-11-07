@@ -1288,15 +1288,6 @@ func (e existingExternalAttempt) matchesAuthorityIdentity(authority runtimeeffec
 		storedParent != nil && (e.bundleHash.Valid || *storedParent != *currentParent) {
 		return false
 	}
-	if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
-		parent, err := runtimeauthoractivity.DeploymentEffectParent(e.authorityKind, e.authorityID, e.authorityEvidence)
-		if err != nil || (parent == nil) != (authority.ChannelConfirmation.TransportParent == nil) {
-			return false
-		}
-		if parent != nil && (e.bundleHash.Valid || *parent != *authority.ChannelConfirmation.TransportParent) {
-			return false
-		}
-	}
 	mode := string(authority.ExecutionMode)
 	if e.authorityKind != string(authority.Kind) || e.authorityID != authority.ID ||
 		e.operationMode != mode || e.attemptMode != mode {
@@ -1786,6 +1777,9 @@ func externalEffectOperationBundle(ctx context.Context, authority runtimeeffects
 		return nil, err
 	}
 	if parent != nil {
+		if req.OperationID != authority.ID || string(req.Kind) != string(authority.Kind) || req.Class != runtimeeffects.EffectWriteOrUnknown {
+			return nil, fmt.Errorf("deployment effect requires its exact operation and request kind")
+		}
 		if authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
 			confirmation := authority.ChannelConfirmation
 			native := confirmation.RegisteredRequest == "" && req.Adapter == "channel_confirmation_whatsapp" && req.Transport == "in_process" &&

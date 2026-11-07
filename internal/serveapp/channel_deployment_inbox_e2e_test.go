@@ -363,7 +363,7 @@ func requireDeploymentEffectActivity(t *testing.T, reader storetest.ChannelObser
 				t.Fatal("deployment lifecycle borrowed an author bundle")
 			}
 			raw, err := json.Marshal(occurrence)
-			if err != nil || strings.Contains(string(raw), "bundle_hash") || strings.Contains(string(raw), "EffectParent") {
+			if err != nil || strings.Contains(string(raw), "bundle_hash") || strings.Contains(string(raw), "EffectAuthorityEvidence") {
 				t.Fatal("typed deployment activity invented bundle or public provenance", err)
 			}
 			if _, selected := wanted[occurrence.Projection.AuthorityKind]; selected {
