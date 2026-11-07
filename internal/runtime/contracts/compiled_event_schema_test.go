@@ -79,6 +79,22 @@ item.*:
 	if event.AcceptanceSchema()["type"] != "object" || again[1].SemanticSchema()["format"] != "uuid" || !bytes.Equal(event.CanonicalAcceptanceSchema(), wantBytes) {
 		t.Fatal("compiled event readback was mutable")
 	}
+	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "Identity:\n  entity_id: string?\n  item_id: uuid\nNotes:\n  note: text?\n")
+	for _, embeds := range []string{"Identity, Notes", "Notes, Identity"} {
+		writeFixtureFile(t, filepath.Join(root, "events.yaml"), "item.created:\n  _embed: ["+embeds+"]\nitem.*:\n")
+		expanded, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		schemas, err := expanded.CompiledEventSchemas()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := requireCompiledEventSchema(t, schemas, ".", "item.created")
+		if !bytes.Equal(got.CanonicalAcceptanceSchema(), wantBytes) || got.AcceptanceSchemaDigest() != event.AcceptanceSchemaDigest() {
+			t.Fatal("embedding/location/order changed inline acceptance schema or digest")
+		}
+	}
 }
 
 func TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentity(t *testing.T) {

@@ -99,16 +99,16 @@ func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 		source  string
 		wantErr string
 	}{
-		{name: "retired required", source: "id: text\nrequired: [id]", wantErr: `event field name "required"`},
-		{name: "retired required through merge", source: "<<: &legacy\n  required: [id]\nid: text", wantErr: `event field name "required"`},
+		{name: "malformed required metadata", source: "id: text\nrequired: {fields: [id]}", wantErr: `field "fields" is not supported`},
+		{name: "malformed required metadata through merge", source: "<<: &legacy\n  required: {fields: [id]}\nid: text", wantErr: `field "fields" is not supported`},
 		{name: "duplicate direct", source: "id: text\nid: uuid", wantErr: "duplicate effective field \"id\""},
 		{name: "duplicate through merge", source: "<<: &base\n  id: text\nid: uuid", wantErr: "duplicate effective field \"id\""},
 		{name: "double optional marker", source: "id: text??", wantErr: "exactly one trailing ?"},
 		{name: "optional business key", source: "_key: id\nid: uuid?", wantErr: "must be required"},
 		{name: "missing business key field", source: "_key: id\nname: text", wantErr: "is not a declared payload field"},
 		{name: "null declaration", source: "null", wantErr: "an event with no fields is declared bare"},
-		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `event field name "swarm"`},
-		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `event field name "swarm"`},
+		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `field "producerr" is not supported`},
+		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `field "producerr" is not supported`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,6 +136,7 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 	catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{
 		"Record": {Fields: map[string]TypeFieldSpec{"id": {Type: "uuid"}, "note": {Type: "text", IsOptional: true}}},
 		"Other":  {Fields: map[string]TypeFieldSpec{"id": {Type: "uuid"}}},
+		"Empty":  {Fields: map[string]TypeFieldSpec{}},
 	}, Enums: map[string]EnumTypeDecl{"Status": {Values: []string{"open"}}}}
 	for _, body := range []string{"_embed: [Record]\n", "_embed: &records [Record]\n"} {
 		snapshot, err := yamlsource.Load([]byte("test.event:\n  " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ") + "\n"))
@@ -159,7 +160,7 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 			t.Fatalf("state/event embedded semantics differ: %#v (%v)", state, err)
 		}
 	}
-	for _, body := range []string{"_embed: [Record, Record]\n", "_embed: [Record, Other]\n", "_embed: [Record]\nid: text\n", "_embed: [Status]\n", "_embed: [missing]\n", "_embed: []\n", "_embed: Record\n", "_embed: null\n"} {
+	for _, body := range []string{"_embed: [Empty]\n", "_embed: [Empty]\nown: text\n", "_embed: [Record, Empty]\n", "aliases: &records [Empty]\n_embed: *records\n", "_embed: [Record, Record]\n", "_embed: [Record, Other]\n", "_embed: [Record]\nid: text\n", "_embed: [Status]\n", "_embed: [missing]\n", "_embed: []\n", "_embed: Record\n", "_embed: null\n"} {
 		for _, family := range []string{"state", "event"} {
 			t.Run(family+"_"+body, func(t *testing.T) {
 				snapshot, err := yamlsource.Load([]byte(body))
@@ -180,6 +181,46 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 			})
 		}
 	}
+	t.Run("detached definition and use", func(t *testing.T) {
+		source, err := yamlsource.Load([]byte("Record:\n  id: uuid\n  note: text?\nOther:\n  id: text\nEmpty: {}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		authored, err := projectTypeCatalogDocument(source.Document("child/types.yaml").Root())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, body := range []string{"_embed: [Record, Other]\n", "_embed: [Record]\nid: text\n", "_embed: [Empty]\nown: text\n"} {
+			use, err := yamlsource.Load([]byte(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = projectStateContract(use.Document("child/state.yaml").Root(), authored)
+			if err == nil || !strings.Contains(err.Error(), "child/types.yaml:") || !strings.Contains(err.Error(), "child/state.yaml:") {
+				t.Fatalf("definition/use missing: %v", err)
+			}
+			if strings.Contains(body, "Other") && (!strings.Contains(err.Error(), "child/types.yaml:2:") || !strings.Contains(err.Error(), "child/types.yaml:5:")) {
+				t.Fatalf("collision lost one defining field: %v", err)
+			}
+		}
+		use, err := yamlsource.Load([]byte("aliases: &records [Record]\n_embed: *records\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := projectStateContract(use.Document("child/state.yaml").Root(), authored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		index, definition, ok := state.Fields["id"].EmbeddedSource()
+		if !ok || index != 0 || definition.File != "child/types.yaml" || definition.Line != 2 || state.Fields["id"].origin.use.Line != 2 {
+			t.Fatalf("expanded provenance = %#v", state.Fields["id"].origin)
+		}
+		copy := cloneEntityContract(state)
+		copy.Fields["id"] = EntityFieldDecl{Type: "integer"}
+		if state.Fields["id"].Type != "uuid" || state.Fields["id"].origin.definition != definition {
+			t.Fatal("readback changed retained field/provenance")
+		}
+	})
 }
 
 func TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations(t *testing.T) {

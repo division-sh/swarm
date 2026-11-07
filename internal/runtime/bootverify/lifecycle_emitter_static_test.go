@@ -201,7 +201,7 @@ func TestCompiledLifecycleEmitterMetadataCoordinates(t *testing.T) {
 				repo := canonicalrouting.RepoRoot(t)
 				root := canonicalrouting.CopyLifecycleEmitterMetadataCoordinate(t, tc.coordinate, field)
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-				if err == nil || !strings.Contains(err.Error(), "event field name \"swarm\"") {
+				if err == nil || !strings.Contains(err.Error(), `["swarm"]`) || !strings.Contains(err.Error(), "is not supported") {
 					t.Fatalf("retired %s metadata accepted: %v", field, err)
 				}
 			})
@@ -213,7 +213,7 @@ func TestCompiledLifecycleEmitterRetiredExternalMetadataRejected(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyLifecycleEmitterStatic(t, canonicalrouting.LifecycleStaticGateExternalProof)
 	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err == nil || !strings.Contains(err.Error(), "event field name \"swarm\"") {
+	if err == nil || !strings.Contains(err.Error(), `["swarm"]`) || !strings.Contains(err.Error(), "is not supported") {
 		t.Fatalf("retired external source metadata accepted: %v", err)
 	}
 }

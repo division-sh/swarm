@@ -30,7 +30,7 @@ func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (Ent
 		return EntityContract{}, err
 	}
 	for name, field := range embedded {
-		state.Fields[name] = EntityFieldDecl{Type: field.Type, IsOptional: field.IsOptional}
+		state.Fields[name] = EntityFieldDecl{Type: field.Type, IsOptional: field.IsOptional, origin: field.origin}
 	}
 	for _, field := range fields {
 		if field.Name == "_embed" {
@@ -54,6 +54,7 @@ func projectStateContract(root yamlsource.Value, types TypeCatalogDocument) (Ent
 			}
 			return EntityContract{}, fmt.Errorf("state.%s at %s: %w", field.Name, field.IntroductionLocation(), nodeValueError(field.Value, err))
 		}
+		declaration.origin.definition = field.IntroductionLocation()
 		state.Fields[field.Name] = declaration
 	}
 	return state, nil

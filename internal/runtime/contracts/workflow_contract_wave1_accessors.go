@@ -486,7 +486,7 @@ func cloneTypeCatalogDocument(in TypeCatalogDocument) TypeCatalogDocument {
 }
 
 func cloneNamedTypeDecl(in NamedTypeDecl) NamedTypeDecl {
-	out := NamedTypeDecl{}
+	out := NamedTypeDecl{definition: in.definition}
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]TypeFieldSpec, len(in.Fields))
 		for key, value := range in.Fields {

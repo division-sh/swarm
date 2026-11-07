@@ -101,8 +101,9 @@ func constructorViews(source semanticview.Source, flowID string) []FlowConstruct
 }
 
 type EventView struct {
-	Name   string   `json:"name"`
-	Fields []string `json:"fields"`
+	Name            string            `json:"name"`
+	Fields          []string          `json:"fields"`
+	EmbeddedSources map[string]string `json:"-"`
 }
 
 type StandingIngressView struct {
@@ -250,9 +251,10 @@ type AgentFieldView struct {
 }
 
 type PrimaryEntityView struct {
-	Type       string            `json:"type"`
-	Fields     map[string]string `json:"fields,omitempty"`
-	SourceFile string            `json:"source_file,omitempty"`
+	Type            string            `json:"type"`
+	Fields          map[string]string `json:"fields,omitempty"`
+	SourceFile      string            `json:"source_file,omitempty"`
+	EmbeddedSources map[string]string `json:"-"`
 }
 
 type TemplateInstanceView struct {
@@ -957,11 +959,18 @@ func eventViews(entries map[string]runtimecontracts.EventCatalogEntry) []EventVi
 	out := make([]EventView, 0, len(names))
 	for _, name := range names {
 		fields := make([]string, 0, len(entries[name].Payload.Properties))
-		for field := range entries[name].Payload.Properties {
+		var origins map[string]string
+		for field, declaration := range entries[name].Payload.Properties {
 			fields = append(fields, field)
+			if index, definition, ok := declaration.EmbeddedSource(); ok {
+				if origins == nil {
+					origins = map[string]string{}
+				}
+				origins[field] = fmt.Sprintf("derived from _embed[%d], %s:%d", index, definition.File, definition.Line)
+			}
 		}
 		sort.Strings(fields)
-		out = append(out, EventView{Name: name, Fields: fields})
+		out = append(out, EventView{Name: name, Fields: fields, EmbeddedSources: origins})
 	}
 	return out
 }
@@ -1003,13 +1012,21 @@ func requiredAgentsView(facts []runtimecontracts.RequiredAgentFact) RequiredAgen
 
 func primaryEntityView(primary runtimecontracts.PrimaryEntityContract, sourceFile string) *PrimaryEntityView {
 	fields := map[string]string{}
+	var origins map[string]string
 	for _, field := range sortedEntityFields(primary.Contract.Fields) {
 		fields[field] = strings.TrimSpace(primary.Contract.Fields[field].Type)
+		if index, definition, ok := primary.Contract.Fields[field].EmbeddedSource(); ok {
+			if origins == nil {
+				origins = map[string]string{}
+			}
+			origins[field] = fmt.Sprintf("derived from _embed[%d], %s:%d", index, definition.File, definition.Line)
+		}
 	}
 	return &PrimaryEntityView{
-		Type:       strings.TrimSpace(primary.EntityType),
-		Fields:     fields,
-		SourceFile: strings.TrimSpace(sourceFile),
+		Type:            strings.TrimSpace(primary.EntityType),
+		Fields:          fields,
+		SourceFile:      strings.TrimSpace(sourceFile),
+		EmbeddedSources: origins,
 	}
 }
 

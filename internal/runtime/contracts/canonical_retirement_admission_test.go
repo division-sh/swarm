@@ -32,8 +32,8 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 			name:      "event payload is not emitter metadata",
 			file:      "events.yaml",
 			canonical: "work.requested:\n  work_id: text\n",
-			retired:   "work.requested:\n  work_id: text\n  emitter: worker\n",
-			want:      `event field name "emitter"`,
+			retired:   "work.requested:\n  work_id: text\n  emitter: {node: worker}\n",
+			want:      `field "node" is not supported`,
 		},
 		{
 			name:      "input pin has derived name",

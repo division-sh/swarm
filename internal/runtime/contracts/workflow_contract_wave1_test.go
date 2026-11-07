@@ -683,10 +683,17 @@ composite_score:
 }
 
 func TestEventCatalogEntryDecode_RejectsRetiredAuthorSummaryField(t *testing.T) {
-	for _, value := range []string{"text", "null", "false", "{}"} {
+	entry, err := admitEventCatalogEntryForTest(t, "author_summary_field: text\n")
+	if err != nil || entry.Payload.Properties["author_summary_field"].Type != "text" || entry.platformAuthority != (PlatformEventAuthority{}) {
+		t.Fatalf("ordinary business field became a retired selector: %#v, %v", entry, err)
+	}
+	for _, value := range []string{"null", "false", "{}"} {
 		t.Run(value, func(t *testing.T) {
-			_, err := admitEventCatalogEntryForTest(t, "text: text\nauthor_summary_field: "+value+"\n")
-			if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "author_summary_field") {
+			entry, err := admitEventCatalogEntryForTest(t, "text: text\nauthor_summary_field: "+value+"\n")
+			if err == nil {
+				_, _, err = (&WorkflowContractBundle{}).compileCurrentEventDeclaration(".", "flow", "events.yaml", "test.event", "test.event", entry, TypeCatalogDocument{})
+			}
+			if err == nil || !strings.Contains(err.Error(), "author_summary_field") {
 				t.Fatalf("retired selector admission = %v", err)
 			}
 		})

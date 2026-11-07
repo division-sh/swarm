@@ -429,6 +429,27 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
 	}
+	writeDescribeTestFile(t, filepath.Join(sourceRoot, "types.yaml"), "Identity:\n  org_id: text\n")
+	writeDescribeTestFile(t, filepath.Join(sourceRoot, "state.yaml"), "_embed: [Identity]\nregion: text\n")
+	writeDescribeTestFile(t, filepath.Join(sourceRoot, "events.yaml"), "org.ready:\n  _embed: [Identity]\n  _key: org_id\n  own: integer\n")
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", sourceRoot}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("describe expanded fields: code=%d out=%s err=%s", code, stdout.String(), stderr.String())
+	}
+	if got := strings.Count(stdout.String(), "org_id: derived from _embed[0], types.yaml:2"); got != 2 {
+		t.Fatalf("event/state field provenance count=%d: %s", got, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "own: derived") || strings.Contains(stdout.String(), "region: derived") {
+		t.Fatalf("own fields acquired embed provenance: %s", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", sourceRoot, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 || stderr.Len() != 0 || strings.Contains(stdout.String(), "derived from") || strings.Contains(stdout.String(), "EmbeddedSources") {
+		t.Fatalf("embed changed JSON field-list format: code=%d out=%s err=%s", code, stdout.String(), stderr.String())
+	}
 }
 
 func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {

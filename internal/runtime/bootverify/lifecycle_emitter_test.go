@@ -139,7 +139,7 @@ func TestCompiledLifecycleEmitterMetadataRoles(t *testing.T) {
 					root := canonicalrouting.CopyLifecycleEmitterMetadata(t, tc.variant, field, strings.Contains(tc.name, "site"))
 					repo := canonicalrouting.RepoRoot(t)
 					_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-					if err == nil || !strings.Contains(err.Error(), "event field name \"swarm\"") {
+					if err == nil || !strings.Contains(err.Error(), `["swarm"]`) || !strings.Contains(err.Error(), "is not supported") {
 						t.Fatalf("retired %s metadata accepted: %v", field, err)
 					}
 				})

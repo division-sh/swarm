@@ -11,27 +11,15 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-// Reserved names cannot be reinterpreted as business payload fields.
+// Retired underscore aliases are not business fields. Ordinary names confer no
+// platform authority and are validated by the same field grammar after expansion.
 var reservedEventCatalogFieldNames = map[string]struct{}{
-	"swarm":                {},
-	"emitter":              {},
-	"emitter_type":         {},
-	"producer":             {},
-	"_producer":            {},
-	"alternate_emitters":   {},
-	"consumer":             {},
-	"_consumer":            {},
-	"consumer_type":        {},
-	"_consumer_type":       {},
-	"_source":              {},
-	"_status":              {},
-	"_note":                {},
-	"intercepted":          {},
-	"passthrough":          {},
-	"runtime_handling":     {},
-	"owning_node":          {},
-	"delivery_channel":     {},
-	"author_summary_field": {},
+	"_producer":      {},
+	"_consumer":      {},
+	"_consumer_type": {},
+	"_source":        {},
+	"_status":        {},
+	"_note":          {},
 }
 
 func loadOptionalEventCatalog(path string) (map[string]EventCatalogEntry, error) {
@@ -127,7 +115,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField, ty
 		return EventCatalogEntry{}, err
 	}
 	for name, field := range embedded {
-		entry.Payload.Properties[name] = EventFieldSpec{Type: field.Type}
+		entry.Payload.Properties[name] = EventFieldSpec{Type: field.Type, origin: field.origin}
 		if !field.IsOptional {
 			entry.Payload.Required = append(entry.Payload.Required, name)
 		}
@@ -170,9 +158,6 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 		if _, reserved := reservedEventCatalogFieldNames[field.Name]; reserved {
 			return nil, nil, fmt.Errorf("event field name %q at %s is reserved and cannot declare business payload", field.Name, field.IntroductionLocation())
 		}
-		if field.Name == "required" {
-			return nil, nil, fmt.Errorf("event field name %q at %s is reserved for required-by-default field semantics", field.Name, field.IntroductionLocation())
-		}
 		if field.Name == "payload" && eventPayloadValueIsRetiredNestedBlock(field.Value) {
 			return nil, nil, fmt.Errorf("event payload at %s must be a field type declaration, not a nested payload block", field.IntroductionLocation())
 		}
@@ -206,6 +191,7 @@ func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.M
 		if !optional {
 			entry.Payload.Required = append(entry.Payload.Required, field.Name)
 		}
+		payloadField.origin.definition = field.IntroductionLocation()
 		entry.Payload.Properties[field.Name] = payloadField
 	}
 	sort.Strings(entry.Payload.Required)

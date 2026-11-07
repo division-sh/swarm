@@ -61,6 +61,7 @@ func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, err
 			if err != nil {
 				return TypeCatalogDocument{}, fmt.Errorf("record %s: %w", name, err)
 			}
+			decl.definition = field.IntroductionLocation()
 			doc.Types[name] = decl
 		case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
 			decl, err := projectEnumDeclaration(field.Value)
@@ -142,6 +143,7 @@ func projectNamedTypeDeclaration(value yamlsource.Value) (NamedTypeDecl, error) 
 		if err != nil {
 			return NamedTypeDecl{}, fmt.Errorf("field %s: %w", name, err)
 		}
+		spec.origin.definition = field.IntroductionLocation()
 		decl.Fields[name] = spec
 	}
 	return decl, nil
