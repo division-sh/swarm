@@ -353,8 +353,8 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	runID := uuid.NewString()
 	seedRuntimeContextRunBundle(t, fixture.pg, baseRunID, runStartTestBundleHash, fixture.admissionA)
 	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
-	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, fixture.ownerA, baseAgent, fixture.admissionA, baseRunID)
-	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, fixture.ownerB, selectedAgent, fixture.admissionB, runID)
+	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, fixture.ownerA, baseAgent, fixture.admissionA, fixture.sourceA, baseRunID)
+	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, fixture.ownerB, selectedAgent, fixture.admissionB, fixture.sourceB, runID)
 	manager := runtimeContextManagerWithRuntimes(t, fixture,
 		&swruntime.Runtime{Bus: fixture.busA, Manager: baseManager},
 		&swruntime.Runtime{Bus: fixture.busB, Manager: selectedManager},
@@ -878,13 +878,14 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 	return manager
 }
 
-func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, agent *directiveIntegrationAgent, root sourceartifact.RootAdmission, runID string) *runtimemanager.AgentManager {
+func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *runtimebus.EventBus, workOwner *worklifetime.RuntimeOccurrence, agent *directiveIntegrationAgent, root sourceartifact.RootAdmission, source semanticview.Source, runID string) *runtimemanager.AgentManager {
 	t.Helper()
 	fact := runtimeContextTestSourceFact(root.BundleHash())
 	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(context.Background(), fact), root)
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
+		SemanticSource:   source,
 		ExecutionPosture: executionposture.Live,
 		BaseContext:      ctx,
 		WorkOwner:        workOwner,

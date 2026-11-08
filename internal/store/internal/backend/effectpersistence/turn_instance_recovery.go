@@ -282,7 +282,9 @@ func peekProviderRecoveryIDsTx(ctx context.Context, tx *sql.Tx, runID string, ac
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(a.attempt_id AS TEXT) FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		WHERE o.effect_kind='provider_turn' AND o.authority_kind IN ('normal_agent','selected_contract_fork')
-		AND (o.authority_kind='normal_agent' OR $1<>'') AND ($1='' OR CAST(o.agent_run_id AS TEXT)=$1)
+		AND (o.authority_kind='normal_agent' OR $1<>'')
+		AND ($1='' OR CAST(o.agent_run_id AS TEXT)=$1 OR
+		 (o.authority_kind='selected_contract_fork' AND o.authority_evidence->'usage_target'->>'run_id'=$1))
 		AND ($2='' OR (o.agent_id=$2 AND o.agent_name_owner=$3 AND o.agent_name_source=$4
 		 AND o.agent_route_presence=$5 AND o.flow_scope_key=$6 AND o.flow_instance_id=$7 AND o.flow_instance=$8))
 		AND a.origin_kind IN ('delivery','directive')
@@ -312,6 +314,15 @@ func prepareProviderRecoveryOwnershipTx(ctx context.Context, tx *sql.Tx, postgre
 	ids, err := peekProviderRecoveryIDsTx(ctx, tx, runID, actor)
 	if err != nil {
 		return nil, err
+	}
+	for _, id := range ids {
+		row, err := peekRetainedTurnTx(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if runID != "" && row.actor.RunID != runID {
+			return nil, fmt.Errorf("turn recovery crosses its exact native run")
+		}
 	}
 	var extra []agentidentity.Identity
 	if actor != nil {

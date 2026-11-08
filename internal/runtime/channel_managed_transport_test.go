@@ -141,6 +141,7 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 				t.Fatal(err)
 			}
 			pinned = effects.WithAuthority(pinned, authority)
+			pinned = effects.WithTurnInstanceSource(pinned, source)
 			pinned = effects.WithController(pinned, effects.NewCompletionController(store, store, store, nil).WithExecutionPosture(executionposture.Live))
 			pinned = effects.WithExecutionMode(pinned, effects.ExecutionModeLive)
 			pinned = deliverylifecycle.WithClaim(pinned, claimed.Claim)

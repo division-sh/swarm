@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -61,7 +62,7 @@ func retainedTurnSourceTx(ctx context.Context, tx *sql.Tx, actor agentidentity.I
 	if err != nil {
 		return nil, correlation.SourceArtifactFact{}, err
 	}
-	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, spec, contracts.WorkflowContractLoadOptions{})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, spec, contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		return nil, correlation.SourceArtifactFact{}, err
 	}

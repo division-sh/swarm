@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -24,7 +26,10 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type ManagedAgentTurnFixtureStore interface {
@@ -33,6 +38,7 @@ type ManagedAgentTurnFixtureStore interface {
 	runtimeeffects.CompletionHeartbeatStore
 	DeliveryLifecycleStore
 	LoadAgentLifecycleState(context.Context, agentidentity.Identity) (runtimemanager.AgentLifecycleState, bool, error)
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
 }
 
@@ -94,6 +100,16 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if fixture.Event.ID() == "" || fixture.Event.RunID() != strings.TrimSpace(fixture.RunID) {
 		t.Fatal("managed turn fixture event does not match run")
 	}
+	rooted, err := fixture.Store.LoadRunRootedSource(ctx, fixture.RunID)
+	if err != nil || rooted.Admission().BundleHash() != bundleSource.BundleHash() {
+		t.Fatalf("managed turn fixture requires its exact retained run source: %v", err)
+	}
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatalf("load managed turn fixture source: %v", err)
+	}
+	ctx = runtimeeffects.WithTurnInstanceSource(ctx, semanticview.Wrap(bundle))
 	now := fixture.CreatedAt.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
