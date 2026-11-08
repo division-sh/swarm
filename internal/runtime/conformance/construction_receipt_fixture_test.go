@@ -40,6 +40,7 @@ func (r conformanceConstructionReceipts) add(t *testing.T, source semanticview.S
 	}
 	at := time.Unix(1700000000, 0).UTC()
 	header := pipeline.WorkflowInstance{
+		Life:         1,
 		WorkflowName: instance.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
 		InstanceID: instance.InstanceID, StorageRef: instance.InstancePath, EntityID: instance.EntityID, InstanceKey: key,
 		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,

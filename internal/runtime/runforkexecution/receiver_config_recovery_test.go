@@ -92,6 +92,7 @@ func recoveredSelectedHeaderFixture(t *testing.T, value any) (LoadedSelectedCont
 	}
 	at := time.Now().UTC()
 	instance := pipeline.WorkflowInstance{
+		Life:     1,
 		EntityID: identity.EntityID, EntityType: "state", WorkflowName: identity.TemplateID,
 		WorkflowVersion: "captured-version", Mode: "template", StorageRef: identity.InstancePath,
 		InstanceID: identity.InstanceID, InstanceKey: "one", ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runID,
