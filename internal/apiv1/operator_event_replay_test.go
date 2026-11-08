@@ -238,7 +238,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				return events.EventEnvelope{
 					EntityID: entityID, FlowInstance: "target-flow/instance", Scope: events.EventScopeEntity,
 					Source: events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/instance", EntityID: uuid.NewString()},
-					Target: events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/instance", EntityID: entityID},
+					Target: events.RouteIdentity{FlowID: "target-flow/instance", FlowInstance: "target-flow/instance", EntityID: entityID},
 				}
 			},
 		},
@@ -250,8 +250,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					Scope:  events.EventScopeGlobal,
 					Source: events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/instance", EntityID: uuid.NewString()},
 					TargetSet: []events.RouteIdentity{
-						{FlowID: "target-flow", FlowInstance: "target-flow/instance", EntityID: entityID},
-						{FlowID: "audit-flow", FlowInstance: "audit-flow/instance", EntityID: auditEntityID},
+						{FlowID: "target-flow/instance", FlowInstance: "target-flow/instance", EntityID: entityID},
+						{FlowID: "audit-flow/instance", FlowInstance: "audit-flow/instance", EntityID: auditEntityID},
 					},
 				}
 			},
@@ -285,47 +285,75 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				ctx = admittedAPICompiledSourceContext(t, context.Background(), f.store, source)
 				ctx = originalAPIFixtureContext(t, ctx, f.store)
 				runID := uuid.NewString()
-				const agentID = "complete-replay-agent"
-				agentIdentity := runtimebustest.IdentityForRun(t, runID, agentID, "target-flow/instance")
-
 				parentID := uuid.NewString()
 				originalID := uuid.NewString()
-				entityID := uuid.NewString()
-				auditEntityID := uuid.NewString()
-				deliveryTarget := events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/instance", EntityID: entityID}
-				auditTarget := events.RouteIdentity{FlowID: "audit-flow", FlowInstance: "audit-flow/instance", EntityID: auditEntityID}
+				entityID := flowidentity.EntityID("target-flow/instance")
+				auditEntityID := flowidentity.EntityID("audit-flow/instance")
+				deliveryTarget := events.RouteIdentity{FlowID: "target-flow/instance", FlowInstance: "target-flow/instance", EntityID: entityID}
+				auditTarget := events.RouteIdentity{FlowID: "audit-flow/instance", FlowInstance: "audit-flow/instance", EntityID: auditEntityID}
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.store.(storetest.RunFixtureStore), runID, createdAt.Add(-time.Minute))
+				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
+				opts := runtimebus.EventBusOptions{ContractBundle: source, DeliveryAuthority: authority, SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))}
+				bus, err := newScopedAPITestEventBus(t, f.store, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				constructor, err := newAPITestFlowConstructor(t, f.store, bus, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				root, err := flowidentity.StandingForGeneration(source, semanticview.RootExecutionFlowID(source), runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err := constructor.PrepareFlowInstanceActivation(effects.WithExecutionMode(correlation.WithRunID(ctx, runID), executionmode.Mock), pipeline.FlowInstanceActivationRequest{
+					ContractBundle: source, Instance: root, OccurredAt: createdAt.Add(-time.Minute),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed, err := bus.CommitFlowInstanceActivation(ctx, plan)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("construct replay receivers: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+				}
+				var agentIdentity, auditIdentity agentidentity.Identity
+				for _, construction := range plan.ConstructionPlans() {
+					for _, actor := range construction.Readiness.Agents {
+						switch construction.Identity.TemplateID {
+						case deliveryTarget.FlowID:
+							agentIdentity = actor.Identity
+						case auditTarget.FlowID:
+							auditIdentity = actor.Identity
+						}
+					}
+				}
+				if agentIdentity.Validate() != nil || auditIdentity.Validate() != nil {
+					t.Fatal("authored replay receivers are missing from the constructed roster")
+				}
+				agentID := agentIdentity.AgentID()
 				envelope := routeShape.envelope(entityID, auditEntityID)
 				if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, f.store, runtimemanager.PersistedAgent{
 					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
-						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
+						FlowID: deliveryTarget.FlowID, FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
 						Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 					}),
 					Status: "active", HiredBy: "test", StartedAt: createdAt,
 				}, mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
-				auditIdentity := runtimebustest.IdentityForRun(t, runID, "complete-replay-auditor", "audit-flow/instance")
 				if routeShape.fanOut {
 					if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, f.store, runtimemanager.PersistedAgent{
 						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
-							FlowID: "audit-flow", FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
+							FlowID: auditTarget.FlowID, FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
 							Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 						}),
 						Status: "active", HiredBy: "test", StartedAt: createdAt,
 					}, mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))); err != nil {
 						t.Fatalf("UpsertAgent(%s): %v", auditIdentity.AgentID(), err)
 					}
-				}
-				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
-				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-					ContractBundle: source, DeliveryAuthority: authority, SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source)),
-				})
-				if err != nil {
-					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
 				ch := subscribeOperatorReplayIdentity(t, bus, agentIdentity)
 				defer runtimebustest.Unsubscribe(bus, agentID)
@@ -851,6 +879,14 @@ func completeOperatorReplaySource(t *testing.T) semanticview.Source {
 	members["source-flow/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
 	members["source-flow/schema.yaml"] = []byte("stages: []\n")
 	members["source-flow/events.yaml"] = []byte("scan.requested:\n")
+	for _, receiver := range []struct{ flow, agent string }{{"target-flow", "complete-replay-agent"}, {"audit-flow", "complete-replay-auditor"}} {
+		for _, flow := range []string{receiver.flow, receiver.flow + "/instance"} {
+			members[flow+"/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
+			members[flow+"/schema.yaml"] = []byte("stages: []\n")
+		}
+		members[receiver.flow+"/instance/events.yaml"] = []byte("scan.requested:\n")
+		members[receiver.flow+"/instance/agents.yaml"] = []byte(receiver.agent + ":\n  role: observer\n  intent: Observe the synthetic replay.\n  subscriptions: [scan.requested]\n")
+	}
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {
 		t.Fatal(err)
