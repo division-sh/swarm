@@ -167,7 +167,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: "owner/one", EntityType: "state", Slug: "snapshot-slug", Name: "Snapshot Name",
 						ParentInstance: f.runID, InstanceKey: "one",
-						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
+						StageDefined: true, Life: f.state.Life, FlowTemplate: "owner", Mode: "template", Status: "active",
 						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
 						DataCreatedAt: &f.state.CreatedAt, DataUpdatedAt: &f.state.UpdatedAt,
 					}
