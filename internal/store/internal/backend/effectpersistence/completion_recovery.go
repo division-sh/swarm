@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -678,13 +679,10 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Kind: runtimeeffects.KindProviderTurn, Adapter: recovered.Adapter, Transport: recovered.Transport,
 		SessionGrantID: recovered.SessionGrantID, SessionLockOwner: recovered.SessionLockOwner,
 	}
-	if len(evidence.InstanceOwnership) != 0 {
-		if err := json.Unmarshal(evidence.InstanceOwnership, &attempt.InstanceOwnership); err != nil {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("decode captured turn ownership: %w", err)
-		}
-		if err := attempt.InstanceOwnership.Validate(); err != nil {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, err
-		}
+	var err error
+	attempt.InstanceOwnership, err = decodeCompletionRecoveryOwnership(evidence.InstanceOwnership)
+	if err != nil {
+		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, err
 	}
 	if authority.HasBusinessTurnOrigin() {
 		origin, err := decodeCompletionOrigin(recovered.OriginKind, recovered.OriginDeliveryID, recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginClaimToken, recovered.OriginClaimVersion, recovered.OriginSubscriber, recovered.OriginDirectiveID, recovered.OriginDirectiveOwner)
@@ -760,6 +758,20 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		settlement.Spend.AgentIdentity = target.AgentIdentity
 	}
 	return attempt, settlement, nil
+}
+
+func decodeCompletionRecoveryOwnership(raw json.RawMessage) (events.InstanceOwnership, error) {
+	var ownership events.InstanceOwnership
+	if len(raw) == 0 {
+		return ownership, nil
+	}
+	if err := json.Unmarshal(raw, &ownership); err != nil {
+		return events.InstanceOwnership{}, fmt.Errorf("decode captured turn ownership: %w", err)
+	}
+	if err := ownership.Validate(); err != nil {
+		return events.InstanceOwnership{}, err
+	}
+	return ownership, nil
 }
 
 func CompletionRecoverySettlement(recovered CompletionRecoveryAttempt, state runtimeeffects.State, failure *runtimefailures.Envelope, now time.Time) (runtimeeffects.Attempt, runtimeeffects.CompletionSettlement, error) {
