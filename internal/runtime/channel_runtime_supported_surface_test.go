@@ -473,7 +473,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if err := fencedOwner.Replace(testAdmittedChannelActivationPublication(t, credentialStore, binding)); err != nil {
 				t.Fatal(err)
 			}
-			proveRegisteredManagedChannelTransport(t, ctx, eventStore, fencedExecutor, fencedOwner, binding, actor, calls.Load)
+			proveRegisteredManagedChannelTransport(t, ctx, eventStore, base, fencedExecutor, fencedOwner, binding, actor, calls.Load)
 		})
 	}
 }
