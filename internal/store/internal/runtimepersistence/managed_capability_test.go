@@ -246,7 +246,7 @@ type managedAgentTurnFixtureOptions struct {
 	OriginEvent *events.Event
 }
 
-func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string) agentmemory.Identity {
+func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string, exactIdentity ...agentmemory.Identity) agentmemory.Identity {
 	t.Helper()
 	rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
 	if err != nil {
@@ -264,6 +264,12 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 	}
 	ctx = originalStoreFixtureContext(t, fixtureCtx, store)
 	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
+	if len(exactIdentity) != 0 {
+		if len(exactIdentity) != 1 || exactIdentity[0].Validate() != nil || exactIdentity[0].RunID != runID || exactIdentity[0].AgentID() != agentID || exactIdentity[0].FlowInstance() != flowInstance {
+			t.Fatal("managed fixture identity disagrees with its exact actor coordinates")
+		}
+		identity = exactIdentity[0]
+	}
 	memory := agentmemory.Plan{}
 	if strings.TrimSpace(flowInstance) != "" {
 		memory = agentmemory.Plan{Enabled: true}
