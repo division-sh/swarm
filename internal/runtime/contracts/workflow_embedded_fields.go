@@ -66,15 +66,9 @@ func embeddedRecordFields(fields []yamlsource.MappingField, types TypeCatalogDoc
 				return nil, fmt.Errorf("_embed repeats record %q at %s and %s", name, previous, at)
 			}
 			seen[name] = at
-			record, exists := types.Types[name]
-			if !exists {
-				return nil, fmt.Errorf("_embed record %q at %s is not a named record in this flow's catalog", name, at)
-			}
-			if len(record.Fields) == 0 {
-				return nil, fmt.Errorf("_embed record %q defined at %s, used at %s, has no fields", name, definitionLocation(record.definition), at)
-			}
-			if _, err := (CatalogTypeReference{Type: name, Catalog: types}).Resolve(); err != nil {
-				return nil, fmt.Errorf("_embed record %q defined at %s, used at %s: %w", name, definitionLocation(record.definition), at, err)
+			record, err := resolveEmbeddedRecord(types, name, at)
+			if err != nil {
+				return nil, err
 			}
 			for _, key := range sortedContractKeys(record.Fields) {
 				value := record.Fields[key]
@@ -89,4 +83,18 @@ func embeddedRecordFields(fields []yamlsource.MappingField, types TypeCatalogDoc
 		}
 	}
 	return out, nil
+}
+
+func resolveEmbeddedRecord(types TypeCatalogDocument, name, at string) (NamedTypeDecl, error) {
+	record, exists := types.Types[name]
+	if !exists {
+		return NamedTypeDecl{}, fmt.Errorf("_embed record %q at %s is not a named record in this flow's catalog", name, at)
+	}
+	if len(record.Fields) == 0 {
+		return NamedTypeDecl{}, fmt.Errorf("_embed record %q defined at %s, used at %s, has no fields", name, definitionLocation(record.definition), at)
+	}
+	if _, err := (CatalogTypeReference{Type: name, Catalog: types}).Resolve(); err != nil {
+		return NamedTypeDecl{}, fmt.Errorf("_embed record %q defined at %s, used at %s: %w", name, definitionLocation(record.definition), at, err)
+	}
+	return record, nil
 }
