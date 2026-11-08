@@ -2164,7 +2164,7 @@ func assertGoldenJoinContinuation(t *testing.T, ctx context.Context, rpc *releas
 	// The process test checks wire evidence; it does not compile an in-process oracle.
 	const collectingTransition = "transition:1c1b19802675aed7db4fab06bcffbf688ca5ed66eeea050adffca0c8b03ede28"
 	entry := map[string]any{
-		"life":   1,
+		"life":   float64(1),
 		"run_id": completion.RunID, "flow_scope": ".", "instance_id": completion.RunID,
 		"instance_path": entities.root.FlowInstance, "entity_id": entities.root.EntityID, "stage": "collecting",
 		"cause": "delivery", "event_id": scout.EventID, "occurrence_id": entryDelivery.DeliveryID, "transition_id": collectingTransition,
