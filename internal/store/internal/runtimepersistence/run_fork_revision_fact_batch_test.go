@@ -73,6 +73,7 @@ func TestRunForkRevisionFactBatchBothStores(t *testing.T) {
 				initial = append(initial, exactLedgerRow{Revision: f.initialRevision + 1, Family: string(runforkrevision.FamilyEntityMetadata), Key: id, Present: true, Body: map[string]any{
 					"entity_id": id, "flow_instance": "batch/1", "entity_type": "fork_entity", "slug": "batch-slug", "name": "Original", "created_at": nil, "flow_config": nil,
 					"construction_kind": "imported_state", "stage_defined": false, "flow_template": nil, "mode": nil,
+					"life": nil, "instance_revision": nil,
 					"status": nil, "current_state": nil, "entered_state_at": nil, "updated_at": nil, "terminated_at": nil,
 					"parent_instance": nil, "instance_key": nil, "initial_materialization": nil, "initial_projection_version": nil,
 					"data_created_at": f.at.UTC().Format(time.RFC3339Nano), "data_updated_at": f.at.UTC().Format(time.RFC3339Nano),
@@ -106,6 +107,7 @@ func TestRunForkRevisionFactBatchBothStores(t *testing.T) {
 					row.Body = map[string]any{
 						"entity_id": id, "flow_instance": "batch/1", "entity_type": "fork_entity", "slug": "batch-slug", "name": "Changed", "created_at": nil, "flow_config": nil,
 						"construction_kind": "imported_state", "stage_defined": false, "flow_template": nil, "mode": nil,
+						"life": nil, "instance_revision": nil,
 						"status": nil, "current_state": nil, "entered_state_at": nil, "updated_at": nil, "terminated_at": nil,
 						"parent_instance": nil, "instance_key": nil, "initial_materialization": nil, "initial_projection_version": nil,
 						"data_created_at": f.at.UTC().Format(time.RFC3339Nano), "data_updated_at": f.at.UTC().Format(time.RFC3339Nano),
