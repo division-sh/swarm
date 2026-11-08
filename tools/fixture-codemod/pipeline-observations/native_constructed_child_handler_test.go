@@ -37,6 +37,7 @@ func TestConstructedScenarioValuesRetainOriginalConstructorFacts(t *testing.T) {
 	row := nativeMissingHeaderRecipe(t, "native-constructed-scenario-values")
 	before := strings.Replace(row.Before, "\tsource := pc.SemanticSource()\n", "", 1)
 	before = strings.Replace(before, "\tinstance := WorkflowInstance{", "\treturn WorkflowInstance{", 1)
+	before = strings.Replace(before, "\treturn WorkflowInstance{\n", "\treturn WorkflowInstance{\n\t\tLife: 1,\n", 1)
 	end := strings.Index(before, "\tif err := pc.workflowStore.create")
 	if end < 0 {
 		t.Fatal("missing original unit persistence cut")
@@ -49,6 +50,11 @@ func TestConstructedScenarioValuesRetainOriginalConstructorFacts(t *testing.T) {
 	got, actualErr := canonicalFunction(actual)
 	if err != nil || actualErr != nil || want != got {
 		t.Fatal("pure scenario values changed compiled fields/stage, parent or entity identity")
+	}
+	mutant := strings.Replace(actual, "\t\tLife:       1,", "\t\tLife:       2,", 1)
+	mutated, mutateErr := canonicalFunction(mutant)
+	if mutant == actual || mutateErr != nil || mutated == want {
+		t.Fatal("scenario constructor lost its exact initial-life guard")
 	}
 	if !row.Removed {
 		t.Fatal("raw constructor seed was not retired")
