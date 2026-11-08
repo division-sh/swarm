@@ -2376,32 +2376,39 @@ func (a *Adapter) RunDiagnosticFailures(ctx context.Context, q queryer, runID st
 	return a.snapshotsByIDQuery(ctx, q, query, runID, limit)
 }
 
+func validateRunTracePage(page RunTracePageQuery) error {
+	if _, err := uuid.Parse(page.RunID); err != nil {
+		return fmt.Errorf("delivery run trace page run id: %w", err)
+	}
+	if page.Limit <= 0 {
+		return fmt.Errorf("delivery run trace page limit must be positive")
+	}
+	if page.Life != nil && (*page.Life <= 0 || len(page.EntityIDs) != 1) {
+		return fmt.Errorf("delivery run trace life requires one entity and a positive iter")
+	}
+	if page.After != nil && (page.After.EventCreatedAt.IsZero() || strings.TrimSpace(page.After.EventID) == "") {
+		return fmt.Errorf("delivery run trace page cursor requires event time and id")
+	}
+	for _, status := range page.DeliveryStatuses {
+		if _, err := ParseStatus(string(status)); err != nil {
+			return err
+		}
+	}
+	for _, class := range page.SubscriberClasses {
+		if _, err := ParseSubscriberClass(string(class)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RunTraceReferencePage applies trace filtering, keyset ordering, and the
 // limit before canonical snapshot hydration. This keeps executable-delivery
 // SQL private while bounding every run-debug page by its requested size.
 func (a *Adapter) RunTraceReferencePage(ctx context.Context, q queryer, page RunTracePageQuery) (RunTraceReferencePage, error) {
 	page.RunID = strings.TrimSpace(page.RunID)
-	if _, err := uuid.Parse(page.RunID); err != nil {
-		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page run id: %w", err)
-	}
-	if page.Limit <= 0 {
-		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page limit must be positive")
-	}
-	if page.Life != nil && (*page.Life <= 0 || len(page.EntityIDs) != 1) {
-		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace life requires one entity and a positive iter")
-	}
-	if page.After != nil && (page.After.EventCreatedAt.IsZero() || strings.TrimSpace(page.After.EventID) == "") {
-		return RunTraceReferencePage{}, fmt.Errorf("delivery run trace page cursor requires event time and id")
-	}
-	for _, status := range page.DeliveryStatuses {
-		if _, err := ParseStatus(string(status)); err != nil {
-			return RunTraceReferencePage{}, err
-		}
-	}
-	for _, class := range page.SubscriberClasses {
-		if _, err := ParseSubscriberClass(string(class)); err != nil {
-			return RunTraceReferencePage{}, err
-		}
+	if err := validateRunTracePage(page); err != nil {
+		return RunTraceReferencePage{}, err
 	}
 
 	type rawReference struct {
