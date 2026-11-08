@@ -59,6 +59,46 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 	}
 }
 
+func TestDescribeCommandShowsLoweredPayloadWrites(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, content string) {
+		t.Helper()
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	write("schema.yaml", "stages: []\n")
+	write("alpha/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	write("alpha/schema.yaml", "stages: []\ninputs:\n  - observed\n")
+	write("alpha/state.yaml", "id: text\nitem_id: text\nmaybe: text?\n")
+	write("alpha/events.yaml", "observed:\n  id: text\n  item_id: text\n  maybe: text?\n  unrelated: text\n")
+	write("alpha/nodes.yaml", "indexer:\n  observed:\n    data_accumulation:\n      from: payload\n      writes:\n        - source_field: id\n          target_field: id\n")
+	var stdout, stderr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", root, "--json"}, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe JSON code=%d stderr=%s", code, stderr.String())
+	}
+	var view authoringview.View
+	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
+		t.Fatalf("decode describe JSON: %v", err)
+	}
+	if len(view.Flows) != 1 || len(view.Flows[0].DataWrites) != 2 || view.Flows[0].DataWrites[1].Value == nil || view.Flows[0].DataWrites[1].Value.Ref != "payload.item_id" {
+		t.Fatalf("describe lowered writes = %#v", view.Flows)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", root}, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe text code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "data writes:") || !strings.Contains(stdout.String(), `target=item_id source_event=observed value=ref("payload.item_id")`) {
+		t.Fatalf("describe text omitted lowered write:\n%s", stdout.String())
+	}
+}
+
 func TestDescribeCommandRendersStandingIngressDeclaration(t *testing.T) {
 	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	var stdout, stderr bytes.Buffer

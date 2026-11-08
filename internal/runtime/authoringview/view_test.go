@@ -1161,6 +1161,9 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T) {
 	source := loadDuplicateNodeIDContainedOpsSource(t)
 	view := mustBuild(t, source, nil)
+	if len(view.Root.DataWrites) != 0 {
+		t.Fatalf("root data writes = %#v, want none without root executable nodes", view.Root.DataWrites)
+	}
 
 	for _, flowID := range []string{"alpha", "beta"} {
 		flow := flowByID(t, view, flowID)
@@ -1174,6 +1177,37 @@ func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T)
 		if op.SourceFile == "" || !strings.HasSuffix(op.SourceFile, filepath.Join(flowID, "nodes.yaml")) {
 			t.Fatalf("%s source file = %q, want flow-local nodes.yaml", flowID, op.SourceFile)
 		}
+		writes := flow.DataWrites
+		if len(writes) != 3 {
+			t.Fatalf("%s data writes = %#v, want explicit id, contained set, and lowered item_id", flowID, writes)
+		}
+		for i, target := range []string{"id", "state.items", "item_id"} {
+			if writes[i].Target != target || writes[i].Event != "observed" || writes[i].NodeID != op.NodeID {
+				t.Fatalf("%s data write %d = %#v, want target %q in observed handler", flowID, i, writes[i], target)
+			}
+		}
+		if writes[0].Value == nil || writes[0].Value.Ref != "payload.id" || writes[2].Value == nil || writes[2].Value.Ref != "payload.item_id" {
+			t.Fatalf("%s write values = %#v, want canonical explicit and lowered payload reads", flowID, writes)
+		}
+		if writes[2].SourceEvent != "observed" || writes[2].Operation != "" || writes[1].Operation != "set" || writes[1].Key == nil {
+			t.Fatalf("%s write semantics = %#v, want lowered ordinary write and intact contained operation", flowID, writes)
+		}
+	}
+}
+
+func TestAppendNodeDataWritesIncludesJoinBranches(t *testing.T) {
+	write := runtimecontracts.WorkflowDataWrite{SourceField: "id", TargetField: "id"}
+	node := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+		"observed": {Join: &runtimecontracts.JoinSpec{
+			OnComplete: runtimecontracts.HandlerRuleEntry{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{write}}},
+			OnDeadline: runtimecontracts.HandlerRuleEntry{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{write}}},
+		}},
+	}}
+	byFlow := map[string][]DataWriteView{}
+	appendNodeDataWrites(byFlow, "alpha", "indexer", "alpha/nodes.yaml", node)
+	writes := byFlow["alpha"]
+	if len(writes) != 2 || writes[0].Scope != "handler.join.on_complete.data_accumulation" || writes[1].Scope != "handler.join.on_deadline.data_accumulation" {
+		t.Fatalf("join data writes = %#v, want both canonical branches in order", writes)
 	}
 }
 
@@ -1376,6 +1410,8 @@ Item:
   name: text
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "state.yaml"), `id: text
+item_id: text
+maybe: text?
 items: map[text]Item
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "events.yaml"), `
@@ -1383,11 +1419,14 @@ observed:
   id: text
   item_id: text
   item: Item
+  maybe: text?
+  unrelated: text
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "nodes.yaml"), `
 indexer:
   observed:
     data_accumulation:
+      from: payload
       writes:
         - source_field: id
           target_field: id
