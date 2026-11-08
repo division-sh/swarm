@@ -1143,7 +1143,6 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		Artifact: bundle.SourceArtifact, StartedAt: at.Add(time.Minute),
 	})
 	commitPreparedWorkflowAggregateFixture(t, unrelatedCtx, pg, unrelatedRunID, runtimepipeline.WorkflowInstance{
-		Life:       1,
 		InstanceID: unrelatedRunID, StorageRef: unrelatedRunID, EntityID: unrelatedRunID,
 		WorkflowName: ".", WorkflowVersion: semanticview.Wrap(bundle).WorkflowVersion(), Mode: "static", CurrentState: "pending",
 		CreatedAt: at.Add(time.Minute), EnteredStageAt: at.Add(time.Minute),
@@ -1274,12 +1273,12 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 	for _, tc := range []struct {
 		name string
 		code string
-		seed func(context.Context, *PostgresStore, *sql.DB, string, string, string, time.Time) error
+		seed func(*testing.T, context.Context, *PostgresStore, *sql.DB, string, string, string, time.Time) error
 	}{
 		{
 			name: "session",
 			code: "source_sessions_advanced_after_fork_point",
-			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+			seed: func(t *testing.T, ctx context.Context, _ *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
@@ -1299,7 +1298,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 		{
 			name: "conversation audit",
 			code: "source_conversation_audits_advanced_after_fork_point",
-			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+			seed: func(t *testing.T, ctx context.Context, _ *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
@@ -1319,7 +1318,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 		{
 			name: "turn",
 			code: "source_turns_advanced_after_fork_point",
-			seed: func(ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+			seed: func(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
 				identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
@@ -1367,7 +1366,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			activationRequest.AllowedSourceEventIDs = []string{eventID}
 			activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 				seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-				if err := tc.seed(ctx, pg, db, sourceRunID, entityID, eventID, at); err != nil {
+				if err := tc.seed(t, ctx, pg, db, sourceRunID, entityID, eventID, at); err != nil {
 					t.Fatalf("seed post-T %s: %v", tc.name, err)
 				}
 				captureRunForkTestRevision(t, db, sourceRunID)
@@ -1969,7 +1968,6 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 		t.Fatal("selected history fixture requires the exact declared keyless leaf")
 	}
 	rootCommand, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
-		Life:       1,
 		InstanceID: run.RunID, StorageRef: run.RunID, EntityID: run.RunID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 		CurrentState: "pending", CreatedAt: at, EnteredStageAt: at,
@@ -1991,7 +1989,6 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 			t.Fatal(err)
 		}
 		parentCommand, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
-			Life:       1,
 			InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
 			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 			ParentFlowID: parent.ParentRoute.FlowID, ParentFlowInstance: parent.ParentRoute.FlowInstance, ParentEntityID: parent.ParentEntityID,
@@ -2001,7 +1998,6 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 			t.Fatal(err)
 		}
 		leafCommand, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
-			Life:       1,
 			InstanceID: leaf.InstanceID, StorageRef: leaf.InstancePath, EntityID: leaf.EntityID, EntityType: owner.entityType,
 			Name: "Selected Store Entity", WorkflowName: leaf.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 			ParentFlowID: leaf.ParentRoute.FlowID, ParentFlowInstance: leaf.ParentRoute.FlowInstance, ParentEntityID: leaf.ParentEntityID,
