@@ -390,7 +390,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 
 func seedSQLiteTraceAgent(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, agentID string, startedAt time.Time) {
 	t.Helper()
-	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, mustTestAgentIdentityForRun(runID, agentID, "flow-a"), "active")
+	seedManagedTurnFixtureAgent(t, ctx, sqliteStore, runID, agentID, "flow-a")
 }
 
 func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, sessionID, runID, agentID string, updatedAt time.Time) {
