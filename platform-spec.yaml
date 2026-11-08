@@ -1099,25 +1099,6 @@ contract_formats:
         Reserved persisted loop buckets are not readable or writable through
         authored accumulator/data/clear paths. Supported entity/tool readbacks
         expose a typed loop projection and omit the mutable internal bucket.
-  entity_schema:
-    description: Authoritative entity contracts live in each FlowNode entities.yaml and are owned by filesystem-derived flow identity.
-    replacement_surface:
-      owner_file: <flow-path>/entities.yaml (entities.yaml at root)
-      type_source: <flow-path>/types.yaml plus visible ancestor type declarations
-    migration_rules:
-      retired:
-        - embedded entity_schema blocks
-        - grouped field sections as contract authority
-        - author-declared jsonb fields
-        - nullable aliases
-      replacement: |
-        Entity contracts use a flat form: underscore-prefixed keys are
-        entity metadata, non-underscored keys are field declarations.
-        Field types come from the Wave 1 type system. Every declared
-        bare field requires definite assignment before a value read; a
-        trailing `?` permits omission. Explicit `initial:` values apply
-        only at creation. Reads never materialize defaults.
-    authoritative_section: See top-level `entity_contracts` and `type_system`.
   canonical_form_registry:
     payloadless_event:
       surface: events.yaml
@@ -4206,13 +4187,13 @@ handler_specification:
       emit_field_lowering:
         syntax: "`emit.from` is an optional sibling of `emit.event` and `emit.fields`.
           It is valid only on emitted-event payload `EmitSpec` surfaces."
-        allowed_sources: "`entity` and `payload` only. The value names exactly one source namespace; lists, fallbacks,
+        allowed_sources: "`state` and `payload` only. The value names exactly one source namespace; lists, fallbacks,
           wildcards, multi-source selection, and heuristic matching are invalid."
         lowering: "`emit.from: <source>` fills required declared payload fields for the emitted event when the same-named
           field exists in the source and the target field is not explicitly present in `emit.fields`. Optional payload fields
           are never auto-filled; authors opt into optionals through explicit `emit.fields` entries."
-        field_values: "All `emit.fields` values use the shared scalar grammar. Unquoted `payload` and `entity` are CEL
-          roots, not same-named source-field selectors. Use `payload.interest_score` or `entity.bucket` for exact
+        field_values: "All `emit.fields` values use the shared scalar grammar. Unquoted `payload` and `state` are CEL
+          roots, not same-named source-field selectors. Use `payload.interest_score` or `state.bucket` for exact
           typed selections, and quote literal text."
         canonical_output: The generated/semantic view and every validator/runtime consumer see the lowered canonical explicit
           `emit.fields` map with `emit.from` removed. Runtime evaluates only that explicit map; it never performs implicit
@@ -25341,7 +25322,7 @@ static_analyzer:
       - MCP/tool-schema derivation
     accepted_coverage:
       initial:
-        rule: Explicit `initial:` on the field counts as authored creation-time coverage.
+        rule: A literal field initializer counts as authored creation-time coverage.
       handler_write_sites:
         rule: Handler write targets that name the field explicitly count as coverage. This includes data_accumulation, compute,
           filter/group_by/reduce/count store_as, query store_as, and clear targets.

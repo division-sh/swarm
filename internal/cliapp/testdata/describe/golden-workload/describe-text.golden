@@ -5,6 +5,9 @@ events:
   - candidate.requested (fields: batch_id, candidate_id)
   - scout.requested (fields: candidate_ids, query)
   - search.requested (fields: candidate_ids, query)
+data writes:
+  - node=Lg.c2NvdXQtY29sbGVjdG9y event=scout.completed scope=handler.data_accumulation target=batch_id value=ref("payload.batch_id")
+  - node=Lg.c2NvdXQtY29sbGVjdG9y event=scout.completed scope=handler.data_accumulation target=candidate_ids value=ref("payload.candidate_ids")
 root primary entity: state
 root constructor: (no arguments)
 flows:
@@ -13,6 +16,8 @@ flows:
       - candidate.analyzed (fields: batch_id, candidate_id, summary)
       - candidate.completed (fields: batch_id, candidate_id, summary)
       - candidate.work.requested (fields: batch_id, candidate_id)
+    data writes:
+      - node=Y2FuZGlkYXRl.Y2FuZGlkYXRlLWludGFrZQ event=candidate.requested scope=handler.data_accumulation target=candidate_id value=ref("payload.candidate_id")
     primary entity: state
     instance: field=candidate_id identity=run + flow + instance_key
     constructor: candidate.requested key=candidate_id supplied=[]
@@ -20,6 +25,8 @@ flows:
     events:
       - scout.completed (fields: batch_id, candidate_ids)
       - scout.work.requested (fields: candidate_ids, query)
+    data writes:
+      - node=c2NvdXQ.c2NvdXQtY29tcGxldGlvbg event=scout.completed scope=handler.data_accumulation target=candidate_ids value=ref("payload.candidate_ids")
     primary entity: state
     constructor: (no arguments)
     singleton coordinator: primary_entity=state contained_fields=1

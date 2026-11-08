@@ -40,6 +40,7 @@ type RoutingTopologyView = routingtopology.Topology
 
 type RootView struct {
 	Constructors       []FlowConstructorView          `json:"constructors"`
+	DataWrites         []DataWriteView                `json:"data_writes,omitempty"`
 	Ingress            *StandingIngressView           `json:"ingress,omitempty"`
 	SourceFiles        RootSourceFiles                `json:"source_files"`
 	Events             []EventView                    `json:"events,omitempty"`
@@ -61,6 +62,7 @@ type RootSourceFiles struct {
 
 type FlowView struct {
 	Constructors         []FlowConstructorView          `json:"constructors"`
+	DataWrites           []DataWriteView                `json:"data_writes,omitempty"`
 	ID                   string                         `json:"id"`
 	Path                 string                         `json:"path,omitempty"`
 	Mode                 string                         `json:"mode,omitempty"`
@@ -318,6 +320,27 @@ type ContainedOperationView struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type DataWriteView struct {
+	FlowID      string               `json:"flow_id"`
+	NodeID      string               `json:"node_id"`
+	Event       string               `json:"event"`
+	Scope       string               `json:"scope"`
+	SourceEvent string               `json:"source_event,omitempty"`
+	Operation   string               `json:"operation,omitempty"`
+	Target      string               `json:"target"`
+	Value       *WriteExpressionView `json:"value,omitempty"`
+	Key         *WriteExpressionView `json:"key,omitempty"`
+	Index       *WriteExpressionView `json:"index,omitempty"`
+	SourceFile  string               `json:"source_file,omitempty"`
+}
+
+type WriteExpressionView struct {
+	Kind    runtimecontracts.ExpressionKind `json:"kind"`
+	Literal any                             `json:"literal,omitempty"`
+	Ref     string                          `json:"ref,omitempty"`
+	CEL     string                          `json:"cel,omitempty"`
+}
+
 type DiagnosticView struct {
 	CheckID          string   `json:"check_id"`
 	Severity         string   `json:"severity"`
@@ -339,12 +362,14 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		return View{}, fmt.Errorf("authoring view requires a workflow contract bundle source")
 	}
 	topology := BuildRoutingTopologyWithReport(source, bundle, opts.BootReport)
+	writesByFlow := dataWritesByFlow(source, bundle)
 	root, err := buildRoot(source, bundle)
 	if err != nil {
 		return View{}, err
 	}
+	root.DataWrites = writesByFlow["."]
 	root.Ingress = standingIngressView(topology.RootInputSources, ".")
-	flows, err := buildFlows(source, bundle, topology.RootInputSources)
+	flows, err := buildFlows(source, bundle, topology.RootInputSources, writesByFlow)
 	if err != nil {
 		return View{}, err
 	}
@@ -475,7 +500,7 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 	return out, nil
 }
 
-func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, rootInputs []routingtopology.RootInputSource) ([]FlowView, error) {
+func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, rootInputs []routingtopology.RootInputSource, writesByFlow map[string][]DataWriteView) ([]FlowView, error) {
 	opsByFlow := containedOperationsByFlow(source, bundle)
 	demandsByFlow := map[string][]runtimebootverify.SingletonCoordinatorDemand{}
 	for _, demand := range runtimebootverify.BuildSingletonCoordinatorDemandProjection(source) {
@@ -495,6 +520,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		}
 		item := FlowView{
 			Constructors:   constructorViews(source, flowID),
+			DataWrites:     writesByFlow[flowID],
 			ID:             flowID,
 			Path:           flowID,
 			Mode:           strings.TrimSpace(schema.EffectiveMode()),
@@ -1071,6 +1097,59 @@ type containedOperationRef struct {
 	EventType string
 	Scope     string
 	Write     runtimecontracts.WorkflowDataWrite
+}
+
+func dataWritesByFlow(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) map[string][]DataWriteView {
+	out := map[string][]DataWriteView{}
+	if source == nil || bundle == nil {
+		return out
+	}
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		flowID, nodeID := node.FlowPath(), node.Key()
+		sourceFile := strings.TrimSpace(authoredFileForSource(bundle, record.Source))
+		appendNodeDataWrites(out, flowID, nodeID, sourceFile, record.Entry)
+	}
+	return out
+}
+
+func appendNodeDataWrites(out map[string][]DataWriteView, flowID, nodeID, sourceFile string, node runtimecontracts.SystemNodeContract) {
+	for _, event := range sortedHandlerEvents(node.EventHandlers) {
+		handler := node.EventHandlers[event]
+		appendWrites := func(scope string, writes runtimecontracts.WorkflowDataAccumulation) {
+			for _, write := range writes.Writes {
+				out[flowID] = append(out[flowID], DataWriteView{
+					FlowID: flowID, NodeID: nodeID, Event: event, Scope: scope,
+					SourceEvent: strings.TrimSpace(writes.SourceEvent),
+					Operation:   string(write.Operation), Target: strings.TrimSpace(write.Target()),
+					Value: writeExpressionView(write.SourceExpression()),
+					Key:   writeExpressionView(write.Key), Index: writeExpressionView(write.Index),
+					SourceFile: sourceFile,
+				})
+			}
+		}
+		appendWrites("handler.data_accumulation", handler.DataAccumulation)
+		for idx, rule := range handler.Rules {
+			appendWrites("handler."+rule.DisplayLabel("rules", idx)+".data_accumulation", rule.DataAccumulation)
+		}
+		for idx, rule := range handler.OnComplete {
+			appendWrites("handler."+rule.DisplayLabel("on_complete", idx)+".data_accumulation", rule.DataAccumulation)
+		}
+		if handler.Join != nil {
+			appendWrites("handler.join.on_complete.data_accumulation", handler.Join.OnComplete.DataAccumulation)
+			appendWrites("handler.join.on_deadline.data_accumulation", handler.Join.OnDeadline.DataAccumulation)
+		}
+	}
+}
+
+func writeExpressionView(value runtimecontracts.ExpressionValue) *WriteExpressionView {
+	if value.IsZero() {
+		return nil
+	}
+	return &WriteExpressionView{Kind: value.Kind, Literal: value.Literal, Ref: value.Ref, CEL: value.CEL}
 }
 
 func containedOperationsByFlow(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) map[string][]ContainedOperationView {

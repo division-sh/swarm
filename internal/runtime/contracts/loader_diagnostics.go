@@ -141,8 +141,6 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 			remediation = "A field is its type or {type: <type>, indexed: true} on state only; put prose in a YAML comment. Authored refinements and citations are not supported; use a validate row for machine-checked rules."
 		case "materialize_from", "project":
 			remediation = "The accumulate target is the collected list; a differently shaped list is a second field written by op: append with an explicit value."
-		case "initial", "_unused_reason", "_unused_reader_reason":
-			remediation = "These state-field mappings are retired; write the initial value as a literal directly under the field, or a plain type for an unassigned field."
 		}
 	}
 	diagnostic := &LoaderDiagnostic{

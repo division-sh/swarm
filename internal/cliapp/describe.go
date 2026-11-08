@@ -230,6 +230,7 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
 	fmt.Fprintln(out, "validation: structural; live readiness: not evaluated")
 	writeDescribeEvents(out, view.Root.Events, "")
+	writeDescribeDataWrites(out, view.Root.DataWrites, "")
 	if view.Root.PrimaryEntity != nil {
 		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
 	}
@@ -267,6 +268,7 @@ func writeDescribeClockSchedules(out io.Writer, schedules []semanticview.ClockSc
 
 func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
 	writeDescribeEvents(out, flow.Events, "    ")
+	writeDescribeDataWrites(out, flow.DataWrites, "    ")
 	writeDescribeIngress(out, flow.Ingress)
 	if flow.PrimaryEntity != nil {
 		fmt.Fprintf(out, "    primary entity: %s\n", flow.PrimaryEntity.Type)
@@ -280,6 +282,45 @@ func writeDescribeFlowDetails(out io.Writer, flow authoringview.FlowView) {
 	}
 	if len(flow.ContainedOperations) > 0 {
 		fmt.Fprintf(out, "    contained operations: %d\n", len(flow.ContainedOperations))
+	}
+}
+
+func writeDescribeDataWrites(out io.Writer, writes []authoringview.DataWriteView, indent string) {
+	if len(writes) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "%sdata writes:\n", indent)
+	for _, write := range writes {
+		fmt.Fprintf(out, "%s  - node=%s event=%s scope=%s target=%s", indent, write.NodeID, write.Event, write.Scope, write.Target)
+		if write.SourceEvent != "" {
+			fmt.Fprintf(out, " source_event=%s", write.SourceEvent)
+		}
+		if write.Operation != "" {
+			fmt.Fprintf(out, " op=%s", write.Operation)
+		}
+		if write.Value != nil {
+			fmt.Fprintf(out, " value=%s", describeWriteExpression(write.Value))
+		}
+		if write.Key != nil {
+			fmt.Fprintf(out, " key=%s", describeWriteExpression(write.Key))
+		}
+		if write.Index != nil {
+			fmt.Fprintf(out, " index=%s", describeWriteExpression(write.Index))
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func describeWriteExpression(value *authoringview.WriteExpressionView) string {
+	switch value.Kind {
+	case "literal":
+		return fmt.Sprintf("literal(%#v)", value.Literal)
+	case "ref":
+		return fmt.Sprintf("ref(%q)", value.Ref)
+	case "cel":
+		return fmt.Sprintf("cel(%q)", value.CEL)
+	default:
+		return string(value.Kind)
 	}
 }
 

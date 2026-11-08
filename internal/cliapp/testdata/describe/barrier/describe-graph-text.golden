@@ -20,11 +20,17 @@ flows:
     events:
       - period.reported (fields: operating_id, period_id, portfolio_id, revenue)
       - period.setup (fields: expected_operating_ids, period_id, portfolio_id)
+    data writes:
+      - node=cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg event=portfolio.setup scope=handler.data_accumulation target=portfolio_id value=ref("payload.portfolio_id")
     primary entity: state
     instance: field=portfolio_id identity=run + flow + instance_key
     constructor: operating.reported key=portfolio_id supplied=[]
     constructor: portfolio.setup key=portfolio_id supplied=[]
   - portfolio/period (template)
+    data writes:
+      - node=cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg event=period.setup scope=handler.data_accumulation target=portfolio_id value=ref("payload.portfolio_id")
+      - node=cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg event=period.setup scope=handler.data_accumulation target=period_id value=ref("payload.period_id")
+      - node=cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg event=period.setup scope=handler.data_accumulation target=expected_operating_ids value=ref("payload.expected_operating_ids")
     primary entity: state
     instance: field=period_id identity=run + flow + instance_key
     constructor: period.reported key=period_id supplied=[portfolio_id]

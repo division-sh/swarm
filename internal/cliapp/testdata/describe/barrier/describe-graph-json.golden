@@ -175,6 +175,20 @@
           "key_field": "portfolio_id"
         }
       ],
+      "data_writes": [
+        {
+          "flow_id": "portfolio",
+          "node_id": "cG9ydGZvbGlv.cG9ydGZvbGlvLXJvdXRlcg",
+          "event": "portfolio.setup",
+          "scope": "handler.data_accumulation",
+          "target": "portfolio_id",
+          "value": {
+            "kind": "ref",
+            "ref": "payload.portfolio_id"
+          },
+          "source_file": "portfolio/nodes.yaml"
+        }
+      ],
       "id": "portfolio",
       "path": "portfolio",
       "mode": "template",
@@ -284,6 +298,44 @@
             "expected_operating_ids",
             "portfolio_id"
           ]
+        }
+      ],
+      "data_writes": [
+        {
+          "flow_id": "portfolio/period",
+          "node_id": "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg",
+          "event": "period.setup",
+          "scope": "handler.data_accumulation",
+          "target": "portfolio_id",
+          "value": {
+            "kind": "ref",
+            "ref": "payload.portfolio_id"
+          },
+          "source_file": "portfolio/period/nodes.yaml"
+        },
+        {
+          "flow_id": "portfolio/period",
+          "node_id": "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg",
+          "event": "period.setup",
+          "scope": "handler.data_accumulation",
+          "target": "period_id",
+          "value": {
+            "kind": "ref",
+            "ref": "payload.period_id"
+          },
+          "source_file": "portfolio/period/nodes.yaml"
+        },
+        {
+          "flow_id": "portfolio/period",
+          "node_id": "cG9ydGZvbGlvL3BlcmlvZA.cG9ydGZvbGlvLWNvbGxlY3Rvcg",
+          "event": "period.setup",
+          "scope": "handler.data_accumulation",
+          "target": "expected_operating_ids",
+          "value": {
+            "kind": "ref",
+            "ref": "payload.expected_operating_ids"
+          },
+          "source_file": "portfolio/period/nodes.yaml"
         }
       ],
       "id": "portfolio/period",
