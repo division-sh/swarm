@@ -28,6 +28,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -63,7 +64,7 @@ func prepareRegisteredManagedChannelActor(t *testing.T, ctx context.Context, sel
 // Called by the real dual-store channel/private-activity fixture. Only the
 // provider protocol is simulated; lifecycle, claim, completion admission,
 // registry, HTTP gateway, catalog hashes, executor, journal and connector run.
-func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, selected any, executor *tools.Executor, owner *channelactivation.Owner, predecessor packs.OutboundBindingPlan, actor models.AgentConfig, calls func() int32) {
+func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, selected any, workflow semanticview.Source, executor *tools.Executor, owner *channelactivation.Owner, predecessor packs.OutboundBindingPlan, actor models.AgentConfig, calls func() int32) {
 	t.Helper()
 	store := selected.(interface {
 		storetest.AgentFixtureStore
@@ -141,7 +142,7 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 				t.Fatal(err)
 			}
 			pinned = effects.WithAuthority(pinned, authority)
-			pinned = effects.WithTurnInstanceSource(pinned, source)
+			pinned = effects.WithTurnInstanceSource(pinned, workflow)
 			pinned = effects.WithController(pinned, effects.NewCompletionController(store, store, store, nil).WithExecutionPosture(executionposture.Live))
 			pinned = effects.WithExecutionMode(pinned, effects.ExecutionModeLive)
 			pinned = deliverylifecycle.WithClaim(pinned, claimed.Claim)

@@ -605,7 +605,11 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepar
 	if store == nil {
 		store = admitTestPostgresStore(t, db)
 	}
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+	ctx := testAuthorActivityContext()
+	if len(historical) != 0 {
+		ctx = testAuthorActivityContextForBundle(historical[0].SourceArtifact.BundleHash())
+	}
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	return seedConversationForkSourceWithContext(t, ctx, store, db, base, historical...)
 }
 

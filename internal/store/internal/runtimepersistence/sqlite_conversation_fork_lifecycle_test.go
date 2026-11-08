@@ -226,7 +226,11 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 
 func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s)
+	ctx := testAuthorActivityContext()
+	if len(historical) != 0 {
+		ctx = testAuthorActivityContextForBundle(historical[0].SourceArtifact.BundleHash())
+	}
+	ctx = originalStoreFixtureContext(t, ctx, s)
 	return seedSQLiteConversationForkSourceWithContext(t, ctx, s, base, historical...)
 }
 
