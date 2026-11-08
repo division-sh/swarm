@@ -903,7 +903,7 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 		}
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	_ = admitAPITestAgent(t, ctx, pg, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, FlowID: semanticview.RootExecutionFlowID(source), FlowPath: semanticview.RootExecutionFlowID(source), Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
+	_ = admitAPITestAgent(t, ctx, pg, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, FlowID: semanticview.RootExecutionFlowID(source), Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	return manager
 }
 
