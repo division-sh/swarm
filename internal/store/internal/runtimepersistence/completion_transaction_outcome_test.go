@@ -178,6 +178,7 @@ func TestCompletionTransactionAcknowledgementBoundaryBothStores(t *testing.T) {
 				settlement.ProviderHead = nil
 				settlement.Settlement.OperationID, settlement.Settlement.AttemptID = attempt.OperationID, attempt.AttemptID
 				settlement.Settlement.Authority = attempt.Authority
+				settlement.Settlement.InstanceOwnership = attempt.InstanceOwnership.Clone()
 				settlement.Settlement.Now = settlement.Now
 				ctx, cancel := context.WithCancel(fixture.context)
 				defer cancel()

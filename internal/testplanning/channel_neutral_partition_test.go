@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const channelNeutralSelection = `^Test(Channel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)|Prov.*)$`
+const channelNeutralSelection = `^Test(Channel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)|Prov.*|InstanceLifeResetPublicJourneyBothStores)$`
 
 func TestChannelNeutralSplitRetainsCompleteProofEnvelopes(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
@@ -19,7 +19,10 @@ func TestChannelNeutralSplitRetainsCompleteProofEnvelopes(t *testing.T) {
 			CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "full",
 		}
 		if id == "serveapp-channel-neutral" {
-			want.RequiredChildren = map[string][]string{"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}}
+			want.RequiredChildren = map[string][]string{
+				"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"},
+				"TestInstanceLifeResetPublicJourneyBothStores":   {"default_sqlite", "explicit_postgres"},
+			}
 		}
 		if !reflect.DeepEqual(policy.Units[id], want) {
 			t.Errorf("%s changed complete-root/backend/count/environment/budget/timeout envelope: %+v", id, policy.Units[id])
