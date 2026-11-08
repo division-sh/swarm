@@ -267,9 +267,9 @@ func prepareTurnAttemptOwnershipTx(ctx context.Context, tx *sql.Tx, postgres boo
 }
 
 func peekProviderRecoveryIDsTx(ctx context.Context, tx *sql.Tx, runID string, actor *agentidentity.Identity) ([]string, error) {
-	// Peeks include the anchors of unfinished logical turns, even when their
-	// original physical attempts have already settled. This is the existing
-	// recovery population, never a scan of arbitrary historical attempts.
+	// Canceled turns and unfinished physical work need their retained anchors.
+	// A completed, uncanceled origin is not recovery work merely because its
+	// logical lifetime has not yet been observed as settled.
 	var agentID, nameOwner, nameSource, presence, scope, instance, path string
 	if actor != nil {
 		fields, err := actor.StorageFields()
@@ -290,6 +290,9 @@ func peekProviderRecoveryIDsTx(ctx context.Context, tx *sql.Tx, runID string, ac
 		AND a.origin_kind IN ('delivery','directive')
 		AND (a.state IN ('authorized','launched','response_observed') OR EXISTS
 		 (SELECT 1 FROM runtime_agent_turn_lifetimes t WHERE t.settled_at IS NULL AND
+		  (t.cancel_reason IS NOT NULL OR EXISTS
+		   (SELECT 1 FROM runtime_external_effect_attempts current_attempt WHERE current_attempt.attempt_id=t.current_attempt_id
+		    AND current_attempt.state IN ('authorized','launched','response_observed'))) AND
 		  (a.attempt_id=t.admitted_attempt_id OR a.attempt_id=t.current_attempt_id OR a.attempt_id=t.first_attempt_id)))
 		ORDER BY a.attempt_id`, runID, agentID, nameOwner, nameSource, presence, scope, instance, path)
 	if err != nil {
