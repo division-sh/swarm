@@ -492,7 +492,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	turnID := uuid.NewString()
 	at := time.Unix(1700002410, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, ctx, db, sourceRunID, entityID, eventID, at)
-	seedSelectedContractSourceConversationHistory(t, ctx, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
+	seedSelectedContractSourceConversationHistory(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(time.Minute))
@@ -605,7 +605,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	at := time.Unix(1700002420, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, ctx, db, sourceRunID, entityID, eventID, at)
 	sessionID := uuid.NewString()
-	activeClaim := seedSelectedContractSourceConversationHistoryWithActiveDelivery(t, ctx, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
+	activeClaim := seedSelectedContractSourceConversationHistoryWithActiveDelivery(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
 	if bound, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
 		t.Fatalf("bind active delivery session: %v", err)
 	} else if !bound.Acknowledged {
@@ -642,7 +642,7 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 	at := time.Unix(1700002425, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, ctx, db, sourceRunID, entityID, sourceEventID, at)
-	seedSelectedContractSourceConversationHistory(t, ctx, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
+	seedSelectedContractSourceConversationHistory(t, ctx, pg, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
@@ -704,7 +704,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	at := time.Unix(1700002427, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, ctx, db, sourceRunID, entityID, sourceEventID, at)
-	seedSelectedContractSourceConversationHistory(t, ctx, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
+	seedSelectedContractSourceConversationHistory(t, ctx, pg, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "item.received",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
@@ -774,7 +774,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	turnID := uuid.NewString()
 	at := time.Unix(1700002430, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, ctx, db, sourceRunID, entityID, eventID, at)
-	seedSelectedContractSourceConversationHistory(t, ctx, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
+	seedSelectedContractSourceConversationHistory(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
 	terminalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("terminal-agent")}
 	terminalEvent := commitPostgresDeliveryFixture(t, ctx, db, eventID, terminalRoute)
 	terminalClaim := claimPostgresDeliveryFixture(t, ctx, db, terminalEvent, terminalRoute)
@@ -871,7 +871,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a', '1', 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
+		        jsonb_build_object('kind', 'flow_owned_control', 'life', 1, 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
 		        'live', $5, 'agent-a', 'system', 'workflow_timer', 'active', $6)
 	`, sourceTimerID, sourceRunID, sourceRef.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
@@ -1097,7 +1097,7 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 	at := time.Unix(1700003608, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, ctx, db, sourceRunID, entityID, eventID, at)
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	seedPostTActiveConversationCoupling(t, ctx, db, sourceRunID, entityID, eventID, sessionID, at)
+	seedPostTActiveConversationCoupling(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, at)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
@@ -1403,7 +1403,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	at := time.Unix(1700003622, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, ctx, db, sourceRunID, entityID, sourceEventID, at)
-	seedSelectedContractSourceConversationHistory(t, ctx, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
+	seedSelectedContractSourceConversationHistory(t, ctx, pg, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
@@ -1472,7 +1472,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		seedPostTActiveConversationCoupling(t, ctx, db, sourceRunID, entityID, eventID, sessionID, at)
+		seedPostTActiveConversationCoupling(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, at)
 		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
 	})
 	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
@@ -2073,17 +2073,16 @@ func seedImportedSelectedContractSourceWithEvent(t *testing.T, ctx context.Conte
 	}
 }
 
-func seedSelectedContractSourceConversationHistory(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
-	seedSelectedContractSourceConversationHistoryWithDelivery(t, ctx, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at, false)
+func seedSelectedContractSourceConversationHistory(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
+	seedSelectedContractSourceConversationHistoryWithDelivery(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at, false)
 }
 
-func seedSelectedContractSourceConversationHistoryWithActiveDelivery(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) runtimedelivery.Claim {
-	return seedSelectedContractSourceConversationHistoryWithDelivery(t, ctx, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at, true)
+func seedSelectedContractSourceConversationHistoryWithActiveDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) runtimedelivery.Claim {
+	return seedSelectedContractSourceConversationHistoryWithDelivery(t, ctx, pg, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at, true)
 }
 
-func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time, keepDelivery bool) runtimedelivery.Claim {
+func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time, keepDelivery bool) runtimedelivery.Claim {
 	t.Helper()
-	pg := admitTestPostgresStore(t, db)
 	identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
 	seedManagedTurnFixtureAgent(t, ctx, pg, sourceRunID, identity.AgentID(), identity.FlowInstance())
@@ -2138,11 +2137,11 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, ctx
 	return claimed.Claim
 }
 
-func seedPostTActiveConversationCoupling(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
+func seedPostTActiveConversationCoupling(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
 	t.Helper()
 	identity := mustTestAgentIdentityForRun(sourceRunID, "active-agent", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedManagedTurnFixtureAgent(t, ctx, admitTestPostgresStore(t, db), sourceRunID, identity.AgentID(), identity.FlowInstance())
+	seedManagedTurnFixtureAgent(t, ctx, pg, sourceRunID, identity.AgentID(), identity.FlowInstance())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
