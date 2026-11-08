@@ -1868,6 +1868,19 @@ func persistExternalAttemptLaunchPostgresTx(txctx context.Context, tx *sql.Tx, a
 	return nil
 }
 
+func launchExternalBusinessTurnTx(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, postgres bool, attempt runtimeeffects.Attempt) (runtimeeffects.ExternalAttemptLaunch, error) {
+	var launch runtimeeffects.ExternalAttemptLaunch
+	launchedAt, err := loadExternalEffectLaunchTime(ctx, tx, attempt.AttemptID, attempt.OperationID, postgres)
+	if err != nil {
+		return launch, err
+	}
+	launch.Turn, err = launchBusinessTurnTx(ctx, tx, postgres, attempt, launchedAt)
+	if err != nil {
+		return launch, err
+	}
+	return launch, recordExternalEffectStory(ctx, mutation, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt)
+}
+
 func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	if processEffectAuthority(attempt.Authority) && !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedEffectLaunch, s) {
 		var launch runtimeeffects.ExternalAttemptLaunch
@@ -1900,18 +1913,8 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 			if err := persistExternalAttemptLaunchPostgresTx(txctx, tx, attempt, now); err != nil {
 				return err
 			}
-			launchedAt, err := loadExternalEffectLaunchTime(txctx, tx, attempt.AttemptID, attempt.OperationID, true)
-			if err != nil {
-				return err
-			}
-			launch.Turn, err = launchBusinessTurnTx(txctx, tx, true, attempt, launchedAt)
-			if err != nil {
-				return err
-			}
-			if err := recordExternalEffectStory(txctx, mutation, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt); err != nil {
-				return err
-			}
-			return nil
+			launch, err = launchExternalBusinessTurnTx(txctx, tx, mutation, true, attempt)
+			return err
 		})
 		return launch, err
 	})
@@ -1972,18 +1975,8 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 			if err := persistExternalAttemptLaunchSQLiteTx(txctx, tx, attempt, now); err != nil {
 				return err
 			}
-			launchedAt, err := loadExternalEffectLaunchTime(txctx, tx, attempt.AttemptID, attempt.OperationID, false)
-			if err != nil {
-				return err
-			}
-			launch.Turn, err = launchBusinessTurnTx(txctx, tx, false, attempt, launchedAt)
-			if err != nil {
-				return err
-			}
-			if err := recordExternalEffectStory(txctx, mutation, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt); err != nil {
-				return err
-			}
-			return nil
+			launch, err = launchExternalBusinessTurnTx(txctx, tx, mutation, false, attempt)
+			return err
 		})
 		return launch, err
 	})
