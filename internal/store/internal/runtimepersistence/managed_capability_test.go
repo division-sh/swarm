@@ -381,7 +381,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, "managed-turn-fixture:"+authority.Target.ID)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, adapter)
 	completionCtx = runtimecorrelation.WithInboundEvent(completionCtx, originEvent)
-	frame := managedCompletionTestFrameWithEvent(t, authority, adapter, originEvent)
+	frame := managedCompletionTestFrameForSource(t, authority, adapter, originEvent, rooted.Admission().BundleHash())
 	handle, err := runtimeeffects.BeginManagedCompletion(completionCtx, adapter, rec.RequestPayload, frame, nil)
 	if err != nil {
 		return err
