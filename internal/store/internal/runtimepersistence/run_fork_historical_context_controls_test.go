@@ -34,7 +34,7 @@ func TestRunForkHistoricalContextOptionalReferencesBothStores(t *testing.T) {
 						case "timer_ancestor_provenance":
 							parentTimer, parentEvent := uuid.NewString(), uuid.NewString()
 							seedRunForkRevisionMatrixEvent(t, ctx, tx, f.foreignID, parentEvent, s.at, f.postgres)
-							mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO timers (timer_id,timer_name,schedule_scope,schedule_key,immutable_hash,run_id,fire_event,fire_payload,routing_source,execution_mode,fire_at,initial_fire_at,recurring,owner_node,owner_kind,due_basis_kind,due_basis_absolute,task_type,status,created_at) VALUES ($1,'ancestor-timer','run','ancestor-key','ancestor-hash',$2,'matrix.fire','{}','{"kind":"root"}','live',$3,$3,FALSE,'matrix-node','system','absolute',$3,'timer','active',$4)`, parentTimer, f.foreignID, s.at.Add(time.Hour), s.at)
+							mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO timers (timer_id,timer_name,schedule_scope,schedule_key,immutable_hash,run_id,fire_event,fire_payload,routing_source,execution_mode,fire_at,initial_fire_at,recurring,owner_node,owner_kind,due_basis_kind,due_basis_absolute,task_type,status,created_at) VALUES ($1,'ancestor-timer','run','ancestor-key','ancestor-hash',$2,'matrix.fire','{}','{"kind":"root","life":1}','live',$3,$3,FALSE,'matrix-node','system','absolute',$3,'timer','active',$4)`, parentTimer, f.foreignID, s.at.Add(time.Hour), s.at)
 							parentEffects, err := runforkrevision.ForRun(f.foreignID, runforkrevision.AllFamilies()...)
 							if err != nil {
 								t.Fatal(err)
@@ -135,7 +135,7 @@ func TestRunForkHistoricalContextTombstoneFoldBothStores(t *testing.T) {
 			}
 			defer tx.Rollback()
 			s := f.source
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO timers (timer_id,timer_name,schedule_scope,schedule_key,immutable_hash,run_id,fire_event,fire_payload,routing_source,execution_mode,fire_at,initial_fire_at,recurring,owner_node,owner_kind,due_basis_kind,due_basis_absolute,task_type,status,created_at) VALUES ($1,'matrix-timer','run','matrix-key','matrix-hash',$2,'matrix.fire','{}','{"kind":"root"}','live',$3,$3,FALSE,'matrix-node','system','absolute',$3,'timer','active',$4)`, s.timerID, s.runID, s.at.Add(time.Hour), s.at)
+			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO timers (timer_id,timer_name,schedule_scope,schedule_key,immutable_hash,run_id,fire_event,fire_payload,routing_source,execution_mode,fire_at,initial_fire_at,recurring,owner_node,owner_kind,due_basis_kind,due_basis_absolute,task_type,status,created_at) VALUES ($1,'matrix-timer','run','matrix-key','matrix-hash',$2,'matrix.fire','{}','{"kind":"root","life":1}','live',$3,$3,FALSE,'matrix-node','system','absolute',$3,'timer','active',$4)`, s.timerID, s.runID, s.at.Add(time.Hour), s.at)
 			reappearedAt := uuid.NewString()
 			seedRunForkRevisionMatrixEvent(t, ctx, tx, s.runID, reappearedAt, s.at.Add(3*time.Second), f.postgres)
 			f.finalize(t, tx)
