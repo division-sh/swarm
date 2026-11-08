@@ -118,31 +118,14 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 	if err != nil || !valid || !event.CreatedAt().Equal(requestedAt.UTC().Truncate(time.Microsecond)) {
 		return fmt.Errorf("canceled turn reaction changed its persisted occurrence time")
 	}
-	flowID, _, path, err := attempt.Authority.BusinessTurnCoordinates()
+	route, err := validateTurnReactionSource(attempt, event)
 	if err != nil {
 		return err
-	}
-	source := event.RoutingSource()
-	if err := attempt.InstanceOwnership.Validate(); err != nil {
-		return err
-	}
-	if captured := attempt.InstanceOwnership.Life; captured != nil && source.Life() != captured.Life {
-		return fmt.Errorf("canceled turn reaction changed its captured originating life")
-	}
-	if source.Kind() != events.RoutingSourceFlowOwnedControl ||
-		source.Route().FlowID != flowID || source.Route().FlowInstance != path ||
-		source.Route().EntityID != attempt.Authority.Target.EntityID ||
-		event.ProducerType() != events.EventProducerPlatform || event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() {
-		return fmt.Errorf("canceled turn reaction changed its exact flow-owned producer: expected=%+v source_kind=%s source=%+v target=%+v producer=%+v", events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: attempt.Authority.Target.EntityID}, source.Kind().StorageCode(), source.Route(), event.TargetRoute(), event.Producer())
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(event.Payload(), &fields); err != nil || fields == nil || len(fields) != 0 {
-		return fmt.Errorf("canceled turn reaction must retain its declared empty payload")
 	}
 	// The command event is the journal's receiver projection, not the producer's
 	// target claim. Validate the original targetless publication against the
 	// planner's immutable admitted source, as grouped publication already does.
-	originalSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: attempt.Authority.Target.EntityID})
+	originalSource, err := events.NewFlowOwnedControlRoutingSource(route)
 	if err != nil {
 		return err
 	}
@@ -168,6 +151,32 @@ func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, atte
 		return fmt.Errorf("validate original timeout publication: %w", err)
 	}
 	return nil
+}
+
+func validateTurnReactionSource(attempt runtimeeffects.Attempt, event events.Event) (events.RouteIdentity, error) {
+	flowID, _, path, err := attempt.Authority.BusinessTurnCoordinates()
+	if err != nil {
+		return events.RouteIdentity{}, err
+	}
+	route := events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: attempt.Authority.Target.EntityID}
+	source := event.RoutingSource()
+	if err := attempt.InstanceOwnership.Validate(); err != nil {
+		return events.RouteIdentity{}, err
+	}
+	if captured := attempt.InstanceOwnership.Life; captured != nil && source.Life() != captured.Life {
+		return events.RouteIdentity{}, fmt.Errorf("canceled turn reaction changed its captured originating life")
+	}
+	if source.Kind() != events.RoutingSourceFlowOwnedControl ||
+		source.Route().FlowID != flowID || source.Route().FlowInstance != path ||
+		source.Route().EntityID != attempt.Authority.Target.EntityID ||
+		event.ProducerType() != events.EventProducerPlatform || event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() {
+		return events.RouteIdentity{}, fmt.Errorf("canceled turn reaction changed its exact flow-owned producer: expected=%+v source_kind=%s source=%+v target=%+v producer=%+v", route, source.Kind().StorageCode(), source.Route(), event.TargetRoute(), event.Producer())
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(event.Payload(), &fields); err != nil || fields == nil || len(fields) != 0 {
+		return events.RouteIdentity{}, fmt.Errorf("canceled turn reaction must retain its declared empty payload")
+	}
+	return route, nil
 }
 
 func AcknowledgeCanceledTurn(result runtimeeffects.CanceledTurnCommit, acknowledged bool) runtimeeffects.CanceledTurnCommit {

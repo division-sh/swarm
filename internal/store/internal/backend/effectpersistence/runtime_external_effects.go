@@ -1881,11 +1881,8 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 		var launch runtimeeffects.ExternalAttemptLaunch
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
-			txctx, attempt, err = prepareTurnAttemptOwnershipTx(txctx, tx, true, s.directives, attempt)
+			txctx, attempt, err = prepareCurrentTurnAttemptOwnershipTx(txctx, tx, true, s.directives, attempt)
 			if err != nil {
-				return err
-			}
-			if err := requireCurrentTurnOwnership(txctx, tx, attempt); err != nil {
 				return err
 			}
 			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
@@ -1956,11 +1953,8 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 		var launch runtimeeffects.ExternalAttemptLaunch
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
-			txctx, attempt, err = prepareTurnAttemptOwnershipTx(txctx, tx, false, s.directives, attempt)
+			txctx, attempt, err = prepareCurrentTurnAttemptOwnershipTx(txctx, tx, false, s.directives, attempt)
 			if err != nil {
-				return err
-			}
-			if err := requireCurrentTurnOwnership(txctx, tx, attempt); err != nil {
 				return err
 			}
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {

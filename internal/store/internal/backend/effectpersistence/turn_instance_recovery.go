@@ -51,8 +51,7 @@ func peekRetainedTurnTx(ctx context.Context, tx *sql.Tx, id string) (retainedTur
 	return row, nil
 }
 
-// Peeks choose locks only. No decoder or anchor can acquire a missing prefix.
-func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraActors ...agentidentity.Identity) (context.Context, error) {
+func peekRetainedTurnSetTx(ctx context.Context, tx *sql.Tx, ids []string, extraActors []agentidentity.Identity) ([]retainedTurnCoordinate, []agentidentity.Identity, error) {
 	unique := make(map[string]bool, len(ids))
 	var peeks []retainedTurnCoordinate
 	actors := append([]agentidentity.Identity(nil), extraActors...)
@@ -63,23 +62,39 @@ func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bo
 		unique[id] = true
 		row, err := peekRetainedTurnTx(ctx, tx, id)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		peeks, actors = append(peeks, row), append(actors, row.actor)
+	}
+	return peeks, actors, nil
+}
+
+func (scope *turnOwnershipObservation) validateRetainedTurnSet(peeks []retainedTurnCoordinate, actors []agentidentity.Identity) error {
+	for _, actor := range actors {
+		if !scope.locked[actor] {
+			return fmt.Errorf("retained turn cannot extend an acquired ownership prefix")
+		}
+	}
+	for _, row := range peeks {
+		if scope.attempts[row.id] != row {
+			return fmt.Errorf("retained turn differs from its outer observed coordinates")
+		}
+	}
+	return nil
+}
+
+// Peeks choose locks only. No decoder or anchor can acquire a missing prefix.
+func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, ids []string, extraActors ...agentidentity.Identity) (context.Context, error) {
+	peeks, actors, err := peekRetainedTurnSetTx(ctx, tx, ids, extraActors)
+	if err != nil {
+		return nil, err
 	}
 	if len(peeks) == 0 && len(actors) == 0 {
 		return ctx, nil
 	}
 	if prior, _ := ctx.Value(turnOwnershipContextKey{}).(*turnOwnershipObservation); prior != nil && prior.tx == tx {
-		for _, actor := range actors {
-			if !prior.locked[actor] {
-				return nil, fmt.Errorf("retained turn cannot extend an acquired ownership prefix")
-			}
-		}
-		for _, row := range peeks {
-			if prior.attempts[row.id] != row {
-				return nil, fmt.Errorf("retained turn differs from its outer observed coordinates")
-			}
+		if err := prior.validateRetainedTurnSet(peeks, actors); err != nil {
+			return nil, err
 		}
 		return ctx, nil
 	}
@@ -127,6 +142,17 @@ func prepareRetainedTurnOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bo
 		}
 	}
 	return context.WithValue(ctx, turnOwnershipContextKey{}, scope), nil
+}
+
+func prepareCurrentTurnAttemptOwnershipTx(ctx context.Context, tx *sql.Tx, postgres bool, owner providerDrainDirectiveOwner, attempt effects.Attempt) (context.Context, effects.Attempt, error) {
+	ctx, attempt, err := prepareTurnAttemptOwnershipTx(ctx, tx, postgres, owner, attempt)
+	if err != nil {
+		return ctx, attempt, err
+	}
+	if err := requireCurrentTurnOwnership(ctx, tx, attempt); err != nil {
+		return ctx, attempt, err
+	}
+	return ctx, attempt, nil
 }
 
 func withAdmittedTurnOwnership(ctx context.Context, tx *sql.Tx, actor agentidentity.Identity, observed events.InstanceOwnership) context.Context {
