@@ -26,11 +26,18 @@ func TestEventCatalogFactoringCompiledReaders(t *testing.T) {
 			t.Fatalf("compiled bare-event reader: %v\n%s", result.err, result.output)
 		}
 	}
-	for _, body := range []string{"task.requested: {}\n", "task.requested:\n  required: [id]\n  id: uuid\n"} {
-		writeReleaseFile(t, path, body)
+	for _, refusal := range []struct{ body, want string }{
+		{"task.requested: {}\n", "an event with no fields is declared bare"},
+		{"task.requested:\n  required: [id]\n  id: uuid\n", `event task.requested.required: unknown catalog type "id"`},
+	} {
+		writeReleaseFile(t, path, refusal.body)
 		for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe", "--json"}} {
 			result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
-			if result.err == nil || (!strings.Contains(result.output, "an event with no fields is declared bare") && !strings.Contains(result.output, "reserved for required-by-default field semantics")) {
+			want := refusal.want
+			if args[0] == "verify" {
+				want = strings.Trim(strconv.Quote(want), `"`)
+			}
+			if result.err == nil || !strings.Contains(result.output, want) {
 				t.Fatalf("compiled event grammar refusal: %v\n%s", result.err, result.output)
 			}
 		}
