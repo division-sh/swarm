@@ -1067,6 +1067,7 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 			t.Fatal(err)
 		}
 		construction = directiveFactoryConstructionLoader{owner: owner, instance: pipeline.WorkflowInstance{
+			Life:         1,
 			WorkflowName: instance.TemplateID, StorageRef: instance.InstancePath,
 			InstanceID: instance.InstanceID, EntityID: instance.EntityID,
 			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,

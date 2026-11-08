@@ -639,7 +639,7 @@ func seedConversationForkSourceWithContext(t *testing.T, ctx context.Context, st
 	if err != nil {
 		t.Fatalf("conversation fork source identity: %v", err)
 	}
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	seedManagedTurnFixtureAgent(t, ctx, store, source.runID, source.agentID, conversationForkSourceFlowInstance)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,

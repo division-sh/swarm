@@ -174,8 +174,8 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 	requireRunFixtureForTest(t, ctx, backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: base,
 	})
-	seedTestAgentRow(t, ctx, backend.db, !backend.sqlite, identity, "active")
-	seedTestAgentRow(t, ctx, backend.db, !backend.sqlite, malformedIdentity, "active")
+	seedManagedTurnFixtureAgent(t, ctx, backend.settlement, runID, agentID, identity.FlowInstance())
+	seedManagedTurnFixtureAgent(t, ctx, backend.settlement, runID, malformedAgentID, malformedIdentity.FlowInstance())
 	seedOperatorConversationProjectionSession(t, backend, runID, sessionID, identity, 0, base, lastAt)
 	seedOperatorConversationProjectionSession(t, backend, runID, malformedSessionID, malformedIdentity, 0, base, lastAt)
 	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[0], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: turnIDs[0], triggerType: "task.one", taskID: "task-1", turnBlocks: privateBlocks, parseOK: true, latencyMS: 101, createdAt: firstAt})

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -247,19 +248,27 @@ type managedAgentTurnFixtureOptions struct {
 
 func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
+	rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatalf("load managed fixture agent source: %v", err)
+	}
+	source, err := runtimecorrelation.NewSourceArtifactFact(rooted.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
 	memory := agentmemory.Plan{}
 	if strings.TrimSpace(flowInstance) != "" {
 		memory = agentmemory.Plan{Enabled: true}
 	}
-	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStaticForSource(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
 			Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
 			Memory: memory, FlowID: "global", FlowPath: flowInstance,
 		}),
 		Status: "active", StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("seed managed turn fixture agent: %v", err)
 	}
 	return identity
@@ -267,8 +276,18 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
-	fixtureCtx := testAuthorActivityContext()
+	rooted, err := store.(rootedRunStore).LoadRunRootedSource(ctx, rec.RunID)
+	if err != nil {
+		return err
+	}
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		return err
+	}
+	fixtureCtx := testAuthorActivityContextForBundle(rooted.Admission().BundleHash())
 	fixtureCtx = originalStoreFixtureContext(t, runtimestartupownership.CarryMutationAuthority(fixtureCtx, ctx), store)
+	fixtureCtx = runtimeeffects.WithTurnInstanceSource(fixtureCtx, semanticview.Wrap(bundle))
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)

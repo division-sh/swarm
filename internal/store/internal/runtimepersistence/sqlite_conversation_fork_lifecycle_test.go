@@ -259,7 +259,7 @@ func seedSQLiteConversationForkSourceWithContext(t *testing.T, ctx context.Conte
 	if err != nil {
 		t.Fatalf("conversation fork source identity: %v", err)
 	}
-	seedTestAgentRow(t, ctx, s.backend.ConstructionHandle(), false, identity, "active")
+	seedManagedTurnFixtureAgent(t, ctx, s, source.runID, source.agentID, conversationForkSourceFlowInstance)
 	statements := []struct {
 		query string
 		args  []any

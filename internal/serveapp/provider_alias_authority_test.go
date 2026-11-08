@@ -360,6 +360,8 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedWorkspaceProofRuntime
 			SubscriberID string                              `json:"subscriber_id"`
 			Status       string                              `json:"status"`
 			Target       operatorread.OperatorDeliveryTarget `json:"target"`
+			ReasonCode   string                              `json:"reason_code"`
+			Failure      json.RawMessage                     `json:"failure"`
 		} `json:"deliveries"`
 		NoDelivery *operatorread.OperatorNoDelivery `json:"no_delivery"`
 		EntityID   string                           `json:"entity_id"`
@@ -427,6 +429,9 @@ func requireProviderAliasDeliveries(t *testing.T, rt servedWorkspaceProofRuntime
 			return event.EventName
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	for _, delivery := range last.Deliveries {
+		t.Logf("provider delivery failure: status=%s reason=%s failure=%s", delivery.Status, delivery.ReasonCode, delivery.Failure)
 	}
 	t.Fatalf("provider delivery did not settle: %#v", last)
 	return ""
