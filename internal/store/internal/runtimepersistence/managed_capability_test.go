@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -257,7 +258,11 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 	}
 	// Fixture construction is a new command on the same retained process, not
 	// a replacement of the caller's already-frozen runtime grant.
-	ctx = originalStoreFixtureContext(t, testAuthorActivityContextForBundle(rooted.Admission().BundleHash()), store)
+	fixtureCtx := testAuthorActivityContextForBundle(rooted.Admission().BundleHash())
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		fixtureCtx = worklifetime.WithProcess(fixtureCtx, process)
+	}
+	ctx = originalStoreFixtureContext(t, fixtureCtx, store)
 	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
 	memory := agentmemory.Plan{}
 	if strings.TrimSpace(flowInstance) != "" {
@@ -288,6 +293,9 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		return err
 	}
 	fixtureCtx := testAuthorActivityContextForBundle(rooted.Admission().BundleHash())
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		fixtureCtx = worklifetime.WithProcess(fixtureCtx, process)
+	}
 	fixtureCtx = originalStoreFixtureContext(t, fixtureCtx, store)
 	fixtureCtx = runtimeeffects.WithTurnInstanceSource(fixtureCtx, semanticview.Wrap(bundle))
 	plan := rec.Memory

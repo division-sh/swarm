@@ -1143,6 +1143,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		Artifact: bundle.SourceArtifact, StartedAt: at.Add(time.Minute),
 	})
 	commitPreparedWorkflowAggregateFixture(t, unrelatedCtx, pg, unrelatedRunID, runtimepipeline.WorkflowInstance{
+		Life:       1,
 		InstanceID: unrelatedRunID, StorageRef: unrelatedRunID, EntityID: unrelatedRunID,
 		WorkflowName: ".", WorkflowVersion: semanticview.Wrap(bundle).WorkflowVersion(), Mode: "static", CurrentState: "pending",
 		CreatedAt: at.Add(time.Minute), EnteredStageAt: at.Add(time.Minute),
@@ -1968,6 +1969,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 		t.Fatal("selected history fixture requires the exact declared keyless leaf")
 	}
 	rootCommand, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
+		Life:       1,
 		InstanceID: run.RunID, StorageRef: run.RunID, EntityID: run.RunID,
 		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 		CurrentState: "pending", CreatedAt: at, EnteredStageAt: at,
@@ -1989,6 +1991,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 			t.Fatal(err)
 		}
 		parentCommand, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
+			Life:       1,
 			InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
 			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 			ParentFlowID: parent.ParentRoute.FlowID, ParentFlowInstance: parent.ParentRoute.FlowInstance, ParentEntityID: parent.ParentEntityID,
@@ -1998,6 +2001,7 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, ctx context.Cont
 			t.Fatal(err)
 		}
 		leafCommand, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
+			Life:       1,
 			InstanceID: leaf.InstanceID, StorageRef: leaf.InstancePath, EntityID: leaf.EntityID, EntityType: owner.entityType,
 			Name: "Selected Store Entity", WorkflowName: leaf.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 			ParentFlowID: leaf.ParentRoute.FlowID, ParentFlowInstance: leaf.ParentRoute.FlowInstance, ParentEntityID: leaf.ParentEntityID,
