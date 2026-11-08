@@ -23,15 +23,19 @@ type turnCancellationCutStore struct {
 	effects.Store
 	effects.TurnLifetimeStore
 	effects.CanceledTurnStore
-	cut       *atomic.Bool
-	seen      chan effects.CanceledTurnCommand
-	once      *sync.Once
-	recovered chan effects.CanceledTurnCommand
+	cut         *atomic.Bool
+	seen        chan effects.CanceledTurnCommand
+	seenContext chan context.Context
+	once        *sync.Once
+	recovered   chan effects.CanceledTurnCommand
 }
 
 func (s turnCancellationCutStore) CommitCanceledTurn(ctx context.Context, command effects.CanceledTurnCommand) (effects.CanceledTurnCommit, error) {
 	if s.cut.Load() {
-		s.once.Do(func() { s.seen <- command })
+		s.once.Do(func() {
+			s.seenContext <- context.WithoutCancel(ctx)
+			s.seen <- command
+		})
 		return effects.CanceledTurnCommit{}, errors.New("injected canceled-origin commit interruption after physical cleanup")
 	}
 	select {
@@ -51,6 +55,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			var recoverNext atomic.Bool
 			cut.Store(true)
 			seen := make(chan effects.CanceledTurnCommand, 1)
+			seenContext := make(chan context.Context, 1)
 			recovered := make(chan effects.CanceledTurnCommand, 1)
 			var once sync.Once
 			var selected interface {
@@ -70,7 +75,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 				role := persistence.deps.ManagerPersistenceRoles.LifecycleEffects
 				persistence.deps.ManagerPersistenceRoles.LifecycleEffects = turnCancellationCutStore{
 					Store: role, TurnLifetimeStore: role.(effects.TurnLifetimeStore), CanceledTurnStore: role.(effects.CanceledTurnStore),
-					cut: &cut, seen: seen, once: &once, recovered: recovered,
+					cut: &cut, seen: seen, seenContext: seenContext, once: &once, recovered: recovered,
 				}
 				return persistence
 			}
@@ -131,7 +136,7 @@ func TestServedCanceledTurnRecoveryBothStores(t *testing.T) {
 			if err != nil || before.Status != deliverylifecycle.StatusInProgress {
 				t.Fatalf("interruption falsely settled business origin: %+v %v", before, err)
 			}
-			pending, err := selected.ListCanceledTurnRecoveries(context.Background(), effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
+			pending, err := selected.ListCanceledTurnRecoveries(<-seenContext, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
 			if err != nil || len(pending) != 1 || !pending[0].Cancellation.Origin.Same(command.Origin) || pending[0].Clock == nil {
 				t.Fatalf("startup lost exact physically settled pending intent: %+v %v", pending, err)
 			}

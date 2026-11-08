@@ -1036,7 +1036,7 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	seedCanonicalSelectedContractExecutionStoreSource(t, ctx, db, sourceRunID, entityID, eventID, at)
 	receiptCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	identity := agentmemory.Identity(mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"))
-	seedTestAgentRow(t, receiptCtx, db, true, identity, "active")
+	seedManagedTurnFixtureAgent(t, receiptCtx, pg, sourceRunID, identity.AgentID(), identity.FlowInstance())
 	predecessor, _, err := pg.AcquireLiveSession(receiptCtx, identity, "fork-worker")
 	if err != nil {
 		t.Fatalf("acquire post-T source session: %v", err)
@@ -1355,7 +1355,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t)), ctx)
 			activate := selectedStoreActivationGateForTest(t, ctx, pg)
 			seedCanonicalSelectedContractExecutionStoreSource(t, ctx, db, sourceRunID, entityID, eventID, at)
-			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"), "active")
+			seedManagedTurnFixtureAgent(t, ctx, pg, sourceRunID, "agent-a", "flow-a/1")
 
 			request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -1510,7 +1510,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		sessionID := uuid.NewString()
 		identity := mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "flow-a/1")
 		fields := testAgentIdentityStorageFields(t, identity)
-		seedTestAgentRow(t, ctx, db, true, identity, "active")
+		seedManagedTurnFixtureAgent(t, ctx, pg, materialized.ForkRunID, identity.AgentID(), identity.FlowInstance())
 		forkRoute := testAgentDeliveryRoute(t, materialized.ForkRunID, "agent-a", "flow-a/1")
 		forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 		forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
@@ -2086,7 +2086,7 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, ctx
 	pg := admitTestPostgresStore(t, db)
 	identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	seedManagedTurnFixtureAgent(t, ctx, pg, sourceRunID, identity.AgentID(), identity.FlowInstance())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -2142,7 +2142,7 @@ func seedPostTActiveConversationCoupling(t *testing.T, ctx context.Context, db *
 	t.Helper()
 	identity := mustTestAgentIdentityForRun(sourceRunID, "active-agent", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	seedManagedTurnFixtureAgent(t, ctx, admitTestPostgresStore(t, db), sourceRunID, identity.AgentID(), identity.FlowInstance())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
