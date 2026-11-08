@@ -35,7 +35,8 @@ func TestEventCatalogFactoringCompiledReaders(t *testing.T) {
 			result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 			want := refusal.want
 			if args[0] == "verify" {
-				want = strings.Trim(strconv.Quote(want), `"`)
+				quoted := strconv.Quote(want)
+				want = quoted[1 : len(quoted)-1]
 			}
 			if result.err == nil || !strings.Contains(result.output, want) {
 				t.Fatalf("compiled event grammar refusal: %v\n%s", result.err, result.output)
