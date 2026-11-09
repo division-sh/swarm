@@ -17,8 +17,8 @@ The existing common owners retain principal/challenge/window/consent, exact
 operation/source/generation/credential/session admission, binding/proof, journal
 launch and settlement, text/reply/card/action meaning, statuses and joined cleanup.
 In particular, readiness is not human identity and SDK retry state is not send
-authority. WhatsApp's existing claimant confirmation policy stays in the CLI
-owner, not in the binding or inferred from session transport.
+authority. The existing deployment-versus-learned claimant confirmation policy
+stays in the CLI owner, not in the binding or inferred from session transport.
 
 The account/input readers and connection role project existing methods only.
 Private account/input seals remain at their current issuers. Publication backing
@@ -40,9 +40,8 @@ The IDs below refer to E's 58-locus source inventory in issue #2338 comment
 
 | Before loci | Current owner |
 | --- | --- |
-| C01, C03-C05, C08-C15 | Installed declaration/intake/codec/presentation facts, consumed by the existing CLI owners. |
-| C02, C06 | One existing common CLI claimant-confirmation policy; the ruled WhatsApp behavior is not generalized to other session transports. |
-| C07 | Existing common continuation-copy policy; operation-ID presentation is not provider identity or consent. |
+| C01, C03-C04, C08-C15 | Installed declaration/intake/codec/presentation facts, including the landed Telegram bot address/link and registration copy, consumed by existing CLI owners. |
+| C02, C05-C07 | Existing common confirmation, claimant wording and continuation policy; preserve automatic confirmation for WhatsApp and deployment Telegram, without generalizing it to session transport. |
 | O01-O07 | Existing declaration, account, scope, logout and native-activity validators consume exact installed facts; their authority predicates remain. |
 | S01-S10 | Existing platform assembly selects the HTTP/native role once; concrete Telegram HTTP/polling and native connection methods own protocol work. |
 | S11-S19 | Existing holder/account/current-credential/source owners consume installed transport and presentation facts. |

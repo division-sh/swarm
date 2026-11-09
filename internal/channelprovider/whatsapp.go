@@ -5,27 +5,29 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 )
 
 var whatsapp = Binding{
 	id: "whatsapp", displayName: "WhatsApp", session: true, canonicalAccount: whatsappAccount,
 	claimInstructions: whatsappClaimInstructions,
-	claimantFormat:    "Code received from %s (%s conversation).\n", sanitizeClaimant: true,
-	nativeRead: "whatsapp.read_account", nativeWrite: "whatsapp.send_text",
+	nativeRead:        "whatsapp.read_account", nativeWrite: "whatsapp.send_text",
 	captureKey:    "whatsapp_capture",
 	readyTeaching: "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
 	notLinked:     "Not linked: run swarm channel connect whatsapp",
 	pairingPrompt: "Open WhatsApp > Linked Devices > Link a device, then scan (expires %s):\n%s\n",
 }
 
-func whatsappClaimInstructions(account, code string, expires time.Time) (string, error) {
+func whatsappClaimInstructions(prompt ClaimPrompt) (string, error) {
+	account := prompt.Account
+	if account == "" && prompt.Connection != nil {
+		account = prompt.Connection.Account
+	}
 	destination, err := whatsappAccount(account)
-	if err != nil || expires.IsZero() {
+	if err != nil || prompt.ExpiresAt.IsZero() {
 		return "", fmt.Errorf("operator code requires its exact WhatsApp destination and expiry")
 	}
 	return fmt.Sprintf("FROM your operator phone TO %s\nSend the code %s from your operator phone to this number before %s.\nSEND-CODE LINK (not a device-link QR): https://wa.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		destination, code, expires.Local().Format(time.RFC3339Nano), strings.TrimPrefix(destination, "+"), url.QueryEscape(code)), nil
+		destination, prompt.Code, ClaimDeadline(prompt.ExpiresAt), strings.TrimPrefix(destination, "+"), url.QueryEscape(prompt.Code)), nil
 }
 
 var e164Account = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
