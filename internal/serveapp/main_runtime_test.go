@@ -2069,6 +2069,24 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	if completed != 1 {
 		t.Fatalf("conversation construction lacks exact completed readiness: %+v", readiness)
 	}
+	scope, instance, path, err := actorIdentity.ExecutionCoordinates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actorIdentity.Route.Presence == runtimeagentidentity.RouteRoot {
+		scope = runtimeflowidentity.ScopeKey(rt.Runtime.Options.WorkflowModule.SemanticSource(), ".")
+	}
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.RunID, Route: runtimeflowidentity.StoredRoute(scope, instance, path)}
+	var owned runtimepipeline.WorkflowInstance
+	var found bool
+	if rt.Postgres != nil {
+		owned, found, err = rt.Postgres.LoadWorkflowInstance(ctx, owner)
+	} else {
+		owned, found, err = rt.SQLite.LoadWorkflowInstance(ctx, owner)
+	}
+	if err != nil || !found || owned.Life <= 0 {
+		t.Fatalf("conversation actor lacks its native owner life: found=%t err=%v", found, err)
+	}
 	for i, turn := range []struct {
 		id string
 		at time.Time
@@ -2078,7 +2096,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		route := events.DeliveryRoute{
 			Recipient: events.MustAgentDeliveryRecipient(actorIdentity.AgentID()), AgentIdentity: actorIdentity,
 			Context: events.DeliveryContext{Life: &events.InstanceLife{RunID: fixture.RunID,
-				FlowInstance: history.Construction.Plan.Identity.InstancePath, Life: history.Construction.Plan.Instance.Life}},
+				FlowInstance: owned.StorageRef, Life: owned.Life}},
 		}
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 			Store: selectedStore, Selected: selected, Identity: actorIdentity,
