@@ -60,13 +60,41 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 					t.Fatalf("generated deployment file is missing or not private: %s", private)
 				}
 			}
-			for _, command := range []string{"swarm verify . --portable", "swarm serve", "swarm test"} {
+			for _, command := range []string{"swarm verify --portable", "swarm serve", "swarm test"} {
 				if !strings.Contains(out.String(), command) {
 					t.Fatalf("output %q does not teach %s", out.String(), command)
 				}
 			}
 			if err := scaffoldArchetype(root, &out, archetype, destination); err == nil || !strings.Contains(err.Error(), "already exists") {
 				t.Fatalf("existing destination error = %v", err)
+			}
+		})
+	}
+}
+
+func TestScaffoldNextStepsUseCurrentDirectory(t *testing.T) {
+	for _, name := range []string{"zero-agent-automation", "webhook-responder", "whatsapp-receptionist"} {
+		t.Run(name, func(t *testing.T) {
+			root := mustInvocationRootForTest(t.TempDir())
+			var out bytes.Buffer
+			if err := scaffoldArchetype(root, &out, name, name); err != nil {
+				t.Fatal(err)
+			}
+			want := "Next:\n  cd " + name + "\n"
+			if name == "whatsapp-receptionist" {
+				want += "  swarm channel connect whatsapp\n  Set operator_account in policy.yaml to the linked number, including +.\n  swarm verify --portable\n  swarm serve\n"
+			} else {
+				want += "  swarm verify --portable\n  swarm test . tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
+			}
+			if !strings.HasSuffix(out.String(), want) {
+				t.Fatalf("wrong next steps:\n%s", out.String())
+			}
+			loaded, err := loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: root.Resolve(name)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.Config.Store.SQLite.Path != "" {
+				t.Fatalf("scaffold authors a SQLite path: %q", loaded.Config.Store.SQLite.Path)
 			}
 		})
 	}
