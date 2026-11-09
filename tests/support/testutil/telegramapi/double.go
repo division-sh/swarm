@@ -530,6 +530,19 @@ func (p *Double) Registration() (string, string, int) {
 	return p.callbackURL, p.signingSecret, len(p.registrationRequests)
 }
 
+// ActiveRegistrationCount counts physical resources, not registration writes.
+func (p *Double) ActiveRegistrationCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count := 0
+	for _, current := range p.registrations {
+		if current.callbackURL != "" {
+			count++
+		}
+	}
+	return count
+}
+
 func (p *Double) Delivery(index int) map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -60,6 +60,15 @@ func TestDoubleBotSettingsBelongToPhysicalResourceNotCredential(t *testing.T) {
 			if launcherResult.Result.Type != test.launcher {
 				t.Fatalf("launcher=%q want=%q", launcherResult.Result.Type, test.launcher)
 			}
+			var registered map[string]any
+			read("setWebhook", `{"url":"https://hooks.example.test/webhook","secret_token":"synthetic"}`, &registered)
+			wantRegistrations := 1
+			if test.credential == "other-store" {
+				wantRegistrations = 2
+			}
+			if registered["ok"] != true || provider.ActiveRegistrationCount() != wantRegistrations {
+				t.Fatalf("physical registrations=%d want=%d response=%v", provider.ActiveRegistrationCount(), wantRegistrations, registered)
+			}
 		})
 	}
 }

@@ -62,6 +62,9 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			writeStandingCandidateFile(t, h.opts.ConfigPath, string(config)+"\nconnection:\n  api_server: "+h.endpoint+"\n")
 			registered := registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079", h.provider)
 			callbackAtConnect, signingAtConnect, registrationsAtConnect := h.provider.Registration()
+			if registrationsAtConnect < 1 || h.provider.ActiveRegistrationCount() != 1 {
+				t.Fatalf("public connect has no sole physical registration: writes=%d active=%d", registrationsAtConnect, h.provider.ActiveRegistrationCount())
+			}
 			var cardMessageID int
 			var token string
 			if !registered.DeploymentRegistration {
@@ -144,10 +147,10 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				t.Fatalf("customer callbacks mutated operator inbox: before=%v after=%v", beforeMailbox, after)
 			}
 			registrations, _ := h.provider.Counts()
-			if registrations != 1 {
-				callback, signing, _ := h.provider.Registration()
-				t.Fatalf("conversation routing created %d registrations, want one physical connection; at_connect=%d same_callback=%t same_signing=%t",
-					registrations, registrationsAtConnect, callback == callbackAtConnect, signing == signingAtConnect)
+			callback, signing, _ := h.provider.Registration()
+			if registrations != registrationsAtConnect || h.provider.ActiveRegistrationCount() != 1 || callback != callbackAtConnect || signing != signingAtConnect {
+				t.Fatalf("conversation routing changed the sole physical registration: writes=%d at_connect=%d active=%d same_callback=%t same_signing=%t",
+					registrations, registrationsAtConnect, h.provider.ActiveRegistrationCount(), callback == callbackAtConnect, signing == signingAtConnect)
 			}
 			h.stop(t)
 			h.start(t)
