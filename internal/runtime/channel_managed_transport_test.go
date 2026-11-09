@@ -131,7 +131,11 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 			if err != nil {
 				t.Fatal(err)
 			}
-			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(actor.ID), AgentIdentity: actor.Identity}
+			deliveryContext := events.DeliveryContextFromContext(inputCtx)
+			if deliveryContext.Life == nil || deliveryContext.Life.RunID != actor.Identity.RunID || deliveryContext.Life.FlowInstance != actor.CanonicalFlowPath() {
+				t.Fatal("managed channel delivery requires its acknowledged instance life")
+			}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(actor.ID), AgentIdentity: actor.Identity, Context: deliveryContext}
 			storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, input, []events.DeliveryRoute{route})
 			claimed, err := storetest.ClaimDelivery(ctx, store, input, route)
 			if err != nil {
