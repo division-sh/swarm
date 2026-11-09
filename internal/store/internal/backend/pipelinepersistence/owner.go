@@ -72,6 +72,7 @@ type eventCommitTxStore interface {
 
 type completionCandidateWriter interface {
 	mutationprotocol.CandidateWriter
+	RequirePresentTx(context.Context, *sql.Tx, string) error
 }
 
 type InstanceLifeLifecycleTxOwner interface {

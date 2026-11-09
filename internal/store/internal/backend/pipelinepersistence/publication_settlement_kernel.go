@@ -43,7 +43,14 @@ func settlePipelineMemberTx(ctx context.Context, attempt *mutationprotocol.Attem
 		}
 		var err error
 		runID, err = eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), postgres)
-		return err
+		if err != nil {
+			return err
+		}
+		// Fence the run before deliveries, without moving completion-evidence writes.
+		if postgres && runID != "" && candidates != nil {
+			return candidates.RequirePresentTx(ctx, tx, runID)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
