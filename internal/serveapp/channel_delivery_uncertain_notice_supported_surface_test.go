@@ -102,7 +102,7 @@ func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Dou
 	}
 	callback, signing, _ = provider.Registration()
 	updateID++
-	postChannelTelegramUpdate(t, callback, signing, map[string]any{
+	postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
 		"update_id": updateID,
 		"callback_query": map[string]any{
 			"id": fmt.Sprintf("uncertain-notice-%d", updateID), "from": map[string]any{"id": 7000},
@@ -180,7 +180,7 @@ func assertChannelUncertainNoticeEntry(t *testing.T, provider *telegramapi.Doubl
 			"chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command,
 		}
 	}
-	postChannelTelegramUpdate(t, callback, signing, update)
+	postChannelTelegramOperatorUpdate(t, callback, signing, update)
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		for index := before; provider.Delivery(index) != nil; index++ {

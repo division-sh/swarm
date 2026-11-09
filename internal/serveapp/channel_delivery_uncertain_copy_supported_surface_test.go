@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -119,7 +120,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	for h.provider.Confirmation(confirmationIndex) != nil {
 		confirmationIndex++
 	}
-	runDeploymentChannelRebindJourney(t, h, "uncertain-copy-token", 1002, 7000+confirmationIndex)
+	h.registration = connectDeploymentChannelFixtureOperator(t, h, "uncertain-copy-token", 1002, 7000+confirmationIndex, "private")
 	command := waitNativeInboxCommand(t, h.provider, "chat", "1002", "")
 	callback, signing, _ := h.provider.Registration()
 	before := 0
@@ -170,7 +171,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	}
 }
 
-func runDeploymentChannelRebindJourney(t *testing.T, h *channelOnboardingE2EHarness, credential string, chatID, userID int) {
+func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE2EHarness, credential string, chatID, userID int, chatType string, beforeClaim ...func()) channelonboarding.Operation {
 	t.Helper()
 	restore := installChannelOnboardingCLIInput(t, credential+"\n")
 	defer restore()
@@ -186,14 +187,17 @@ func runDeploymentChannelRebindJourney(t *testing.T, h *channelOnboardingE2EHarn
 		}
 	}()
 	go func() {
-		code := executeCLI(ctx, []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "--yes",
-			"--client-language", "en", "--api-server", h.endpoint}, out, errOut, nil)
+		code := cliapp.Execute(ctx, []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "--yes",
+			"--client-language", "en", "--api-server", h.endpoint}, out, errOut, nil, nil, OpenChannelRegistration)
 		done <- code
 		progress <- code
 	}()
 	challenge := waitChannelOnboardingChallenge(t, out, errOut, progress)
+	if len(beforeClaim) != 0 {
+		beforeClaim[0]()
+	}
 	callback, signing, _ := h.provider.Registration()
-	claim := submitChannelOnboardingClaimAs(t, callback, signing, challenge, 901109, int64(userID), int64(chatID), "replacement_operator")
+	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, 901109, int64(userID), int64(chatID), chatType, "replacement_operator")
 	if claim.StatusCode != http.StatusOK || len(claim.EventIDs) != 0 || len(claim.EventNames) != 0 {
 		t.Fatalf("deployment rebind claim escaped the deployment receiver: %+v", claim)
 	}
@@ -206,16 +210,20 @@ func runDeploymentChannelRebindJourney(t *testing.T, h *channelOnboardingE2EHarn
 	case <-ctx.Done():
 		t.Fatalf("deployment rebind did not complete: out=%s err=%s", out.String(), errOut.String())
 	}
+	if chatType != "private" && !strings.Contains(out.String(), "Future notices") && !strings.Contains(out.String(), "future notices, decision cards, and their updates") {
+		t.Fatalf("deployment operator claim omitted shared audience disclosure: %s", out.String())
+	}
 	var listing struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
 	var listed, listErr lockedBuffer
-	code := executeCLI(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil)
+	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil, nil, OpenChannelRegistration)
 	if code != 0 || json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 ||
 		listing.Accounts[0].Binding == nil || listing.Accounts[0].Binding.ConversationRef != fmt.Sprint(chatID) ||
 		!listing.Accounts[0].Operation.DeploymentRegistration {
 		t.Fatalf("deployment rebind lost its current binding: exit=%d out=%s err=%s", code, listed.String(), listErr.String())
 	}
+	return listing.Accounts[0].Operation
 }
 
 func postUncertainCopyCallback(t *testing.T, h *channelOnboardingE2EHarness, message int, token string, update int, expected ...int) {
