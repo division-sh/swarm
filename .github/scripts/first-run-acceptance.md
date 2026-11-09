@@ -22,6 +22,8 @@ The output directory must not exist. A first failure returns nonzero, joins
 owned processes and retains sanitized transcripts plus `receipt.json`;
 rerunning or replacing that receipt is not automatic. Read `complete`,
 `failure` and cleanup fields, not merely a successful container removal.
+Parent SIGINT/SIGTERM requests cleanup at operation boundaries; repeat
+signals cannot interrupt that cleanup. SIGKILL cannot run a cleanup handler.
 
 The fixture targets post-#3001 commands. Published v0.7.1 keeps its own dot
 spelling and historical receipt. A local Linux-only candidate manifest is
