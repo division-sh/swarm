@@ -41,6 +41,45 @@ import (
 
 func TestInstanceLifeResetCommitBeforeFinalizeReplayBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/fieldless_history", func(t *testing.T) {
+			f := newReceiverConfigActivationFixtureWithOwnership(t, backend, false, map[string]string{
+				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": "stages: []\n",
+				"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"review/schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
+				"review/events.yaml":   "finish.requested:\n",
+				"review/nodes.yaml":    "progress:\n  finish.requested:\n    advances_to: done\n",
+			}, nil, ownStoreTestAgentManager, nil)
+			fact, err := correlation.NewSourceArtifactFact(f.bundle.SourceArtifact.BundleHash())
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.ctx = correlation.WithSourceArtifactFact(f.ctx, fact)
+			f.constructKeylessRoot(t)
+			source := semanticview.Wrap(f.bundle)
+			owner, err := flowidentity.StandingForGeneration(source, "review", correlation.RunIDFromContext(f.ctx))
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := f.manager.PrepareFlowInstanceActivation(f.ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: owner, OccurredAt: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			finishNativeResetLife(t, f, first)
+			reset := prepareNativeResetPlan(t, f, first)
+			if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, reset); err != nil {
+				t.Fatal(err)
+			}
+			reader := f.store.(interface {
+				LoadOperatorEntityAtLife(context.Context, string, string, int64) (operatorread.OperatorEntityFull, error)
+			})
+			for _, life := range []int64{1, 2} {
+				got, err := reader.LoadOperatorEntityAtLife(f.ctx, owner.EntityID, reset.Readiness.RunID, life)
+				if err != nil || got.Entity.Life == nil || *got.Entity.Life != life || got.Entity.EntityID != owner.EntityID ||
+					got.Entity.CreatedAt != nil || got.Entity.UpdatedAt != nil || got.Entity.LifecycleCreatedAt == nil || len(got.Fields) != 0 {
+					t.Fatalf("fieldless life %d lost exact header history or fabricated data clocks: %+v err=%v", life, got, err)
+				}
+			}
+		})
 		t.Run(backend+"/historical_life1", func(t *testing.T) {
 			f, first := newWorkflowTargetConstructionFixture(t, backend, true)
 			committer := agentFixtureFlowActivationCommitter{store: f.store}
@@ -695,6 +734,9 @@ func prepareNativeResetPlan(t *testing.T, f receiverConfigActivationFixture, pre
 	req.Instance, req.ConstructorInput, req.ResolvedKey = previous.Identity, "review.created", "preserved"
 	req.OccurredAt = time.Now().UTC()
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "review.created", "constructor-fixture", "", []byte(`{"account_id":"preserved"}`), 0, previous.Readiness.RunID, events.EventEnvelope{}, req.OccurredAt)
+	if schema, found := semanticview.Wrap(f.bundle).FlowSchemaByID(previous.Identity.TemplateID); found && schema.Instance.Empty() {
+		req.ConstructorInput, req.ResolvedKey, req.TriggerEvent = "", "", events.Event{}
+	}
 	req.Restart = &pipeline.FlowInstanceRestart{Life: current.Life, Revision: current.Revision, FinalStage: stage}
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {
