@@ -22,7 +22,7 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 	wantTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}
 	var matched []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID, eventID) {
 		if node, ok := delivery.route.Recipient.Node(); delivery.eventID == eventID && ok && node.FlowPath() == "consumer" && node.NodeID() == "collector" {
 			matched = append(matched, delivery)
 			deliveryID = id

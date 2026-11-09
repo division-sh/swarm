@@ -25,26 +25,33 @@ type servedForkDeliveryEvidence struct {
 	route             events.DeliveryRoute
 }
 
-func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, runID string) map[string]servedForkDeliveryEvidence {
+func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, runID string, executedEvent ...string) map[string]servedForkDeliveryEvidence {
 	t.Helper()
-	var rooted sourceartifact.RootedSource
-	var err error
-	if rt.Postgres != nil {
-		rooted, err = rt.Postgres.LoadRunRootedSource(t.Context(), runID)
-	} else {
-		rooted, err = rt.SQLite.LoadRunRootedSource(t.Context(), runID)
+	var plans []pinrouting.ConnectRoutePlan
+	if len(executedEvent) > 1 {
+		t.Fatal("delivery claim oracle requires exactly one executed event")
 	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := repoRootForTest()
-	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
-	if err != nil {
-		t.Fatal(err)
-	}
-	graph := pinrouting.CompileConnectGraph(semanticview.Wrap(bundle))
-	if len(graph.Issues()) != 0 {
-		t.Fatalf("delivery oracle requires its exact admitted connect graph: %+v", graph.Issues())
+	if len(executedEvent) == 1 {
+		var rooted sourceartifact.RootedSource
+		var err error
+		if rt.Postgres != nil {
+			rooted, err = rt.Postgres.LoadRunRootedSource(t.Context(), runID)
+		} else {
+			rooted, err = rt.SQLite.LoadRunRootedSource(t.Context(), runID)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		repo := repoRootForTest()
+		bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+		if err != nil {
+			t.Fatal(err)
+		}
+		graph := pinrouting.CompileConnectGraph(semanticview.Wrap(bundle))
+		if len(graph.Issues()) != 0 {
+			t.Fatalf("delivery oracle requires its exact admitted connect graph: %+v", graph.Issues())
+		}
+		plans = graph.Plans()
 	}
 	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT),CAST(receiver_materialization_plan AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
 	if err != nil {
@@ -81,9 +88,9 @@ func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, 
 				t.Fatal(err)
 			}
 		}
-		if !route.ConnectClaim.Empty() {
+		if len(executedEvent) == 1 && executedEvent[0] == eventID && !route.ConnectClaim.Empty() {
 			matched := 0
-			for _, plan := range graph.Plans() {
+			for _, plan := range plans {
 				claim, err := plan.ClaimForRetainedDelivery(route)
 				if err == nil && claim.Equal(route.ConnectClaim) {
 					matched++
