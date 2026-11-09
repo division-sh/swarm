@@ -198,7 +198,7 @@ const (
 
 // newRunGroupCommand is the CLI v2.2 run noun-group: bare `swarm run` prints
 // group help; the start form moved to `swarm run start`
-// (cli_specification.topology_revision_v2_2.target_rows.run_group).
+// (cli_specification.command_catalog.run_group).
 func newRunGroupCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
