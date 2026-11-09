@@ -42,19 +42,10 @@ The tradeoff: a Swarm flow cannot be re-wired by an LLM at runtime. That rigidit
 
 ## Try it
 
-```bash
-# run the static analyzer against the platform spec
-swarm verify ./my-flow
-
-# start a run from a triggering event, stream its trace as it executes
-swarm run start ./my-flow --event order.created --payload ./payload.json
-
-# follow the full causal trace of any run, live or historical
-swarm run trace <run-id> -f
-
-# re-execute any run from any point in its history
-swarm run fork <source-run-id> --at-event <event-id>
-```
+Follow the [v0.7.1 Quickstart](#quickstart) below to install the released
+binary, create a shipped starter and get a deterministic mock result. No
+hand-written flow files, Go toolchain or provider credentials are needed
+for that mock test. Live Telegram execution is a separate step.
 
 ---
 
@@ -88,20 +79,135 @@ Conditions use [CEL](https://github.com/google/cel-spec): strongly typed, non-Tu
 
 ## Quickstart
 
-Build the binary, then follow the [docs Quickstart](https://docs.division.sh/quickstart)
-for a 4-file flow you can run end to end:
+### Install v0.7.1
+
+The [release](https://github.com/division-sh/swarm/releases/tag/v0.7.1)
+publishes these exact assets:
+
+| Asset | Platform |
+| --- | --- |
+| `swarm_v0.7.1_linux_amd64.tar.gz` | Linux amd64, compatible glibc and `libgcc_s.so.1`; not static or Alpine/musl |
+| `swarm_v0.7.1_darwin_arm64.tar.gz` | macOS arm64; built and smoke-tested by the release workflow on macOS 15 |
+| `SHA256SUMS` | Checksums for both archives |
+
+This Linux transcript was run on Ubuntu 22.04.5 with curl, CA certificates,
+tar and GNU coreutils available. Use an empty directory for the release
+files. No source checkout or Go installation is required.
 
 ```bash
-git clone https://github.com/division-sh/swarm && cd swarm
-go build ./cmd/swarm
+mkdir -p "$HOME/.local/bin" "$HOME/swarm-v0.7.1"
+cd "$HOME/swarm-v0.7.1"
+curl --fail --location --silent --show-error --output swarm_v0.7.1_linux_amd64.tar.gz https://github.com/division-sh/swarm/releases/download/v0.7.1/swarm_v0.7.1_linux_amd64.tar.gz
+curl --fail --location --silent --show-error --output SHA256SUMS https://github.com/division-sh/swarm/releases/download/v0.7.1/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf swarm_v0.7.1_linux_amd64.tar.gz
+install -m 755 swarm "$HOME/.local/bin/swarm"
+export PATH="$HOME/.local/bin:$PATH"
+swarm version
 ```
 
-Plain local runs need no database service (SQLite at `.swarm/stores/dev.db` is the
-default) and no LLM credential (an agent-free flow boots without one). For
-Postgres, the agent workspace image, and LLM backend setup, see
-[Installation](https://docs.division.sh/installation) and
-[Configuration](https://docs.division.sh/reference/configuration). For local
-deployment setup, use [`swarm.example.yaml`](swarm.example.yaml) as the non-secret
+The checksum command prints:
+
+```text
+swarm_v0.7.1_linux_amd64.tar.gz: OK
+```
+
+The download, extraction, install and PATH commands are silent on success.
+Version output begins:
+
+```text
+Swarm v0.7.1
+Commit: e32076a89371a04c5196008965ed93530b937e90
+Built: 2026-11-09T07:35:22Z
+Go: go1.26.8 linux/amd64
+```
+
+### Create and test the starter
+
+```bash
+swarm new zero-agent-automation
+cd zero-agent-automation
+swarm verify --portable
+swarm test . tests/smoke.yaml
+```
+
+The scaffold creates admitted source and private deployment files. Its
+printed instructions are:
+
+```text
+Created zero-agent-automation in zero-agent-automation
+
+Next:
+  cd zero-agent-automation
+  swarm verify --portable
+  swarm test . tests/smoke.yaml
+  swarm secrets set -- 'telegram.telegram_bot_token'
+  swarm serve --dev
+```
+
+Verification begins with these lines, followed by the deployment checks
+it did not run and the embedded pack inventory:
+
+```text
+verify ok: source=zero-agent-automation@1.0.0
+portable structural checks passed; deployment admission not evaluated
+```
+
+The test prints:
+
+```text
+scenario ok: tests/smoke.yaml
+swarm test ok: scenarios=1
+```
+
+That is a deterministic mock result, not a Telegram send. The test owns a
+fresh private runtime; it needs no running server, Docker, LLM key or bot
+token. Keep the dot in the test command: its first argument is the source
+directory. Serve and verify use the current directory when it is omitted.
+
+### The printed follow-on steps
+
+```bash
+swarm secrets set -- 'telegram.telegram_bot_token'
+swarm serve --dev
+```
+
+The credential command asks `Secret value:` and `Confirm secret value:`
+without echoing input. It reports credential presence, not token validity:
+
+```text
+secret set: key=telegram.telegram_bot_token source=file writable=yes shadowed=no present=yes
+Credential presence here is inventory only; static provider/channel requirements use the file tier.
+```
+
+The [installed-artifact proof](https://github.com/division-sh/swarm/issues/1578#issuecomment-6735094993)
+executed these exact commands using a synthetic credential with provider
+networking blocked. Serve selected the project-local SQLite scratch store,
+reported that no workspace was required and reached `/readyz`. Its final
+readiness and Ctrl-C shutdown output was:
+
+```text
+ready — waiting for events
+^Cshutdown · complete
+```
+
+The process exited zero. This proves startup,
+not a real bot token or Telegram delivery. Do not use a dummy credential
+for live work; the separate consented real-token check has not been run.
+
+`serve --dev` starts live execution, not mock mode, and replaces its
+project-local scratch history on each invocation. No explicit SQLite path
+is written by this starter. Plain `serve` uses retained state instead.
+`run start` publishes into an existing serve; it does not boot a one-shot
+runtime in v0.7.1.
+
+### Deployment configuration
+
+SQLite requires no separate database service. No LLM key is needed for
+this agent-free flow, but live connector sends require their provider
+credentials. For Postgres, workspace and LLM setup, see
+[Configuration](https://docs.division.sh/reference/configuration). Use
+[`swarm.example.yaml`](swarm.example.yaml) as the non-secret deployment
 reference. Swarm reads one file: `.swarm/swarm.yaml` in the current directory,
 or built-in defaults if that file is absent. `--config <file>` replaces that
 selection completely. `SWARM_CONFIG` selects the same file when `--config` is
