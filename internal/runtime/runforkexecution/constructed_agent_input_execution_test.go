@@ -325,6 +325,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		t.Fatalf("exact constructed child declaration: plan=%#v err=%v", materialized, err)
 	}
 	var sourceRoutes []events.DeliveryRoute
+	var auditRoutes []events.DeliveryRoute
 	for _, blueprint := range materialized.Agents {
 		record, err := blueprint.Materialize(runID)
 		if err != nil {
@@ -339,10 +340,27 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 				t.Fatal("fresh conversation source lacks its committed child life")
 			}
 			route.Context.Life = &events.InstanceLife{RunID: runID, FlowInstance: child.InstancePath, Life: childLife}
+			if record.Config.ID == "audit" {
+				auditRoutes = append(auditRoutes, route)
+				continue
+			}
 		}
 		sourceRoutes = append(sourceRoutes, route)
 	}
 	storetest.CommitSemanticEventWithRoutes(t, writeCtx, selected, input, sourceRoutes, pipelineobligation.ScopeSubscribed)
+	if proof.freshConversation {
+		if len(sourceRoutes) != 1 || len(auditRoutes) != 1 {
+			t.Fatal("fresh conversation requires both exact authored actor inputs")
+		}
+		audit := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "audit.assigned", "operator", "", payload, 0, runID, nil,
+			events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at.Add(time.Second))
+		audit, err = eventtest.AdmitPayload(audit, ".", "audit.assigned")
+		if err != nil {
+			t.Fatal(err)
+		}
+		storetest.CommitSemanticEventWithRoutes(t, writeCtx, selected, audit, auditRoutes, pipelineobligation.ScopeSubscribed)
+		eventID = audit.ID()
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -476,6 +494,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		result, err := q1ExecuteSelectedPhaseComponent(t, ctx, request, true)
 		if err != nil || result.Materialization.ForkRunID == "" || result.Activation.Activated {
 			t.Fatalf("fresh selected conversation component: result=%+v err=%v", result, err)
+		}
+		if result.ExecutedEventCount != 2 || len(result.ForkEvents) != 2 || result.ForkEvents[0].SourceEventID == result.ForkEvents[1].SourceEventID {
+			t.Fatalf("fresh actors did not consume their two distinct authored inputs: %+v", result.ForkEvents)
 		}
 		forkRunID := result.Materialization.ForkRunID
 		for table, want := range map[string]int{"agent_sessions": 1, "agent_conversation_audits": 1, "agent_turns": 2} {
