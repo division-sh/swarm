@@ -226,22 +226,6 @@ spec_authority:
       The platform spec is an open normative document: inert prose is retained in its immutable source, not reinterpreted as
       executable fields. API schemas preserve their own extended dialect. Diagnostic positions are looked up on demand
       from the exact retained source or pack body; describe does not expose an effective-provenance ledger.
-  tracker_repairs:
-    explicit_superseding_comments:
-    - '#852'
-    - '#749'
-    - '#746'
-    accounted_existing_trackers:
-    - '#750'
-    - '#628'
-    - '#499'
-    - '#500'
-    - '#664'
-    rule: |
-      Future active tracker references to ignored review artifacts MUST be
-      superseded with a tracked owner before implementation proceeds. If no
-      tracked owner exists, the work must split or promote the exact semantic
-      draft instead of citing the ignored artifact as binding authority.
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
@@ -27022,28 +27006,6 @@ cli_specification:
     for command topology, migration boundary, runtime-state ownership rules,
     and #735 child gating. It supersedes the earlier v1 `swarm investigate`
     topology and the non-promoted CLI v2 review draft as a merge artifact.
-  source_of_truth:
-    status: promoted_cli_v2_catalog
-    promoted_by: '#795'
-    merge_bearing_owner: platform-spec.yaml#cli_specification
-    authority_rule: >
-      This cli_specification block is the sole merge-bearing CLI v2 authority. CLI implementation gates, PRs,
-      tests, and tracker closeouts MUST bind to this tracked section. Issue prose, local review drafts,
-      ignored files, audit matrices, and unpromoted design notes are evidence only until their accepted
-      behavior is promoted here.
-    local_review_spec_disposition: >
-      Private CLI UX review artifacts remain reconciliation input only. Any
-      local "AUTHORITATIVE" or "source-of-truth" claim in those artifacts is
-      superseded by this tracked source_of_truth block. Merge-bearing behavior
-      must be reflected here.
-    promotion_rule: >
-      When the local CLI UX v2 review artifact contains behavior not represented in this section, the
-      behavior is candidate intent. It must be promoted into this section, split to a tracked child, or
-      explicitly downgraded to backlog before it can be used as implementation authority.
-    supersedes:
-    - stale v1 `swarm investigate` command draft
-    - non-promoted CLI UX v1 review draft
-    - stale v1 `swarm investigate *` command catalog entries
   agent_identity_boundary:
     owner: platform-spec.yaml#agent_identity_model
     status: exact_concrete_target_resolution
@@ -27054,50 +27016,6 @@ cli_specification:
       otherwise it fails closed with the candidates. The CLI MUST NOT construct internal identities, infer bundle
       aliases, or add cross-bundle duplicate
       declaration support.
-  catalog_accounting_model:
-    owner: platform-spec.yaml#cli_specification.command_catalog
-    accounting_unit: explicit_command_catalog_row
-    rule: >
-      CLI v2 catalog accounting counts one explicit `command_catalog` map entry as one row.
-      Row keys, not Cobra nodes, literal subcommands, optional flags, examples, target modes,
-      or ignored review-artifact prose, define the implementation and tracker accounting unit.
-      Future #794/#735 children MUST bind to these explicit rows unless a later tracked spec
-      change deliberately splits or merges rows.
-    derived_count_rule: >
-      Numeric totals are not independently authoritative prose. Total, tier, and implementation
-      status counts MUST be derived from the structured `command_catalog` rows at review/proof
-      time by grouping row entries by `tier` and `implementation_status`.
-    stale_count_policy: >
-      Count claims in ignored review artifacts, issue prose, historical matrices, or non-promoted
-      design notes are reconciliation evidence only. If they disagree with the structured rows,
-      the structured rows win until a tracked spec PR changes the catalog.
-    family_normalization_examples:
-      forkchat:
-        row: forkchat
-        rule: >
-          `swarm forkchat new|resume|list|view|delete` is one blocked backlog family row for
-          #735/#749 accounting until a future tracked spec PR splits the family.
-      control:
-        rows:
-        - control_pause
-        - control_continue
-        - control_stop
-        rule: >
-          Each control verb is one row. Target forms such as `<run-id>` and `--all` are modes
-          of that row, not separate command rows.
-      agent_replay:
-        rows:
-        - agent_replay
-        rule: >
-          Event-targeted replay is the only public agent replay operation. Durable
-          delivery continuation is runtime-owned and has no manual backlog command.
-      events:
-        rows:
-        - event_replay
-        - event_publish
-        rule: >
-          Event replay and event publish are separate rows. The implemented replay row MUST NOT
-          be reopened or counted as closing the absent publish row.
   foundations:
     command_group_authority:
       allowed_values: [getting_started, author_validate, run_operate, observe_debug, utilities]
@@ -32087,28 +32005,6 @@ api_specification:
     \ placeholders that the impl never honors, all\nmethod signatures typed, all shapes consistent across read paths. This\n\
     YAML is the OpenRPC source-of-truth \u2014 the openrpc.json artifact is\ngenerated mechanically from method_catalog +\
     \ components.\n"
-  source_of_truth:
-    status: promoted_api_catalog
-    merge_bearing_owner: platform-spec.yaml#api_specification
-    authority_rule: |
-      This api_specification block is the sole merge-bearing user-facing
-      JSON-RPC/OpenRPC API contract. API implementation gates, CLI/dashboard
-      consumers, generated OpenRPC checks, and tracker closeouts MUST bind to
-      this tracked section plus generated openrpc.json and implementation proof
-      in internal/apispec and internal/apiv1. Issue prose, local review drafts,
-      ignored files, audit matrices, and unpromoted design notes are evidence
-      only until their accepted behavior is promoted here.
-    local_review_spec_disposition: |
-      Private user-facing RPC review artifacts remain reconciliation input only.
-      Any local "OpenRPC source-of-truth" or equivalent authority claim in those
-      artifacts is superseded by this tracked source_of_truth block.
-      Merge-bearing API behavior must be reflected here.
-    promotion_rule: |
-      When the local user-facing RPC review artifact contains methods, shapes,
-      or API lifecycle semantics not represented in this section, that content
-      is candidate intent. It must be promoted into this section with matching
-      generated/implementation proof, split to a tracked child, or explicitly
-      downgraded to backlog before it can be used as implementation authority.
   multi_bundle_publication_boundary:
     owner: platform-spec.yaml#filesystem_source_model
     status: source_artifact_only
