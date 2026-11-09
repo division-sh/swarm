@@ -592,7 +592,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 	}
 	if delayedOperatorClaim {
-		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
+		h := &channelOnboardingE2EHarness{registration: registered, opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		chat, kind := 1001, "private"
 		if scenario == "shared_audience" {
 			chat, kind = -1001, "group"
@@ -693,7 +693,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		case <-time.After(15 * time.Second):
 			t.Fatal("native setting write did not launch")
 		}
-		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
+		h := &channelOnboardingE2EHarness{registration: registered, opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		connectDeploymentChannelFixtureOperator(t, h, "bot-token", 1001, 7000, "private", func() {
 			var out, errOut lockedBuffer
 			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {

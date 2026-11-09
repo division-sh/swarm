@@ -164,6 +164,20 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
+		if err == nil && req.Method == "channel.confirm" {
+			var confirmed struct {
+				Operation operatorchannel.Operation `json:"operation"`
+			}
+			if err := json.Unmarshal(result, &confirmed); err != nil {
+				return nil, err
+			}
+			parent, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, confirmed.Operation.OnboardingOperationID)
+			if err != nil || parent.Provider != provider || parent.IdentityOperationID != confirmed.Operation.OperationID ||
+				parent.PrincipalID != confirmed.Operation.PrincipalID {
+				return nil, errors.Join(channelonboarding.ErrRevisionConflict, err)
+			}
+			head.Operation = parent
+		}
 		rememberDeploymentControl(clients, &mu, provider, head.Operation, client)
 		if !found && head.Operation.OperationID == "" {
 			err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
