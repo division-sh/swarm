@@ -36,6 +36,10 @@ expect: {events: [work.requested], no_dead_letters: true}
 	if result.err != nil || !strings.Contains(result.output, "swarm test ok: scenarios=1") {
 		t.Fatalf("public command: %v\n%s", result.err, result.output)
 	}
+	fromCWD := runReleaseCommand(t, 30*time.Second, source, env, "", binary, "test", "tests/canonical.yaml", "--timeout", "10s", "--poll-interval", "25ms")
+	if fromCWD.err != nil || !strings.Contains(fromCWD.output, "swarm test ok: scenarios=1") {
+		t.Fatalf("public cwd scenario: %v\n%s", fromCWD.err, fromCWD.output)
+	}
 	for _, row := range []struct{ name, body, teaching string }{
 		{"version", "version: 1\nsteps: [{publish: work.requested, payload: {work_id: valid}}]\n", "remove `version`; the scenario format has one version"},
 		{"invalid-expect", "steps: [{publish: work.requested, payload: {work_id: valid}}]\ninvalid: {base: {publish: work.requested, payload: {work_id: valid}}, cases: [{expect: reject}]}\n", "remove `expect`"},

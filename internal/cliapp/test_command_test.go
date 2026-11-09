@@ -134,35 +134,41 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test", sourceRoot,
-		"--timeout", "2s",
-		"--poll-interval", "10ms",
-	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	assertScenarioTestMethods(t, calls, []string{
-		"runtime.identity",
-		eventPublishMethod,
-		"run.diagnose",
-		eventPublishMethod,
-		"run.diagnose",
-		"run.diagnose",
-		"run.trace",
-		"run.trace",
-		eventObservationMethodList,
-		entityListMethod,
-		entityGetMethod,
-	})
-	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+	for _, operands := range [][]string{{sourceRoot}, nil, {"."}, {"tests/empire-routing.yaml"}, {".", "tests/empire-routing.yaml"}} {
+		t.Run(fmt.Sprint(operands), func(t *testing.T) {
+			calls, publishCalls, traceCalls = nil, 0, 0
+			var stdout, stderr bytes.Buffer
+			args := append([]string{"test"}, operands...)
+			args = append(args,
+				"--timeout", "2s",
+				"--poll-interval", "10ms",
+			)
+			code := executeRootCommandWithOptions(context.Background(), sourceRoot, args, &stdout, &stderr, scenarioProtocolTestOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			assertScenarioTestMethods(t, calls, []string{
+				"runtime.identity",
+				eventPublishMethod,
+				"run.diagnose",
+				eventPublishMethod,
+				"run.diagnose",
+				"run.diagnose",
+				"run.trace",
+				"run.trace",
+				eventObservationMethodList,
+				entityListMethod,
+				entityGetMethod,
+			})
+			for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
+			}
+			if strings.TrimSpace(stderr.String()) != "" {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 
