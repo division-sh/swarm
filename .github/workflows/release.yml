@@ -278,9 +278,43 @@ jobs:
         run: |
           printf '%s\n' 'Artifact-only rehearsal: both native smoke tests and archive allowlists passed. No tag or release was created.' >> "$GITHUB_STEP_SUMMARY"
 
+  first-run:
+    needs: [prepare, verify]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+          clean: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-assets
+      - name: Check the finite driver failure and cleanup controls
+        run: python3 .github/scripts/test-first-run-acceptance.py -v
+      - name: Acquire the pinned prerequisite image outside the newcomer environment
+        run: docker pull buildpack-deps@sha256:10ffecf0416e47f8ed9a621ce234b209b69c3d1e7e79ba273394ef6ff74b4f5b
+      - name: Install and follow the candidate starter in one fresh offline environment
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          python3 .github/scripts/first-run-acceptance.py \
+            --assets "$RUNNER_TEMP/release-assets" --output "$RUNNER_TEMP/first-run-result" \
+            --version "$VERSION" --source "$SOURCE_SHA" --kind candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: first-run-linux
+          path: ${{ runner.temp }}/first-run-result
+          if-no-files-found: warn
+          retention-days: 7
+
   publish:
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [prepare, verify]
+    needs: [prepare, verify, first-run]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     # Native builds remain parallel; serialize the verified publication boundary
