@@ -296,6 +296,36 @@ func debtW1RunObservationSignatureTransitions() [10][2]authorityDebtSite {
 	return pairs
 }
 
+// #2970/6731069804: the same seven oracle calls retain all existing debt;
+// only the exact helper signature and three positive-event arguments changed.
+func debtW2DeliveryEvidenceSignatureTransitions() [6][2]authorityDebtSite {
+	const before = "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string) map[string]github.com/division-sh/swarm/internal/serveapp.servedForkDeliveryEvidence|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|results=(map[string]github.com/division-sh/swarm/internal/serveapp.servedForkDeliveryEvidence)"
+	const after = "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, executedEvent ...string) map[string]github.com/division-sh/swarm/internal/serveapp.servedForkDeliveryEvidence|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|results=(map[string]github.com/division-sh/swarm/internal/serveapp.servedForkDeliveryEvidence)"
+	const positive = "func=func(t *testing.T, rt github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime, runID string, executedEvent ...string) map[string]github.com/division-sh/swarm/internal/serveapp.servedForkDeliveryEvidence|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/serveapp.servedControlProofRuntime|arg=string|arg=string|results=(map[string]github.com/division-sh/swarm/internal/serveapp.servedForkDeliveryEvidence)"
+	var pairs [6][2]authorityDebtSite
+	for index, call := range [6]struct {
+		file, declaration, resolved string
+		count                       int
+	}{
+		{"fork_delivery_route_evidence_test.go", "TestServedForkConnectedDeliveryRouteEvidenceOnBothStores", after, 2},
+		{"fork_loop_generation_notice_test.go", "requireForkLoopStateEffect", after, 1},
+		{"fork_receiver_acquisition_effect_only_test.go", "requireSupplementalForkAcquisitionSettlement", positive, 1},
+		{"fork_receiver_ownership_test.go", "requireForkReceiverBusinessMutation", positive, 1},
+		{"fork_receiver_ownership_test.go", "requireForkReceiverDelivery", positive, 1},
+		{"fork_recipient_authority_test.go", "requireServedForkConsumerAuthority", after, 1},
+	} {
+		old := authorityDebtSite{
+			Kind: "raw-operation", File: "internal/serveapp/" + call.file, Declaration: call.declaration,
+			Operation: "call:github.com/division-sh/swarm/internal/serveapp.readServedForkDeliveryEvidence", Resolved: before,
+			Family: "unowned-authority", Replacement: "exact domain owner not identified here; escalate #2542, never invent a SQL escape", Multiplicity: call.count,
+		}
+		current := old
+		current.Resolved = call.resolved
+		pairs[index] = [2]authorityDebtSite{old, current}
+	}
+	return pairs
+}
+
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
@@ -309,6 +339,8 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	pairs = append(pairs, portableFixtures[:]...)
 	globalFixtures := debtPortableGlobalSignatureTransitions()
 	pairs = append(pairs, globalFixtures[:]...)
+	w2Evidence := debtW2DeliveryEvidenceSignatureTransitions()
+	pairs = append(pairs, w2Evidence[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -2456,6 +2488,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtPortableAgentFixtureCollectorTo && trusted.Collector == base &&
+		current == debtW2DeliveryEvidenceCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #2970/6731069804: six exact oracle signatures; baseline sites stay unchanged.
 	}
 	if base == debtPortableGlobalRoleCollectorTo && trusted.Collector == base &&
 		current == debtPortableAgentFixtureCollectorTo && reviewedTransition == current && head.Collector == current &&
