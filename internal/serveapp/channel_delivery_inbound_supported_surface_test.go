@@ -2002,6 +2002,16 @@ inboxVisible:
 			"chat": map[string]any{"id": -1001, "type": "group"},
 			"text": "@SwarmTestBot ordinary business text",
 		},
+	}); len(admitted) != 0 {
+		t.Fatal("operator conversation admitted business text")
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 2250,
+		"message": map[string]any{
+			"message_id": 9132, "from": map[string]any{"id": 9001},
+			"chat": map[string]any{"id": -9001, "type": "group"},
+			"text": "@SwarmTestBot ordinary business text",
+		},
 	}); len(admitted) == 0 {
 		t.Fatal("addressed group business text did not enter the flow")
 	}
