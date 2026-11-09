@@ -247,9 +247,7 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 	}
-	if strings.TrimSpace(opts.sourceRoot) == "" && strings.TrimSpace(opts.connectURL) == "" {
-		opts.sourceRoot = root.Path()
-	}
+	opts.sourceRoot = opts.publicationSourceRoot(root)
 	if strings.TrimSpace(opts.sourceRoot) != "" {
 		_, bundle, _, err := loadConfiguredCLIWorkflowModule(root.Path(), CLISourcePathOptions{SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath})
 		if err != nil {
@@ -351,6 +349,13 @@ func (o runCommandOptions) validate() error {
 		return fmt.Errorf("--event with --payload, or at least one --data/--pin, is required")
 	}
 	return nil
+}
+
+func (o runCommandOptions) publicationSourceRoot(root InvocationRoot) string {
+	if strings.TrimSpace(o.sourceRoot) == "" && strings.TrimSpace(o.connectURL) == "" {
+		return root.Path()
+	}
+	return o.sourceRoot
 }
 
 func (o runCommandOptions) withLocalForegroundServeAuth(root InvocationRoot) (runCommandOptions, error) {
