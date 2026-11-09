@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,9 +27,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -35,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -98,6 +103,14 @@ func TestSelectedConstructedAgentInputExecutesBothStores(t *testing.T) {
 	}
 }
 
+func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{freshConversation: true})
+		})
+	}
+}
+
 func TestSelectedNestedConstructedAgentInputExecutesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, fields := range []bool{false, true} {
@@ -134,6 +147,7 @@ func TestSelectedConstructedRecoveryKeepsCapturedVersionBothStores(t *testing.T)
 
 type selectedConstructedInputProof struct {
 	scan, changedVersionRecovery bool
+	freshConversation            bool
 	parentRuntime                bool
 	afterRelease                 *func()
 }
@@ -195,6 +209,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	}
 	ctx, repo := runForkTestContext(t), runForkExecutionRepoRoot(t)
 	root := canonicalrouting.CopySelectedConstructedAgentInput(t)
+	if proof.freshConversation {
+		canonicalrouting.ApplyOverlay(t, root, "child/agents.yaml", "worker:\n  model: regular\n  memory: true\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\naudit:\n  model: regular\n  memory: false\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n")
+	}
 	if nested {
 		root = canonicalrouting.CopySelectedNestedConstructedAgentInput(t, fields)
 	}
@@ -257,6 +274,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	}
 	writeCtx := effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), input.ExecutionMode())
+	var childLife int64
 	for _, identity := range instances {
 		var constructorInput []string
 		constructorEvent := input
@@ -277,6 +295,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		result, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(writeCtx, command)
 		if err != nil || !result.Acknowledged || !result.Created {
 			t.Fatalf("component source construction: result=%#v err=%v", result, err)
+		}
+		if identity == child {
+			childLife = result.Plan.Instance.Life
 		}
 	}
 	if nested {
@@ -299,17 +320,32 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		eventID = input.ID()
 	}
 	materialized, err := manager.ConstructedFlowMaterialization(loaded.Source, runID, child)
-	if err != nil || len(materialized.Agents) != 1 {
+	wantSourceAgents := 1
+	if proof.freshConversation {
+		wantSourceAgents = 2
+	}
+	if err != nil || len(materialized.Agents) != wantSourceAgents {
 		t.Fatalf("exact constructed child declaration: plan=%#v err=%v", materialized, err)
 	}
-	record, err := materialized.Agents[0].Materialize(runID)
-	if err != nil {
-		t.Fatal(err)
+	var sourceRoutes []events.DeliveryRoute
+	for _, blueprint := range materialized.Agents {
+		record, err := blueprint.Materialize(runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		route := events.DeliveryRoute{
+			Recipient: events.MustAgentDeliveryRecipient(record.Config.ID), AgentIdentity: record.Config.Identity,
+			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath}),
+		}
+		if proof.freshConversation {
+			if childLife <= 0 {
+				t.Fatal("fresh conversation source lacks its committed child life")
+			}
+			route.Context.Life = &events.InstanceLife{RunID: runID, FlowInstance: child.InstancePath, Life: childLife}
+		}
+		sourceRoutes = append(sourceRoutes, route)
 	}
-	storetest.CommitSemanticEventWithRoutes(t, writeCtx, selected, input, []events.DeliveryRoute{{
-		Recipient: events.MustAgentDeliveryRecipient(record.Config.ID), AgentIdentity: record.Config.Identity,
-		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath}),
-	}}, pipelineobligation.ScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, writeCtx, selected, input, sourceRoutes, pipelineobligation.ScopeSubscribed)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -421,6 +457,37 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 				return agent, nil
 			},
 		},
+	}
+	if proof.freshConversation {
+		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"model":"fixture-model","choices":[{"message":{"role":"assistant","content":"completed"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+		}))
+		defer provider.Close()
+		keyStore, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := keyStore.Set(ctx, llmselection.OpenAICompatibleCredentialEnv, "test-key"); err != nil {
+			t.Fatal(err)
+		}
+		request.AgentRuntime.AgentFactory = nil
+		request.AgentRuntime.Config = selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "fixture-model", provider.URL)
+		request.AgentRuntime.ProviderCredentials = keyStore
+		request.AgentRuntime.SessionRegistry = selected.(sessions.Registry)
+		request.AgentRuntime.ConversationStore = selected.(llm.ConversationPersistence)
+		result, err := q1ExecuteSelectedPhaseComponent(t, ctx, request, true)
+		if err != nil || result.Materialization.ForkRunID == "" || result.Activation.Activated {
+			t.Fatalf("fresh selected conversation component: result=%+v err=%v", result, err)
+		}
+		forkRunID := result.Materialization.ForkRunID
+		for table, want := range map[string]int{"agent_sessions": 1, "agent_conversation_audits": 1, "agent_turns": 2} {
+			var count int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, forkRunID).Scan(&count); err != nil || count != want {
+				t.Fatalf("fresh %s rows=%d want=%d err=%v", table, count, want, err)
+			}
+		}
+		return
 	}
 	if childContextProof != nil {
 		request.AgentRuntime.ProcessCapability = childContextProof
