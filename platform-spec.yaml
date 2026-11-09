@@ -27103,8 +27103,6 @@ cli_specification:
           Runtime workspace startup consumes `workspace_model.runtime_image_packaging`. An installed binary MUST NOT use
           source-checkout discovery, Go caller file paths, or a `go.mod` walk to locate `Dockerfile.workspace` or derive
           workspace mount defaults.
-      split_tail:
-      - '#996 Docker Compose setup, #997 local cli_test defaults/image contents, #992 serve listener behavior, multi-bundle work, and README/public-doc polish remain split.'
     local_cli_test_gateway_startup:
       promoted_by: '#997'
       implementation_status: implemented_first_slice
@@ -27151,12 +27149,6 @@ cli_specification:
         authentication and connector failures consume the joined reader output. Observing
         provider init cancels the probe process before joining its readers. Agent-free `cli_test`
         boot remains governed by #993 and MUST NOT require LLM/gateway startup credentials.
-      split_tail:
-      - '#997 local cli_test workspace image contents/default-agent Claude CLI availability is closed by cli_specification.foundations.local_cli_test_workspace_cli_availability.'
-      - '#996 Docker Compose setup remains split.'
-      - '#1568 selected-contract and multi-bundle gateway materialization remains split; #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
-      - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not an open tail.'
-      - '#1568 selected-fork URL-env side-channel and current public URL-env retirement/admission are closed by local_tool_gateway_binding; broader multi-bundle materialization and remote transport policy remain split.'
     local_tool_gateway_binding:
       promoted_by: '#1568'
       implementation_status: implemented_first_slice
@@ -27241,12 +27233,6 @@ cli_specification:
       - selected-fork ephemeral gateway Claude runtime factory as regression-guard consumer
       - local `claude_cli` preflight diagnostics as consumer-only stale-env reporter
       - non-dev serve retired URL-env admission
-      split_tail:
-      - '#1639 closes raw `SWARM_TOOL_GATEWAY_TOKEN` source authority for local serve/run and selected-fork tool-gateway tokens.'
-      - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; selected-fork ephemeral gateway startup no longer uses process-global URL env as a propagation side channel, and DB-loaded multi-context claude_cli gateway/forkchat ambiguity now fails closed, but full context-aware MCP/forkchat routing remains open. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
-      - '#1138/#1213 host workspace `claude_cli` execution remains split.'
-      - '#1567 API connection discovery and connection-file authority remain split.'
-      - 'IPC/unix socket transports and remote/Kubernetes routing remain split.'
     local_cli_test_workspace_cli_availability:
       promoted_by: '#997'
       implementation_status: implemented
@@ -27277,11 +27263,6 @@ cli_specification:
       - '`internal/runtime/runtime_claude_startup.go` managed-agent startup validation'
       - '`internal/runtime/llm` Claude CLI startup probe and per-turn fallback diagnostics'
       - '`internal/runtime/workspace` configured workspace image/container targets'
-      split_tail:
-      - '#996 Docker Compose setup remains split.'
-      - '#995 schema migration startup diagnostics remain split.'
-      - '#1568 selected-contract and multi-bundle gateway materialization remains split; #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
-      - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not reopened.'
     local_claude_cli_preflight_admission:
       promoted_by: '#1565'
       implementation_status: implemented
@@ -27325,12 +27306,6 @@ cli_specification:
         CLI-in-image findings are `skipped`/not measured and MUST NOT emit derivative blockers. If the configured-image probe
         fails, the CLI-in-image finding is `skipped`/not measured. Text and JSON render the same finding statuses and the
         upstream blocker carries the exact recovery command from `workspace_model.runtime_image_packaging`.
-      split_tail:
-      - '#1566 workspace image build/validation path remains split; this owner may report a missing/unusable image but must not build one.'
-      - '#1567 API connection discovery and .swarm/connection.* remain split.'
-      - '#1568 stale MCP gateway env precedence/auto-fix policy remains split; this owner may detect/report/fail closed on stale values.'
-      - '#1138/#1213 host workspace claude_cli execution support remains split.'
-      - '#1441 parent local proof setup remains open after this child unless all sibling tails are closed separately.'
     no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
     daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run start` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
     cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical API at /v1/rpc or /v1/ws. The only local file-contract carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
@@ -41506,85 +41481,6 @@ api_specification:
         runtime.identity is promoted in v1 as the canonical runtime-instance descriptor trust owner by #1613.
         RuntimeIdentityResult also owns the exact bundle-keyed effective-source posture of this live process so
         target-bound clients never infer persisted versus ephemeral admission from backend selection.
-  migration:
-    description: How the previous dual-API surface is retired in favor of v1.
-    builder_api_disposition:
-      package: "internal/builder is removed. No production or test-only constructor, adapter, handler, controller contract,\
-        \ run/debug stream, or WebSocket frame remains."
-      transport: "JSON-RPC at /rpc and /api/rpc, plus Builder WebSocket at /ws and /api/ws, are retired operator-facing\
-        \ surfaces and do not exist. v1 /v1/rpc and /v1/ws are the only user-facing operator API transports."
-      methods:
-      - "project.open / project.reload / project.close \u2192 retired with the legacy Builder transport. A future bundle_lifecycle\
-        \ namespace requires a new product owner and spec."
-      - "run.start / run.stop / run.pause / run.continue \u2192 renamed to v1 run.* methods (same semantics, new request envelope\
-        \ under /v1/rpc, canonical bundle_hash input only)."
-      - "run.step / run.retry / run.skip \u2192 retired with the legacy Builder transport. A future debug.* namespace requires\
-        \ a new product owner and spec."
-      - "state.list_instances \u2192 entity.list (consolidated with /api/instances)."
-      - "state.get_entity \u2192 entity.get (consolidated with /api/instances/{id})."
-      - "credentials.list / set / delete \u2192 retired with the legacy Builder transport. A future credentials.* namespace\
-        \ requires a new product owner and spec."
-      - "validate.full \u2192 DEPRECATED. No JSON-RPC equivalent in v1; verify.* namespace is deferred (see deferred_namespaces.verify).\
-        \ Use `swarm verify` CLI for static contract validation in v1."
-      - "[PROPOSED] methods that were never implemented \u2192 either v1 method on the equivalent namespace, deferred namespace,\
-        \ or removed from spec entirely. None remain as [PROPOSED] in v1."
-      source_replacement: >
-        The retired Builder package and its project reload/source-replacement implementation do not exist. A process epoch
-        loads exactly one generation for each boot-selected source; changing files on disk does not mutate that generation.
-        Existing runs retain immutable bundle authority. Changed-bundle continuation uses run.fork against an exact
-        retained target artifact under independent selected-fork preparation and execution ownership, not a loaded
-        normal runtime. Any future reload product requires a new lifecycle owner and specification.
-    operator_api_disposition:
-      implementation_retirement: The retired internal/dashboard/server package, test-only projection adapters and dashboard-only declarations are deleted. Supported assertions consume canonical typed operatorread owners and v1 HTTP/WebSocket surfaces; no retired constructor or compatibility layer remains.
-      transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
-        \ production; consumers use /v1/rpc or /v1/ws."
-      methods:
-      - "GET /api/health \u2192 health.check"
-      - "GET /api/agents \u2192 agent.list"
-      - "GET /api/agents/{id} \u2192 agent.get"
-      - "POST /api/agents/{id}/actions/directive \u2192 agent.send_directive"
-      - "POST /api/agents/{id}/actions/restart \u2192 agent.restart"
-      - "GET /api/conversations \u2192 conversation.list"
-      - "GET /api/conversations/{sessionID} \u2192 conversation.list_turns"
-      - "GET /api/events \u2192 event.list"
-      - "GET /api/events/{id} \u2192 event.get"
-      - "GET /api/events/flow \u2192 event.subscribe"
-      - "GET /api/mailbox \u2192 mailbox.list"
-      - "GET /api/mailbox/{id} \u2192 mailbox.get"
-      - "(NEW) \u2192 mailbox.decide / mailbox.defer / mailbox.begin_input / mailbox.cancel_input / mailbox.acknowledge / mailbox.subscribe"
-      - "GET /api/instances \u2192 entity.list"
-      - "GET /api/instances/{id} \u2192 entity.get"
-      - "GET /api/instances/aggregate \u2192 entity.aggregate"
-      - "GET /api/runtime/logs \u2192 runtime.logs"
-      - "GET /api/runtime/incidents \u2192 runtime.incidents"
-      - "POST /api/runtime/actions {pause/resume} \u2192 runtime.pause / runtime.resume"
-      - "POST /api/runtime/actions {reset_state} \u2192 retired/fail-closed; future dashboard consumers must call runtime.nuke
-        directly and the legacy reset_state name remains deferred/retired."
-      - "GET /api/runs/{runID}/trace \u2192 run.trace (also adds run.subscribe_trace as the live variant)"
-    auth_token_disposition:
-      v1_model: >
-        User-facing API bearer-token sources are governed by
-        cli_specification.foundations.api_connection_auth_config_precedence. Client-side `SWARM_API_TOKEN` is not
-        a valid API bearer-token source after #1636; server-side `swarm serve` API auth sourcing remains tracked by #1647.
-        `SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` are retired and MUST NOT authorize /v1/rpc
-        or /v1/ws.
-      auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\
-        \ auth surface, one token."
-    cli_consumer_migration:
-      private_makefile_helper_retired: >
-        The former private Makefile/script runtime helper is not a supported
-        public surface. Public consumers use `swarm serve` for runtime startup,
-        `swarm run start` for run creation, `swarm health` for readiness/identity,
-        `swarm agent directive` for directive delivery, and `swarm control
-        nuke` for destructive reset through `/v1/rpc runtime.nuke`. No
-        compatibility wrapper or alternate helper owner remains for those
-        behaviors.
-      cli_v2_read_commands: "Promoted CLI v2 read commands map to v1 methods (v2.2 spellings):\n  swarm run list     \u2192 run.list\n  swarm\
-        \ run status   \u2192 run.diagnose (default), run.get for header-only mode if exposed\n  swarm run trace    \u2192 run.trace,\
-        \ run.subscribe_trace (--follow)\n  swarm health   \u2192 health.check\nRetired `swarm investigate *` commands are\
-        \ legacy consumers only. They are not authoritative CLI v2 topology and must either migrate to the promoted commands\
-        \ or fail closed when the legacy namespace is removed.\n"
-      dashboard: "When a dashboard ships, it consumes v1 \u2014 no direct DB or internal-package access."
   out_of_scope_for_v1:
     multi_tenancy: No org_id, tenant_id, workspace_id in v1. URL paths reserved for tenant prefix in Phase 3 without breaking
       v1 URL shape.
