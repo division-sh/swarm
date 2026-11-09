@@ -134,14 +134,6 @@ func AdmitDeploymentInputTx(ctx context.Context, tx *sql.Tx, prepared PreparedDe
 		if fact.ExternalAccountRef != account {
 			return true, false, nil // The operator conversation is never customer input.
 		}
-	} else {
-		fact := prepared.action
-		if fact.ConversationRef != conversation || string(fact.ConversationScope) != scope {
-			return false, false, nil
-		}
-		if fact.ExternalAccountRef != account {
-			return true, false, nil
-		}
 	}
 	var fingerprint sql.NullString
 	var count, complete, distinct int64
