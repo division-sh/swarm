@@ -8,24 +8,38 @@ import (
 )
 
 type Binding struct {
-	id                string
-	displayName       string
-	session           bool
-	webhook           bool
-	pollClaims        bool
-	credential        bool
-	signingCredential bool
-	canonicalAccount  func(string) (string, error)
-	claimInstructions func(string, string, time.Time) (string, error)
-	readyTeaching     string
-	notLinked         string
-	pairingPrompt     string
-	languageHelp      func(string) string
-	claimantFormat    string
-	sanitizeClaimant  bool
-	nativeRead        string
-	nativeWrite       string
-	captureKey        string
+	id                           string
+	displayName                  string
+	session                      bool
+	webhook                      bool
+	pollClaims                   bool
+	credential                   bool
+	signingCredential            bool
+	canonicalAccount             func(string) (string, error)
+	claimInstructions            func(ClaimPrompt) (string, error)
+	readyTeaching                string
+	registrationTeaching         string
+	omitBoundRegistrationReceipt bool
+	notLinked                    string
+	pairingPrompt                string
+	languageHelp                 func(string) string
+	nativeRead                   string
+	nativeWrite                  string
+	captureKey                   string
+}
+
+type AccountPresentation struct {
+	Account string
+	Name    string
+}
+
+// ClaimPrompt carries existing presentation facts, never claim authority.
+type ClaimPrompt struct {
+	Account    string
+	Code       string
+	ExpiresAt  time.Time
+	Deployment bool
+	Connection *AccountPresentation
 }
 
 // Keep installation in one compiled seat. Packs cannot register callbacks or
@@ -55,10 +69,19 @@ func Installed() []Binding { return append([]Binding(nil), installed[:]...) }
 func (b Binding) Provider() string      { return b.id }
 func (b Binding) DisplayName() string   { return b.displayName }
 func (b Binding) ReadyTeaching() string { return b.readyTeaching }
-func (b Binding) NotLinked() string     { return b.notLinked }
-func (b Binding) Session() bool         { return b.id != "" && b.session }
-func (b Binding) Webhook() bool         { return b.id != "" && b.webhook }
-func (b Binding) PollsClaim() bool      { return b.id != "" && b.pollClaims }
+func (b Binding) RegistrationTeaching() string {
+	if b.registrationTeaching != "" {
+		return b.registrationTeaching
+	}
+	return b.readyTeaching
+}
+func (b Binding) ShowRegistrationReceipt(bound bool) bool {
+	return !bound || !b.omitBoundRegistrationReceipt
+}
+func (b Binding) NotLinked() string { return b.notLinked }
+func (b Binding) Session() bool     { return b.id != "" && b.session }
+func (b Binding) Webhook() bool     { return b.id != "" && b.webhook }
+func (b Binding) PollsClaim() bool  { return b.id != "" && b.pollClaims }
 
 func (b Binding) CaptureProvenanceKey() string { return b.captureKey }
 
@@ -92,11 +115,15 @@ func (b Binding) CanonicalAccount(account string) (string, error) {
 	return b.canonicalAccount(account)
 }
 
-func (b Binding) ClaimInstructions(account, code string, expires time.Time) (string, error) {
+func (b Binding) ClaimInstructions(prompt ClaimPrompt) (string, error) {
 	if b.claimInstructions == nil {
 		return "", fmt.Errorf("provider must be whatsapp or telegram")
 	}
-	return b.claimInstructions(account, code, expires)
+	return b.claimInstructions(prompt)
+}
+
+func ClaimDeadline(expires time.Time) string {
+	return expires.Local().Format("2006-01-02 15:04:05 MST (-07:00)")
 }
 
 func (b Binding) PairingInstructions(expires time.Time, qr string) string {
@@ -111,16 +138,6 @@ func (b Binding) LanguageHelp(operation string) string {
 		return ""
 	}
 	return b.languageHelp(operation)
-}
-
-func (b Binding) ClaimantObservation(account, oneLineAccount, scope string) string {
-	if b.sanitizeClaimant {
-		account = oneLineAccount
-	}
-	if b.claimantFormat == "" {
-		return ""
-	}
-	return fmt.Sprintf(b.claimantFormat, account, scope)
 }
 
 func (b Binding) NativeRead(target string) bool {

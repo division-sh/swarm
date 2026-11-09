@@ -16,7 +16,7 @@ const whatsAppReadyTeaching = "WhatsApp ready. Run `swarm serve` to answer custo
 
 func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.T) {
 	expires := time.Date(2026, 11, 6, 22, 42, 17, 123000, time.UTC)
-	displayed, err := time.Parse("2006-01-02 15:04:05 MST (-07:00)", channelClaimDeadline(expires))
+	displayed, err := time.Parse("2006-01-02 15:04:05 MST (-07:00)", channelprovider.ClaimDeadline(expires))
 	if err != nil || displayed.After(expires) || expires.Sub(displayed) >= time.Second {
 		t.Fatal("human deadline rounded later than its stored expiry", displayed, expires, err)
 	}
@@ -59,10 +59,10 @@ func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.
 		Connection:        &channelonboarding.SessionConnectionReadback{AccountPresentation: "420079", AccountName: "SwarmTestBot"},
 	}
 	var out bytes.Buffer
-	if err := writeTelegramClaimInstructions(&out, result); err != nil {
+	if err := writeChannelClaimInstructions(&out, result); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Send the code 00007 to @SwarmTestBot", channelClaimDeadline(expires), "SEND-CODE LINK: https://t.me/SwarmTestBot?text=00007"} {
+	for _, want := range []string{"Send the code 00007 to @SwarmTestBot", channelprovider.ClaimDeadline(expires), "SEND-CODE LINK: https://t.me/SwarmTestBot?text=00007"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %q", want, out.String())
 		}
@@ -82,7 +82,7 @@ func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.
 		copy.Connection = &connection
 		mutate(&copy)
 		out.Reset()
-		if err := writeTelegramClaimInstructions(&out, copy); err == nil || out.Len() != 0 {
+		if err := writeChannelClaimInstructions(&out, copy); err == nil || out.Len() != 0 {
 			t.Fatal("instructions inferred a bot destination from incomplete/foreign evidence")
 		}
 	}
