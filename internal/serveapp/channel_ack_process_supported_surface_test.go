@@ -1,10 +1,15 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -12,7 +17,11 @@ import (
 func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, presentation := range []string{"cli", "channel"} {
-			for _, cut := range []string{"launched", "settled"} {
+			cuts := []string{"launched", "settled"}
+			if presentation == "channel" {
+				cuts = append(cuts, "logout_while_launched")
+			}
+			for _, cut := range cuts {
 				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
 					h, db, hash := startChannelAnchorJourney(t, backend, "ack-crash-token", false)
 					if presentation == "cli" {
@@ -41,7 +50,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 					}
 					var arrived <-chan struct{}
 					var release func()
-					if cut == "launched" {
+					if cut == "launched" || cut == "logout_while_launched" {
 						arrived, release = h.provider.PauseNextCallbackResponse()
 						t.Cleanup(release)
 					}
@@ -66,6 +75,10 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 						}
 					} else {
 						waitChannelAnchorDecision(t, db, card)
+					}
+					if cut == "logout_while_launched" {
+						proveDeploymentLogoutDuringAcknowledgment(t, h, db, first, card, seed.RunID, token, intentQuery, release)
+						return
 					}
 					operation := waitChannelAcknowledgmentAttempt(t, db, cut)
 					before := len(h.provider.Acknowledgments())
@@ -105,6 +118,81 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				})
 			}
 		}
+	}
+}
+
+func proveDeploymentLogoutDuringAcknowledgment(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB,
+	first *channelOnboardingCrashServeProcess, card, runID, token, intentQuery string, release func()) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var out, errOut lockedBuffer
+	done := make(chan int, 1)
+	joined := false
+	defer func() {
+		cancel()
+		release()
+		if !joined {
+			<-done
+		}
+	}()
+	go func() {
+		done <- cliapp.Execute(ctx, []string{"--config", h.opts.ConfigPath, "channel", "logout", "telegram", "420079",
+			"--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	}()
+	select {
+	case code := <-done:
+		joined = true
+		var retired channelonboarding.Result
+		if code != 0 || json.Unmarshal([]byte(out.String()), &retired) != nil ||
+			retired.Operation.OperationID != h.registration.OperationID || !retired.Operation.LogoutCompleted {
+			t.Fatalf("logout could not retire its parent while the provider ACK was paused: exit=%d out=%s err=%s", code, out.String(), errOut.String())
+		}
+	case <-ctx.Done():
+		t.Fatal("logout waited on the paused provider acknowledgment")
+	}
+	release()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var state, disposition string
+		if err := db.QueryRow(intentQuery, token).Scan(&state, &disposition); err != nil {
+			t.Fatal(err)
+		}
+		if state == "settled" && disposition == "rejected" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retired parent left action executable: %s/%s", state, disposition)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	assertUnchanged := func() {
+		t.Helper()
+		var state string
+		var decisions int
+		if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, card).Scan(&state); err != nil || state != "pending" {
+			t.Fatalf("retired ACK acquired card authority: %s %v", state, err)
+		}
+		if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, runID).Scan(&decisions); err != nil || decisions != 0 {
+			t.Fatalf("retired ACK emitted a decision: %d %v", decisions, err)
+		}
+		if got := len(h.provider.Acknowledgments()); got != 1 {
+			t.Fatal("retired ACK was retried", got)
+		}
+		var stateDefault string
+		if err := db.QueryRow(`SELECT state FROM channel_delivery_defaults WHERE singleton_id=1`).Scan(&stateDefault); err != nil || stateDefault != "retired" {
+			t.Fatalf("logout retained the deployment delivery default: %s %v", stateDefault, err)
+		}
+	}
+	assertUnchanged()
+	if err := first.stop(); err != nil {
+		t.Fatal(err)
+	}
+	second := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
+	h.endpoint = second.endpoint(t)
+	assertUnchanged()
+	if err := second.stop(); err != nil {
+		t.Fatal(fmt.Errorf("stop post-logout serve: %w", err))
 	}
 }
 
