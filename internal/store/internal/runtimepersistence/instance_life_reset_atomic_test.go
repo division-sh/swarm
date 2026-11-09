@@ -54,9 +54,24 @@ func TestInstanceLifeResetCommitBeforeFinalizeReplayBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.ctx = correlation.WithSourceArtifactFact(f.ctx, fact)
-			f.constructKeylessRoot(t)
 			source := semanticview.Wrap(f.bundle)
-			owner, err := flowidentity.StandingForGeneration(source, "review", correlation.RunIDFromContext(f.ctx))
+			runID := correlation.RunIDFromContext(f.ctx)
+			root, err := flowidentity.StandingForGeneration(source, semanticview.RootExecutionFlowID(source), runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rootPlan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, rootPlan)
+			if err != nil || !committed.Acknowledged || !committed.Created {
+				t.Fatalf("construct fieldless history family: %+v %v", committed, err)
+			}
+			if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, committed); err != nil {
+				t.Fatal(err)
+			}
+			owner, err := flowidentity.StandingForGeneration(source, "review", runID)
 			if err != nil {
 				t.Fatal(err)
 			}
