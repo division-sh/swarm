@@ -2,23 +2,38 @@ package channelprovider
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"strconv"
-	"time"
 )
 
 var telegram = Binding{
 	id: "telegram", displayName: "Telegram", webhook: true, pollClaims: true, credential: true, signingCredential: true,
-	canonicalAccount:  telegramAccount,
-	claimInstructions: telegramClaimInstructions,
-	claimantFormat:    "Claimed by %s in a %s conversation.\n",
+	canonicalAccount:             telegramAccount,
+	claimInstructions:            telegramClaimInstructions,
+	registrationTeaching:         "Telegram ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
+	omitBoundRegistrationReceipt: true,
 	languageHelp: func(operation string) string {
 		return fmt.Sprintf("Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", operation)
 	},
 }
 
-func telegramClaimInstructions(_, code string, expires time.Time) (string, error) {
+var telegramBotName = regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`)
+
+func telegramClaimInstructions(prompt ClaimPrompt) (string, error) {
+	if prompt.Deployment {
+		if prompt.Connection == nil || prompt.ExpiresAt.IsZero() {
+			return "", fmt.Errorf("operator code requires its exact Telegram destination and expiry")
+		}
+		bot := prompt.Connection.Name
+		if !telegramBotName.MatchString(bot) || prompt.Connection.Account != prompt.Account {
+			return "", fmt.Errorf("operator code requires its authenticated Telegram bot address")
+		}
+		return fmt.Sprintf("Send the code %s to @%s before %s.\nSEND-CODE LINK: https://t.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
+			prompt.Code, bot, ClaimDeadline(prompt.ExpiresAt), bot, url.QueryEscape(prompt.Code)), nil
+	}
 	return fmt.Sprintf("Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n",
-		code, expires.Local().Format(time.RFC3339Nano)), nil
+		prompt.Code, ClaimDeadline(prompt.ExpiresAt)), nil
 }
 
 func telegramAccount(account string) (string, error) {
