@@ -23205,7 +23205,7 @@ multi_bundle_persistence:
   cli_surface:
     run_fork: run fork defaults to its source run; optional --source admits a local directory only to compute an exact already-stored target hash. Pin overrides use that same target, never the unrelated health source.
     canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
-    local_source: serve and local run start require one positional directory; `.` is the explicit current-directory spelling
+    local_source: Source-aware local commands use the captured invocation directory when the root operand is omitted or `.`; one positional directory selects an alternate root. Source-free modes never inspect a local root.
     persisted_source: Internal recovery, replay, reset and fork reconstruct exact selected-store blobs without the original directory. Public serve accepts a directory only; hash-only boot is absent.
     retired: bundle build/register/delete/list/get/agents commands are absent
   historical_publication_disposition:

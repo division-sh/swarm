@@ -110,7 +110,7 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 		if name == "whatsapp-receptionist" {
 			workspace = "workspace:\n  backend: host\n  allow_exec_on_host: true\n"
 		}
-		body := "runtime:\n  recovery_on_startup: true\nstore:\n  backend: sqlite\n  sqlite:\n    path: .swarm/store.sqlite\n" + workspace + "serve:\n  api_listen_addr: 127.0.0.1:8081\n  mcp_listen_addr: 127.0.0.1:8082\n  api_token_file: .swarm/api-token\nconnection:\n  api_server: http://127.0.0.1:8081\n  api_token_file: .swarm/api-token\n"
+		body := "runtime:\n  recovery_on_startup: true\nstore:\n  backend: sqlite\n" + workspace + "serve:\n  api_listen_addr: 127.0.0.1:8081\n  mcp_listen_addr: 127.0.0.1:8082\n  api_token_file: .swarm/api-token\nconnection:\n  api_server: http://127.0.0.1:8081\n  api_token_file: .swarm/api-token\n"
 		ignore, err := os.ReadFile(filepath.Join(absDestination, ".gitignore"))
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -132,12 +132,13 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	if name == "whatsapp-receptionist" {
 		fmt.Fprintln(out, "  swarm channel connect whatsapp")
 		fmt.Fprintln(out, "  Set operator_account in policy.yaml to the linked number, including +.")
-		fmt.Fprintln(out, "  swarm verify . --portable")
+		fmt.Fprintln(out, "  swarm verify --portable")
 		fmt.Fprintln(out, "  swarm serve")
 		return nil
 	}
-	fmt.Fprintln(out, "  swarm verify . --portable")
+	fmt.Fprintln(out, "  swarm verify --portable")
 	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")
-	fmt.Fprintln(out, "  swarm serve . --dev")
+	fmt.Fprintln(out, "  swarm secrets set -- 'telegram.telegram_bot_token'")
+	fmt.Fprintln(out, "  swarm serve --dev")
 	return nil
 }

@@ -75,6 +75,21 @@ func TestRootHelpGroupsRenderInJourneyOrder(t *testing.T) {
 	}
 }
 
+func TestHelpExamplesUseCurrentDirectory(t *testing.T) {
+	for _, example := range []struct{ command, line string }{
+		{"serve", "swarm serve --dev"}, {"verify", "swarm verify"},
+	} {
+		t.Run(example.command, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommand(context.Background(), t.TempDir(), []string{example.command, "--help"}, &stdout, &stderr)
+			if code != 0 || !strings.Contains(stdout.String(), "\n  "+example.line+"\n") ||
+				strings.Contains(stdout.String(), "swarm "+example.command+" .") {
+				t.Fatalf("help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestEveryVisibleCommandBelongsToAGroup(t *testing.T) {
 	var out, errOut bytes.Buffer
 	root := newRootCommand(context.Background(), t.TempDir(), &out, &errOut)

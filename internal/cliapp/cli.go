@@ -275,7 +275,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd := &cobra.Command{
 		Use:     "serve [directory]",
 		Short:   "Start the Swarm runtime (server): engine, API, health, and MCP.",
-		Example: `  swarm serve . --dev`,
+		Example: `  swarm serve --dev`,
 		Args:    argcount.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -373,7 +373,7 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	cmd := &cobra.Command{
 		Use:     "verify [directory]",
 		Short:   "Validate contract files or compare a run's state with its history.",
-		Example: "  swarm verify .\n  swarm verify --run <run_id> --json",
+		Example: "  swarm verify\n  swarm verify --run <run_id> --json",
 		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
