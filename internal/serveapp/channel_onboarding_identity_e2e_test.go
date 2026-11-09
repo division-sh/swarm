@@ -31,22 +31,7 @@ var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --inter
 func registerChannelFixtureAccount(t *testing.T, config, token, account string, hitl ...*telegramapi.Double) channelonboarding.Operation {
 	t.Helper()
 	if len(hitl) != 0 {
-		body, err := os.ReadFile(config)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var document map[string]any
-		if err := yaml.Unmarshal(body, &document); err != nil {
-			t.Fatal(err)
-		}
-		document["channels"] = map[string]any{"hitl": map[string]any{"provider": "telegram", "account": account}}
-		body, err = yaml.Marshal(document)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(config, body, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		configureChannelFixtureHITL(t, config, account)
 	}
 	input, err := os.CreateTemp(t.TempDir(), "account-token")
 	if err != nil {
@@ -140,6 +125,26 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 		t.Fatalf("fixture account registration exit=%d err=%s", code, errOut.String())
 	}
 	return result.Operation
+}
+
+func configureChannelFixtureHITL(t *testing.T, config, account string) {
+	t.Helper()
+	body, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["channels"] = map[string]any{"hitl": map[string]any{"provider": "telegram", "account": account}}
+	body, err = yaml.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type channelOnboardingExactChoice struct {

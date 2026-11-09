@@ -123,7 +123,7 @@ func TestChannelNativeInboxForeignCommandsBlockReadinessE2E(t *testing.T) {
 func TestChannelNativeInboxDelayedApplyDuringReconnectStartE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_delayed_apply")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_delayed_apply")
 		})
 	}
 }
@@ -139,6 +139,11 @@ func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 		t.Run(backend+"-deployment-unheld", func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:unheld:verdict")
 		})
+		if backend == "sqlite" {
+			t.Run(backend+"-deployment-rollback", func(t *testing.T) {
+				runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:rollback:verdict")
+			})
+		}
 	}
 }
 
@@ -253,7 +258,7 @@ func TestChannelDeliveryManualResendAfterLostPromptEditE2E(t *testing.T) {
 func TestChannelDeliverySharedAudienceE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "shared_audience")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:shared_audience")
 		})
 	}
 }
@@ -269,7 +274,7 @@ func TestChannelDeliveryViewFullE2E(t *testing.T) {
 func TestChannelDeliveryBacklogSummaryOpenInboxE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "summary_open")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:summary_open")
 		})
 	}
 }
@@ -277,7 +282,7 @@ func TestChannelDeliveryBacklogSummaryOpenInboxE2E(t *testing.T) {
 func TestChannelDeliveryUncertainNoticeSummaryReadbackE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "notice_uncertainty_readback")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:notice_uncertainty_readback")
 		})
 	}
 }
@@ -285,7 +290,7 @@ func TestChannelDeliveryUncertainNoticeSummaryReadbackE2E(t *testing.T) {
 func TestChannelDeliveryBacklogOpenInboxAcrossPublicPagesE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "summary_open_many")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:summary_open_many")
 		})
 	}
 }
@@ -327,6 +332,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	scenario = strings.TrimPrefix(scenario, "deployment:")
 	unheld := strings.HasPrefix(scenario, "unheld:")
 	scenario = strings.TrimPrefix(scenario, "unheld:")
+	rollback := strings.HasPrefix(scenario, "rollback:")
+	scenario = strings.TrimPrefix(scenario, "rollback:")
 	retainedInteraction := scenario == "ordered_input_restart" || scenario == "draft_chooser_restart"
 	if retainedInteraction {
 		scenario = strings.TrimSuffix(scenario, "_restart")
@@ -477,10 +484,15 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		observation.configure(&opts)
 	}
 	var registered channelonboarding.Operation
-	if scenario == "inbox" {
+	preconnectionBacklog := deploymentTransport && (scenario == "summary_open" || scenario == "summary_open_many" || scenario == "notice_uncertainty_readback")
+	delayedOperatorClaim := preconnectionBacklog || deploymentTransport && scenario == "shared_audience"
+	if scenario == "inbox" || delayedOperatorClaim {
 		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079")
 	} else {
 		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079", provider)
+	}
+	if delayedOperatorClaim {
+		configureChannelFixtureHITL(t, configPath, "420079")
 	}
 	if scenario == "inbox_install_loss" {
 		provider.LoseNextCommandWriteAcknowledgment()
@@ -508,7 +520,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 	if unheld {
 		var out, errOut lockedBuffer
-		if code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, &out, &errOut, nil); code != 0 {
+		if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
 			t.Fatalf("read unheld account exit=%d err=%s", code, errOut.String())
 		}
 		var listed struct {
@@ -578,6 +590,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				time.Sleep(20 * time.Millisecond)
 			}
 		}
+	}
+	if delayedOperatorClaim {
+		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
+		chat, kind := 1001, "private"
+		if scenario == "shared_audience" {
+			chat, kind = -1001, "group"
+		}
+		registered = connectDeploymentChannelFixtureOperator(t, h, "bot-token", chat, 7000, kind)
 	}
 	if registered.DeploymentRegistration && scenario != "inbox" && !deploymentTransport {
 		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
@@ -673,26 +693,43 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		case <-time.After(15 * time.Second):
 			t.Fatal("native setting write did not launch")
 		}
-		var reconnect map[string]any
-		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_start", map[string]any{
-			"provider": "telegram", "verb": "reconnect", "save_proof": false,
-		}, &reconnect)
-		operation, _ := reconnect["operation"].(map[string]any)
-		if operation["phase"] != "awaiting_external_identity" {
-			t.Fatalf("reconnect did not admit an independent ceremony: %v", reconnect)
-		}
-		if writes := provider.CommandWrites(); len(writes) != 0 {
-			t.Fatalf("successor wrote over launched predecessor: %v", writes)
-		}
-		var current channelonboarding.Result
-		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_get", map[string]any{
-			"operation_id": connectedOperationID,
-		}, &current)
-		if current.Readiness == nil || !current.Readiness.NativeInboxRequired || current.Readiness.NativeInbox == nil ||
-			current.Readiness.NativeInbox.State == channelnative.QualificationQualified {
-			t.Fatalf("launched native setting became usable before settlement: %+v", current.Readiness)
-		}
-		releaseCommandApply()
+		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
+		connectDeploymentChannelFixtureOperator(t, h, "bot-token", 1001, 7000, "private", func() {
+			var out, errOut lockedBuffer
+			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
+				t.Fatalf("read pending successor exit=%d err=%s", code, errOut.String())
+			}
+			var pending struct {
+				Accounts []channelonboarding.Result `json:"accounts"`
+			}
+			if json.Unmarshal([]byte(out.String()), &pending) != nil || len(pending.Accounts) != 1 ||
+				pending.Accounts[0].Operation.OperationID == registered.OperationID ||
+				pending.Accounts[0].Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity ||
+				pending.Accounts[0].IdentityOperation == nil || pending.Accounts[0].IdentityOperation.State != operatorchannel.StateAwaitingClaim {
+				t.Fatalf("deployment successor did not require its own ceremony: %s", out.String())
+			}
+			if writes := provider.CommandWrites(); len(writes) != 0 {
+				t.Fatalf("successor wrote over launched predecessor: %v", writes)
+			}
+			db, err := sql.Open(backend, observerDSN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			var evidence []byte
+			if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, registered.OperationID).Scan(&evidence); err != nil {
+				t.Fatal(err)
+			}
+			parent, err := channelnative.DecodeTransportParent(evidence)
+			if err != nil || qualificationReader == nil || parent.ID != registered.OperationID || parent.Revision != registered.Revision {
+				t.Fatalf("launched predecessor lost exact parent evidence: %+v err=%v", parent, err)
+			}
+			qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
+			if err != nil || qualification.State == channelnative.QualificationQualified {
+				t.Fatalf("launched native setting became usable before settlement: %+v err=%v", qualification, err)
+			}
+			releaseCommandApply()
+		})
 		deadline := time.Now().Add(15 * time.Second)
 		for {
 			writes := provider.CommandWrites()
@@ -907,6 +944,9 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err != nil {
 		t.Fatal(err)
 	}
+	if rollback {
+		proveDeploymentCallbackRollback(t, observerDSN, provider, callbackURL, signing, update, requestBody)
+	}
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, callbackURL, strings.NewReader(string(requestBody)))
 	if err != nil {
 		t.Fatal(err)
@@ -1071,7 +1111,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				return
 			}
 			businessChat := "1001"
-			if deploymentTransport {
+			if deploymentTransport && scenario == "business" {
 				businessChat = "9001"
 			}
 			if fmt.Sprint(delivery["chat_id"]) == businessChat && strings.Contains(message, "ordinary business text") {
@@ -1087,6 +1127,52 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatalf("%s flow did not answer %q; deliveries=%v acknowledgments=%v edits=%v", scenario, inputText, provider.Delivery(1), provider.Acknowledgments(), provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveDeploymentCallbackRollback(t *testing.T, dsn string, provider *telegramapi.Double, callback, signing string, update map[string]any, body []byte) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	id := channelFixtureProviderEventID(t, fmt.Sprint(update["update_id"]))
+	// Inject only an abort after the genuine owner inserts this occurrence.
+	// Neither the authenticated input nor its authority is manufactured.
+	if _, err := db.Exec(`CREATE TRIGGER reject_deployment_callback BEFORE UPDATE ON operator_channel_action_intents
+		WHEN NEW.provider_event_id='` + id + `' BEGIN SELECT RAISE(ABORT,'deployment callback rollback probe'); END`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := db.Exec(`DROP TRIGGER reject_deployment_callback`); err != nil {
+			t.Error(err)
+		}
+	}()
+	acks := len(provider.Acknowledgments())
+	status, _ := postProviderAliasUpdate(t, callback, "", signing, string(body))
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("aborted deployment callback status=%d", status)
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM operator_channel_action_intents WHERE provider_event_id=$1`,
+		`SELECT COUNT(*) FROM runtime_external_effect_operations WHERE authority_kind='channel_action_ack' AND json_extract(authority_evidence,'$.provider_event_id')=$1`,
+	} {
+		var count int
+		if err := db.QueryRow(query, id).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("aborted deployment callback retained mutation evidence: count=%d err=%v", count, err)
+		}
+	}
+	if len(provider.Acknowledgments()) != acks {
+		t.Fatal("aborted deployment callback caused an external acknowledgment")
+	}
+	var state string
+	token := update["callback_query"].(map[string]any)["data"]
+	if err := db.QueryRow(`SELECT card.status FROM channel_delivery_actions action
+		JOIN channel_delivery_renders render ON render.render_id=action.render_id
+		JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
+		JOIN decision_cards card ON card.card_id=plan.source_id WHERE action.action_token=$1`, token).Scan(&state); err != nil || state != "pending" {
+		t.Fatalf("aborted callback changed its card: state=%s err=%v", state, err)
 	}
 }
 
@@ -2135,10 +2221,10 @@ func postChannelTelegramUpdate(t *testing.T, callbackURL, signing string, update
 
 func postChannelTelegramOperatorUpdate(t *testing.T, callbackURL, signing string, update map[string]any) []string {
 	t.Helper()
-	return postChannelTelegramUpdateStatus(t, callbackURL, signing, update, http.StatusOK)
+	return postChannelTelegramUpdateStatus(t, callbackURL, signing, update, http.StatusOK, true)
 }
 
-func postChannelTelegramUpdateStatus(t *testing.T, callbackURL, signing string, update map[string]any, expectedStatus int) []string {
+func postChannelTelegramUpdateStatus(t *testing.T, callbackURL, signing string, update map[string]any, expectedStatus int, empty ...bool) []string {
 	t.Helper()
 	body, err := json.Marshal(update)
 	if err != nil {
@@ -2158,6 +2244,12 @@ func postChannelTelegramUpdateStatus(t *testing.T, callbackURL, signing string, 
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != expectedStatus {
 		t.Fatalf("Telegram update status=%d body=%s err=%v", response.StatusCode, responseBody, err)
+	}
+	if len(empty) != 0 && empty[0] {
+		if len(responseBody) != 0 {
+			t.Fatalf("deployment operator update published a business receipt: %s", responseBody)
+		}
+		return nil
 	}
 	if expectedStatus == http.StatusOK && len(responseBody) == 0 {
 		return nil

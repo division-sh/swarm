@@ -412,7 +412,12 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "telegram-secret"); err != nil {
 		t.Fatal(err)
 	}
-	h.registration = registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079", h.provider)
+	if withSummary {
+		h.registration = registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079")
+		configureChannelFixtureHITL(t, h.opts.ConfigPath, "420079")
+	} else {
+		h.registration = registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079", h.provider)
+	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
 	var identity apiv1.RuntimeIdentityResult
@@ -429,6 +434,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 		requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
 			"run_id": notice.RunID, "idempotency_key": "uncertainty-summary-pause",
 		})
+		h.registration = connectDeploymentChannelFixtureOperator(t, h, token, 1001, 7000, "private")
 	}
 	if !h.registration.DeploymentRegistration {
 		runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
