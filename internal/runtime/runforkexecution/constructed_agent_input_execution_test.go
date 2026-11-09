@@ -208,10 +208,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 	}
 	ctx, repo := runForkTestContext(t), runForkExecutionRepoRoot(t)
-	root := canonicalrouting.CopySelectedConstructedAgentInput(t)
-	if proof.freshConversation {
-		canonicalrouting.ApplyOverlay(t, root, "child/agents.yaml", "worker:\n  model: regular\n  memory: true\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\naudit:\n  model: regular\n  memory: false\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n")
-	}
+	root := canonicalrouting.CopySelectedConstructedAgentInput(t, proof.freshConversation)
 	if nested {
 		root = canonicalrouting.CopySelectedNestedConstructedAgentInput(t, fields)
 	}
