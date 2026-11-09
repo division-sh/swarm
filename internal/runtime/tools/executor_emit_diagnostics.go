@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -14,6 +16,71 @@ import (
 )
 
 const emitToolOutcomeAction = "emit_tool_outcome"
+
+var emitDiagnosticIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,96}$`)
+var emitDiagnosticSQLState = regexp.MustCompile(`^[0-9A-Z]{5}$`)
+
+// Preserve native branch identity without serializing private error text or attributes.
+func emitPublicationDiagnostic(err error, remaining *int) map[string]any {
+	if err == nil {
+		return nil
+	}
+	if *remaining == 0 {
+		return map[string]any{"truncated": true}
+	}
+	*remaining -= 1
+	identifier := func(value string) string {
+		if emitDiagnosticIdentifier.MatchString(value) {
+			return value
+		}
+		return "[opaque]"
+	}
+	node := map[string]any{"type": TruncateTelemetry(fmt.Sprintf("%T", err), 96)}
+	switch typed := err.(type) {
+	case *failures.Error:
+		if typed == nil {
+			node["opaque"] = true
+			break
+		}
+		node["class"], node["code"] = identifier(string(typed.Failure.Class)), identifier(typed.Failure.Detail.Code)
+		node["component"], node["operation"] = identifier(typed.Failure.Component), identifier(typed.Failure.Operation)
+	case interface{ SQLState() string }:
+		state := typed.SQLState()
+		if emitDiagnosticSQLState.MatchString(state) {
+			node["sqlstate"] = state
+		} else {
+			node["opaque"] = true
+		}
+	default:
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			node["sentinel"] = err.Error()
+		} else {
+			node["opaque"], node["message_sha256"] = true, fmt.Sprintf("%x", sha256.Sum256([]byte(err.Error())))
+		}
+	}
+	var branches []error
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		branches = wrapped.Unwrap()
+	case interface{ Unwrap() error }:
+		branches = []error{wrapped.Unwrap()}
+	}
+	var children []any
+	for _, branch := range branches {
+		if branch == nil {
+			continue
+		}
+		if *remaining == 0 {
+			children = append(children, map[string]any{"truncated": true})
+			break
+		}
+		children = append(children, emitPublicationDiagnostic(branch, remaining))
+	}
+	if len(children) != 0 {
+		node["causes"] = children
+	}
+	return node
+}
 
 func emitReceiverRefusals(err error) []failures.Envelope {
 	var refusals []failures.Envelope

@@ -1,9 +1,12 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 
@@ -17,6 +20,33 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
+
+func captureEmitPublicationDiagnostic(t *testing.T) (*bytes.Buffer, func() map[string]any) {
+	t.Helper()
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	return &output, func() map[string]any {
+		t.Helper()
+		for _, line := range strings.Split(output.String(), "\n") {
+			if !strings.Contains(line, `"message":"Emit publication failure diagnostic"`) {
+				continue
+			}
+			var result map[string]any
+			if err := json.Unmarshal([]byte(line[strings.Index(line, "detail=")+len("detail="):]), &result); err != nil {
+				t.Fatal(err)
+			}
+			return result
+		}
+		t.Fatal("missing native emit publication diagnostic")
+		return nil
+	}
+}
+
+type emitDiagnosticStateError struct{ error }
+
+func (emitDiagnosticStateError) SQLState() string { return "57014" }
 
 // Controlled publisher evidence for tool component tests, not persistence or
 // handler-completion qualification.
@@ -101,6 +131,7 @@ func (b *acknowledgedEmitFaultPublisher) PublishEmit(ctx context.Context, event 
 }
 
 func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
+	captured, diagnostic := captureEmitPublicationDiagnostic(t)
 	bundle := &contracts.WorkflowContractBundle{Events: map[string]contracts.EventCatalogEntry{"root.done": {}}}
 	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".", "root.done")
 	fault := errors.New("post-commit dispatch failed")
@@ -114,6 +145,39 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 	output, ok := value.(map[string]any)
 	if !ok || output["accepted"] != true || output["feedback_committed"] != true || output["retry_write"] != false || output["stage"] != "component-fixture" || output["stage_origin"] != pipeline.EmitStageAcceptance || output["dispatch"] != pipeline.EmitDispatchError || output["event_id"] != publisher.event.ID() {
 		t.Fatalf("tool discarded exact committed feedback: %#v", value)
+	}
+	evidence := diagnostic()
+	ack := evidence["ack"].(map[string]any)
+	if evidence["event_id"] != publisher.event.ID() || evidence["run_id"] != toolTestRunID || evidence["agent_id"] != actor.ID ||
+		ack["accepted"] != true || ack["feedback_committed"] != true || ack["replay"] != false || ack["stage"] != "component-fixture" || ack["dispatch"] != string(pipeline.EmitDispatchError) {
+		t.Fatalf("diagnostic invented or lost native acknowledgement: %#v", evidence)
+	}
+	private := "credential-value /private/native-error https://private.invalid/secret"
+	native := failures.New(failures.ClassInternalFailure, "unclassified_runtime_error", "native-publication", "feedback.commit", map[string]any{"password": private})
+	publisher.fault = errors.Join(context.Canceled, fmt.Errorf("private wrapper %s: %w", private, native), emitDiagnosticStateError{errors.New(private)})
+	captured.Reset()
+	_, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, native) {
+		t.Fatalf("capture changed independent publication causes: %v", err)
+	}
+	diagnostic()
+	for _, required := range []string{`"sentinel":"context canceled"`, `"component":"native-publication"`, `"operation":"feedback.commit"`, `"sqlstate":"57014"`, `"opaque":true`, `"message_sha256":`} {
+		if !strings.Contains(captured.String(), required) {
+			t.Fatalf("native branch evidence lost %s: %s", required, captured.String())
+		}
+	}
+	if strings.Contains(captured.String(), private) || strings.Contains(captured.String(), "password") {
+		t.Fatal("native diagnostic exposed private text or failure attributes")
+	}
+	publisher.fault = fault
+	for i := 0; i < 12; i++ {
+		publisher.fault = fmt.Errorf("opaque wrapper: %w", publisher.fault)
+	}
+	captured.Reset()
+	_, _ = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+	diagnostic()
+	if !strings.Contains(captured.String(), `"truncated":true`) || len(captured.Bytes()) > 8192 {
+		t.Fatalf("native diagnostic did not disclose its bound: %d bytes", len(captured.Bytes()))
 	}
 	for _, joined := range []bool{false, true} {
 		refusal := &pipeline.NoHandlerError{FlowID: ".", FlowInstance: toolTestRunID, Stage: "done"}

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -251,6 +252,14 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		if refusals := emitReceiverRefusals(publishErr); len(refusals) != 0 {
 			return e.emitRefusalOutput(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, output, refusals, "publish"), failures.FromError(publishErr, "tool-executor", "handle_emit_tool.publish")
 		}
+		ack := map[string]any{"accepted": emitResult.Accepted, "feedback_committed": emitResult.FeedbackCommitted, "replay": emitResult.Replay}
+		if emitResult.FeedbackCommitted {
+			ack["stage"], ack["dispatch"] = TruncateTelemetry(emitResult.Feedback.Receipt.Stage().Stage, 96), emitResult.Feedback.Dispatch
+		}
+		remaining := 8
+		diaglog.ProcessLog(diaglog.LevelWarn, "tool-executor", "Emit publication failure diagnostic",
+			"event_id", emitted.ID(), "run_id", emitted.RunID(), "agent_id", TruncateTelemetry(actor.ID, 96),
+			"ack", ack, "cause", emitPublicationDiagnostic(publishErr, &remaining))
 		output["status"] = "publish_failed"
 		if emitResult.Accepted {
 			output["status"] = "accepted"
