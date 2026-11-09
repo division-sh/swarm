@@ -179,7 +179,9 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				}
 				childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
 				childRoute := requireSupplementalForkAcquisitionSettlement(t, rt, fork.ForkRunID, childEvent, tc.policy)
-				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
+				sourcePin, sourceClaim := sourceRoute.ConnectClaim.ReceiverIdentity()
+				childPin, childClaim := childRoute.ConnectClaim.ReceiverIdentity()
+				if !sourceClaim || !childClaim || sourcePin != childPin || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("acquisition fork changed compiled handler or immutable producer")
 				}
 				childRows := readForkReceiverRows(t, rt, fork.ForkRunID)

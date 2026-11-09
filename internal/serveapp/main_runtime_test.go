@@ -2075,10 +2075,15 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	}{
 		{fixture.Turn1ID, fixture.Turn1At}, {fixture.Turn2ID, fixture.Turn2At},
 	} {
+		route := events.DeliveryRoute{
+			Recipient: events.MustAgentDeliveryRecipient(actorIdentity.AgentID()), AgentIdentity: actorIdentity,
+			Context: events.DeliveryContext{Life: &events.InstanceLife{RunID: fixture.RunID,
+				FlowInstance: history.Construction.Plan.Identity.InstancePath, Life: history.Construction.Plan.Instance.Life}},
+		}
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 			Store: selectedStore, Selected: selected, Identity: actorIdentity,
 			RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id,
-			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history.Events[i], ParseOK: true, CreatedAt: turn.at,
+			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history.Events[i], DeliveryRoute: &route, ParseOK: true, CreatedAt: turn.at,
 		})
 	}
 	return fixture
