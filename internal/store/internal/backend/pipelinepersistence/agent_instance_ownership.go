@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
@@ -130,12 +131,20 @@ func (s *flowInstanceIndexSnapshot) readAgentOwnership(ctx context.Context, fact
 			ownership.RunOwned = true
 			return nil
 		}
-		readiness, complete := observed.Readiness()
+		_, complete := observed.Readiness()
 		if !complete {
 			return fmt.Errorf("turn ownership requires its complete source-bound actor roster")
 		}
-		for _, expected := range readiness.Plan.Agents {
-			if expected.Identity.Normalize() != actor {
+		declared, err := manager.ConstructedFlowMaterialization(s.source, actor.RunID, observed.Identity())
+		if err != nil {
+			return err
+		}
+		for _, expected := range declared.Agents {
+			identity, err := expected.Identity.Live(actor.RunID)
+			if err != nil {
+				return err
+			}
+			if identity != actor {
 				continue
 			}
 			instance, err := observed.WorkflowInstance()
