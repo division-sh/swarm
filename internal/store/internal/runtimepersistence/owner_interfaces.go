@@ -451,7 +451,7 @@ type runForkOwnerMethods interface {
 	RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error)
 	RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error
-	RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error)
+	RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding, plans ...pinrouting.ConnectRoutePlan) (bool, error)
 	ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runfork.ConversationForkPointSelector) (runfork.ConversationForkPointDescriptor, error)
 	StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error)
 }
