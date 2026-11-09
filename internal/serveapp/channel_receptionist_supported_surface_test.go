@@ -69,23 +69,21 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				if connected.Readiness == nil || !connected.Readiness.Ready {
 					t.Fatalf("public connection is not ready: %#v", connected)
 				}
-				db, err := sql.Open(backendName, h.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
-				cardMessageID = waitChannelCardMessageID(t, db, backendName, ".")
-				card := h.provider.Delivery(cardMessageID - 1)
-				if fmt.Sprint(card["chat_id"]) != "1001" {
-					t.Fatalf("operator card escaped operator conversation: %v", card)
-				}
-				var found bool
-				token, found = telegramCallbackToken(card, "retire")
-				if !found {
-					t.Fatalf("operator card has no retire action: %v", card)
-				}
-			} else {
-				registeredChannelMailboxCLI(t, h, true, "list")
+			}
+			db, err := sql.Open(backendName, h.storeDSN)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			cardMessageID = waitChannelCardMessageID(t, db, backendName, ".")
+			card := h.provider.Delivery(cardMessageID - 1)
+			if fmt.Sprint(card["chat_id"]) != "1001" {
+				t.Fatalf("operator card escaped operator conversation: %v", card)
+			}
+			var found bool
+			token, found = telegramCallbackToken(card, "retire")
+			if !found {
+				t.Fatalf("operator card has no retire action: %v", card)
 			}
 			beforeMailbox := receptionistPendingMailbox(t, h)
 			var replies []string
@@ -116,27 +114,23 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			before := loadStandingMemorySessions(t, backendName, h.storeDSN)
 			requireReceptionistMemory(t, before, 2)
 			requireReceptionistReplies(t, h, expectedDestinations)
-			// Channel-token rejection remains deferred; there is no registered
-			// channel-card token in the CLI-only v0.7 journey (6526882297).
-			if !registered.DeploymentRegistration {
-				for index, foreign := range []struct{ user, chat int64 }{
-					{2001, 1001}, {7000, 2001}, {2002, 2002},
-				} {
-					callbackURL, signing, _ := h.provider.Registration()
-					providerID := fmt.Sprintf("receptionist-foreign-%d", index)
-					if names := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
-						"update_id": 83200 + index,
-						"callback_query": map[string]any{
-							"id": providerID, "from": map[string]any{"id": foreign.user},
-							"message": map[string]any{"message_id": cardMessageID,
-								"chat": map[string]any{"id": foreign.chat, "type": "private"}},
-							"data": token,
-						},
-					}); len(names) != 0 {
-						t.Fatalf("customer callback became business authority: %v", names)
-					}
-					waitReceptionistActionRejection(t, h, fmt.Sprint(83200+index))
+			for index, foreign := range []struct{ user, chat int64 }{
+				{2001, 1001}, {7000, 2001}, {2002, 2002},
+			} {
+				callbackURL, signing, _ := h.provider.Registration()
+				providerID := fmt.Sprintf("receptionist-foreign-%d", index)
+				if names := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
+					"update_id": 83200 + index,
+					"callback_query": map[string]any{
+						"id": providerID, "from": map[string]any{"id": foreign.user},
+						"message": map[string]any{"message_id": cardMessageID,
+							"chat": map[string]any{"id": foreign.chat, "type": "private"}},
+						"data": token,
+					},
+				}); len(names) != 0 {
+					t.Fatalf("customer callback became business authority: %v", names)
 				}
+				waitReceptionistActionRejection(t, h, fmt.Sprint(83200+index))
 			}
 			if after := receptionistPendingMailbox(t, h); !reflect.DeepEqual(beforeMailbox, after) {
 				t.Fatalf("customer callbacks mutated operator inbox: before=%v after=%v", beforeMailbox, after)
