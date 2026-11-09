@@ -162,6 +162,9 @@ func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runt
 		if err := observeDeploymentWebhookAccount(ctx, runtimeOptions, operation, row.Status); err != nil {
 			return nil, err
 		}
+		if operation.AccountConfirmed && row.Connection != nil {
+			row.Connection.State = row.Status.Health
+		}
 	}
 	return json.Marshal(list)
 }

@@ -32,6 +32,38 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
+func requireLiveDeploymentChannelList(t *testing.T, config, endpoint string, op channelonboarding.Operation) {
+	t.Helper()
+	for _, format := range []string{"json", ""} {
+		var out, diagnostic bytes.Buffer
+		args := []string{"--config", config, "channel", "list", "--api-server", endpoint}
+		if format != "" {
+			args = append(args, "--"+format)
+		}
+		if code := cliapp.Execute(t.Context(), args, &out, &diagnostic, nil, nil, OpenChannelRegistration); code != 0 {
+			t.Fatalf("channel list %s exit=%d: %s", format, code, diagnostic.String())
+		}
+		if format == "" {
+			if !strings.Contains(out.String(), op.Provider+" "+op.AccountReference+" \u00b7 live \u00b7 held by ") || !strings.Contains(out.String(), " \u00b7 connected") {
+				t.Fatalf("human channel list lost live connection: %s", out.String())
+			}
+			continue
+		}
+		var listed struct {
+			Accounts []channelonboarding.Result `json:"accounts"`
+		}
+		err := json.Unmarshal(out.Bytes(), &listed)
+		if err != nil || len(listed.Accounts) != 1 {
+			t.Fatalf("invalid %s channel list: %s (%v)", format, out.String(), err)
+		}
+		row := listed.Accounts[0]
+		if row.Operation.OperationID != op.OperationID || !row.Operation.AccountConfirmed || row.Status == nil || row.Connection == nil ||
+			row.Status.Provider != op.Provider || row.Status.Account != op.AccountReference || row.Status.State != "live" || row.Status.Health != "connected" || row.Connection.State != "connected" {
+			t.Fatalf("%s channel list contradicts its live account: %s", format, out.String())
+		}
+	}
+}
+
 type firstConnectCheckpointKey struct{}
 
 type firstConnectLoginRead struct {
@@ -547,6 +579,7 @@ service-probe:
 		listing.Accounts[0].Operation.AccountReference != registered.AccountReference || !listing.Accounts[0].Operation.AccountConfirmed {
 		t.Error("service mock restart replaced or lost the approved deployment account")
 	}
+	requireLiveDeploymentChannelList(t, opts.ConfigPath, endpoint, registered)
 	// An existing verifier fault leaves a genuine capture with no staged request,
 	// the field failure's durable shape. The first subsequent boot must drain it.
 	process.mu.Lock()
