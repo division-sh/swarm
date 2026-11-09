@@ -22,6 +22,7 @@ IMAGE = "buildpack-deps@sha256:10ffecf0416e47f8ed9a621ce234b209b69c3d1e7e79ba273
 HOME = "/home/newcomer"
 LIMIT = 2 * 1024 * 1024
 STEPS = "directories checksum extract install path version help scaffold cd verify test secret serve".split()
+CANCELLED = None
 
 
 def require(condition, message):
@@ -41,9 +42,35 @@ def file_digest(path):
     return value.hexdigest()
 
 
-def docker(*args):
+def check_cancelled():
+    require(CANCELLED is None, "driver cancelled by " + str(CANCELLED))
+
+
+def run_owned(run):
+    global CANCELLED
+    def cancel(signum, _frame):
+        global CANCELLED
+        CANCELLED = signal.Signals(signum).name
+        for sig in [signal.SIGINT, signal.SIGTERM]:
+            signal.signal(sig, signal.SIG_IGN)
+    previous = {sig: signal.signal(sig, cancel) for sig in [signal.SIGINT, signal.SIGTERM]}
+    try:
+        return run.run()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+        CANCELLED = None
+
+
+def docker(*args, cleanup=False):
+    if not cleanup:
+        check_cancelled()
     result = subprocess.run(["docker", *args], capture_output=True, timeout=30, check=False)
-    require(result.returncode == 0, "docker operation refused: " + args[0])
+    if result.returncode:
+        # Retain only closed safe fragments and a digest, not arbitrary engine/plugin text.
+        known = ["Couldn't find PID field in ps output", "No such container", "permission denied", "Cannot connect to the Docker daemon"]
+        detail = next((text for text in known if text.encode() in result.stderr), "redacted")
+        raise RuntimeError(f"docker {args[0]} exit={result.returncode} stderr={detail} stderr_sha256={digest(result.stderr)}")
     require(len(result.stdout) + len(result.stderr) <= LIMIT, "oversized docker observation")
     return result.stdout.decode()
 
@@ -52,6 +79,8 @@ class Terminal:
     def __init__(self, argv):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
             try:
                 os.execvp(argv[0], argv)
             except OSError:
@@ -110,6 +139,7 @@ def drive(terminal, kind, fixture, echo_hidden, readiness, capture, timeout=60):
     deadline, exit_seen, terminal_name = time.monotonic() + timeout, False, None
     try:
         while True:
+            check_cancelled()
             chunk = terminal.receive()
             raw += chunk
             require(len(raw) <= LIMIT, "oversized terminal output")
@@ -157,6 +187,12 @@ def assert_identity(version, expected_version, source):
                 {"binary_version": expected_version, "commit": source, "goos": "linux", "goarch": "amd64"}.items()), "wrong binary identity")
 
 
+def assert_idle(output, pid):
+    rows = [line.split() for line in output.splitlines()]
+    require(type(pid) is int and pid > 0 and rows == [["PID", "COMMAND"], [str(pid), "sleep"]],
+            "expected only the identified idle supervisor in process observation")
+
+
 class Acceptance:
     def __init__(self, args):
         self.args, self.container = args, "swarm-first-run-" + uuid.uuid4().hex
@@ -166,6 +202,7 @@ class Acceptance:
         args.output.mkdir(parents=True, mode=0o700, exist_ok=False)
         self.record = {"label": args.kind + " archive; synthetic/offline startup, NOT provider or guided acceptance",
                        "source": args.source, "version": args.version, "image": IMAGE,
+                       "driver_sha256": file_digest(Path(__file__)),
                        "started": time.time(), "steps": [], "complete": False}
         self.created = False
 
@@ -183,6 +220,7 @@ class Acceptance:
         return docker(*self.exec(command))
 
     def step(self, name, command, kind="ordinary"):
+        check_cancelled()
         start, entry, terminal, captured = time.monotonic(), {"step": name, "command": command, "cwd": self.cwd, "started": time.time()}, None, []
         try:
             args = self.exec(command)
@@ -203,6 +241,7 @@ class Acceptance:
             if terminal:
                 try:
                     entry["forced_child_cleanup"] = terminal.close()
+                    entry["joined_exit"] = terminal.status
                 except Exception as error:
                     entry["cleanup_failure"], cleanup_error = str(error), error
             output = captured[0] if captured else ""
@@ -273,20 +312,25 @@ class Acceptance:
             require(config == self.observe("cat .swarm/swarm.yaml"), "deployment configuration changed")
             self.record["authored_sha256"] = digest(before.encode())
             require(self.record["binary_sha256"] == self.observe('sha256sum "$HOME/.local/bin/swarm"').split()[0], "installed binary changed")
-            processes = docker("top", self.container, "-eo", "comm")
-            require("swarm" not in processes.splitlines(), "owned product remains")
+            processes = docker("top", self.container, "-eo", "pid,comm")
+            assert_idle(processes, state["State"]["Pid"])
+            self.record["idle_processes_sha256"] = digest(processes.encode())
+            check_cancelled()
             self.record["complete"] = True
         except Exception as error:
             self.record.setdefault("failure", str(error))
         finally:
             if self.created:
                 try:
-                    docker("rm", "--force", self.container)
+                    docker("rm", "--force", self.container, cleanup=True)
                     self.record["container_removed"] = True
                 except Exception as error:
                     self.record.update(complete=False, cleanup_failure=str(error))
             self.record["seconds"] = round(time.time() - self.record["started"], 3)
             self.record["unstarted"] = [name for name in STEPS if name not in [s["step"] for s in self.record["steps"]]]
+            if CANCELLED:
+                self.record.update(complete=False, cancelled=CANCELLED)
+                self.record.setdefault("failure", "driver cancelled by " + CANCELLED)
             self.persist()
         return self.record["complete"]
 
@@ -301,4 +345,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", args.version), "invalid version")
     require(re.fullmatch(r"[0-9a-f]{40}", args.source), "invalid source identity")
-    raise SystemExit(0 if Acceptance(args).run() else 1)
+    raise SystemExit(0 if run_owned(Acceptance(args)) else 1)

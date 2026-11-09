@@ -1,8 +1,12 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -108,9 +112,9 @@ class FirstRunControls(unittest.TestCase):
                 archive.write_bytes(b"driver-only artifact")
                 (root / "SHA256SUMS").write_text(("0" * 64 if corrupt else D.digest(archive.read_bytes())) + "  " + archive.name + "\n")
                 args = SimpleNamespace(assets=root, output=root / "output", source="a" * 40, version="v1.2.3", kind="candidate")
-                def docker(*argv):
+                def docker(*argv, **_kwargs):
                     if argv[0] == "inspect":
-                        return json.dumps([dict(Mounts=[], Image="driver-only-image", HostConfig=dict(NetworkMode="none"), Config=dict(User="1000:1000"))])
+                        return json.dumps([dict(Mounts=[], Image="driver-only-image", State=dict(Pid=17), HostConfig=dict(NetworkMode="none"), Config=dict(User="1000:1000"))])
                     if argv[0] == "rm" and cleanup_failure:
                         raise RuntimeError("cleanup refused")
                     return ""
@@ -156,6 +160,76 @@ class FirstRunControls(unittest.TestCase):
         finally:
             self.assertTrue(terminal.close())
         self.assertEqual(terminal.status, -D.signal.SIGKILL)
+
+    def test_idle_process_read_requires_exact_header_pid_and_single_supervisor(self):
+        D.assert_idle("PID COMMAND\n17 sleep\n", 17)
+        for output in ["COMMAND\nsleep\n", "PID COMMAND\n", "PID COMMAND\n17 swarm\n",
+                       "PID COMMAND\n18 sleep\n", "PID COMMAND\n17 sleep extra\n",
+                       "PID COMMAND\n17 sleep\n18 sleep\n", "PID COMMAND\nnot-a-pid sleep\n"]:
+            with self.subTest(output=output), self.assertRaisesRegex(RuntimeError, "idle supervisor"):
+                D.assert_idle(output, 17)
+
+    def test_docker_nonzero_is_retained_without_arbitrary_stderr(self):
+        for stderr, expected in [(b"Couldn't find PID field in ps output", "PID field"),
+                                 (b"private-location secret-MUST-NOT-PRINT", "redacted")]:
+            with patch.object(D.subprocess, "run", return_value=SimpleNamespace(returncode=17, stderr=stderr)):
+                with self.assertRaises(RuntimeError) as error:
+                    D.docker("top", "driver-only-container", "-eo", "pid,comm")
+            self.assertIn("exit=17", str(error.exception))
+            self.assertIn(expected, str(error.exception))
+            self.assertNotIn("secret-MUST-NOT-PRINT", str(error.exception))
+
+    def test_parent_signals_join_child_cleanup_container_and_write_failure_receipt(self):
+        for sig in [signal.SIGINT, signal.SIGTERM]:
+            with self.subTest(signal=sig), tempfile.TemporaryDirectory() as root:
+                root = Path(root)
+                (root / "swarm_v1.2.3_linux_amd64.tar.gz").write_bytes(b"driver-only")
+                (root / "SHA256SUMS").write_text(D.digest(b"driver-only") + "  swarm_v1.2.3_linux_amd64.tar.gz\n")
+                child = "import os,signal,sys; from pathlib import Path; signal.signal(signal.SIGINT,lambda *_:sys.exit(0)); Path(" + repr(str(root / "armed")) + ").write_text(str(os.getpid())); print(os.ttyname(0),flush=True); signal.pause()"
+                code = f'''
+import importlib.util,json,sys,time
+from pathlib import Path
+from types import SimpleNamespace
+spec=importlib.util.spec_from_file_location("driver",{str(Path(D.__file__).resolve())!r})
+d=importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
+root=Path({str(root)!r}); original=d.Terminal
+d.Terminal=lambda _argv:original([sys.executable,"-c",{child!r}])
+def docker(*argv,**kwargs):
+    if argv[0]=="inspect": return json.dumps([dict(Mounts=[],Image="test",State=dict(Pid=17),HostConfig=dict(NetworkMode="none"),Config=dict(User="1000:1000"))])
+    if argv[0]=="rm":
+        time.sleep(.15); (root/"removed").write_text("true")
+    return ""
+d.docker=docker
+args=SimpleNamespace(assets=root,output=root/"output",source="a"*40,version="v1.2.3",kind="candidate")
+sys.exit(0 if d.run_owned(d.Acceptance(args)) else 1)
+'''
+                parent = subprocess.Popen([sys.executable, "-B", "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not (root / "armed").exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertTrue((root / "armed").exists())
+                    parent.send_signal(sig)
+                    time.sleep(.02)
+                    parent.send_signal(sig)
+                    output, error = parent.communicate(timeout=5)
+                    self.assertEqual(parent.returncode, 1, (output, error))
+                    receipt = json.loads((root / "output/receipt.json").read_text())
+                    self.assertFalse(receipt["complete"])
+                    self.assertEqual(receipt["cancelled"], sig.name)
+                    self.assertTrue(receipt["container_removed"])
+                    self.assertEqual(receipt["steps"][0]["joined_exit"], 0)
+                    self.assertFalse(receipt["steps"][0]["forced_child_cleanup"])
+                    self.assertTrue((root / "removed").exists())
+                finally:
+                    if parent.poll() is None:
+                        if (root / "armed").exists():
+                            try:
+                                os.killpg(int((root / "armed").read_text()), signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        parent.kill()
+                        parent.communicate()
 
 
 if __name__ == "__main__":
