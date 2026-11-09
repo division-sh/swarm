@@ -366,6 +366,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
+		base = runtimeeffects.WithTurnInstanceSource(base, source)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
@@ -569,6 +570,7 @@ printf '{"result":"ok"}'
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
+		base = runtimeeffects.WithTurnInstanceSource(base, source)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")

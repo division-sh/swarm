@@ -289,7 +289,7 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 			t.Fatalf("prepare budget-race forkchat authority: %v", err)
 		}
 		authority := forkChatCompletionAuthority(prepared, 1)
-		profile, err := llmselection.ResolveLiveBackend(llmselection.BackendOpenAIResponses)
+		profile, err := llmselection.ResolveLiveBackend(prepared.Snapshot.SourceAgent.LLMBackend)
 		if err != nil {
 			t.Fatal(err)
 		}

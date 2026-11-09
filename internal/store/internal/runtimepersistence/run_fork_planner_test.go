@@ -949,7 +949,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.session", events.EventProducerPlatform, "test", "", "", at)
 	identity := mustTestAgentIdentityForRun(runID, "agent-a", "fork-planner")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, identity.AgentID(), identity.FlowInstance(), identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
