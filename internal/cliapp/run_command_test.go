@@ -71,8 +71,20 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 	}
 	directoryHash := bundle.SourceArtifact.BundleHash()
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
-	for _, mismatch := range []bool{false, true} {
-		t.Run(fmt.Sprint(mismatch), func(t *testing.T) {
+	for _, selection := range []struct {
+		name, cwd string
+		operands  []string
+		mismatch  bool
+		connected bool
+	}{
+		{"false", root, []string{source}, false, false},
+		{"true", root, []string{source}, true, true},
+		{"cwd omitted", source, nil, false, false},
+		{"cwd dot", source, []string{"."}, false, false},
+		{"cwd omitted mismatch", source, nil, true, false},
+	} {
+		t.Run(selection.name, func(t *testing.T) {
+			mismatch := selection.mismatch
 			servedHash := directoryHash
 			if mismatch {
 				servedHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
@@ -101,12 +113,13 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 				writeJSONRPCResult(t, w, req.ID, runStartCommandResult("9d4ee136-7965-50e5-9111-821facf546b7", "running"))
 			}))
 			defer server.Close()
-			args := []string{"run", "start", source, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}
-			if mismatch {
+			args := append([]string{"run", "start"}, selection.operands...)
+			args = append(args, "--event", "scan.requested", "--payload", payloadPath, "--no-follow")
+			if selection.connected {
 				args = append(args, "--connect", server.URL)
 			}
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), root, args, &stdout, &stderr, testRunCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), selection.cwd, args, &stdout, &stderr, testRunCommandOptions(server))
 			wantCode := 0
 			if mismatch {
 				wantCode = 6
