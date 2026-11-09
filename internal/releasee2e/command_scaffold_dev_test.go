@@ -60,7 +60,7 @@ func TestCommandScaffoldDevStartup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, ".swarm", "stores", "dev-scratch.db")); err != nil {
 		t.Fatalf("dev serve did not use its scratch store: %v", err)
 	}
-	wantNext := "Next:\n  cd zero-agent-automation\n  swarm verify --portable\n  swarm test . tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
+		wantNext := "Next:\n  cd zero-agent-automation\n  swarm verify --portable\n  swarm test tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
 	if !strings.HasSuffix(scaffold.output, wantNext) {
 		t.Fatalf("scaffold next steps differ:\n%s", scaffold.output)
 	}
