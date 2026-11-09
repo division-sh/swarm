@@ -48,11 +48,9 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 	os.Stdin = input
 	defer func() { os.Stdin = prior }()
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
-	args := []string{"--config", config, "channel", "connect", "telegram", "--yes"}
+	args := []string{"--config", config, "channel", "connect", "telegram", "--yes", "--client-language", "en"}
 	if len(hitl) == 0 {
 		args = append(args, "--json")
-	} else {
-		args = append(args, "--client-language", "en")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan int, 1)
