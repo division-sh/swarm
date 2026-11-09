@@ -177,7 +177,7 @@ func TestScenarioAdmissionRefusesBeforeSessionAcquisition(t *testing.T) {
 		}{
 			{[]string{"missing.yaml"}, "no such file"},
 			{[]string{"broken"}, "no such file"},
-			{[]string{"tests/fixtures/item-received.yaml"}, "unsupported scenario field"},
+			{[]string{"tests/fixtures/item-received.yaml"}, `unsupported top-level field "item_id"`},
 			{[]string{"tests/empire-routing.yaml", "tests/other.yaml"}, "use a directory"},
 			{[]string{"tests/empire-routing.yaml", "--derive", "."}, "--derive cannot be combined"},
 		} {
