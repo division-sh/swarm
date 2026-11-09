@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -12,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
@@ -135,18 +135,45 @@ func (s *flowInstanceIndexSnapshot) readAgentOwnership(ctx context.Context, fact
 		if !complete {
 			return fmt.Errorf("turn ownership requires its complete source-bound actor roster")
 		}
-		declared, err := manager.ConstructedFlowMaterialization(s.source, actor.RunID, observed.Identity())
+		constructed := observed.Identity()
+		if observed.Owner().RunID != actor.RunID {
+			return fmt.Errorf("turn ownership construction crosses its exact run")
+		}
+		if err := constructed.ValidateConstruction(s.source, actor.RunID); err != nil {
+			return err
+		}
+		if bundle, available := semanticview.Bundle(s.source); !available || bundle == nil {
+			return fmt.Errorf("turn ownership requires its complete declaration inventory")
+		}
+		flow, found := s.source.FlowScopeByID(constructed.TemplateID)
+		if !found {
+			return fmt.Errorf("turn ownership requires its exact declaration scope")
+		}
+		route, err := constructed.Route().AgentIdentityRoute()
 		if err != nil {
 			return err
 		}
-		for _, expected := range declared.Agents {
-			identity, err := expected.Identity.Live(actor.RunID)
+		member := false
+		declared := 0
+		for _, declaration := range semanticview.AgentDeclarations(s.source) {
+			if strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(flow.ID) {
+				continue
+			}
+			declared++
+			plan, err := semanticview.ScopedAgentNamePlan(s.source, declaration)
 			if err != nil {
 				return err
 			}
-			if identity != actor {
-				continue
+			name, err := plan.Materialize()
+			if err != nil {
+				return err
 			}
+			member = member || name == actor.Name && route == actor.Route
+		}
+		if declared != len(flow.AgentURIs) {
+			return fmt.Errorf("turn ownership declaration inventory is incomplete")
+		}
+		if member {
 			instance, err := observed.WorkflowInstance()
 			if err != nil {
 				return err
