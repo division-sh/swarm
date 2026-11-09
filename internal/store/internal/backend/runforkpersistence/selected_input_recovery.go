@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -21,7 +22,7 @@ import (
 // RequireSelectedForkInputPublished observes exact immutable publication
 // evidence before receiver preflight. The caller supplies the already-projected,
 // payload-admitted input and its selected schema, never a newly timed event.
-func (s *RunForkPostgresOwner) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error) {
+func (s *RunForkPostgresOwner) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding, plans ...pinrouting.ConnectRoutePlan) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, fmt.Errorf("postgres store is required")
 	}
@@ -41,13 +42,13 @@ func (s *RunForkPostgresOwner) RequireSelectedForkInputPublished(ctx context.Con
 		if err != nil {
 			return err
 		}
-		published, err = readSelectedForkInputPublishedTx(ctx, tx, binding, sourceEvent, expectedSchema, false)
+		published, err = readSelectedForkInputPublishedTx(ctx, tx, binding, sourceEvent, expectedSchema, false, plans...)
 		return err
 	})
 	return published && err == nil, err
 }
 
-func (s *RunForkSQLiteOwner) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error) {
+func (s *RunForkSQLiteOwner) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding, plans ...pinrouting.ConnectRoutePlan) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, fmt.Errorf("sqlite store is required")
 	}
@@ -67,7 +68,7 @@ func (s *RunForkSQLiteOwner) RequireSelectedForkInputPublished(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		published, err = readSelectedForkInputPublishedTx(ctx, tx, binding, sourceEvent, expectedSchema, true)
+		published, err = readSelectedForkInputPublishedTx(ctx, tx, binding, sourceEvent, expectedSchema, true, plans...)
 		return err
 	})
 	return published && err == nil, err
@@ -138,7 +139,7 @@ func requireSelectedInputCurrentExecutionTx(ctx context.Context, tx *sql.Tx, aut
 	return nil
 }
 
-func readSelectedForkInputPublishedTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding, sqlite bool) (bool, error) {
+func readSelectedForkInputPublishedTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding, sqlite bool, plans ...pinrouting.ConnectRoutePlan) (bool, error) {
 	eventID := activityidentity.ForkLineageEventID(binding.ForkRunID, sourceEvent.SourceEventID)
 	lineage, lineageFound, err := readSelectedForkInputLineageTx(ctx, tx, binding.ForkRunID, sourceEvent.SourceEventID, eventID)
 	if err != nil {
@@ -166,7 +167,7 @@ func readSelectedForkInputPublishedTx(ctx context.Context, tx *sql.Tx, binding r
 	if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, sourceEvent.SourceEventID, !sqlite); err != nil {
 		return false, eventrecord.Corrupt(eventID, err)
 	}
-	if err := requireSelectedForkFanOutPublishedTx(ctx, tx, binding, sourceEvent.SourceEventID, !sqlite, sourceEvent.OriginalConnectPlans...); err != nil {
+	if err := requireSelectedForkFanOutPublishedTx(ctx, tx, binding, sourceEvent.SourceEventID, !sqlite, plans...); err != nil {
 		return false, eventrecord.Corrupt(eventID, err)
 	}
 	return true, nil

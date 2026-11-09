@@ -143,8 +143,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 					return fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
 				}
 				out = append(out, runfork.RunForkSelectedContractSourceEvent{
-					OriginalConnectPlans: append([]pinrouting.ConnectRoutePlan(nil), plans...),
-					SourceEventID:        event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
+					SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
 					Scope:         string(event.Scope()),
 					RoutingSource: event.RoutingSource(), Payload: event.Payload(),
 				})

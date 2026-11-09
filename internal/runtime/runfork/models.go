@@ -1420,7 +1420,6 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	OriginalConnectPlans     []pinrouting.ConnectRoutePlan        `json:"-"`
 	PublishedActivityResult  activityresult.PublishedContinuation `json:"-"`
 	InputPublication         InputPublication                     `json:"-"`
 	JoinContinuation         genericschedule.JoinContinuation     `json:"-"`
