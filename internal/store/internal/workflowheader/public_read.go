@@ -11,7 +11,7 @@ const PublicReadColumns = `CAST(fi.run_id AS TEXT), CAST(es.entity_id AS TEXT),
 	CAST(fi.entity_id AS TEXT), fi.instance_path, fi.entity_type, fi.flow_template,
 	fi.mode, fi.status, fi.config, fi.current_state, fi.stage_defined, fi.revision,
 	fi.entered_state_at, fi.created_at, fi.updated_at, fi.terminated_at,
-	fi.bookkeeping, fi.accumulator, fi.parent_instance, fi.instance_key,
+	fi.bookkeeping, fi.accumulator, fi.parent_instance, fi.instance_key, fi.life,
 	(SELECT COUNT(*) FROM entity_state owner
 	 WHERE owner.run_id = fi.run_id AND (owner.entity_id = fi.entity_id OR owner.flow_instance = fi.instance_path))`
 

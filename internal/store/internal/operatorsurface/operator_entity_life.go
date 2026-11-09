@@ -67,8 +67,12 @@ func validateOperatorEntityLife(current operatorread.OperatorEntityFull, life in
 func operatorEntityLifeProjection(current operatorread.OperatorEntityFull, metadata runforkrevision.EntityMetadataFact, fields, bookkeeping, accumulator map[string]any) (operatorread.OperatorEntityFull, error) {
 	if metadata.EntityID != current.Entity.EntityID || metadata.FlowInstance != current.Entity.FlowInstance ||
 		metadata.EntityType != current.Entity.EntityType || metadata.InstanceRevision <= 0 ||
-		metadata.DataCreatedAt == nil || metadata.DataUpdatedAt == nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("prior entity life requires exact retained state-row and header evidence")
+		metadata.Life <= 0 || (metadata.DataCreatedAt == nil) != (metadata.DataUpdatedAt == nil) ||
+		(metadata.EntityType == "") != (metadata.DataCreatedAt == nil) || (metadata.EntityType == "" && len(fields) != 0) {
+		return operatorread.OperatorEntityFull{}, fmt.Errorf("prior entity life requires exact retained header and declared data evidence")
+	}
+	if fields == nil {
+		fields = map[string]any{}
 	}
 	loops, err := loopruntime.PublicActivations(accumulator)
 	if err != nil {
