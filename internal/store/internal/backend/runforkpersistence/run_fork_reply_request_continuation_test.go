@@ -24,6 +24,7 @@ func requestContinuationPartitionFixture(t *testing.T) (*runForkRevisionSnapshot
 		}
 	}
 	snapshot, event, _ := replayCutFixture(t)
+	snapshot.connectPlans = []pinrouting.ConnectRoutePlan{plan}
 	record, err := plan.ReplyRequestRecord(event, events.RouteIdentity{FlowID: ".", FlowInstance: snapshot.RunID, EntityID: snapshot.RunID},
 		pinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.request_id": "key"}), event.CreatedAt())
 	if err != nil {
@@ -31,8 +32,9 @@ func requestContinuationPartitionFixture(t *testing.T) (*runForkRevisionSnapshot
 	}
 	node := identitytest.FlowNode(t, "provider", "provider-node")
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
-		Target:  events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "provider", FlowInstance: "provider"}),
-		Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}}
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "provider", FlowInstance: "provider"}),
+		Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID},
+			Life: &events.InstanceLife{RunID: snapshot.RunID, FlowInstance: snapshot.RunID, Life: 7}}}
 	compiled := pinrouting.ConnectDeliveryRoute{Recipient: route.Recipient, Handler: pinrouting.MustConnectReceiverHandler(node),
 		Target: route.Target.Route(), Context: route.Context}
 	route.ConnectClaim, err = pinrouting.ConnectExecutionClaim(plan, compiled)
@@ -53,6 +55,9 @@ func requestContinuationPartitionFixture(t *testing.T) (*runForkRevisionSnapshot
 	if err != nil {
 		t.Fatal(err)
 	}
+	if projected.Context.Life == nil || projected.Context.Life.RunID != child || projected.Context.Life.FlowInstance != child || projected.Context.Life.Life != 7 {
+		t.Fatal("request continuation changed the captured execution life instead of projecting its child coordinate")
+	}
 	record.ID, record.RunID = projected.Context.ReplyContextID(), child
 	record.RequestEventID = deterministicRunForkReplayEventID(child, record.RequestEventID)
 	record.Origin = events.RouteIdentity{FlowID: ".", FlowInstance: child, EntityID: child}
@@ -64,7 +69,7 @@ func requestContinuationPartitionFixture(t *testing.T) (*runForkRevisionSnapshot
 }
 
 func TestIssue642RequestContinuationPreservesCompleteCompiledClaim(t *testing.T) {
-	for _, fault := range []string{"exact", "missing_route", "extra_route", "duplicate_route", "claim", "plan", "target", "entity", "source_entity", "projection", "context", "handler", "source_claim", "settled_source"} {
+	for _, fault := range []string{"exact", "missing_route", "extra_route", "duplicate_route", "claim", "plan", "target", "entity", "source_entity", "projection", "context", "handler", "source_claim", "settled_source", "missing_compiled_plan", "duplicate_compiled_plan", "source_life", "child_life"} {
 		t.Run(fault, func(t *testing.T) {
 			snapshot, event, child, reply, route := requestContinuationPartitionFixture(t)
 			routes := []events.DeliveryRoute{route}
@@ -101,6 +106,18 @@ func TestIssue642RequestContinuationPreservesCompleteCompiledClaim(t *testing.T)
 				snapshot.Deliveries[0].Snapshot.Route.ConnectClaim = events.ConnectExecutionClaim{}
 			case "settled_source":
 				snapshot.Deliveries[0].Snapshot.Status = deliverylifecycle.StatusDelivered
+			case "missing_compiled_plan":
+				snapshot.connectPlans = nil
+			case "duplicate_compiled_plan":
+				snapshot.connectPlans = append(snapshot.connectPlans, snapshot.connectPlans[0])
+			case "source_life":
+				life := *snapshot.Deliveries[0].Snapshot.Route.Context.Life
+				life.Life++
+				snapshot.Deliveries[0].Snapshot.Route.Context.Life = &life
+			case "child_life":
+				life := *routes[0].Context.Life
+				life.Life++
+				routes[0].Context.Life = &life
 			}
 			before := projectionJSON(t, snapshot)
 			input := append([]events.DeliveryRoute(nil), routes...)

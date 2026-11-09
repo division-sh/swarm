@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -348,7 +349,9 @@ func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event eve
 			return events.DeliveryRoute{}, err
 		}
 	}
-	if !delivery.Route.ConnectClaim.Empty() {
+	// Only the new execution-life projection changes this claim here. Paired
+	// reply claims retain their own existing obligation checks and rebinding.
+	if !delivery.Route.ConnectClaim.Empty() && !reflect.DeepEqual(delivery.Route.Context.Life, projected.Context.Life) {
 		matched := false
 		for _, plan := range snapshot.connectPlans {
 			original, err := plan.ClaimForRetainedDelivery(delivery.Route)
