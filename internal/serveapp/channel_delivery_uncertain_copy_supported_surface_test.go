@@ -1,13 +1,16 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -35,27 +38,6 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
 				})
 				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
-				if h.registration.DeploymentRegistration {
-					before := readRegisteredChannelCard(t, h, cardID)
-					registeredChannelMailboxCLI(t, h, false, "decide", cardID, "reject")
-					h.stop(t)
-					h.start(t)
-					args := []string{"decide", cardID, "reject", "--input", "reason=fresh-copy-private-reason", "--idempotency-key", "cli-copy-decision"}
-					registeredChannelMailboxCLI(t, h, true, args...)
-					decided := readRegisteredChannelCard(t, h, cardID)
-					if decided.Verdict != "reject" || decided.Fields["reason"] != "fresh-copy-private-reason" || string(decided.Snapshot) != string(before.Snapshot) || decided.DecisionEventID == "" {
-						t.Fatalf("CLI lost exact decision authority: %+v", decided)
-					}
-					h.stop(t)
-					h.start(t)
-					registeredChannelMailboxCLI(t, h, true, args...)
-					if got := readRegisteredChannelCard(t, h, cardID); got.DecisionEventID != decided.DecisionEventID {
-						t.Fatal("restart/replay duplicated decision")
-					}
-					// Uncertain channel-copy application/rebind assertions stay below,
-					// deferred to the v0.8 design by 6526882297.
-					return
-				}
 				oldMessage := waitChannelAnchorReceipt(t, db, cardID)
 				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "reject")
 				if !found {
@@ -137,7 +119,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	for h.provider.Confirmation(confirmationIndex) != nil {
 		confirmationIndex++
 	}
-	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "rebind", "uncertain-copy-token", 1002, "private", confirmationIndex)
+	runDeploymentChannelRebindJourney(t, h, "uncertain-copy-token", 1002, 7000+confirmationIndex)
 	command := waitNativeInboxCommand(t, h.provider, "chat", "1002", "")
 	callback, signing, _ := h.provider.Registration()
 	before := 0
@@ -148,7 +130,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 		chat, user, update int
 		command            string
 	}{{1001, 7000, 901110, oldCommand}, {1002, 7000 + confirmationIndex, 901111, command}} {
-		postChannelTelegramUpdate(t, callback, signing, map[string]any{
+		postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
 			"update_id": entry.update, "message": map[string]any{
 				"message_id": entry.update, "from": map[string]any{"id": entry.user},
 				"chat": map[string]any{"id": entry.chat, "type": "private"}, "text": "/" + entry.command,
@@ -188,9 +170,60 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	}
 }
 
+func runDeploymentChannelRebindJourney(t *testing.T, h *channelOnboardingE2EHarness, credential string, chatID, userID int) {
+	t.Helper()
+	restore := installChannelOnboardingCLIInput(t, credential+"\n")
+	defer restore()
+	out, errOut := &lockedBuffer{}, &lockedBuffer{}
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+	defer cancel()
+	done, progress := make(chan int, 1), make(chan int, 1)
+	joined := false
+	defer func() {
+		cancel()
+		if !joined {
+			<-done
+		}
+	}()
+	go func() {
+		code := executeCLI(ctx, []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "--yes",
+			"--client-language", "en", "--api-server", h.endpoint}, out, errOut, nil)
+		done <- code
+		progress <- code
+	}()
+	challenge := waitChannelOnboardingChallenge(t, out, errOut, progress)
+	callback, signing, _ := h.provider.Registration()
+	claim := submitChannelOnboardingClaimAs(t, callback, signing, challenge, 901109, int64(userID), int64(chatID), "replacement_operator")
+	if claim.StatusCode != http.StatusOK || len(claim.EventIDs) != 0 || len(claim.EventNames) != 0 {
+		t.Fatalf("deployment rebind claim escaped the deployment receiver: %+v", claim)
+	}
+	select {
+	case code := <-done:
+		joined = true
+		if code != 0 {
+			t.Fatalf("deployment rebind exit=%d out=%s err=%s", code, out.String(), errOut.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("deployment rebind did not complete: out=%s err=%s", out.String(), errOut.String())
+	}
+	var listing struct {
+		Accounts []channelonboarding.Result `json:"accounts"`
+	}
+	var listed, listErr lockedBuffer
+	code := executeCLI(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil)
+	if code != 0 || json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 ||
+		listing.Accounts[0].Binding == nil || listing.Accounts[0].Binding.ConversationRef != fmt.Sprint(chatID) ||
+		!listing.Accounts[0].Operation.DeploymentRegistration {
+		t.Fatalf("deployment rebind lost its current binding: exit=%d out=%s err=%s", code, listed.String(), listErr.String())
+	}
+}
+
 func postUncertainCopyCallback(t *testing.T, h *channelOnboardingE2EHarness, message int, token string, update int, expected ...int) {
 	t.Helper()
-	status := http.StatusAccepted
+	status := http.StatusOK
+	if !h.registration.DeploymentRegistration {
+		status = http.StatusAccepted
+	}
 	if len(expected) != 0 {
 		status = expected[0]
 	}
@@ -207,7 +240,10 @@ func postUncertainCopyCallback(t *testing.T, h *channelOnboardingE2EHarness, mes
 
 func postUncertainCopyText(t *testing.T, h *channelOnboardingE2EHarness, message int, text string, update int, expected ...int) {
 	t.Helper()
-	status := http.StatusAccepted
+	status := http.StatusOK
+	if !h.registration.DeploymentRegistration {
+		status = http.StatusAccepted
+	}
 	if len(expected) != 0 {
 		status = expected[0]
 	}
@@ -354,7 +390,7 @@ func assertUncertainCopyWarning(t *testing.T, h *channelOnboardingE2EHarness, ca
 		for h.provider.Delivery(before) != nil {
 			before++
 		}
-		postChannelTelegramUpdate(t, callback, signing, map[string]any{
+		postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
 			"update_id": update + 1,
 			"callback_query": map[string]any{
 				"id": fmt.Sprintf("uncertain-card-summary-%d", update), "from": map[string]any{"id": 7000},
@@ -371,7 +407,7 @@ func assertUncertainCopyWarning(t *testing.T, h *channelOnboardingE2EHarness, ca
 		before++
 	}
 	callback, signing, _ := h.provider.Registration()
-	postChannelTelegramUpdate(t, callback, signing, map[string]any{
+	postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
 		"update_id": update, "message": map[string]any{
 			"message_id": update, "from": map[string]any{"id": 7000},
 			"chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command,

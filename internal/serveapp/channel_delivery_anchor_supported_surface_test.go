@@ -81,40 +81,58 @@ func (r channelAnchorLLMRuntime) ContinueManagedSession(ctx context.Context, ses
 
 func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		t.Run(string(backend), func(t *testing.T) {
-			observation := &channelReconcileObservation{}
-			h, bundleHash := startChannelAnchorPublicJourney(t, backend, "anchor-token", false, 0, func(opts *cliapp.ServeOptions) {
-				observation.configure(opts)
-				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
-			})
-			reader := openChannelAnchorObservation(t, h)
-			var channels struct {
-				Channels []channelonboarding.ConnectedChannelReadback `json:"channels"`
-			}
-			requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.list", map[string]any{}, &channels)
-			var interfaceKey string
-			telegramIdentities := 0
-			for _, channel := range channels.Channels {
-				if channel.Identity.Interface.ChannelPackID == "telegram" && (channel.Operation == nil || !channel.Operation.DeploymentRegistration) {
-					telegramIdentities++
-					interfaceKey = channel.Identity.Interface.Key()
+		for _, presentation := range []string{"cli", "channel"} {
+			t.Run(string(backend)+"/"+presentation, func(t *testing.T) {
+				observation := &channelReconcileObservation{}
+				h, bundleHash := startChannelAnchorPublicJourney(t, backend, "anchor-token", false, 0, func(opts *cliapp.ServeOptions) {
+					observation.configure(opts)
+					opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
+				})
+				reader := openChannelAnchorObservation(t, h)
+				var channels struct {
+					Channels []channelonboarding.ConnectedChannelReadback `json:"channels"`
 				}
-			}
-			if !h.registration.DeploymentRegistration && telegramIdentities != 1 {
-				t.Fatalf("anchor journey requires one exact Telegram channel identity, got %d", telegramIdentities)
-			}
-			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
-				t.Run(string(kind), func(t *testing.T) {
-					flowInstance := "chat/reviews"
-					if kind == decisioncard.AnchorKindHumanTask {
-						flowInstance = "chat/observers"
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.list", map[string]any{}, &channels)
+				var interfaceKey string
+				telegramIdentities := 0
+				for _, channel := range channels.Channels {
+					if channel.Identity.Interface.ChannelPackID == "telegram" && (channel.Operation == nil || !channel.Operation.DeploymentRegistration) {
+						telegramIdentities++
+						interfaceKey = channel.Identity.Interface.Key()
 					}
-					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-						"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
-						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
-					})
-					gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
-					if h.registration.DeploymentRegistration {
+				}
+				if !h.registration.DeploymentRegistration && telegramIdentities != 1 {
+					t.Fatalf("anchor journey requires one exact Telegram channel identity, got %d", telegramIdentities)
+				}
+				for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
+					t.Run(string(kind), func(t *testing.T) {
+						flowInstance := "chat/reviews"
+						if kind == decisioncard.AnchorKindHumanTask {
+							flowInstance = "chat/observers"
+						}
+						seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+							"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
+							"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
+						})
+						gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+						if presentation == "cli" {
+							if kind != decisioncard.AnchorKindStageGate {
+								event := "observer.requested"
+								if kind == decisioncard.AnchorKindProposedEffect {
+									event = "effect.requested"
+								}
+								requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+									"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
+									"payload": map[string]any{"seed": true}, "idempotency_key": "producer-" + string(kind),
+								})
+							}
+							card := waitChannelPublicCard(t, h, seed.RunID, kind, flowInstance)
+							decideRegisteredAnchorCLI(t, h, card, kind == decisioncard.AnchorKindProposedEffect)
+							requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-anchor-pause-" + string(kind)})
+							requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-anchor-stop-" + string(kind)})
+							return
+						}
+						waitChannelAnchorObservedReceipt(t, reader, gateID)
 						if kind != decisioncard.AnchorKindStageGate {
 							event := "observer.requested"
 							if kind == decisioncard.AnchorKindProposedEffect {
@@ -125,139 +143,122 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 								"payload": map[string]any{"seed": true}, "idempotency_key": "producer-" + string(kind),
 							})
 						}
-						card := waitChannelPublicCard(t, h, seed.RunID, kind, flowInstance)
-						decideRegisteredAnchorCLI(t, h, card, kind == decisioncard.AnchorKindProposedEffect)
-						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-anchor-pause-" + string(kind)})
-						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "cli-anchor-stop-" + string(kind)})
-						return
-					}
-					// Registered channel-card assertions remain deferred under 6526882297.
-					waitChannelAnchorObservedReceipt(t, reader, gateID)
-					if kind != decisioncard.AnchorKindStageGate {
-						event := "observer.requested"
+						cardID := waitChannelPublicCard(t, h, seed.RunID, kind, flowInstance)
+						messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
+						message := h.provider.Delivery(messageID - 1)
+						label := "Approve"
+						if kind == decisioncard.AnchorKindStageGate {
+							label = "approve"
+						}
+						token, found := telegramCallbackToken(message, label)
+						if !found {
+							t.Fatalf("real %s card lacks approve action: %v", kind, message)
+						}
+						var arrived <-chan struct{}
+						var release func()
+						var dispatchCut render.ReconcileMark
 						if kind == decisioncard.AnchorKindProposedEffect {
-							event = "effect.requested"
+							arrived, release = h.provider.PauseNextDeliveryResponse()
+							t.Cleanup(release)
 						}
-						requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-							"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
-							"payload": map[string]any{"seed": true}, "idempotency_key": "producer-" + string(kind),
-						})
-					}
-					cardID := waitChannelPublicCard(t, h, seed.RunID, kind, flowInstance)
-					messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
-					message := h.provider.Delivery(messageID - 1)
-					label := "Approve"
-					if kind == decisioncard.AnchorKindStageGate {
-						label = "approve"
-					}
-					token, found := telegramCallbackToken(message, label)
-					if !found {
-						t.Fatalf("real %s card lacks approve action: %v", kind, message)
-					}
-					var arrived <-chan struct{}
-					var release func()
-					var dispatchCut render.ReconcileMark
-					if kind == decisioncard.AnchorKindProposedEffect {
-						arrived, release = h.provider.PauseNextDeliveryResponse()
-						t.Cleanup(release)
-					}
-					post := func(update int, occurrence string) {
-						t.Helper()
-						callback, signing, _ := h.provider.Registration()
-						if names := postChannelTelegramUpdate(t, callback, signing, map[string]any{
-							"update_id": update,
-							"callback_query": map[string]any{
-								"id": occurrence, "from": map[string]any{"id": 7000},
-								"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
-								"data":    token,
-							},
-						}); len(names) != 0 {
-							t.Fatalf("operator anchor action leaked business events: %v", names)
+						post := func(update int, occurrence string) {
+							t.Helper()
+							callback, signing, _ := h.provider.Registration()
+							if names := postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
+								"update_id": update,
+								"callback_query": map[string]any{
+									"id": occurrence, "from": map[string]any{"id": 7000},
+									"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
+									"data":    token,
+								},
+							}); len(names) != 0 {
+								t.Fatalf("operator anchor action leaked business events: %v", names)
+							}
 						}
-					}
-					post(837000+messageID, "anchor-"+cardID)
-					waitChannelAnchorPublicApproval(t, h, cardID)
-					if arrived != nil {
-						select {
-						case <-arrived:
-						case <-time.After(15 * time.Second):
-							t.Fatal("approved effect did not reach the real provider request")
-						}
-						var readback struct {
-							Card struct {
-								Verdict string `json:"verdict"`
-							} `json:"decision_card"`
-							Effect decisioncard.ProposedEffectReadback `json:"effect"`
-						}
-						requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &readback)
-						if readback.Card.Verdict != "approve" || readback.Effect.DispatchState == "" || readback.Effect.DispatchState == "succeeded" {
-							t.Fatalf("approval inferred completed dispatch while provider response is blocked: %+v", readback)
-						}
-						// This action is running inside the worker's current pass;
-						// post-commit demand must survive until that pass returns.
-						observation.mu.Lock()
-						mark := observation.mark
-						observation.mu.Unlock()
-						var active bool
-						dispatchCut, active = mark()
-						if !active {
-							t.Fatal("activity cut lost its exact channel Process")
-						}
-						release()
-						deadline := time.Now().Add(15 * time.Second)
-						for {
+						post(837000+messageID, "anchor-"+cardID)
+						waitChannelAnchorPublicApproval(t, h, cardID)
+						if arrived != nil {
+							select {
+							case <-arrived:
+							case <-time.After(15 * time.Second):
+								t.Fatal("approved effect did not reach the real provider request")
+							}
+							var readback struct {
+								Card struct {
+									Verdict string `json:"verdict"`
+								} `json:"decision_card"`
+								Effect decisioncard.ProposedEffectReadback `json:"effect"`
+							}
 							requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &readback)
-							if readback.Effect.DispatchState == "succeeded" {
-								break
+							if readback.Card.Verdict != "approve" || readback.Effect.DispatchState == "" || readback.Effect.DispatchState == "succeeded" {
+								t.Fatalf("approval inferred completed dispatch while provider response is blocked: %+v", readback)
 							}
-							if time.Now().After(deadline) {
-								t.Fatalf("real approved effect did not settle: %+v", readback)
+							// This action is running inside the worker's current pass;
+							// post-commit demand must survive until that pass returns.
+							observation.mu.Lock()
+							mark := observation.mark
+							observation.mu.Unlock()
+							var active bool
+							dispatchCut, active = mark()
+							if !active {
+								t.Fatal("activity cut lost its exact channel Process")
 							}
-							time.Sleep(20 * time.Millisecond)
+							release()
+							deadline := time.Now().Add(15 * time.Second)
+							for {
+								requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &readback)
+								if readback.Effect.DispatchState == "succeeded" {
+									break
+								}
+								if time.Now().After(deadline) {
+									t.Fatalf("real approved effect did not settle: %+v", readback)
+								}
+								time.Sleep(20 * time.Millisecond)
+							}
+							count := 0
+							for index := 0; ; index++ {
+								delivery := h.provider.Delivery(index)
+								if delivery == nil {
+									break
+								}
+								if delivery["text"] == "review" && fmt.Sprint(delivery["chat_id"]) == "42" {
+									count++
+								}
+							}
+							if count != 1 {
+								t.Fatalf("actual approved provider effect count=%d, want one", count)
+							}
 						}
-						count := 0
-						for index := 0; ; index++ {
-							delivery := h.provider.Delivery(index)
-							if delivery == nil {
-								break
-							}
-							if delivery["text"] == "review" && fmt.Sprint(delivery["chat_id"]) == "42" {
-								count++
-							}
+						waitChannelAnchorTerminalEdit(t, h, messageID)
+						if kind == decisioncard.AnchorKindProposedEffect {
+							waitChannelAnchorDispatchEdit(t, h, messageID, "succeeded")
+							observation.oneAfter(t, dispatchCut, render.ReconcileOrdinary)
 						}
-						if count != 1 {
-							t.Fatalf("actual approved provider effect count=%d, want one", count)
+						post(838000+messageID, "double-tap-"+cardID)
+						waitChannelAnchorRejectedIntent(t, reader, interfaceKey, fmt.Sprint(838000+messageID))
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+							"run_id": seed.RunID, "idempotency_key": "channel-anchor-pause-" + string(kind),
+						})
+						var events struct {
+							Events []struct {
+								RunID     string `json:"run_id"`
+								EventName string `json:"event_name"`
+							} `json:"events"`
+							NextCursor string `json:"next_cursor"`
 						}
-					}
-					waitChannelAnchorTerminalEdit(t, h, messageID)
-					if kind == decisioncard.AnchorKindProposedEffect {
-						waitChannelAnchorDispatchEdit(t, h, messageID, "succeeded")
-						observation.oneAfter(t, dispatchCut, render.ReconcileOrdinary)
-					}
-					post(838000+messageID, "double-tap-"+cardID)
-					waitChannelAnchorRejectedIntent(t, reader, interfaceKey, fmt.Sprint(838000+messageID))
-					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
-						"run_id": seed.RunID, "idempotency_key": "channel-anchor-pause-" + string(kind),
+						requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{
+							"filter": map[string]any{"run_id": seed.RunID, "event_name": "mailbox.card_decided"}, "limit": 2,
+						}, &events)
+						if len(events.Events) != 1 || events.NextCursor != "" || events.Events[0].RunID != seed.RunID || events.Events[0].EventName != "mailbox.card_decided" {
+							t.Fatalf("double tap changed exact completion cardinality: %+v", events)
+						}
+						requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{
+							"run_id": seed.RunID, "idempotency_key": "channel-anchor-stop-" + string(kind),
+						})
 					})
-					var events struct {
-						Events []struct {
-							RunID     string `json:"run_id"`
-							EventName string `json:"event_name"`
-						} `json:"events"`
-						NextCursor string `json:"next_cursor"`
-					}
-					requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{
-						"filter": map[string]any{"run_id": seed.RunID, "event_name": "mailbox.card_decided"}, "limit": 2,
-					}, &events)
-					if len(events.Events) != 1 || events.NextCursor != "" || events.Events[0].RunID != seed.RunID || events.Events[0].EventName != "mailbox.card_decided" {
-						t.Fatalf("double tap changed exact completion cardinality: %+v", events)
-					}
-					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.stop", map[string]any{
-						"run_id": seed.RunID, "idempotency_key": "channel-anchor-stop-" + string(kind),
-					})
-				})
-			}
-		})
+				}
+			})
+		}
 	}
 }
 

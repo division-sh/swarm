@@ -34,7 +34,7 @@ import (
 func TestChannelDeliveryInboundDispositionE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "business")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:business")
 		})
 	}
 }
@@ -42,7 +42,7 @@ func TestChannelDeliveryInboundDispositionE2E(t *testing.T) {
 func TestChannelDeliveryPagedCardActionsE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "action_pages")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:action_pages")
 		})
 	}
 }
@@ -50,7 +50,7 @@ func TestChannelDeliveryPagedCardActionsE2E(t *testing.T) {
 func TestChannelDeliveryNoticeFirstE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "notice")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:notice")
 		})
 	}
 }
@@ -58,7 +58,7 @@ func TestChannelDeliveryNoticeFirstE2E(t *testing.T) {
 func TestChannelNoticeAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "notice_ack")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:notice_ack")
 		})
 	}
 }
@@ -141,7 +141,7 @@ func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 func TestChannelDeliveryVerdictAcknowledgmentLossE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "verdict_ack_loss")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:verdict_ack_loss")
 		})
 	}
 }
@@ -151,6 +151,9 @@ func TestChannelDeliveryRequiredInputE2E(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "required_input")
 		})
+		t.Run(backend+"-deployment", func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:required_input")
+		})
 	}
 }
 
@@ -159,13 +162,16 @@ func TestChannelDeliveryInvalidTypedInputE2E(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "invalid_input")
 		})
+		t.Run(backend+"-deployment", func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:invalid_input")
+		})
 	}
 }
 
 func TestChannelDeliveryOrderedInputE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "ordered_input")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:ordered_input")
 		})
 	}
 }
@@ -175,13 +181,16 @@ func TestChannelDeliveryOrderedInputRetainedRestartE2E(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "ordered_input_restart")
 		})
+		t.Run(backend+"-deployment", func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:ordered_input_restart")
+		})
 	}
 }
 
 func TestChannelDeliveryCancelInputE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "cancel_input")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:cancel_input")
 		})
 	}
 }
@@ -189,7 +198,7 @@ func TestChannelDeliveryCancelInputE2E(t *testing.T) {
 func TestChannelDeliverySkipFinalOptionalInputE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "skip_input")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:skip_input")
 		})
 	}
 }
@@ -197,7 +206,7 @@ func TestChannelDeliverySkipFinalOptionalInputE2E(t *testing.T) {
 func TestChannelDeliveryBareInputChooserE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "draft_chooser")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:draft_chooser")
 		})
 	}
 }
@@ -207,13 +216,16 @@ func TestChannelDeliveryChooserRetainedAnswerRestartE2E(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "draft_chooser_restart")
 		})
+		t.Run(backend+"-deployment", func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:draft_chooser_restart")
+		})
 	}
 }
 
 func TestChannelDeliveryQuotedTwoDraftsE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "quoted_two")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:quoted_two")
 		})
 	}
 }
@@ -221,7 +233,7 @@ func TestChannelDeliveryQuotedTwoDraftsE2E(t *testing.T) {
 func TestChannelDeliveryManualResendAfterLostResponseE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "delivery_loss_resend")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:delivery_loss_resend")
 		})
 	}
 }
@@ -229,7 +241,7 @@ func TestChannelDeliveryManualResendAfterLostResponseE2E(t *testing.T) {
 func TestChannelDeliveryManualResendAfterLostPromptEditE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "edit_loss_resend")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:edit_loss_resend")
 		})
 	}
 }
@@ -245,7 +257,7 @@ func TestChannelDeliverySharedAudienceE2E(t *testing.T) {
 func TestChannelDeliveryViewFullE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "view_full")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:view_full")
 		})
 	}
 }
@@ -790,6 +802,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			"chat": map[string]any{"id": 1001, "type": "private"}, "text": inputText,
 		},
 	}
+	if deploymentTransport && !nativeInboxScenario {
+		update["message"].(map[string]any)["from"] = map[string]any{"id": 9001}
+		update["message"].(map[string]any)["chat"] = map[string]any{"id": 9001, "type": "private"}
+	}
 	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
@@ -862,7 +878,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err != nil {
 		t.Fatal(err)
 	}
-	deploymentCallback := deploymentTransport && (scenario == "verdict" || scenario == "verdict_ack_loss")
+	_, operatorCallback := update["callback_query"]
+	deploymentCallback := deploymentTransport && (operatorCallback || nativeInboxScenario)
 	if deploymentCallback && (response.StatusCode != http.StatusOK || len(responseBody) != 0) {
 		t.Fatalf("deployment callback admission status=%d body=%s", response.StatusCode, responseBody)
 	}
@@ -1061,7 +1078,7 @@ func proveChannelPagedCardActions(t *testing.T, provider *telegramapi.Double, ca
 	tap := func(token string) {
 		t.Helper()
 		sequence++
-		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 			"update_id": time.Now().UnixMilli() + sequence*1000,
 			"callback_query": map[string]any{
 				"id": fmt.Sprintf("paged-card-%d", sequence), "from": map[string]any{"id": 7000},
@@ -1144,7 +1161,7 @@ func proveChannelRequiredInputText(t *testing.T, provider *telegramapi.Double, c
 		time.Sleep(20 * time.Millisecond)
 	}
 	answer := "the operator's private reason"
-	admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1000,
 		"message": map[string]any{
 			"message_id": 9103, "from": map[string]any{"id": 7000},
@@ -1190,7 +1207,7 @@ func proveChannelInvalidInputText(t *testing.T, provider *telegramapi.Double, ca
 		time.Sleep(20 * time.Millisecond)
 	}
 	answer := "not-a-number"
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1100,
 		"message": map[string]any{
 			"message_id": 9104, "from": map[string]any{"id": 7000},
@@ -1249,7 +1266,7 @@ func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, ca
 	waitForEdit("Input: zeta (integer) required")
 	postAnswer := func(messageID int, answer string) {
 		t.Helper()
-		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 			"update_id": time.Now().UnixMilli() + int64(messageID),
 			"message": map[string]any{
 				"message_id": messageID, "from": map[string]any{"id": 7000},
@@ -1307,7 +1324,7 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1200,
 		"callback_query": map[string]any{
 			"id": "callback-input-control", "from": map[string]any{"id": 7000},
@@ -1340,7 +1357,7 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 	beginOtherChannelDraft(t, provider, callbackURL, signing, ingressMessageID, stoppedMessageID)
 	deadline := time.Now().Add(25 * time.Second)
 	answer := "private chooser answer"
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1400,
 		"message": map[string]any{
 			"message_id": 9107, "from": map[string]any{"id": 7000},
@@ -1386,7 +1403,7 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 		callbackURL, signing = restart()
 		deadline = time.Now().Add(25 * time.Second)
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1500,
 		"callback_query": map[string]any{
 			"id": "callback-select-draft", "from": map[string]any{"id": 7000},
@@ -1467,7 +1484,7 @@ func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callback
 		t.Fatalf("second card first action is absent: %v", second)
 	}
 	button, _ := row[0].(map[string]any)
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1300,
 		"callback_query": map[string]any{
 			"id": "callback-second-draft", "from": map[string]any{"id": 7000},
@@ -1500,7 +1517,7 @@ func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, cal
 	deadline := time.Now().Add(25 * time.Second)
 	for index, cardMessageID := range []int{stoppedMessageID, ingressMessageID} {
 		answer := fmt.Sprintf("private quoted answer %d", cardMessageID)
-		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 			"update_id": time.Now().UnixMilli() + int64(1400+index*100),
 			"message": map[string]any{
 				"message_id": 9107 + index, "from": map[string]any{"id": 7000},
@@ -1578,7 +1595,7 @@ func proveChannelManualResendAfterLostNotice(t *testing.T, provider *telegramapi
 			"data":    resendToken,
 		},
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, update); len(admitted) != 0 {
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, update); len(admitted) != 0 {
 		t.Fatalf("manual resend escaped into business events: %v", admitted)
 	}
 	for countNotice() < 2 {
@@ -1615,7 +1632,7 @@ func requestChannelRecoveryAction(t *testing.T, provider *telegramapi.Double, ca
 	if command == "" {
 		t.Fatalf("native recovery entry was not installed: %v", provider.CommandWrites())
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1600,
 		"message": map[string]any{
 			"message_id": 9110, "from": map[string]any{"id": 7000},
@@ -1683,7 +1700,7 @@ func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.D
 		t.Fatalf("uncertain prompt edit retried without consent %d times", got)
 	}
 	token, responseMessageID := requestChannelRecoveryAction(t, provider, callbackURL, signing, "Resend card")
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1700,
 		"callback_query": map[string]any{
 			"id": "callback-resend-card", "from": map[string]any{"id": 7000},
@@ -1715,7 +1732,7 @@ func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.D
 		time.Sleep(20 * time.Millisecond)
 	}
 	answer := "private answer after explicit resend"
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1800,
 		"message": map[string]any{
 			"message_id": 9120, "from": map[string]any{"id": 7000},
@@ -1773,7 +1790,7 @@ func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, call
 	}
 	postGroupCallback := func(updateID int64, callbackID string, member int64) {
 		t.Helper()
-		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 			"update_id": updateID,
 			"callback_query": map[string]any{
 				"id": callbackID, "from": map[string]any{"id": member},
@@ -1795,7 +1812,7 @@ func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, call
 	for provider.Delivery(beforeForeignEntry) != nil {
 		beforeForeignEntry++
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 2050,
 		"message": map[string]any{
 			"message_id": 9129, "from": map[string]any{"id": 7001},
@@ -1815,7 +1832,7 @@ func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, call
 			t.Fatalf("foreign group member received operator inbox: %v", delivery)
 		}
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 2100,
 		"message": map[string]any{
 			"message_id": 9130, "from": map[string]any{"id": 7000},
@@ -1844,7 +1861,7 @@ func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, call
 		time.Sleep(20 * time.Millisecond)
 	}
 inboxVisible:
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 2200,
 		"message": map[string]any{
 			"message_id": 9131, "from": map[string]any{"id": 7000},
@@ -1949,7 +1966,7 @@ func proveChannelViewFullCallbackPages(t *testing.T, provider *telegramapi.Doubl
 		}
 		responseBody, err := io.ReadAll(response.Body)
 		response.Body.Close()
-		if err != nil || response.StatusCode != http.StatusAccepted {
+		if err != nil || response.StatusCode != http.StatusOK || len(responseBody) != 0 {
 			t.Fatalf("view-full callback status=%d body=%s err=%v", response.StatusCode, responseBody, err)
 		}
 		nextIndex := messageIndex + 1
@@ -2068,6 +2085,11 @@ func postChannelTelegramUpdate(t *testing.T, callbackURL, signing string, update
 	return postChannelTelegramUpdateStatus(t, callbackURL, signing, update, http.StatusAccepted)
 }
 
+func postChannelTelegramOperatorUpdate(t *testing.T, callbackURL, signing string, update map[string]any) []string {
+	t.Helper()
+	return postChannelTelegramUpdateStatus(t, callbackURL, signing, update, http.StatusOK)
+}
+
 func postChannelTelegramUpdateStatus(t *testing.T, callbackURL, signing string, update map[string]any, expectedStatus int) []string {
 	t.Helper()
 	body, err := json.Marshal(update)
@@ -2088,6 +2110,9 @@ func postChannelTelegramUpdateStatus(t *testing.T, callbackURL, signing string, 
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != expectedStatus {
 		t.Fatalf("Telegram update status=%d body=%s err=%v", response.StatusCode, responseBody, err)
+	}
+	if expectedStatus == http.StatusOK && len(responseBody) == 0 {
+		return nil
 	}
 	var admitted struct {
 		EventNames []string `json:"event_names"`
@@ -2128,7 +2153,7 @@ func proveChannelBacklogSummaryOpenInbox(t *testing.T, provider *telegramapi.Dou
 	if !found {
 		t.Fatalf("backlog summary has no Open inbox action: %v", provider.Delivery(summaryIndex))
 	}
-	admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+	admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1000,
 		"callback_query": map[string]any{
 			"id": "backlog-summary-open", "from": map[string]any{"id": 7000},
@@ -2200,7 +2225,7 @@ func proveChannelNoticeAcknowledgment(t *testing.T, provider *telegramapi.Double
 			"data":    token,
 		},
 	}
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, update); len(admitted) != 0 {
+	if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, update); len(admitted) != 0 {
 		t.Fatalf("notice acknowledgment leaked into business events: %v", admitted)
 	}
 	for {
