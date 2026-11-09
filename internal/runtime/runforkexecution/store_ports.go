@@ -81,7 +81,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 type SelectedContractReplayPersistence interface {
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission, ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error)
-	RequireSelectedForkInputPublished(context.Context, runtimeeffects.Authority, runfork.RunForkSelectedContractSourceEvent, events.PayloadSchemaBinding) (bool, error)
+	RequireSelectedForkInputPublished(context.Context, runtimeeffects.Authority, runfork.RunForkSelectedContractSourceEvent, events.PayloadSchemaBinding, ...pinrouting.ConnectRoutePlan) (bool, error)
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 

@@ -813,7 +813,7 @@ func (c selectedContractForkLocalRuntimeContainer) commitSelectedInputs() (input
 				return inputs, errors.New("selected recovery input lacks admitted schema evidence")
 			}
 			sourceEvent.Payload = evt.Payload()
-			published, err := c.ports.replay.RequireSelectedForkInputPublished(eventCtx, c.authority, sourceEvent, payload.Binding())
+			published, err := c.ports.replay.RequireSelectedForkInputPublished(eventCtx, c.authority, sourceEvent, payload.Binding(), pinrouting.CompileConnectGraph(req.Prepared.originalSource.Source).Plans()...)
 			if err != nil {
 				return inputs, fmt.Errorf("admit committed selected input recovery: %w", err)
 			}
