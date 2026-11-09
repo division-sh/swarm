@@ -127,6 +127,10 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	if !c.operation.DeploymentRegistration || incoming.registered == nil {
 		ctx = work.Context()
 	}
+	return c.captureIncomingMessage(ctx, incoming, message)
+}
+
+func (c *RuntimeConnection) captureIncomingMessage(ctx context.Context, incoming *runtimeIncoming, message *events.Message) error {
 	scope, source, err := incoming.receiveScope(ctx, message)
 	if err != nil {
 		return err

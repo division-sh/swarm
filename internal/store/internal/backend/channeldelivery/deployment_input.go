@@ -135,26 +135,8 @@ func AdmitDeploymentInputTx(ctx context.Context, tx *sql.Tx, prepared PreparedDe
 			return true, false, nil // The operator conversation is never customer input.
 		}
 	}
-	var fingerprint sql.NullString
-	var count, complete, distinct int64
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(request_fingerprint),COUNT(DISTINCT request_fingerprint),MIN(request_fingerprint)
-		FROM (SELECT request_fingerprint FROM operator_channel_action_intents WHERE publication_id=$1
-		UNION ALL SELECT request_fingerprint FROM operator_channel_text_intents WHERE publication_id=$1) original`, prepared.id).
-		Scan(&count, &complete, &distinct, &fingerprint)
-	if err != nil {
-		return false, false, err
-	}
-	if count != 0 {
-		if complete != count || distinct != 1 || !fingerprint.Valid || fingerprint.String != prepared.fingerprint {
-			return false, false, fmt.Errorf("deployment provider occurrence contradicts its original request")
-		}
-		if prepared.nativeFingerprint != "" {
-			receipt, found, err := LoadDeploymentInputReceipt(ctx, tx, r.Parent.ID, deliveryProviderID(prepared))
-			if err != nil || !found || receipt.Parent != r.Parent || receipt.Fingerprint != prepared.nativeFingerprint {
-				return false, false, errors.Join(err, fmt.Errorf("native operator occurrence contradicts its original capture"))
-			}
-		}
-		return true, false, nil
+	if duplicate, err := deploymentInputAlreadyAdmittedTx(ctx, tx, prepared); duplicate || err != nil {
+		return duplicate, false, err
 	}
 	if prepared.action != nil {
 		err = InsertActionIntentTx(ctx, tx, *prepared.action, r.ReceivedAt, postgres)
@@ -181,6 +163,31 @@ func AdmitDeploymentInputTx(ctx context.Context, tx *sql.Tx, prepared PreparedDe
 		_, err = tx.ExecContext(ctx, `UPDATE operator_channel_text_intents SET state='settled',disposition='unsupported',settled_at=$1 WHERE publication_id=$2`, r.ReceivedAt.UTC(), prepared.id)
 	}
 	return err == nil, err == nil, err
+}
+
+func deploymentInputAlreadyAdmittedTx(ctx context.Context, tx *sql.Tx, prepared PreparedDeploymentInput) (bool, error) {
+	var fingerprint sql.NullString
+	var count, complete, distinct int64
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(request_fingerprint),COUNT(DISTINCT request_fingerprint),MIN(request_fingerprint)
+		FROM (SELECT request_fingerprint FROM operator_channel_action_intents WHERE publication_id=$1
+		UNION ALL SELECT request_fingerprint FROM operator_channel_text_intents WHERE publication_id=$1) original`, prepared.id).
+		Scan(&count, &complete, &distinct, &fingerprint)
+	if err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return false, nil
+	}
+	if complete != count || distinct != 1 || !fingerprint.Valid || fingerprint.String != prepared.fingerprint {
+		return false, fmt.Errorf("deployment provider occurrence contradicts its original request")
+	}
+	if prepared.nativeFingerprint != "" {
+		receipt, found, err := LoadDeploymentInputReceipt(ctx, tx, prepared.request.Parent.ID, deliveryProviderID(prepared))
+		if err != nil || !found || receipt.Parent != prepared.request.Parent || receipt.Fingerprint != prepared.nativeFingerprint {
+			return false, errors.Join(err, fmt.Errorf("native operator occurrence contradicts its original capture"))
+		}
+	}
+	return true, nil
 }
 
 func deliveryProviderID(prepared PreparedDeploymentInput) string {

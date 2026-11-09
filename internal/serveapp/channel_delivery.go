@@ -601,6 +601,10 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		}
 		return d.dispatchDeploymentChannel(ctx, selected, plan, candidate, prepared, operation, previousReference)
 	}
+	return d.dispatchRuntimeChannel(ctx, candidate, prepared, operation, previousReference)
+}
+
+func (d *serveChannelDeliveryDispatcher) dispatchRuntimeChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
 	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return err

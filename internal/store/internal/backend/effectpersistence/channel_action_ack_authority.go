@@ -59,11 +59,7 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 	if err := json.Unmarshal(raw, &fact); err != nil {
 		return false, fmt.Errorf("decode verified channel action: %w", err)
 	}
-	if fact.Kind != operatorchannel.ActionSourceCallback || state != "pending" || provider != ack.Provider || eventID != ack.ProviderEventID ||
-		interfaceKey != ack.InterfaceKey || authorization != ack.ProviderAuthorization || fact.Interface.Key() != ack.InterfaceKey ||
-		fact.ExternalAccountRef != ack.ExternalAccountRef || fact.ConversationRef != ack.ConversationRef ||
-		string(fact.ConversationScope) != ack.ConversationScope || fact.MessageReference != ack.MessageReference ||
-		fact.InteractionRef != ack.InteractionRef || fact.Token != ack.Token {
+	if !channelActionAckMatchesFact(ack, fact, provider, eventID, interfaceKey, authorization, state) {
 		return false, nil
 	}
 	resolved, found, err := channeldelivery.ResolveActionFact(ctx, q, fact, postgres)
@@ -86,6 +82,14 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 		return false, nil
 	}
 	return channelActionAckActivationCurrent(ctx, q, ack, postgres, lock)
+}
+
+func channelActionAckMatchesFact(ack runtimeeffects.ChannelActionAckAuthority, fact operatorchannel.ActionFact, provider, eventID, interfaceKey, authorization, state string) bool {
+	return fact.Kind == operatorchannel.ActionSourceCallback && state == "pending" && provider == ack.Provider && eventID == ack.ProviderEventID &&
+		interfaceKey == ack.InterfaceKey && authorization == ack.ProviderAuthorization && fact.Interface.Key() == ack.InterfaceKey &&
+		fact.ExternalAccountRef == ack.ExternalAccountRef && fact.ConversationRef == ack.ConversationRef &&
+		string(fact.ConversationScope) == ack.ConversationScope && fact.MessageReference == ack.MessageReference &&
+		fact.InteractionRef == ack.InteractionRef && fact.Token == ack.Token
 }
 
 func channelActionAckActivationCurrent(ctx context.Context, q schemaQueryer, ack runtimeeffects.ChannelActionAckAuthority, postgres, lock bool) (bool, error) {
