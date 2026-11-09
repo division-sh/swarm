@@ -3318,6 +3318,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	providerCtx = managedcapabilities.WithContext(providerCtx, capabilitySurface)
 	frame, causalEvent := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.SourceArtifactFact, targetConfig.Model, targetConfig.ResolvedModel)
 	providerCtx = runtimecorrelation.WithSourceArtifactFact(providerCtx, baseRequest.LoadedSource.SourceArtifactFact)
+	providerCtx = runtimeeffects.WithTurnInstanceSource(providerCtx, baseRequest.LoadedSource.Source)
 	providerCtx = runtimecorrelation.WithInboundEvent(providerCtx, causalEvent)
 	causalEvent, err = eventfixture.BindPayload(causalEvent)
 	if err != nil {

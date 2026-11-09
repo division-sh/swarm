@@ -374,7 +374,8 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 					t.Fatalf("persisted reply routes %s = %#v err=%v", req.name, routes, err)
 				}
 				wantInstance := templatereply.RequesterFlowID + "/" + req.accountID
-				if routes[0].Target.Route().FlowInstance != wantInstance || !routes[0].Context.Empty() {
+				wantContext := events.DeliveryContext{Life: &events.InstanceLife{RunID: runID, FlowInstance: wantInstance, Life: 1}}
+				if routes[0].Target.Route().FlowInstance != wantInstance || !reflect.DeepEqual(routes[0].Context, wantContext) {
 					t.Fatalf("persisted reply route %s = %#v, want instance %q with consumed context", req.name, routes[0], wantInstance)
 				}
 				record, err := backend.LoadReplyContext(ctx, contexts[req.name].ReplyContextID())

@@ -633,6 +633,7 @@ func (h *directiveAmbiguityHarness) restartManager(t *testing.T) {
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		BaseContext:      h.original, MutationContext: h.mutationContext, CarryMutationContext: startupownership.CarryMutationAuthority,
+		SemanticSource: defaultTurnInstanceSourceForTest(t), SourceArtifactFact: sourceartifactfixture.Fact(),
 		LifecycleStore: agentfixture.Lifecycle(t, h.backend.store),
 		WorkOwner:      storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
