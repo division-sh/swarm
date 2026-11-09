@@ -20842,8 +20842,9 @@ platform_tables:
         live: The sole live run for its flow_path within the selected store, which is the deployment. The partial unique index is the claim fence.
           Only the run-lifecycle transaction creates or changes live selection. Ingress, timers and schedules consume
           that row through their existing context and scheduling owners; bundle hashes, process pointers and standing
-          service current-run fields are not selectors. A fork fences outgoing admissions and settles or parks accepted
-          work before one transaction pauses the currently live sibling and selects the child. Rollback and lost-ACK
+          service current-run fields are not selectors. Serve's existing boot reconciliation creates a deployment-origin
+          live run for a flow with no landing run; an ended landing run is not revived. A fork fences outgoing admissions
+          and settles or parks accepted work before one transaction pauses the currently live sibling and selects the child. Rollback and lost-ACK
           recovery preserve the committed selection. A live run is not normally completed when its instances settle.
           A selected child completes actor self-release while its selected grant remains admitted. The activation
           transaction fences and closes that exact executor, switches live selection, records the immutable live
@@ -26513,6 +26514,10 @@ test_specification:
         selections and ambient credentials or API targets cannot enter its construction request. The selected config document
         is still parsed and validated, including retired keys hidden by a command override. Live backend/model policy remains source-validation
         input, not live execution authority. No project store, dev epoch or persistent project-context registration is used.
+      scenario_run: >-
+        The existing setup owner creates each scenario's run at that scenario's start with its exact immutable profile and
+        run identity. That running run is selectable only inside the private host's scenario scope; scenario status and
+        public run readouts do not change.
       external_boundary: >-
         Explicit --api-server, --context and --api-token-file refuse before connection lookup or acquisition. Public test
         mounts no provider ingress, channel registration or external exposure. Real signed ingress and retained restart
@@ -27094,6 +27099,13 @@ cli_specification:
           Event replay and event publish are separate rows. The implemented replay row MUST NOT
           be reopened or counted as closing the absent publish row.
   foundations:
+    command_group_authority:
+      allowed_values: [getting_started, author_validate, run_operate, observe_debug, utilities]
+      rule: >-
+        Every command_catalog row except root declares one canonical group identifier. Cobra GroupID assignments match
+        those row values directly, without a translation table. Read-only conformance binds command path, visibility and
+        group assignment to the catalog, explicitly accounting for commands whose merge-bearing rows live elsewhere.
+        Generator-style synchronization is not authorized.
     read_window_input:
       promoted_by: '#1955'
       implementation_status: implemented
@@ -30553,6 +30565,10 @@ cli_specification:
       implementation_status: implemented
       tracker: '#743'
       accepted_contract_status: 'merge-bearing contract promoted by #795; command code implemented by #743.'
+      live_selection: >-
+        Run start publishes into the existing serve's selected live run and never creates a run or starts a host.
+        --run-id, when present, is an expected existing live-run identity; a missing, paused, ended, ambiguous or
+        mismatched target is refused by the current run.start API owner before publication.
       owners:
         readiness: /v1/rpc health.check
         start: /v1/rpc run.start
@@ -30584,8 +30600,8 @@ cli_specification:
             attempt optional bounded run.subscribe_trace observation. Never start a local host; absent serve refuses
             with "No serve running for this deployment: start `swarm serve` first". Render available trace rows and
             the quiescence readout. Configure the runtime through `swarm serve`. Fused imports and pins consume the same
-            exact selected-bundle data declarations and method-neutral run-creation owner as connected starts. New work uses the active canonical bundle_hash
-            returned by health.check for create-new-work scope. `--data` and `--pin` are create-new-work inputs, are valid for
+            exact selected-bundle data declarations and current publication owner as connected starts. Publication uses the active canonical bundle_hash
+            returned by health.check for scope. `--data` and `--pin` are publication inputs, are valid for
             local and connected starts, and fail closed with `--reattach`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists and exits 130; it never stops serve. The existing standing-run stop refusal remains authoritative.'
         foreground_connected_start:
@@ -30674,7 +30690,7 @@ cli_specification:
         wait_timeout_without_cancellation: 8
         interrupted: 130
       proof_expectations:
-      - exact /v1/rpc calls for health.check, run.start, run.diagnose, run.fan_out.list, event.get for the published inputs' own deliveries, reattach run.get, and explicit run.stop; health.check exposes the active canonical bundle_hash and run.start carries that hash for new work; existing request replay retains its permanent source binding. Missing new-work scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable internal hashes map BUNDLE_UNAVAILABLE; authored hash flags are absent.
+      - exact /v1/rpc calls for health.check, run.start, run.diagnose, run.fan_out.list, event.get for the published inputs' own deliveries, reattach run.get, and explicit run.stop; health.check exposes the active canonical bundle_hash and run.start carries that hash for publication; existing request replay retains its permanent source binding. Missing scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable internal hashes map BUNDLE_UNAVAILABLE; authored hash flags are absent.
       - connected start failures for EVENT_NOT_DECLARED, PAYLOAD_VALIDATION_FAILED, EVENT_PUBLISH_FAILED, bundle identity rejection, and IDEMPOTENCY_CONFLICT render canonical API codes on stderr, exit 6, and do not open /v1/ws or follow work after failed run.start
       - exact /v1/ws subscription for run.subscribe_trace where observation is in scope, with finite acquisition timeout, cancellation close/join, and unchanged 16-row transport bound
       - every post-start attach, timeout, protocol, transport, validation, mismatch, clean-close, and overflow manifestation emits exactly one typed detach fact and continues the authoritative wait (run.diagnose for starts; run.get for reattach)
@@ -32063,126 +32079,6 @@ cli_specification:
       The current command catalog is the complete public vocabulary. Removed commands
       are not registered, do not appear in help/completion and fail ordinary command
       admission before API calls. No aliases, migration messages or retirement layer exists.
-  topology_revision_v2_2:
-    id: cli.topology_revision_v2_2
-    status: implemented_historical_record
-    promoted_by: '#1654'
-    implemented_by: '#1677'
-    authority_rule: >
-      Historical decision record for the CLI v2.2 topology revision (D1-D7). The revision is
-      implemented: command_catalog rows above carry the v2.2 spellings as live behavior, unsupported
-      spellings fail ordinary command admission, and the cobra/catalog
-      conformance drift test enforces the binding. This block preserves the decision trail and
-      MUST NOT be reused as a live migration target; future topology changes require a new
-      tracked revision.
-    old_spelling_policy:
-      default_disposition: ordinary_unknown_command
-      rule: >
-        Only current public spellings are registered. Unsupported commands and flags fail
-        ordinary admission before effects. There is no pre-1.0 migration surface, hidden stub,
-        replacement-pointer table or compatibility alias.
-    group_field:
-      status: contract_bearing
-      allowed_values: [getting_started, author_validate, run_operate, observe_debug, utilities]
-      rule: >
-        `group` is a required command_catalog row field naming the operator help journey group.
-        Only root is exempt because it renders the groups. Current row values describe the live #1657
-        cobra group MEMBERSHIP; target-row values describe the v2.2 grouping. Phase 2 MUST bind
-        cobra GroupID assignments to row group values through the conformance drift test.
-      identifier_alignment: >
-        The snake_case allowed_values above are the canonical group identifiers. The live cobra
-        GroupID strings from #1657 (getting-started, author, operate, observe, utilities) are
-        non-canonical internal spellings: row group values assert live group membership, not the
-        current internal ID spelling. Phase 2 MUST rename the cobra GroupID constants to the
-        canonical values when landing the conformance drift test, and the drift test MUST
-        compare identifiers directly with no translation table.
-    conformance_binding:
-      decision: read_only_drift_test
-      rule: >
-        The Phase 2 implementation child MUST land a read-only conformance test binding the
-        cobra command tree (command path shape, visibility, group assignment) to
-        command_catalog rows and, once implemented, this revision's target rows. Commands whose
-        merge-bearing rows live outside command_catalog (currently `swarm describe`) MUST be
-        explicitly enumerated by the test, not silently skipped. Generator-style
-        synchronization is explicitly parked and MUST NOT be implemented without a later
-        promoted decision.
-    forkchat_disposition:
-      decision: keep_name_rename_rejected_for_now
-      rule: >
-        `swarm forkchat` keeps its current name with the #1657 operator description. Rename is
-        rejected-for-now, not open; reopening requires a new tracked lead decision.
-    target_rows:
-      run_group:
-        command: swarm run # live noun-group form: bare run prints group help
-        group: run_operate
-        behavior: Bare `swarm run` prints the run noun-group help and exits 0. It does not start a run.
-      run_start:
-        command: swarm run start [flags]
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.run
-        note: >
-          R52 supersedes the inherited creating arm: run.start publishes its declared root
-          input into the running serve's live run, never creates a run or starts a serve,
-          and treats --run-id only as an expected existing live-run identity. The rows arm
-          refuses with RUN_DATA_IMMUTABLE without creating, binding, or mutating anything.
-          Following publication, existing follow, return, interruption, and exit behavior
-          stays unchanged. A private swarm test scenario creates its run at scenario start
-          through the existing setup owner, with its exact immutable profile and identity;
-          that running run is selectable only inside that private host's scenario scope.
-          Scenario status and public run readouts do not change. Ordinary serve retains its
-          one boot maker, which does not revive ended landing runs.
-      run_list:
-        command: swarm run list [filters]
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.runs
-      run_fan_out_group:
-        command: swarm run fan-out
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.run_fan_out_group
-      run_fan_out_list:
-        command: swarm run fan-out list <run-id>
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.run_fan_out_list
-      run_status:
-        command: swarm run status [<run-id>]
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.status
-      run_trace:
-        command: swarm run trace [flags]
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.trace
-      run_fork:
-        command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.run_fork
-        supersession_scope: >
-          CLI command spelling only. Runtime/API /v1/rpc run.fork ownership and semantics and
-          all non-CLI run_fork sections of this spec are not superseded.
-      agent_list:
-        command: swarm agent list
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.agents_list
-      event_list:
-        command: swarm event list
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.events_list
-      event_follow:
-        command: swarm event follow
-        group: run_operate
-        inherits_contract: cli_specification.command_catalog.events_follow
-      entity_list:
-        command: swarm entity list
-        group: observe_debug
-        inherits_contract: cli_specification.command_catalog.entities_list
-      conversation_list:
-        command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
-        group: observe_debug
-        inherits_contract: cli_specification.command_catalog.conversations_list
-    current_vocabulary_rule: >
-      Only the current command catalog is registered. Unknown commands, misplaced flags,
-      and unsupported --platform-spec flags are ordinary Cobra errors before side effects.
-      There are no hidden migration stubs or old-to-new spelling pointers.
-
 api_specification:
   description: "Single canonical user-facing API for the Swarm platform. JSON-RPC 2.0 over\nHTTP for request/response, JSON-RPC\
     \ subscriptions over WebSocket for live\nstreams. One transport, one auth model, one envelope. All operator,\nCLI,\
