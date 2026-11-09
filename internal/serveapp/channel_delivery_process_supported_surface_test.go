@@ -14,167 +14,169 @@ import (
 
 func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		for _, cut := range []string{"launched", "settled"} {
-			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
-				h, db, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
-				if h.registration.DeploymentRegistration {
-					runRegisteredCLIProcessRestart(t, h, hash, cut)
-					return
-				}
-				waitChannelDeliverySendsSettled(t, db, backend)
-				h.stop(t)
-				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
-				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
-				h.endpoint = first.endpoint(t)
-				var standingRun string
-				if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
-					t.Fatal(err)
-				}
-				standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
-				waitChannelAnchorReceipt(t, db, standingCard)
-				waitChannelDeliverySendsSettled(t, db, backend)
-				var arrived <-chan int
-				var release func()
-				seedAdmitted := make(chan struct{})
-				var seedRunID string
-				if cut == "launched" {
-					arrived, release = h.provider.PauseDeliveryResponseMatching(func(delivery map[string]any) bool {
-						token, ok := telegramCallbackToken(delivery, "approve")
-						if !ok {
-							return false
-						}
-						select {
-						case <-seedAdmitted:
-						case <-time.After(20 * time.Second):
-							t.Error("creating publication did not acknowledge the review run")
-							return false
-						}
-						var runID, raw string
-						err := db.QueryRow(`SELECT CAST(card.run_id AS TEXT),CAST(card.anchor AS TEXT)
+		for _, presentation := range []string{"cli", "channel"} {
+			for _, cut := range []string{"launched", "settled"} {
+				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
+					h, db, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
+					if presentation == "cli" {
+						runRegisteredCLIProcessRestart(t, h, hash, cut)
+						return
+					}
+					waitChannelDeliverySendsSettled(t, db, backend)
+					h.stop(t)
+					t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
+					first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
+					h.endpoint = first.endpoint(t)
+					var standingRun string
+					if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
+						t.Fatal(err)
+					}
+					standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
+					waitChannelAnchorReceipt(t, db, standingCard)
+					waitChannelDeliverySendsSettled(t, db, backend)
+					var arrived <-chan int
+					var release func()
+					seedAdmitted := make(chan struct{})
+					var seedRunID string
+					if cut == "launched" {
+						arrived, release = h.provider.PauseDeliveryResponseMatching(func(delivery map[string]any) bool {
+							token, ok := telegramCallbackToken(delivery, "Approve")
+							if !ok {
+								return false
+							}
+							select {
+							case <-seedAdmitted:
+							case <-time.After(20 * time.Second):
+								t.Error("creating publication did not acknowledge the review run")
+								return false
+							}
+							var runID, raw string
+							err := db.QueryRow(`SELECT CAST(card.run_id AS TEXT),CAST(card.anchor AS TEXT)
 							FROM channel_delivery_actions action
 							JOIN channel_delivery_renders render ON render.render_id=action.render_id
 							JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 							JOIN decision_cards card ON card.card_id=plan.source_id
 							WHERE action.action_token=$1`, token).Scan(&runID, &raw)
-						if err != nil {
-							t.Errorf("resolve actual provider control: %v", err)
-							return false
-						}
-						anchor, err := decisioncard.DecodeAnchor(string(decisioncard.AnchorKindStageGate), []byte(raw))
-						if err != nil {
-							t.Errorf("decode actual provider control anchor: %v", err)
-							return false
-						}
-						scope, err := anchor.Scope()
-						if err != nil {
-							t.Errorf("resolve actual provider control scope: %v", err)
-							return false
-						}
-						return runID == seedRunID && scope.FlowInstance == "chat/reviews"
+							if err != nil {
+								t.Errorf("resolve actual provider control: %v", err)
+								return false
+							}
+							anchor, err := decisioncard.DecodeAnchor(string(decisioncard.AnchorKindStageGate), []byte(raw))
+							if err != nil {
+								t.Errorf("decode actual provider control anchor: %v", err)
+								return false
+							}
+							scope, err := anchor.Scope()
+							if err != nil {
+								t.Errorf("resolve actual provider control scope: %v", err)
+								return false
+							}
+							return runID == seedRunID && scope.FlowInstance == "chat/reviews"
+						})
+						t.Cleanup(release)
+					}
+					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+						"event_name": "work.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
+						"payload": map[string]any{"seed": true}, "idempotency_key": "delivery-crash-seed",
 					})
-					t.Cleanup(release)
-				}
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
-					"payload": map[string]any{"seed": true}, "idempotency_key": "delivery-crash-seed",
-				})
-				seedRunID = seed.RunID
-				close(seedAdmitted)
-				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
-				messageID := 0
-				if arrived != nil {
-					select {
-					case messageID = <-arrived:
-					case <-time.After(20 * time.Second):
-						t.Fatalf("delivery never reached the actual provider response barrier\n%s", first.output.String())
+					seedRunID = seed.RunID
+					close(seedAdmitted)
+					card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+					messageID := 0
+					if arrived != nil {
+						select {
+						case messageID = <-arrived:
+						case <-time.After(20 * time.Second):
+							t.Fatalf("delivery never reached the actual provider response barrier\n%s", first.output.String())
+						}
+						if _, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "Approve"); !ok {
+							t.Fatalf("provider barrier selected a different source: %#v", h.provider.Delivery(messageID-1))
+						}
+					} else {
+						messageID = waitChannelAnchorReceipt(t, db, card)
 					}
-					if _, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve"); !ok {
-						t.Fatalf("provider barrier selected a different source: %#v", h.provider.Delivery(messageID-1))
+					state := "settled"
+					if cut == "launched" {
+						state = "launched"
 					}
-				} else {
-					messageID = waitChannelAnchorReceipt(t, db, card)
-				}
-				state := "settled"
-				if cut == "launched" {
-					state = "launched"
-				}
-				operation, render := waitChannelDeliveryProcessAttempt(t, db, backend, card, state)
-				var input, renderHash string
-				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&input, &renderHash); err != nil {
-					t.Fatal(err)
-				}
-				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
-				if !ok {
-					t.Fatal("real gate delivery lacks its frozen approve control")
-				}
-				before := channelDeliveryCountForToken(h.provider, token)
-				if before != 1 {
-					t.Fatalf("review control delivered %d times before crash", before)
-				}
-				if err := first.kill(); err != nil {
-					t.Fatal(err)
-				}
-				if first.waitError() == nil {
-					t.Fatal("abrupt process death reported a graceful exit")
-				}
-				if release != nil {
-					release()
-				}
-				second := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
-				h.endpoint = second.endpoint(t)
-				want := "settled"
-				if cut == "launched" {
-					want = "outcome_uncertain"
-				}
-				waitChannelDeliveryProcessAttempt(t, db, backend, card, want)
-				var actualOperation, afterInput, afterHash, planState, receiptState, current string
-				if err := db.QueryRow(`SELECT CAST(r.effect_operation_id AS TEXT),p.state,r.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),'')
+					operation, render := waitChannelDeliveryProcessAttempt(t, db, backend, card, state)
+					var input, renderHash string
+					if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&input, &renderHash); err != nil {
+						t.Fatal(err)
+					}
+					token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "Approve")
+					if !ok {
+						t.Fatal("real gate delivery lacks its frozen approve control")
+					}
+					before := channelDeliveryCountForToken(h.provider, token)
+					if before != 1 {
+						t.Fatalf("review control delivered %d times before crash", before)
+					}
+					if err := first.kill(); err != nil {
+						t.Fatal(err)
+					}
+					if first.waitError() == nil {
+						t.Fatal("abrupt process death reported a graceful exit")
+					}
+					if release != nil {
+						release()
+					}
+					second := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
+					h.endpoint = second.endpoint(t)
+					want := "settled"
+					if cut == "launched" {
+						want = "outcome_uncertain"
+					}
+					waitChannelDeliveryProcessAttempt(t, db, backend, card, want)
+					var actualOperation, afterInput, afterHash, planState, receiptState, current string
+					if err := db.QueryRow(`SELECT CAST(r.effect_operation_id AS TEXT),p.state,r.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),'')
 					FROM channel_delivery_plans p JOIN channel_delivery_receipts r ON r.delivery_id=p.delivery_id AND r.effect_operation_id=$2
 					WHERE p.source_id=$1`, card, operation).Scan(&actualOperation, &planState, &receiptState, &current); err != nil {
-					var retainedState, retainedCurrent string
-					var receipts int
-					readErr := db.QueryRow(`SELECT p.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),''),
+						var retainedState, retainedCurrent string
+						var receipts int
+						readErr := db.QueryRow(`SELECT p.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),''),
 						(SELECT COUNT(*) FROM channel_delivery_receipts WHERE effect_operation_id=$2)
 						FROM channel_delivery_plans p WHERE p.source_id=$1`, card, operation).Scan(&retainedState, &retainedCurrent, &receipts)
-					t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s",
-						cut, operation, want, retainedState, retainedCurrent, receipts, readErr, err, second.output.String())
-				}
-				if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&afterInput, &afterHash); err != nil {
-					t.Fatal(err)
-				}
-				wantReceipt := "sent"
-				wantCurrent := operation
-				if cut == "launched" {
-					wantReceipt = "uncertain"
-					wantCurrent = ""
-				}
-				if actualOperation != operation || current != wantCurrent || planState != wantReceipt || receiptState != wantReceipt || afterInput != input || afterHash != renderHash {
-					t.Fatalf("restart changed exact frozen delivery/receipt: op=%s want=%s plan=%s receipt=%s", actualOperation, operation, planState, receiptState)
-				}
-				if count := channelDeliveryCountForToken(h.provider, token); count != before {
-					t.Fatalf("startup replayed a %s delivery: before=%d after=%d", cut, before, count)
-				}
-				callback, signing, _ := h.provider.Registration()
-				postChannelTelegramUpdate(t, callback, signing, map[string]any{
-					"update_id": 940000 + messageID, "callback_query": map[string]any{
-						"id": "crash-control-" + card, "from": map[string]any{"id": 7000},
-						"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
-						"data":    token,
-					},
-				})
-				if cut == "launched" {
-					waitChannelRejectedCallback(t, db, token)
-					var count int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 0 {
-						t.Fatalf("uncertain historical control acquired decision authority: count=%d %v", count, err)
+						t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s",
+							cut, operation, want, retainedState, retainedCurrent, receipts, readErr, err, second.output.String())
 					}
-				} else {
-					waitChannelAnchorDecision(t, db, card)
-				}
-				if err := second.stop(); err != nil {
-					t.Fatalf("recovered process did not stop: %v\n%s", err, second.output.String())
-				}
-			})
+					if err := db.QueryRow(`SELECT CAST(render_input AS TEXT),render_hash FROM channel_delivery_renders WHERE render_id=$1`, render).Scan(&afterInput, &afterHash); err != nil {
+						t.Fatal(err)
+					}
+					wantReceipt := "sent"
+					wantCurrent := operation
+					if cut == "launched" {
+						wantReceipt = "uncertain"
+						wantCurrent = ""
+					}
+					if actualOperation != operation || current != wantCurrent || planState != wantReceipt || receiptState != wantReceipt || afterInput != input || afterHash != renderHash {
+						t.Fatalf("restart changed exact frozen delivery/receipt: op=%s want=%s plan=%s receipt=%s", actualOperation, operation, planState, receiptState)
+					}
+					if count := channelDeliveryCountForToken(h.provider, token); count != before {
+						t.Fatalf("startup replayed a %s delivery: before=%d after=%d", cut, before, count)
+					}
+					callback, signing, _ := h.provider.Registration()
+					postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
+						"update_id": 940000 + messageID, "callback_query": map[string]any{
+							"id": "crash-control-" + card, "from": map[string]any{"id": 7000},
+							"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}},
+							"data":    token,
+						},
+					})
+					if cut == "launched" {
+						waitChannelRejectedCallback(t, db, token)
+						var count int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 0 {
+							t.Fatalf("uncertain historical control acquired decision authority: count=%d %v", count, err)
+						}
+					} else {
+						waitChannelAnchorDecision(t, db, card)
+					}
+					if err := second.stop(); err != nil {
+						t.Fatalf("recovered process did not stop: %v\n%s", err, second.output.String())
+					}
+				})
+			}
 		}
 	}
 }
@@ -186,7 +188,7 @@ func channelDeliveryCountForToken(provider *channelOnboardingTelegramProvider, t
 		if delivery == nil {
 			return count
 		}
-		if actual, ok := telegramCallbackToken(delivery, "approve"); ok && actual == token {
+		if actual, ok := telegramCallbackToken(delivery, "Approve"); ok && actual == token {
 			count++
 		}
 	}

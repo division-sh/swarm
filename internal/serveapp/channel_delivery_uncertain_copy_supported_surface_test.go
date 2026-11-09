@@ -39,7 +39,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				})
 				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 				oldMessage := waitChannelAnchorReceipt(t, db, cardID)
-				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "reject")
+				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "Reject")
 				if !found {
 					t.Fatal("actual gate card lacks the required-input reject action")
 				}
@@ -64,7 +64,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				callback, signing, _ := h.provider.Registration()
 				resendToken, inboxMessage := requestChannelRecoveryAction(t, h.provider, callback, signing, "Resend card")
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020)
-				fresh := waitUncertainCopyDelivery(t, h, inboxMessage, "Input: reason (text) required")
+				fresh := waitUncertainCopyDelivery(t, h, inboxMessage, "Input: Reason (text) required")
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020, http.StatusOK)
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901021)
 				waitChannelRejectedCallback(t, db, resendToken)
@@ -78,7 +78,7 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				waitChannelReceiptText(t, h, fresh, "Decision: reject", true)
 				if apply != nil {
 					apply()
-					waitChannelReceiptText(t, h, oldMessage, "Input: reason (text) required", false)
+					waitChannelReceiptText(t, h, oldMessage, "Input: Reason (text) required", false)
 				}
 				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901070)
 				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901080, withSummary)

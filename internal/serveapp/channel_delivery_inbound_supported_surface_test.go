@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/telegramapi"
 	"github.com/google/uuid"
@@ -74,7 +75,7 @@ func TestChannelDeliveryNativeInboxE2E(t *testing.T) {
 func TestChannelDeliveryNativeInboxServedRestartE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_restart")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_restart")
 		})
 	}
 }
@@ -82,7 +83,7 @@ func TestChannelDeliveryNativeInboxServedRestartE2E(t *testing.T) {
 func TestChannelDeliveryNativeInboxRetiredReadbackConflictE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_restart_mismatch")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_restart_mismatch")
 		})
 	}
 }
@@ -90,7 +91,7 @@ func TestChannelDeliveryNativeInboxRetiredReadbackConflictE2E(t *testing.T) {
 func TestChannelDeliveryNativeInboxLostAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_loss")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_loss")
 		})
 	}
 }
@@ -98,7 +99,7 @@ func TestChannelDeliveryNativeInboxLostAcknowledgmentE2E(t *testing.T) {
 func TestChannelNativeInboxUnknownWriteBlocksReadinessE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_install_loss")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_install_loss")
 		})
 	}
 }
@@ -106,7 +107,7 @@ func TestChannelNativeInboxUnknownWriteBlocksReadinessE2E(t *testing.T) {
 func TestChannelNativeInboxReadbackFailureBlocksReadinessE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_readback_failure")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_readback_failure")
 		})
 	}
 }
@@ -114,7 +115,7 @@ func TestChannelNativeInboxReadbackFailureBlocksReadinessE2E(t *testing.T) {
 func TestChannelNativeInboxForeignCommandsBlockReadinessE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_foreign_commands")
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:inbox_foreign_commands")
 		})
 	}
 }
@@ -134,6 +135,9 @@ func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 		})
 		t.Run(backend+"-deployment", func(t *testing.T) {
 			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:verdict")
+		})
+		t.Run(backend+"-deployment-unheld", func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "deployment:unheld:verdict")
 		})
 	}
 }
@@ -321,6 +325,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	t.Helper()
 	deploymentTransport := strings.HasPrefix(scenario, "deployment:")
 	scenario = strings.TrimPrefix(scenario, "deployment:")
+	unheld := strings.HasPrefix(scenario, "unheld:")
+	scenario = strings.TrimPrefix(scenario, "unheld:")
 	retainedInteraction := scenario == "ordered_input_restart" || scenario == "draft_chooser_restart"
 	if retainedInteraction {
 		scenario = strings.TrimSuffix(scenario, "_restart")
@@ -340,6 +346,15 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		t.Cleanup(releaseCommandApply)
 	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	if unheld {
+		disableChannelOnboardingBusinessConsumers(t, sourceRoot)
+		path := filepath.Join(sourceRoot, "schema.yaml")
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeStandingCandidateFile(t, path, canonicalrouting.WithoutStandingIngressPins(t, string(body)))
+	}
 	if scenario == "action_pages" {
 		schemaPath := filepath.Join(sourceRoot, ".", "schema.yaml")
 		raw, err := os.ReadFile(schemaPath)
@@ -467,10 +482,43 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	} else {
 		registered = registerChannelFixtureAccount(t, configPath, "bot-token", "420079", provider)
 	}
+	if scenario == "inbox_install_loss" {
+		provider.LoseNextCommandWriteAcknowledgment()
+	} else if scenario == "inbox_readback_failure" {
+		provider.FailCommandReadbackAfterWrite()
+	} else if scenario == "inbox_foreign_commands" {
+		if err := provider.SeedCommands("bot-token", map[string]any{"type": "chat", "chat_id": "1001"}, "",
+			[]map[string]any{{"command": "foreign", "description": "Foreign owner"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var qualificationReader interface {
+		ReadNativeInboxQualificationParent(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)
+	}
+	if deploymentTransport && strings.HasPrefix(scenario, "inbox_") {
+		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+			qualificationReader, _ = p.channelOnboarding.(interface {
+				ReadNativeInboxQualificationParent(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)
+			})
+		})
+	}
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+	if unheld {
+		var out, errOut lockedBuffer
+		if code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, &out, &errOut, nil); code != 0 {
+			t.Fatalf("read unheld account exit=%d err=%s", code, errOut.String())
+		}
+		var listed struct {
+			Accounts []channelonboarding.Result `json:"accounts"`
+		}
+		if json.Unmarshal([]byte(out.String()), &listed) != nil || len(listed.Accounts) != 1 || listed.Accounts[0].Status == nil ||
+			len(listed.Accounts[0].Status.Holders) != 0 {
+			t.Fatalf("unheld transport fixture has no exact public zero-holder account: %s", out.String())
+		}
+	}
 	if scenario == "summary_open" || scenario == "summary_open_many" || scenario == "notice_uncertainty_readback" {
 		rpcEndpoint := endpoint + "/v1/rpc"
 		var identity apiv1.RuntimeIdentityResult
@@ -536,18 +584,6 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		runRegisteredChannelCLIInbox(t, h, scenario, retainedInteraction)
 		process = h.process
 		return
-	}
-	// Channel-card assertions below are retained for the v0.8 transport design.
-	// Registered accounts use the CLI-only journey above (6526882297).
-	if scenario == "inbox_install_loss" {
-		provider.LoseNextCommandWriteAcknowledgment()
-	} else if scenario == "inbox_readback_failure" {
-		provider.FailCommandReadbackAfterWrite()
-	} else if scenario == "inbox_foreign_commands" {
-		if err := provider.SeedCommands("bot-token", map[string]any{"type": "chat", "chat_id": "1001"}, "",
-			[]map[string]any{{"command": "foreign", "description": "Foreign owner"}}); err != nil {
-			t.Fatal(err)
-		}
 	}
 	chatID, chatType := int64(1001), "private"
 	if scenario == "shared_audience" {
@@ -687,14 +723,22 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if writes := provider.CommandWrites(); len(writes) != wantWrites {
 			t.Fatalf("non-usable native setting caused %d writes, want %d: %v", len(writes), wantWrites, writes)
 		}
-		var current channelonboarding.Result
-		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_get", map[string]any{
-			"operation_id": connectedOperationID,
-		}, &current)
-		if current.Readiness == nil || !current.Readiness.NativeInboxRequired || current.Readiness.NativeInbox == nil ||
-			current.Readiness.NativeInbox.State != channelnative.QualificationInvalid ||
-			current.Readiness.NativeInbox.SettingID == "" || current.Readiness.NativeInbox.SettingGeneration <= 0 {
-			t.Fatalf("non-usable native setting lost exact qualification refusal: %+v", current.Readiness)
+		db, err := sql.Open(backend, observerDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var evidence []byte
+		if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, connectedOperationID).Scan(&evidence); err != nil {
+			t.Fatal(err)
+		}
+		parent, err := channelnative.DecodeTransportParent(evidence)
+		if err != nil || parent.ID != registered.OperationID || parent.Revision != registered.Revision || qualificationReader == nil {
+			t.Fatalf("native fault lacks its original deployment parent: %+v err=%v", parent, err)
+		}
+		qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
+		if err != nil || qualification.State != channelnative.QualificationInvalid || qualification.SettingID == "" || qualification.SettingGeneration <= 0 {
+			t.Fatalf("non-usable native setting lost exact qualification refusal: %+v err=%v", qualification, err)
 		}
 		if scenario == "inbox_readback_failure" {
 			if reads, failures := provider.CommandReadbackCounts(); failures == 0 {
@@ -1026,7 +1070,11 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				}
 				return
 			}
-			if fmt.Sprint(delivery["chat_id"]) == "1001" && strings.Contains(message, "ordinary business text") {
+			businessChat := "1001"
+			if deploymentTransport {
+				businessChat = "9001"
+			}
+			if fmt.Sprint(delivery["chat_id"]) == businessChat && strings.Contains(message, "ordinary business text") {
 				if scenario == "notice" && !strings.Contains(message, "Observed ordinary business text") {
 					continue
 				}
@@ -1071,7 +1119,7 @@ func proveChannelPagedCardActions(t *testing.T, provider *telegramapi.Double, ca
 		return found, len(rows)
 	}
 	first, firstRows := controls(card)
-	if firstRows != 8 || first["More choices"] == "" || first["choice01"] == "" {
+	if firstRows != 8 || first["More choices"] == "" || first["Choice01"] == "" {
 		t.Fatalf("first action page was not selected to Telegram capacity: %v", card)
 	}
 	sequence := int64(0)
@@ -1110,10 +1158,10 @@ func proveChannelPagedCardActions(t *testing.T, provider *telegramapi.Double, ca
 	tap(first["More choices"])
 	secondEdit := waitEdit(before)
 	second, secondRows := controls(secondEdit)
-	if secondRows != 4 || second["retire"] == "" || second["More choices"] == "" || second["choice01"] != "" {
+	if secondRows != 4 || second["Retire"] == "" || second["More choices"] == "" || second["Choice01"] != "" {
 		t.Fatalf("later action page did not expose remaining choices: %v", secondEdit)
 	}
-	tap(first["choice01"])
+	tap(first["Choice01"])
 	time.Sleep(200 * time.Millisecond)
 	if edits := provider.Edits(); len(edits) != before+1 {
 		t.Fatalf("stale first-page verdict mutated the card: %v", edits)
@@ -1121,16 +1169,16 @@ func proveChannelPagedCardActions(t *testing.T, provider *telegramapi.Double, ca
 	tap(second["More choices"])
 	thirdEdit := waitEdit(before + 1)
 	third, thirdRows := controls(thirdEdit)
-	if thirdRows != 8 || third["More choices"] == first["More choices"] || third["choice01"] == first["choice01"] {
+	if thirdRows != 8 || third["More choices"] == first["More choices"] || third["Choice01"] == first["Choice01"] {
 		t.Fatalf("revisited first page revived old callback tokens: %v", thirdEdit)
 	}
 	tap(third["More choices"])
 	fourthEdit := waitEdit(before + 2)
 	fourth, fourthRows := controls(fourthEdit)
-	if fourthRows != 4 || fourth["retire"] == second["retire"] {
+	if fourthRows != 4 || fourth["Retire"] == second["Retire"] {
 		t.Fatalf("revisited later page revived old callback tokens: %v", fourthEdit)
 	}
-	tap(fourth["retire"])
+	tap(fourth["Retire"])
 	for {
 		for _, edit := range provider.Edits() {
 			if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
@@ -1150,7 +1198,7 @@ func proveChannelRequiredInputText(t *testing.T, provider *telegramapi.Double, c
 	for {
 		prompted := false
 		for _, edit := range provider.Edits() {
-			prompted = prompted || strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required")
+			prompted = prompted || strings.Contains(fmt.Sprint(edit["text"]), "Input: Reason (text) required")
 		}
 		if prompted {
 			break
@@ -1196,7 +1244,7 @@ func proveChannelInvalidInputText(t *testing.T, provider *telegramapi.Double, ca
 	for {
 		prompted := false
 		for _, edit := range provider.Edits() {
-			prompted = prompted || strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (integer) required")
+			prompted = prompted || strings.Contains(fmt.Sprint(edit["text"]), "Input: Reason (integer) required")
 		}
 		if prompted {
 			break
@@ -1263,7 +1311,7 @@ func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, ca
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	waitForEdit("Input: zeta (integer) required")
+	waitForEdit("Input: Zeta (integer) required")
 	postAnswer := func(messageID int, answer string) {
 		t.Helper()
 		if admitted := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
@@ -1277,7 +1325,7 @@ func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, ca
 		}
 	}
 	postAnswer(9105, "7")
-	waitForEdit("Input: alpha (boolean) required")
+	waitForEdit("Input: Alpha (boolean) required")
 	for _, edit := range provider.Edits() {
 		if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
 			t.Fatalf("partial ordered answer decided card: %v", edit)
@@ -1301,7 +1349,7 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 	var token string
 	for token == "" {
 		for _, edit := range provider.Edits() {
-			if !strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text)") {
+			if !strings.Contains(fmt.Sprint(edit["text"]), "Input: Reason (text)") {
 				continue
 			}
 			markup, _ := edit["reply_markup"].(map[string]any)
@@ -1341,7 +1389,7 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 				return
 			}
 			if scenario == "cancel_input" && strings.Contains(visible, "Decision: pending") &&
-				!strings.Contains(visible, "Input: reason") {
+				!strings.Contains(visible, "Input: Reason") {
 				return
 			}
 		}
@@ -1497,7 +1545,7 @@ func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callback
 	for {
 		prompts := map[string]bool{}
 		for _, edit := range provider.Edits() {
-			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Input: Reason (text) required") {
 				prompts[fmt.Sprint(edit["message_id"])] = true
 			}
 		}
@@ -1679,7 +1727,7 @@ func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.D
 	countPromptEdits := func() int {
 		count := 0
 		for _, edit := range provider.Edits() {
-			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Input: Reason (text) required") {
 				lostPromptText = fmt.Sprint(edit["text"])
 				count++
 			}

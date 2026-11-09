@@ -104,6 +104,9 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 				if !h.registration.DeploymentRegistration && telegramIdentities != 1 {
 					t.Fatalf("anchor journey requires one exact Telegram channel identity, got %d", telegramIdentities)
 				}
+				if h.registration.DeploymentRegistration {
+					interfaceKey = h.registration.Interface.Key()
+				}
 				for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 					t.Run(string(kind), func(t *testing.T) {
 						flowInstance := "chat/reviews"
@@ -147,9 +150,6 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
 						message := h.provider.Delivery(messageID - 1)
 						label := "Approve"
-						if kind == decisioncard.AnchorKindStageGate {
-							label = "approve"
-						}
 						token, found := telegramCallbackToken(message, label)
 						if !found {
 							t.Fatalf("real %s card lacks approve action: %v", kind, message)
@@ -264,72 +264,74 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 
 func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		t.Run(string(backend), func(t *testing.T) {
-			observation := &channelReconcileObservation{}
-			h, hash := startChannelAnchorPublicJourney(t, backend, "activity-wake-token", false, 0, func(opts *cliapp.ServeOptions) {
-				observation.configure(opts)
-				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
-			})
-			reader := openChannelAnchorObservation(t, h)
-			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-				"event_name": "work.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
-				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-activity-wake",
-			})
-			requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-				"event_name": "effect.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
-				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-proposal-wake",
-			})
-			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindProposedEffect, "chat/reviews")
-			if h.registration.DeploymentRegistration {
-				decideRegisteredAnchorCLI(t, h, cardID, true)
-				return
-			}
-			messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
-			var item struct {
-				Card struct {
-					CardContentHash string `json:"card_content_hash"`
-				} `json:"decision_card"`
-			}
-			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &item)
-			arrived, release := h.provider.PauseDeliveryResponseMatching(func(message map[string]any) bool {
-				return message["text"] == "review" && fmt.Sprint(message["chat_id"]) == "42"
-			})
-			ctx, cancel := context.WithCancel(context.Background())
-			done := make(chan error, 1)
-			go func() {
-				response, status, err := mailboxTransportRequest(ctx, h.rpcEndpoint(), "http", apiv1.DefaultLoopbackAPIToken, "mailbox.decide", map[string]any{
-					"card_id": cardID, "verdict": "approve", "observed_content_hash": item.Card.CardContentHash,
-					"idempotency_key": "isolated-activity-decision",
+		for _, presentation := range []string{"cli", "channel"} {
+			t.Run(string(backend)+"/"+presentation, func(t *testing.T) {
+				observation := &channelReconcileObservation{}
+				h, hash := startChannelAnchorPublicJourney(t, backend, "activity-wake-token", false, 0, func(opts *cliapp.ServeOptions) {
+					observation.configure(opts)
+					opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
 				})
-				if err == nil && (status != 200 || response.Error != nil) {
-					err = fmt.Errorf("public decision status=%d error=%+v", status, response.Error)
+				reader := openChannelAnchorObservation(t, h)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+					"event_name": "work.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
+					"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-activity-wake",
+				})
+				requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+					"event_name": "effect.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
+					"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-proposal-wake",
+				})
+				cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindProposedEffect, "chat/reviews")
+				if presentation == "cli" {
+					decideRegisteredAnchorCLI(t, h, cardID, true)
+					return
 				}
-				done <- err
-			}()
-			defer cancel()
-			defer func() {
+				messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
+				var item struct {
+					Card struct {
+						CardContentHash string `json:"card_content_hash"`
+					} `json:"decision_card"`
+				}
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &item)
+				arrived, release := h.provider.PauseDeliveryResponseMatching(func(message map[string]any) bool {
+					return message["text"] == "review" && fmt.Sprint(message["chat_id"]) == "42"
+				})
+				ctx, cancel := context.WithCancel(context.Background())
+				done := make(chan error, 1)
+				go func() {
+					response, status, err := mailboxTransportRequest(ctx, h.rpcEndpoint(), "http", apiv1.DefaultLoopbackAPIToken, "mailbox.decide", map[string]any{
+						"card_id": cardID, "verdict": "approve", "observed_content_hash": item.Card.CardContentHash,
+						"idempotency_key": "isolated-activity-decision",
+					})
+					if err == nil && (status != 200 || response.Error != nil) {
+						err = fmt.Errorf("public decision status=%d error=%+v", status, response.Error)
+					}
+					done <- err
+				}()
+				defer cancel()
+				defer func() {
+					release()
+					if err := <-done; err != nil {
+						t.Error(err)
+					}
+				}()
+				select {
+				case <-arrived:
+				case <-time.After(15 * time.Second):
+					var state struct {
+						Effect decisioncard.ProposedEffectReadback `json:"effect"`
+					}
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &state)
+					t.Fatalf("approved activity did not reach the exact held provider call: continuation=%s dispatch=%s", state.Effect.ContinuationState, state.Effect.DispatchState)
+				}
+				waitChannelAnchorDispatchEdit(t, h, messageID, "started")
+				// Earlier decision/start hints have all been consumed. With no repair
+				// tick, only the subsequent completion can release this card edit.
+				_, cut := observation.completedCurrentOrdinary(t)
 				release()
-				if err := <-done; err != nil {
-					t.Error(err)
-				}
-			}()
-			select {
-			case <-arrived:
-			case <-time.After(15 * time.Second):
-				var state struct {
-					Effect decisioncard.ProposedEffectReadback `json:"effect"`
-				}
-				requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &state)
-				t.Fatalf("approved activity did not reach the exact held provider call: continuation=%s dispatch=%s", state.Effect.ContinuationState, state.Effect.DispatchState)
-			}
-			waitChannelAnchorDispatchEdit(t, h, messageID, "started")
-			// Earlier decision/start hints have all been consumed. With no repair
-			// tick, only the subsequent completion can release this card edit.
-			_, cut := observation.completedCurrentOrdinary(t)
-			release()
-			waitChannelAnchorDispatchEdit(t, h, messageID, "succeeded")
-			observation.oneAfter(t, cut, render.ReconcileOrdinary)
-		})
+				waitChannelAnchorDispatchEdit(t, h, messageID, "succeeded")
+				observation.oneAfter(t, cut, render.ReconcileOrdinary)
+			})
+		}
 	}
 }
 
