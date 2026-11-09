@@ -337,7 +337,6 @@ contract_formats:
   semantic_json:
     canonical_owner: internal/runtime/semanticvalue
     json_codec: internal/runtime/canonicaljson
-    implementation_tracker: '#1986'
     broader_migration_tracker: '#2046'
     implemented_scope:
     - decision-card context snapshots
@@ -540,7 +539,6 @@ contract_formats:
       are also rejected on any presence. No compatibility or old-store
       migration is provided.
     compiled_transition_admission:
-      implementation_tracker: '#2415'
       owner: The selected flow's lossless compiled lifecycle topology.
       rule: >
         Verification, graph projection, execution admission, and durable
@@ -638,7 +636,6 @@ contract_formats:
         selected-store compatibility reader.
     stages_authoring:
       status: canonical
-      implementation_tracker: '#2566'
       rule: >
         `stages:` is the canonical lifecycle node authoring owner for staged
         bundles. It is a keyed mapping whose keys are per-flow stage IDs and
@@ -679,7 +676,6 @@ contract_formats:
         lifecycle authoring. Missing stages preserves markerless/stateless
         posture; it does not derive an authored pending stage.
       temporal_rows:
-        implementation_tracker: '#1846'
         rule: >
           A stage may declare one-shot temporal rows under
           `stages.<stage>.timers`. Executable rows on final stages are rejected
@@ -712,8 +708,6 @@ contract_formats:
           `interrupting`, `repeat`, and `recurring`. Stage timer rows are
           one-shot in this slice.
       decision_gates:
-        status: merge_bearing
-        implementation_tracker: '#1986'
         syntax: |
           stages:
             awaiting_launch_approval:
@@ -822,8 +816,6 @@ contract_formats:
           Generic mailbox producers reject item_type decision_card and every
           reserved decision-card payload field.
     bounded_loops:
-      status: merge_bearing
-      implementation_tracker: '#1849'
       purpose: >
         `loops:` is the canonical owner for declarative, finite lifecycle
         revision loops. It replaces counter guards, backward-edge conventions,
@@ -1282,8 +1274,6 @@ contract_formats:
       - jsonb payload declarations
       - Author-declared envelope fields
     runtime_event_construction:
-      status: merge_bearing_source_authority
-      owner: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
       rule: |
         Runtime event carriers are read-only outside the event package.
         Event-owned fields such as id, type, producer_identity, task_id, payload,
@@ -1916,8 +1906,6 @@ contract_formats:
         agent_delivery: If no node subscribes, only independently admitted agent recipients receive the event.
         workflow_node_route_authority: Workflow-node delivery route authority is derived from semantic route topology at publish time and persisted as typed event_deliveries rows before workflow-node execution. Live internal carriers, interceptors, handler lookup, receipts, settlement, replay markers, and API/CLI readback are consumers or evidence only; they MUST NOT be required or used as the authority that creates a workflow-node delivery route.
       route_plan_authority:
-        status: merge_bearing_source_authority
-        owner: platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority
         definition: |
           A RoutePlan is the publish-time typed authority that states which
           concrete recipients should receive one event, why they were selected,
@@ -1935,7 +1923,6 @@ contract_formats:
           RoutePlan results; they MUST NOT create, replace, or repair missing
           route authority.
         compiled_connect_evaluation:
-          status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.CompiledConnectGraph plus source-bound EventBus planning and internal/runtime/pipeline.FlowInstanceIndexReader
           rule: |
             Authored FlowConnect rows are compiler input only. One immutable compiled graph owns endpoint identity,
@@ -2270,7 +2257,6 @@ contract_formats:
           selection. Missing, duplicate, or contradictory FlowNode ownership fails before semantic publication or runtime
           mutation; filesystem ancestry, a bare local-node match, or retired package/project coordinates cannot repair it.
         decision_state:
-          status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.RoutePlan.AuthorityState
           states:
           - no_canonical_match
@@ -2304,7 +2290,6 @@ contract_formats:
             projection, materialization, diagnostics, persistence, and delivery
             consumers.
         route_intent_producer_model:
-          status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.routeIntentProducer
           producers:
           - ordinary
@@ -2338,7 +2323,6 @@ contract_formats:
             remains an explicit direct-recipient RoutePlan-backed
             producer/consumer path.
         legacy_event_delivery_plan_collapse:
-          status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and deliveryPlanner.PlanDirect
           rule: |
             EventBus subscribed and direct planning MUST return and consume
@@ -2352,7 +2336,6 @@ contract_formats:
             MUST consume the same RoutePlan model instead of crossing a
             post-plan compatibility interpreter.
         direct_delivery_route_plan_consumption:
-          status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.EventBus.PublishDirect, internal/runtime/bus.EventBus.PublishDirectRoutes, and internal/runtime/bus.EventBus.CheckDirectRecipients
           rule: |
             Direct delivery is a distinct public delivery semantic, not
@@ -2378,7 +2361,6 @@ contract_formats:
             and dispatched target, reply-context, and payload-projection fact is
             copied exactly from the selected original delivery route.
         lowered_connect_route_plan_consumption:
-          status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver
           consumes:
           - internal/runtime/core/pinrouting.ConnectRoutePlan
@@ -2418,7 +2400,6 @@ contract_formats:
             RoutePlan authority state so materializer eligibility and fail-closed zero-route behavior are structural rather
             than inferred from connect-route metadata.
           compiled_connect_recipient_boundary:
-            status: merge_bearing_runtime_behavior
             canonical_code_owner: internal/runtime/core/pinrouting.CompiledConnectGraph recipient evaluator
             rule: |
               For a matched lowered ConnectRoutePlan, the compiled graph evaluates
@@ -2433,7 +2414,6 @@ contract_formats:
               fails closed. Route-source text is a private diagnostic codec only
               and MUST NOT authorize runtime or selected-fork admission.
           instance_evidence_boundary:
-            status: merge_bearing_runtime_behavior
             canonical_code_owner: internal/runtime/pipeline.FlowInstanceIndexReader and native construction validation; internal/runtime/core/pinrouting.MaterializeConnectRoutePlan is static projection only
             rule: |
               Runtime receiver selection consumes exact source/run/declaration/parent/key evidence from the selected
@@ -2449,7 +2429,6 @@ contract_formats:
               Arbitrary business fields, current field-derived keys, config, deliveries, receipts, replay/readback,
               route membership, live subscriptions and handler lookup cannot repair missing construction evidence.
           route_authority_drift_guardrails:
-            status: merge_bearing_conformance_guardrail
             canonical_artifacts:
             - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
             - internal/runtime/conformance/route_authority_drift_inventory_test.go
@@ -2539,8 +2518,6 @@ contract_formats:
               owners. Source rows, current live subscriptions, readback state,
               receipts, or settlement evidence remain invalid recipient truth.
         runtime_callback_context:
-          status: merge_bearing_source_authority
-          owner: platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority.runtime_callback_context
           rule: |
             Runtime-produced business callbacks MUST construct their final
             event name through engine.event_identity.business_publication
@@ -3139,7 +3116,6 @@ event_payload_migration:
     - inline type: object without declared shape
     - author-declared envelope fields
 literal_policy_contracts:
-  status: merge_bearing_runtime_behavior
   location: flow policy.yaml
   owner: admitted literal values resolved by flowmodel
   rules:
@@ -3160,7 +3136,6 @@ literal_policy_contracts:
   - Missing-key teaching errors retain source/field location and sorted declared root keys, and suggest the nearest exact declared key by character edit distance with lexicographic tie-breaking. Suggestions are diagnostics only; they never normalize, replace or authorize an authored key.
   - This direct policy-root check does not prove totality of derived-object or alias dataflow reads. That distinct analysis remains tracked by '#2289'; no arbitrary-object interpreter or permissive execution fallback is introduced.
 rule_set_contracts:
-  status: merge_bearing_runtime_behavior
   location: flow rules.yaml
   owner: admitted RulesDocument single scoped namespace
   resolution: Walk ancestors and replace each complete same-name declaration with the nearest one. Every declaration is a machine validation set; malformed nearer declarations refuse rather than falling back to an ancestor.
@@ -3172,7 +3147,6 @@ rule_set_contracts:
   - Parameters are omitted or a mapping of inert text, boolean, integer or finite numeric scalars. Empty text is valid; null and containers are invalid. Existing policy scalar reference semantics are unchanged.
   - Alias and merge expansion consumes the same admission and document-wide bounds. Duplicate local declarations, duplicate rule IDs and undeclared classes fail closed.
 policy_validation_contracts:
-  status: merge_bearing_runtime_behavior
   description: |
     Flow-local machine-evaluated validation sets are stable-ID rule sets
     declared in the owning flow's flat `rules.yaml`. They use the
@@ -3269,7 +3243,6 @@ policy_validation_contracts:
   - Non-equality predicates, richer expression/derive rows, criteria packs, prompt-frame validation, compute/WASM validation,
     and file-backed validation sets are separate gates.
 compute_module_contracts:
-  status: merge_bearing_runtime_behavior
   description: |
     Flow-local tools.yaml declarations with handler_type wasm or python define deterministic
     compute modules. Policy-sheet `compute_module` value rows instantiate those
@@ -8937,7 +8910,6 @@ engine:
         Run-scoped admission requires a running or paused run. Missing or terminal linkage fails closed. start_on boot is a
         global platform-control schedule with empty run, entity, and flow scope; no entity-scoped boot interpretation exists.
       flow_clock_declarations:
-        implementation_tracker: '#1850'
         governing_freeze: '#1786 comment 5903652180: A6, A9, section 3 consumer law, section 5.4 binding facts'
         declaration_surface: schema.yaml schedules
         example:
@@ -9270,7 +9242,6 @@ engine:
   error_model:
     description: How the platform handles failures at each layer.
     failure_taxonomy:
-      owner: platform-spec.yaml#engine.error_model.failure_taxonomy
       executable_owner: internal/runtime/failures
       namespace: platform.*
       namespace_rule: The platform.* failure namespace is closed and reserved. Product contracts cannot mint classes or selectors in it.
@@ -14128,9 +14099,7 @@ flow_model:
     smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate
     project concept (removed).
   flow_instance_authoring:
-    status: merge_bearing_source_authority
     parent_tracker: '#1537'
-    owner: platform-spec.yaml#flow_model.flow_instance_authoring
     locked_principle: >
       Swarm's default authoring model is flow-instance-centered. A normal flow
       instance owns one primary state entity. Cross-flow composition routes to
@@ -14176,7 +14145,6 @@ flow_model:
         locked_design_section: Delivery vs contained-state update
         coverage: split_to_child
         owner: platform-spec.yaml#flow_model.flow_instance_authoring.contained_state_model
-        implementation_tracker: '#1548'
       - id: escape_hatches
         locked_design_section: What stays as escape hatch
         coverage: specified_by_1538
@@ -14247,7 +14215,6 @@ flow_model:
       - singleton flow = one durable instance, including intentionally stateless services
       - singleton coordinator = singleton flow whose exact contract consumers use typed map/list state
     authoring_decision_rubric:
-      status: merge_bearing_authoring_guidance
       rule: >
         Authors should not choose among overlapping routing/entity primitives.
         They first classify whether state is a flow instance, contained data,
@@ -14269,8 +14236,6 @@ flow_model:
         when: A map/list item starts behaving like a routable recipient.
         use: promote it to a child/template flow instance
     template_instance_model:
-      status: merge_bearing_contract_behavior
-      implementation_tracker: '#2087'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowTemplateInstance
       declaration_surface:
       - 'instance: <field>'
@@ -14324,8 +14289,6 @@ flow_model:
         Producer event schema and business key own producer payload guarantees;
         explicit lifecycle actions remain a separately owned operation after target selection.
     effective_flow_mode_model:
-      status: merge_bearing_contract_behavior
-      implementation_tracker: '#2438'
       canonical_code_owner: internal/runtime/contracts.FlowSchemaDocument.EffectiveMode
       declaration_surface:
         - 'schema.yaml instance: <field>, when template identity is required'
@@ -14356,8 +14319,6 @@ flow_model:
         flows. Descendant shape alone, another run and foreign flow evidence
         never grant target authority.
     primary_entity_model:
-      status: merge_bearing_contract_behavior
-      implementation_tracker: '#1539'
       declaration_surface: 'exactly one flow-owned entities.yaml entry; root entities.yaml uses the same resolver when present'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveRootPrimaryEntity / ResolveFlowPrimaryEntity
       single_entity_rule: >
@@ -14408,8 +14369,6 @@ flow_model:
         retired_connect_key_adapters: '#2087'
         connect_time_template_lifecycle: '#1577'
       connect_to_instance_route_planning:
-        status: merge_bearing_runtime_behavior
-        implementation_tracker: '#1545'
         canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
         rule: >
           For normal composition into a template receiver, parent `connect`
@@ -14423,7 +14382,6 @@ flow_model:
           through the connection's exact `key_from` value.
       retired_connect_identity_aliases:
         status: hard_invalid_on_presence
-        implementation_tracker: '#2087'
         canonical_code_owner: strict contract decoders
         rule: >
           Input-pin address, connect map, connect using.instance, and implicit
@@ -14438,7 +14396,6 @@ flow_model:
         - any attempt to synthesize receiver identity from retired output-pin key/carries
       output_pin_key_carries_contract:
         status: retired_on_presence
-        implementation_tracker: '#2352'
         canonical_code_owner: internal/runtime/contracts.CompiledEventSchema + internal/runtime/contracts.CompiledFlowInputPin + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: >
           Output-pin `key` and `carries` are invalid on presence. Producer event
@@ -14451,8 +14408,6 @@ flow_model:
           subscribers, and RouteTable/live subscription lookup are also not
           canonical receiver identity owners.
     contained_state_model:
-      status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#1548'
       canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.ResolveContainedOperationTarget + internal/runtime/engine.Executor.applyContainedDataOperation
       rule: >
         Typed lists and maps are contained state inside the primary entity.
@@ -14484,8 +14439,6 @@ flow_model:
           RouteTable row, direct delivery target, or live subscription. Parent
           `connect` remains cross-flow-instance topology only.
     singleton_cardinality_model:
-      status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#2238'
       declaration_surface: 'static shape derived by absence of instance, with actual primary-state demand'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingleton
       rule: >
@@ -14505,8 +14458,6 @@ flow_model:
       - agent conversation/session memory as singleton cardinality or coordinator state
       - synthetic placeholder fields used only to satisfy verification
     singleton_coordinator_model:
-      status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#1549'
       refinement_tracker: '#2238'
       declaration_surface: 'exact typed map/list consumer usage inside a derived static flow; no coordinator flag exists'
       canonical_code_owner: internal/runtime/bootverify.BuildSingletonCoordinatorDemandProjection + internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingletonCoordinator + internal/runtime/engine.Executor.applyContainedDataOperation
@@ -14576,8 +14527,6 @@ flow_model:
       - parent connect to contained map/list items
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     standing_activation_model:
-      status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#2438'
       declaration_surface: 'provider directories held by a flow with their events in schema.yaml pins.inputs, or compiled schedules; retention derives from an enabled binding or an active deployment clock'
       canonical_owners:
         declaration: internal/runtime.ResolveStandingTargetDeclarations over the admitted ingress and compiled clock declarations
@@ -14725,7 +14674,6 @@ flow_model:
     escape_hatches:
       static_multi_entity_flows:
         status: retired_unsupported
-        implementation_tracker: '#1554'
         rule: >
           Stateful static/default-static authored flows MUST NOT create or own
           multiple runtime entity rows through `create_entity`. Handler receiver
@@ -14736,7 +14684,6 @@ flow_model:
           rows are unsupported; this retirement provides no persisted-row migration.
       producer_emit_routing:
         status: retired_unsupported
-        implementation_tracker: '#2086'
         adapter_retirement_tracker: '#2352'
         rule: >
           Producer `emit.target` and `emit.broadcast` are retired on presence.
@@ -14745,7 +14692,6 @@ flow_model:
           RoutePlan facts. No adapter can restore producer recipient or cardinality authority.
       custom_adapters:
         status: retired_unsupported
-        implementation_tracker: '#2352'
         rule: >
           `connect.adapter` is invalid on presence. Exact `connect.rename` owns
           receiver event-name adaptation; payload transformation requires a
@@ -14790,8 +14736,6 @@ flow_model:
         singleton_coordinator_contract: '#1549'
         expand_minimize_tooling: '#1551'
       expand_minimize_tooling:
-        status: merge_bearing_supported_tooling
-        implementation_tracker: '#1551'
         command: swarm describe
         pack_inspection:
           command: swarm describe pack [provider] [directory]
@@ -15226,10 +15170,7 @@ flow_model:
   composition_routing:
     status: scalar_receiver_identity_authoritative
     parent_decision: '#1466'
-    owner: platform-spec.yaml#flow_model.composition_routing
     w2_compiled_pin_edge_ownership:
-      status: merge_bearing_runtime_behavior
-      implementation_tracker: '#2352'
       canonical_owners:
         - internal/runtime/contracts.CompiledFlowInputPin
         - internal/runtime/contracts.CompiledFlowOutputPin
@@ -15435,7 +15376,6 @@ flow_model:
         Compiler resolution is allowed only when exactly one producer output and receiver input match their authoring-flow-visible event identities. There is no first-match, pin-name fallback, suffix/leaf match, dot-to-underscore guess, or global resolved-event search.
       lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting authored aliases.
     route_plan_lowering:
-      owner: platform-spec.yaml#flow_model.composition_routing.route_plan_lowering
       syntax_owner: internal/runtime/contracts.projectSchemaConnectValue
       compiler_owner: internal/runtime/core/pinrouting.CompileConnectGraph
       ownership_rule: |
@@ -15473,7 +15413,6 @@ flow_model:
         handler_resolution: |
           Connected-input workflow handler resolution MUST produce exactly one receiver-local handler candidate. Zero or multiple candidates are explicit failures propagated through delivery policy and interception; stale or replayed invalid delivery routes MUST return the failure without passthrough, receipt settlement, or handler execution. These failures apply only when a typed node DeliveryRoute or committed node delivery authority selects that node. Agent-only connect delivery and events without node authority MUST NOT turn an unrelated receiver-flow node into a handler candidate or abort the agent delivery. Execution MUST NOT select the first source-matching input handler.
       implementation_slice_1827_connect_delivery_reply_retirement:
-        status: merge_bearing_aggressive_retirement
         canonical_code_owner: internal/runtime/contracts.FlowConnect + internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: |
           Authored `connect.delivery` and `connect.reply` are invalid on presence. FlowConnect and ConnectRoutePlan expose no delivery or raw reply compatibility fields. Connect lowering consumes the directed edge, optional rename, connection-owned ordinary instance policy and response-edge replies_to/correlation_key. Runtime dispatch, persistence, replay, topology readback, and describe output consume only target/target_set and typed ReplyResolution facts. No fan-in or pin fan-out route-plan metadata or resolution branch remains.
@@ -15486,7 +15425,6 @@ flow_model:
           - connection resolution create, select and select-or-create; response-edge paired reply facts
           - derived DeliveryRoute persistence, replay, and typed reply context
       implementation_slice_1472:
-        status: merge_bearing_runtime_artifact
         canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan
         rule: |
           Runtime lowering of verified parent connect facts is represented by
@@ -15515,7 +15453,6 @@ flow_model:
           indexed_scope: Native lookup binds the exact admitted source, run, declaration, structural parent and immutable typed instance key. A foreign, corrupt or ambiguous observation fails closed; a stored identity is never replaced by a hash derived from its current path or business fields.
           unsupported_targets: Every unrelated entity field, nested business path, config field, instance metadata field or arbitrary business-field target remains invalid routing authority.
       implementation_slice_1545:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.ResolutionKind + ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
         rule: |
           Parent connect into a template receiver MUST lower to an explicit
@@ -15806,7 +15743,6 @@ flow_model:
           - route_plan_instance_source_value_missing
           - route_plan_instance_resolution_invalid
       implementation_slice_1473:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver
         rule: |
           Supported EventBus publish/preflight/outbox dispatch consumes lowered ConnectRoutePlan artifacts as the
@@ -15829,7 +15765,6 @@ flow_model:
           - arbitrary business-field descriptor targets remain hard-invalid under #2087
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
       implementation_slice_2304:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/semanticview.SelectedRootInputPin plus internal/runtime/bus.NewRootInputAPIEventPublicationEndpoint and runtimebus.APIEventPublicationCommitOwner
         rule: |
           Public event.publish admission requires an exact compiled selected-root input pin for both new and existing
@@ -15874,7 +15809,6 @@ flow_model:
           - selected-root template lifecycle and static+standing/explicit-singleton startup subcases explicitly deferred to issue 2438; the latter retain executable dual-store acceptance under TestIssue2438SelectedRootProviderBootBothStores with the issue2438 test tag
           - general routing architecture tracked by issue 2413
       implementation_slice_1474:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/bus.RoutePlan via CheckPublishRecipientPlan and Publish, consumed by internal/runtime/tools.Executor.handleEmitTool
         rule: |
           Generated agent emit tools for pin-declared output events MUST NOT
@@ -15921,7 +15855,6 @@ flow_model:
         does_not_close:
           - '#1466 composition-first parent closure'
       implementation_slice_1508:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/contracts.FlowConnect plus internal/runtime/core/pinrouting.ConnectRoutePlan and ProducerRouteCommonPathFailure
         rule: |
           Parent connect names the authoring flow with `from: .` or `to: .` and names the
@@ -15962,7 +15895,6 @@ flow_model:
           - '#1474 already closed generated agent/node EventBus RoutePlan consumption'
           - '#2087 retires declared indexed business-field descriptor materialization'
       implementation_slice_1485:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver with connectReceiverCarrierRouteKeys
         rule: |
           Lower-precedence route interpreters are separated from matched
@@ -15988,7 +15920,6 @@ flow_model:
           - runtime-resolution plans consume exact scoped native instance evidence and cannot borrow static targets
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve the corrected RoutePlan path where relevant
       implementation_slice_1496:
-        status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan, deliveryPlanner.PlanDirect, EventBus.PublishDirect, EventBus.PublishDirectRoutes, and EventBus.CheckDirectRecipients
         rule: |
           Subscribed publish planning, direct publish planning, recipient-plan
@@ -25008,7 +24939,6 @@ static_analyzer:
     rule: Emit hard invalidity for every statically detectable missing or malformed accepted pin route source. Runtime failure
       reasons cover the cases boot verification cannot prove; no case may silently fall back to consumerless event-type delivery.
     implementation_slice_1444:
-      status: merge_bearing_static_verify_behavior
       canonical_code_owner: internal/runtime/core/pinrouting.ClassifyOutputConsumer
       rule: |
         Agent emit_events declarations that name a pin-declared output event are
@@ -25047,7 +24977,6 @@ static_analyzer:
     domain: retired_authoring_surface
     authority: strict_contract_admission
     canonical_owner: internal/runtime/contracts pin decoders
-    implementation_tracker: '#2352'
     spec_basis:
       - flow_model.flow_instance_authoring.composition_model.output_pin_key_carries_contract
       - flow_model.composition_routing
@@ -25399,7 +25328,6 @@ test_specification:
   internal_catalog_conformance:
     id: testing.internal_catalog_claim_inventory
     implementation_status: implemented_current_corpus_replay_clean_and_external_proofs
-    owner: platform-spec.yaml#test_specification.internal_catalog_conformance
     purpose: >
       Define the claim-indexed proof contract for the private tests/tier*
       conformance corpus and explicitly registered external supported-surface
@@ -26408,7 +26336,6 @@ test_specification:
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     implementation_status: implemented_first_slice
-    owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
     purpose: >
       Define the public deterministic scenario/injection runner semantics for
       cost-free proof of flow routing, system-node behavior, mailbox decisions,
@@ -26802,7 +26729,6 @@ test_specification:
       - provider/runtime fake-response injection
       - shell/script execution
     test_quiescence:
-      owner: platform-spec.yaml#test_specification.deterministic_scenario_runner.test_quiescence
       relationship_to_runtime_completion: >
         Runtime run completion remains owned by run_model.lifecycle.completion:
         all entities terminal and no pending deliveries, with active timers
@@ -29134,7 +29060,6 @@ cli_specification:
             The default is a bearer token value, not a no-auth mode. CLI requests still send
             `Authorization: Bearer <token>` and the v1 API handler still validates the bearer value.
       cli_config_file:
-        owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
         unified_config_supersession: >
           #1804 superseded this flat CLI config-file model with
           configuration_source_authority.unified_swarm_config. #1801 replaces the #1858 layered first slice with
