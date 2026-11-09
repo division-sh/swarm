@@ -61,6 +61,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			}
 			writeStandingCandidateFile(t, h.opts.ConfigPath, string(config)+"\nconnection:\n  api_server: "+h.endpoint+"\n")
 			registered := registerChannelFixtureAccount(t, h.opts.ConfigPath, "bot-token", "420079", h.provider)
+			callbackAtConnect, signingAtConnect, registrationsAtConnect := h.provider.Registration()
 			var cardMessageID int
 			var token string
 			if !registered.DeploymentRegistration {
@@ -144,7 +145,9 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			}
 			registrations, _ := h.provider.Counts()
 			if registrations != 1 {
-				t.Fatalf("conversation routing created %d registrations, want one physical connection", registrations)
+				callback, signing, _ := h.provider.Registration()
+				t.Fatalf("conversation routing created %d registrations, want one physical connection; at_connect=%d same_callback=%t same_signing=%t",
+					registrations, registrationsAtConnect, callback == callbackAtConnect, signing == signingAtConnect)
 			}
 			h.stop(t)
 			h.start(t)
