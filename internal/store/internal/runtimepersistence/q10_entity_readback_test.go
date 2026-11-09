@@ -83,6 +83,15 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				t.Fatalf("physical observation changed field-row membership: %+v %v", observations, err)
 			}
 			observed := map[string]bool{}
+			var fieldless operatorread.OperatorEntitySummary
+			for _, entity := range entities.Entities {
+				if entity.EntityType == "" {
+					fieldless = entity
+				}
+			}
+			if fieldless.EntityID == "" {
+				t.Fatal("fieldless header missing from public membership")
+			}
 			for _, observation := range observations {
 				if observed[observation.EntityID] {
 					t.Fatalf("physical observation duplicated a field row: %+v", observations)
@@ -94,6 +103,12 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 						matched = &entities.Entities[i]
 						break
 					}
+				}
+				if observation.EntityID == importID {
+					if matched != nil || observation.CurrentState != nil {
+						t.Fatalf("state-only import acquired public header membership: %+v", observation)
+					}
+					continue
 				}
 				if matched == nil || observation.FlowInstance != matched.FlowInstance {
 					t.Fatalf("physical observation invented or crossed a data row: %+v", observation)
@@ -118,14 +133,10 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				row, found, err := f.store.(tools.EntityPersistence).LoadEntityState(ctx, tools.EntityIdentity{RunID: runID, EntityID: entity.EntityID})
-				if err != nil || !found {
+				if err != nil || found != (entity.EntityType != "") {
 					t.Fatalf("agent read: %v %t %v", row, found, err)
 				}
-				if entity.EntityID == importID {
-					if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil || row["current_state"] != nil {
-						t.Fatalf("import acquired lifecycle: %+v %+v %v", entity, full, row)
-					}
-				} else {
+				{
 					if entity.StageDefined == nil || entity.Revision == nil || *entity.Revision <= 0 || entity.LifecycleCreatedAt == nil || entity.LifecycleUpdatedAt == nil || full.Bookkeeping == nil || full.Accumulated == nil || full.Loops == nil {
 						t.Fatalf("constructed lifecycle missing: %+v %+v", entity, full)
 					}
@@ -135,6 +146,9 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 						}
 					} else if *entity.StageDefined || entity.CurrentState != nil || entity.EnteredStateAt != nil || row["current_state"] != nil {
 						t.Fatalf("no-stage member fabricated named stage: %+v %v", entity, row)
+					}
+					if entity.EntityType == "" && (full.Fields == nil || len(full.Fields) != 0 || entity.Slug != "" || entity.Name != "") {
+						t.Fatalf("fieldless header borrowed authored data: %+v", full)
 					}
 				}
 				encoded, err := json.Marshal(full)
@@ -186,20 +200,22 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				}
 				return response.Result
 			}
-			importWire := readRPC("entity.get", map[string]any{"run_id": runID, "entity_id": importID})
+			imported, found, err := f.store.(tools.EntityPersistence).LoadEntityState(ctx, tools.EntityIdentity{RunID: runID, EntityID: importID})
+			if err != nil || !found || imported["current_state"] != nil {
+				t.Fatalf("independent data-only reader changed: %v %t %v", imported, found, err)
+			}
+			importWire := readRPC("entity.get", map[string]any{"run_id": runID, "entity_id": fieldless.EntityID})
 			var summaryWire map[string]json.RawMessage
 			if err := json.Unmarshal(importWire["entity"], &summaryWire); err != nil {
 				t.Fatal(err)
 			}
-			for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+			for _, key := range []string{"created_at", "updated_at", "current_state", "entered_state_at"} {
 				if string(summaryWire[key]) != "null" {
-					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire["entity"])
+					t.Fatalf("public fieldless %s must be an explicit null: %s", key, importWire["entity"])
 				}
 			}
-			for _, key := range []string{"bookkeeping", "accumulated", "loops"} {
-				if string(importWire[key]) != "null" {
-					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire[key])
-				}
+			if string(importWire["fields"]) != "{}" || string(importWire["loops"]) != "[]" || string(importWire["bookkeeping"]) == "null" || string(summaryWire["stage_defined"]) != "false" {
+				t.Fatalf("public fieldless envelope lost header evidence: %s", importWire)
 			}
 			aggregateWire := readRPC("entity.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"})
 			if string(aggregateWire["absent_count"]) != "2" || string(aggregateWire["counts"]) != `{"unknown":1}` {

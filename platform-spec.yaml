@@ -34034,7 +34034,7 @@ api_specification:
       EntitySummary:
         description: >-
           Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every
-          lifecycle property. Constructed no-stage members have stage_defined false, a positive header revision and
+          lifecycle property. Instances with no data row have null data clocks. Constructed no-stage members have stage_defined false, a positive header revision and
           lifecycle clocks and a positive life, but null current_state and entered_state_at. Life is not identity;
           instance-taking reads default to the current life and accept iter only for an explicit prior life.
           Staged members expose the exact declared stage.
@@ -34083,9 +34083,9 @@ api_specification:
           lifecycle_updated_at:
             oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
           created_at:
-            $ref: '#/components/schemas/Timestamp'
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
           updated_at:
-            $ref: '#/components/schemas/Timestamp'
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
       EntityFull:
         description: 'Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.'
         type: object

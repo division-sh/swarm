@@ -164,7 +164,11 @@ func listAllEntityIdentifierCandidates(ctx context.Context, client *cliAPIClient
 		}
 		candidates := make([]cliIdentifierCandidate, 0, len(result.Entities))
 		for _, entity := range result.Entities {
-			candidates = append(candidates, cliIdentifierCandidate{ID: entity.EntityID, Status: entityLifecycleStageText(entity), CreatedAt: entity.CreatedAt})
+			candidate := cliIdentifierCandidate{ID: entity.EntityID, Status: entityLifecycleStageText(entity)}
+			if entity.CreatedAt != nil {
+				candidate.CreatedAt = *entity.CreatedAt
+			}
+			candidates = append(candidates, candidate)
 		}
 		return candidates, result.NextCursor, nil
 	}, "entity.list")

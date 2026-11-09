@@ -48,8 +48,10 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 			base := filepath.Join(root, backend, transport)
 			receipt := rand.Text()
 			policy, remoteCalls := externalMCPJourneyTransport(t, base, transport, receipt)
+			secrets := []string{"synthetic-mcp-secret", "synthetic-llm-secret"}
 			var rejections, inferences atomic.Int64
-			model := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", func(request llmapi.Request) (llmapi.Reply, error) {
+			var model *llmapi.Server
+			model = llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "synthetic-llm-secret", func(request llmapi.Request) (llmapi.Reply, error) {
 				if request.Number == 1 && strings.Contains(string(request.Body), receipt) {
 					return llmapi.Reply{}, fmt.Errorf("hidden MCP receipt leaked before tool execution")
 				}
@@ -58,6 +60,18 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					respond = externalMCPUnknownNameReply
 				}
 				reply, err := respond(request)
+				if unknownName && request.Number == 3 && err != nil {
+					for _, observed := range model.Requests() {
+						if observed.Number > request.Number {
+							continue
+						}
+						body := strings.ReplaceAll(string(observed.Body), root, "[FIXTURE_ROOT]")
+						for _, secret := range secrets {
+							body = strings.ReplaceAll(body, secret, "[REDACTED]")
+						}
+						t.Logf("MCP unexpected provider request: number=%d raw_body_sha256=%x redacted_body=%s", observed.Number, sha256.Sum256(observed.Body), body)
+					}
+				}
 				if reply.StatusCode >= 300 {
 					rejections.Add(1)
 					t.Logf("mock provider refused request before inference: HTTP %d %s", reply.StatusCode, reply.ErrorBody)
@@ -91,7 +105,6 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 			token := filepath.Join(base, "api-token")
 			writeReleaseFile(t, token, goldenAPIToken+"\n")
 			env := append(goldenProcessEnv(t, base, store.passwordEnv, 0), "SWARM_CREDENTIALS_FILE="+filepath.Join(base, "credentials.json"))
-			secrets := []string{"synthetic-mcp-secret", "synthetic-llm-secret"}
 			for key, secret := range map[string]string{"MCP_FIXTURE_KEY": secrets[0], "OPENAI_COMPATIBLE_API_KEY": secrets[1]} {
 				result := runReleaseCommand(t, goldenStartupTimeout, base, env, secret+"\n", binary, "--config", config, "secrets", "set", key, "--stdin")
 				requireConnectorSecretsAbsent(t, result.output, secrets)

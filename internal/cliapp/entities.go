@@ -78,8 +78,8 @@ type entitySummary struct {
 	EnteredStateAt     *string `json:"entered_state_at"`
 	LifecycleCreatedAt *string `json:"lifecycle_created_at"`
 	LifecycleUpdatedAt *string `json:"lifecycle_updated_at"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
+	CreatedAt          *string `json:"created_at"`
+	UpdatedAt          *string `json:"updated_at"`
 }
 
 type entityFull struct {
@@ -463,6 +463,9 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Fields == nil {
 		return fmt.Errorf("malformed %s: fields is required", prefix)
 	}
+	if result.Entity.EntityType == "" && len(result.Fields) != 0 {
+		return fmt.Errorf("malformed %s: fieldless instance cannot carry fields", prefix)
+	}
 	if result.Entity.StageDefined == nil {
 		if result.Bookkeeping != nil || result.Accumulated != nil || result.Loops != nil {
 			return fmt.Errorf("malformed %s: data-only entity cannot carry lifecycle maps or loops", prefix)
@@ -500,9 +503,6 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 		{name: "entity_id", value: entity.EntityID},
 		{name: "run_id", value: entity.RunID},
 		{name: "flow_instance", value: entity.FlowInstance},
-		{name: "entity_type", value: entity.EntityType},
-		{name: "created_at", value: entity.CreatedAt},
-		{name: "updated_at", value: entity.UpdatedAt},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			return fmt.Errorf("malformed %s: %s is required", prefix, field.name)
@@ -514,16 +514,8 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 	if err := validateEntityOpaqueIDField(prefix+".run_id", entity.RunID); err != nil {
 		return fmt.Errorf("malformed %s: %w", prefix, err)
 	}
-	if err := validateRequiredTimestamp(prefix+".created_at", entity.CreatedAt); err != nil {
+	if err := validateEntityDataPresence(prefix, entity); err != nil {
 		return err
-	}
-	if err := validateRequiredTimestamp(prefix+".updated_at", entity.UpdatedAt); err != nil {
-		return err
-	}
-	created, _ := time.Parse(time.RFC3339Nano, entity.CreatedAt)
-	updated, _ := time.Parse(time.RFC3339Nano, entity.UpdatedAt)
-	if updated.Before(created) {
-		return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
 	}
 	if entity.StageDefined == nil {
 		if entity.Life != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
@@ -562,6 +554,35 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 	}
 	if entity.CurrentState != nil || entity.EnteredStateAt != nil {
 		return fmt.Errorf("malformed %s: no-stage entity cannot carry a named stage or entry time", prefix)
+	}
+	return nil
+}
+
+func validateEntityDataPresence(prefix string, entity entitySummary) error {
+	if entity.EntityType == "" {
+		if entity.StageDefined == nil || entity.CreatedAt != nil || entity.UpdatedAt != nil || entity.Slug != "" || entity.Name != "" {
+			return fmt.Errorf("malformed %s: fieldless instance requires lifecycle and null data clocks", prefix)
+		}
+		return nil
+	}
+	if strings.TrimSpace(entity.EntityType) == "" {
+		return fmt.Errorf("malformed %s: entity_type is required", prefix)
+	}
+	for _, clock := range []struct {
+		name  string
+		value *string
+	}{{"created_at", entity.CreatedAt}, {"updated_at", entity.UpdatedAt}} {
+		if clock.value == nil {
+			return fmt.Errorf("malformed %s: %s is required", prefix, clock.name)
+		}
+		if err := validateRequiredTimestamp(prefix+"."+clock.name, *clock.value); err != nil {
+			return err
+		}
+	}
+	created, _ := time.Parse(time.RFC3339Nano, *entity.CreatedAt)
+	updated, _ := time.Parse(time.RFC3339Nano, *entity.UpdatedAt)
+	if updated.Before(created) {
+		return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
 	}
 	return nil
 }
@@ -650,8 +671,8 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 		header = append(header,
 			cliLabeledDetailRow{Label: "life", Value: fmt.Sprintf("%d", *entity.Life)},
 			cliLabeledDetailRow{Label: "revision", Value: fmt.Sprintf("%d", *entity.Revision)},
-			cliLabeledDetailRow{Label: "lifecycle created", Value: entityTimestampText(now, *entity.LifecycleCreatedAt, opts.verbose)},
-			cliLabeledDetailRow{Label: "lifecycle updated", Value: entityTimestampText(now, *entity.LifecycleUpdatedAt, opts.verbose)})
+			cliLabeledDetailRow{Label: "lifecycle created", Value: entityTimestampText(now, entity.LifecycleCreatedAt, opts.verbose)},
+			cliLabeledDetailRow{Label: "lifecycle updated", Value: entityTimestampText(now, entity.LifecycleUpdatedAt, opts.verbose)})
 		if *entity.Life > 1 {
 			if started, err := entityLifeStartedAt(result); err == nil {
 				header = append(header, cliLabeledDetailRow{Label: "history", Value: "started over on " + started.UTC().Format(time.RFC3339Nano)})
@@ -684,12 +705,15 @@ func entityLifecycleStageText(entity entitySummary) string {
 
 // entityTimestampText renders a humanized relative time; under --verbose it
 // appends the absolute ISO value so operators can pin the exact moment.
-func entityTimestampText(now time.Time, raw string, verbose bool) string {
-	relative := formatCLIRelativeTime(now, raw)
+func entityTimestampText(now time.Time, raw *string, verbose bool) string {
+	if raw == nil {
+		return "-"
+	}
+	relative := formatCLIRelativeTime(now, *raw)
 	if !verbose {
 		return relative
 	}
-	return relative + " (" + raw + ")"
+	return relative + " (" + *raw + ")"
 }
 
 // entityOneLine normalizes a truncatable descriptive value so embedded

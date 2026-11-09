@@ -32,8 +32,13 @@ type dataScanner interface{ Scan(...any) error }
 // ScanData shares exact companion admission across operator, agent and handler
 // reads. decodeTime is only the existing backend's timestamp transport codec.
 func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), tail ...any) (operatorread.OperatorEntityFull, error) {
+	return scanData(row, decodeTime, false, tail...)
+}
+
+func scanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), public bool, tail ...any) (operatorread.OperatorEntityFull, error) {
 	var runID string
 	var state pipeline.WorkflowEntityStatePersistenceRecord
+	var stateID, statePath, stateType sql.NullString
 	var slug, name sql.NullString
 	var header pipeline.WorkflowInstancePersistenceRecord
 	var headerID, path, entityType, template, mode, status, stage sql.NullString
@@ -43,7 +48,7 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	var owners int
 	var dataCreated, dataUpdated, entered, created, updated, terminated any
 	var fields, config, bookkeeping, accumulator []byte
-	dest := []any{&runID, &state.EntityID, &state.FlowInstance, &state.EntityType, &slug, &name,
+	dest := []any{&runID, &stateID, &statePath, &stateType, &slug, &name,
 		&fields, &dataCreated, &dataUpdated, &headerID, &path, &entityType, &template,
 		&mode, &status, &config, &stage, &stageDefined, &revision, &entered, &created, &updated,
 		&terminated, &bookkeeping, &accumulator, &parentInstance, &instanceKey, &life, &owners}
@@ -51,8 +56,12 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 		return operatorread.OperatorEntityFull{}, err
 	}
 	state.Fields = fields
+	state.EntityID, state.FlowInstance, state.EntityType = stateID.String, statePath.String, stateType.String
 	header.Config, header.Bookkeeping, header.Accumulator = config, bookkeeping, accumulator
-	if owners > 1 || (owners == 1) != headerID.Valid {
+	if public && (owners > 1 || !headerID.Valid || (owners == 1) != stateID.Valid) {
+		return operatorread.OperatorEntityFull{}, fmt.Errorf("instance has conflicting field companions")
+	}
+	if !public && (owners > 1 || (owners == 1) != headerID.Valid) {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("entity has conflicting constructed header owners")
 	}
 	state.Slug, state.Name = slug.String, name.String
@@ -82,6 +91,9 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 		header.CurrentState, header.StageDefined, header.Revision = stage.String, stageDefined.Bool, revision.Int64
 		header.Life = life.Int64
 		target.Presence = pipeline.WorkflowTargetPersistenceComplete
+		if public && !entityType.Valid && !stateID.Valid {
+			target.Presence = pipeline.WorkflowTargetPersistenceCompleteFieldless
+		}
 		target.Lifecycle = pipeline.WorkflowLifecycleCompanionPersistenceRecord{
 			ParentInstance: header.ParentInstance, InstanceKey: header.InstanceKey,
 			FlowInstance: header.FlowInstance, WorkflowName: header.WorkflowName, Mode: header.Mode, Status: header.Status,
@@ -96,23 +108,38 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 			}
 		}
 	}
-	if err := target.Validate(flowidentity.RouteForInstancePath(state.FlowInstance), identity.NormalizeEntityID(state.EntityID)); err != nil {
+	pathForRead, entityForRead := state.FlowInstance, state.EntityID
+	if public {
+		pathForRead, entityForRead = header.FlowInstance, header.EntityID
+	}
+	route, entityID := flowidentity.RouteForInstancePath(pathForRead), identity.NormalizeEntityID(entityForRead)
+	if err := target.Validate(route, entityID); err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}
 	if headerID.Valid && header.UpdatedAt.Before(header.CreatedAt) {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("constructed lifecycle clocks are inconsistent")
 	}
 	out := operatorread.OperatorEntityFull{Entity: operatorread.OperatorEntitySummary{
-		EntityID: state.EntityID, RunID: runID, FlowInstance: state.FlowInstance, EntityType: state.EntityType,
-		Slug: state.Slug, Name: state.Name, CreatedAt: state.CreatedAt, UpdatedAt: state.UpdatedAt,
+		EntityID: entityForRead, RunID: runID, FlowInstance: pathForRead, EntityType: state.EntityType,
+		Slug: state.Slug, Name: state.Name,
 	}}
-	if err := canonicaljson.DecodePreservingNumberLexemes(state.Fields, &out.Fields); err != nil {
-		return operatorread.OperatorEntityFull{}, err
+	return projectDataRead(out, target, route, entityID)
+}
+
+func projectDataRead(out operatorread.OperatorEntityFull, target pipeline.WorkflowTargetPersistenceRecord, route flowidentity.Route, entityID identity.EntityID) (operatorread.OperatorEntityFull, error) {
+	state, header := target.State, target.Lifecycle.State
+	if target.Presence.HasState() {
+		out.Entity.CreatedAt, out.Entity.UpdatedAt = &state.CreatedAt, &state.UpdatedAt
+		if err := canonicaljson.DecodePreservingNumberLexemes(state.Fields, &out.Fields); err != nil {
+			return operatorread.OperatorEntityFull{}, err
+		}
+	} else {
+		out.Fields = map[string]any{}
 	}
-	if !headerID.Valid {
+	if !target.Presence.HasLifecycleCompanion() {
 		return out, nil
 	}
-	instance, err := target.DecodeComplete(flowidentity.RouteForInstancePath(state.FlowInstance), identity.NormalizeEntityID(state.EntityID))
+	instance, err := target.DecodeComplete(route, entityID)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}

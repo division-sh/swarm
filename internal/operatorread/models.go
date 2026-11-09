@@ -143,8 +143,8 @@ type OperatorEntitySummary struct {
 	EnteredStateAt     *time.Time `json:"entered_state_at"`
 	LifecycleCreatedAt *time.Time `json:"lifecycle_created_at"`
 	LifecycleUpdatedAt *time.Time `json:"lifecycle_updated_at"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	CreatedAt          *time.Time `json:"created_at"`
+	UpdatedAt          *time.Time `json:"updated_at"`
 	Slug               string     `json:"slug,omitempty"`
 	Name               string     `json:"name,omitempty"`
 }

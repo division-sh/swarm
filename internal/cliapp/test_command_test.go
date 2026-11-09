@@ -1397,58 +1397,88 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 }
 
 func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
-	var calls []jsonRPCRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		calls = append(calls, req)
-		switch req.Method {
-		case entityListMethod:
-			if req.Params["run_id"] != "run-1" || req.Params["flow"] != "run-1" {
-				t.Fatalf("entity.list params = %#v", req.Params)
+	for _, tc := range []struct {
+		name, listType, detailType string
+		wantTypeError              bool
+	}{
+		{"fielded", "state", "state", false},
+		{"fieldless", "", "", false},
+		{"fieldless_list_fielded_detail", "", "state", true},
+		{"fielded_list_fieldless_detail", "state", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := func(entityType string) map[string]any {
+				entity := validEntitySummary("entity-1")
+				entity["entity_type"], entity["current_state"] = entityType, "done"
+				if entityType == "" {
+					entity["created_at"], entity["updated_at"] = nil, nil
+					delete(entity, "slug")
+					delete(entity, "name")
+				}
+				return entity
 			}
-			entity := validEntitySummary("entity-1")
-			entity["entity_type"] = "state"
-			entity["current_state"] = "done"
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
-		case entityGetMethod:
-			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
-				t.Fatalf("entity.get params = %#v", req.Params)
+			var calls []jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				calls = append(calls, req)
+				switch req.Method {
+				case entityListMethod:
+					if req.Params["run_id"] != "run-1" || req.Params["flow"] != "run-1" {
+						t.Fatalf("entity.list params = %#v", req.Params)
+					}
+					entity := summary(tc.listType)
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
+				case entityGetMethod:
+					if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+						t.Fatalf("entity.get params = %#v", req.Params)
+					}
+					result := validEntityFullResult("entity-1")
+					result["entity"] = summary(tc.detailType)
+					result["fields"] = map[string]any{"score": 7, "ready": true}
+					if tc.detailType == "" {
+						result["fields"] = map[string]any{}
+					}
+					writeJSONRPCResult(t, w, req.ID, result)
+				default:
+					t.Fatalf("unexpected request %#v", req)
+				}
+			}))
+			defer server.Close()
+			client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
+			if err != nil {
+				t.Fatalf("client: %v", err)
 			}
-			result := validEntityFullResult("entity-1")
-			entity := result["entity"].(map[string]any)
-			entity["entity_type"] = "state"
-			entity["current_state"] = "done"
-			result["fields"] = map[string]any{"score": 7, "ready": true}
-			writeJSONRPCResult(t, w, req.ID, result)
-		default:
-			t.Fatalf("unexpected request %#v", req)
-		}
-	}))
-	defer server.Close()
-	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
-	if err != nil {
-		t.Fatalf("client: %v", err)
+			runner := scenarioRunner{client: client}
+			evaluator := mustScenarioExpressionEvaluator(t, map[string]any{
+				"done_state": "done",
+				"score":      7,
+				"ready":      true,
+			})
+			state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
+			fields := map[string]any{"score": "${vars.score}", "ready": "${vars.ready}"}
+			if tc.listType == "" {
+				fields = map[string]any{}
+			}
+			err = runner.assertEntityExpectation(context.Background(), state, evaluator, scenarioEntityExpect{
+				Flow:         ".",
+				CurrentState: "${vars.done_state}",
+				StateSet:     true,
+				Fields:       fields,
+				FieldsSet:    true,
+			})
+			if tc.wantTypeError {
+				if err == nil || !strings.Contains(err.Error(), "entity.entity_type") {
+					t.Fatalf("contradictory list/get type error = %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("entity detail expectation: %v", err)
+			}
+			assertScenarioTestMethods(t, calls, []string{entityListMethod, entityGetMethod})
+		})
 	}
-	runner := scenarioRunner{client: client}
-	evaluator := mustScenarioExpressionEvaluator(t, map[string]any{
-		"done_state": "done",
-		"score":      7,
-		"ready":      true,
-	})
-	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
-	if err := runner.assertEntityExpectation(context.Background(), state, evaluator, scenarioEntityExpect{
-		Flow:         ".",
-		CurrentState: "${vars.done_state}",
-		StateSet:     true,
-		Fields:       map[string]any{"score": "${vars.score}", "ready": "${vars.ready}"},
-		FieldsSet:    true,
-	}); err != nil {
-		t.Fatalf("entity detail expectation: %v", err)
-	}
-	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityGetMethod})
 }
 
 func TestScenarioEntityDetailExpectationFailsClosedOnMultipleMatches(t *testing.T) {
