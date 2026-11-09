@@ -76,8 +76,12 @@ func TestRetainedTurnSourceMemoKeepsOnlyExactCompilerOutput(t *testing.T) {
 	}
 	changedRoot, _ := sourceartifactfixture.Rooted(t, "fixture", changedArtifact)
 	changed, err := memo.load(t.Context(), changedRoot)
-	if err != nil || changed == updated || changed.WorkflowVersion() != "2.0.0" {
+	if err != nil || changed == updated {
 		t.Fatalf("same root crossed changed source bytes: %v", err)
+	}
+	changedBundle, _ := semanticview.Bundle(changed)
+	if changedBundle.SourceArtifact.BundleHash() != changedArtifact.BundleHash() {
+		t.Fatal("changed source returned a previous artifact")
 	}
 	var concurrent retainedTurnSourceMemo
 	results := make([]semanticview.Source, 16)
