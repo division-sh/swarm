@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -237,8 +238,9 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 		if len(routes) != 1 || routes[0].Target.Route().FlowInstance != templatereply.RequesterFlowID+"/"+tc.accountID {
 			t.Fatalf("reply %s routes = %#v", tc.name, routes)
 		}
-		if !routes[0].Context.Empty() {
-			t.Fatalf("terminal reply %s leaked consumed context: %#v", tc.name, routes[0].Context)
+		wantContext := events.DeliveryContext{Life: &events.InstanceLife{RunID: runID, FlowInstance: templatereply.RequesterFlowID + "/" + tc.accountID, Life: 1}}
+		if !reflect.DeepEqual(routes[0].Context, wantContext) {
+			t.Fatalf("terminal reply %s changed originating life or leaked consumed reply/join context: got=%#v want=%#v", tc.name, routes[0].Context, wantContext)
 		}
 	}
 	firstContext := contexts["same-origin-first"]
