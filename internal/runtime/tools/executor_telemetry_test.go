@@ -559,6 +559,7 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 }
 
 func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(t *testing.T) {
+	captured, diagnostic := captureEmitPublicationDiagnostic(t)
 	bus := &telemetryBusStub{publishErr: errors.New("publish down")}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -614,6 +615,18 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 	}
 	if log.Failure == nil || log.Failure.Class != runtimefailures.ClassDependencyUnavailable || log.Failure.Detail.Code != "event_publish_failed" {
 		t.Fatalf("failure = %#v, want canonical event publish failure", log.Failure)
+	}
+	ack := diagnostic()["ack"].(map[string]any)
+	if ack["accepted"] != false || ack["feedback_committed"] != false || ack["replay"] != false || ack["stage"] != nil || ack["dispatch"] != nil {
+		t.Fatalf("failed admission gained acknowledgement evidence: %#v", ack)
+	}
+	captured.Reset()
+	bus.publishErr = nil
+	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "finops"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(captured.String(), "Emit publication failure diagnostic") {
+		t.Fatal("successful emit produced failure-only diagnostic")
 	}
 }
 

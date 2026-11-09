@@ -112,7 +112,14 @@ func runExternalMCPPublicJourneyBothStores(t *testing.T, unknownName bool) {
 					t.Fatal("public MCP/LLM credential setup failed")
 				}
 			}
-			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, ConfigPath: config, Source: source, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env, DefaultExecutionSelection: true, RedactValues: secrets})
+			var process *releaseServeProcess
+			// Registered first so the existing child cleanup joins before the failure dump.
+			t.Cleanup(func() {
+				if t.Failed() && process != nil {
+					t.Logf("MCP joined child output:\n%s", strings.ReplaceAll(process.output.String(), root, "[FIXTURE_ROOT]"))
+				}
+			})
+			process = startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, ConfigPath: config, Source: source, Store: backend, TokenFile: token, Token: goldenAPIToken, Env: env, DefaultExecutionSelection: true, RedactValues: secrets})
 			ctx, cancel := context.WithTimeout(t.Context(), goldenStartupTimeout)
 			defer cancel()
 			if err := process.waitReady(ctx); err != nil {
