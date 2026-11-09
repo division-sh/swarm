@@ -153,6 +153,7 @@ type PipelinePostgresOwner struct {
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
 	historicalInstances    HistoricalFlowInstanceReader
+	retainedTurnSource     retainedTurnSourceMemo
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
 	instanceLifeLifecycle  InstanceLifeLifecycleTxOwner
@@ -177,6 +178,7 @@ type PipelineSQLiteOwner struct {
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
 	historicalInstances    HistoricalFlowInstanceReader
+	retainedTurnSource     retainedTurnSourceMemo
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
 	instanceLifeLifecycle  InstanceLifeLifecycleTxOwner
