@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -55,7 +56,6 @@ const (
 
 type scenarioTestCommandOptions struct {
 	apiOptions       rootCommandOptions
-	contracts        string
 	timeout          time.Duration
 	pollInterval     time.Duration
 	derive           string
@@ -166,21 +166,14 @@ func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command
 		pollInterval: defaultScenarioTestPoll,
 	}
 	cmd := &cobra.Command{
-		Use:   "test [directory] [scenario-label]",
+		Use:   "test [directory|scenario-label] [scenario-label]",
 		Short: "Run deterministic scenario tests through public read owners.",
 		Args:  argcount.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cliAPIConnectionFlagsChanged(cmd) {
 				return returnScenarioTestValidationError(cmd.ErrOrStderr(), fmt.Errorf("swarm test owns a fresh private session; --api-server, --context and --api-token-file are not supported"))
 			}
-			var scenarios []string
-			if len(args) > 0 {
-				testOpts.contracts = args[0]
-			}
-			if len(args) > 1 {
-				scenarios = args[1:]
-			}
-			return runScenarioTestCommand(cmd.Context(), root.Path(), cmd.OutOrStdout(), cmd.ErrOrStderr(), scenarios, testOpts)
+			return runScenarioTestCommand(cmd.Context(), root.Path(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, testOpts)
 		},
 	}
 	cmd.Flags().DurationVar(&testOpts.timeout, "timeout", defaultScenarioTestTimeout, "Safety deadline for test quiescence")
@@ -216,7 +209,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load runtime config: %w", err))
 	}
-	sourceRoot, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configResult.cli)
+	sourceRoot, args, err := resolveScenarioTestArguments(RepoRoot, args, configResult.cli)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
@@ -412,6 +405,80 @@ func resolveScenarioTestSources(RepoRoot, sourceArgument string, _ cliCommandCon
 		return "", err
 	}
 	return sourceRoot, nil
+}
+
+func resolveScenarioTestArguments(invocation string, args []string, cfg cliCommandConfig) (string, []string, error) {
+	if len(args) == 0 {
+		root, err := resolveScenarioTestSources(invocation, "", cfg)
+		return root, nil, err
+	}
+	if len(args) == 2 {
+		root, err := resolveScenarioTestSources(invocation, args[0], cfg)
+		if err != nil {
+			return "", nil, fmt.Errorf("%w; use a directory followed by one scenario label, or one cwd scenario label", err)
+		}
+		return root, args[1:], nil
+	}
+	invocation, err := requireInvocationRootPath(invocation)
+	if err != nil {
+		return "", nil, err
+	}
+	operand := args[0]
+	candidate := operand
+	if !filepath.IsAbs(candidate) {
+		candidate = invocation + string(filepath.Separator) + candidate
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return "", nil, fmt.Errorf("inspect test argument %q: %w", operand, err)
+	}
+	if info.IsDir() {
+		if err := refuseAmbiguousScenarioDirectory(invocation, operand); err != nil {
+			return "", nil, err
+		}
+		root, err := resolveScenarioTestSources(invocation, operand, cfg)
+		return root, nil, err
+	}
+	label, err := normalizeScenarioLabel(operand)
+	if err != nil {
+		return "", nil, err
+	}
+	root, err := resolveScenarioTestSources(invocation, "", cfg)
+	return root, []string{label}, err
+}
+
+func refuseAmbiguousScenarioDirectory(invocation, operand string) error {
+	label, err := normalizeScenarioLabel(operand)
+	if err != nil || label == operand {
+		return nil
+	}
+	// Label normalization can name a different file than the literal directory.
+	info, err := os.Stat(filepath.Join(invocation, label))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect scenario candidate %q: %w", label, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	artifact, err := sourceartifact.AdmitDirectory(invocation)
+	if err != nil {
+		return fmt.Errorf("admit cwd scenario candidate: %w", err)
+	}
+	return requireUnambiguousScenarioDirectory(operand, label, artifact)
+}
+
+func requireUnambiguousScenarioDirectory(operand, label string, artifact *sourceartifact.AdmittedSourceArtifact) error {
+	files, err := scenarioTestFilesByLabel(artifact)
+	if err != nil {
+		return err
+	}
+	if _, found := files[label]; found {
+		return fmt.Errorf("argument %q is ambiguous between a source directory and scenario %q; use an explicit absolute directory, or swarm test . %s", operand, label, label)
+	}
+	return nil
 }
 
 func discoverScenarioTestFiles(bundle *runtimecontracts.WorkflowContractBundle, args []string) ([]scenarioTestFile, error) {

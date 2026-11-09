@@ -138,6 +138,41 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 			t.Fatalf("import wrote invocation root: %v", err)
 		}
 	})
+	t.Run("scenario argument roots do not admit unrelated cwd", func(t *testing.T) {
+		cwd := t.TempDir()
+		writeWorkflowValidationFixtureFile(t, filepath.Join(cwd, "manifest.yaml"), "version: [invalid]\n")
+		for _, operands := range [][]string{{root}, {root, "tests/scenario.yaml"}} {
+			selected, labels, err := resolveScenarioTestArguments(cwd, operands, cliCommandConfig{})
+			if err != nil || selected != root || len(labels) != len(operands)-1 {
+				t.Fatalf("%v selects %q/%v: %v", operands, selected, labels, err)
+			}
+		}
+		for _, operand := range []string{"plain", "plain "} {
+			if err := os.Mkdir(filepath.Join(cwd, operand), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			selected, _, err := resolveScenarioTestArguments(cwd, []string{operand}, cliCommandConfig{})
+			if err != nil || selected != filepath.Join(cwd, operand) {
+				t.Fatalf("unrelated invalid cwd blocks directory %q: %q, %v", operand, selected, err)
+			}
+		}
+		writeWorkflowValidationFixtureFile(t, filepath.Join(cwd, "candidate.yaml"), "steps: []\n")
+		if err := os.Mkdir(filepath.Join(cwd, "candidate.yaml "), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := resolveScenarioTestArguments(cwd, []string{"candidate.yaml "}, cliCommandConfig{}); err == nil || !strings.Contains(err.Error(), "admit cwd scenario candidate") {
+			t.Fatalf("cwd admission failure became scenario absence: %v", err)
+		}
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, ".swarm", "candidate.yaml"), "steps: []\n")
+		nonmember := filepath.Join(".swarm", "candidate.yaml ")
+		if err := os.Mkdir(filepath.Join(root, nonmember), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		selected, labels, err := resolveScenarioTestArguments(root, []string{nonmember}, cliCommandConfig{})
+		if err != nil || selected != filepath.Join(root, nonmember) || len(labels) != 0 {
+			t.Fatalf("successful native nonmembership lost directory: %q/%v, %v", selected, labels, err)
+		}
+	})
 }
 
 func TestStaticDataCatalogInvocationInvariance(t *testing.T) {

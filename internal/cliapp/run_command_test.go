@@ -31,22 +31,35 @@ func TestRunCommandRequiresRunningServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := t.TempDir()
+	source := writeServedEventPublishFollowUpFixture(t)
 	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("SWARM_API_TOKEN=must-not-load\nBROKEN\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
-	for _, extra := range [][]string{nil, {"--no-follow"}, {"--connect", server.URL}} {
-		t.Run(strings.Join(extra, " "), func(t *testing.T) {
+	for _, selection := range []struct {
+		name, cwd string
+		operands  []string
+		extra     []string
+	}{
+		{"local explicit", repo, []string{source}, nil},
+		{"local explicit no-follow", repo, []string{source}, []string{"--no-follow"}},
+		{"connected omitted", repo, nil, []string{"--connect", server.URL}},
+		{"local omitted", source, nil, nil},
+		{"local omitted no-follow", source, nil, []string{"--no-follow"}},
+	} {
+		t.Run(selection.name, func(t *testing.T) {
 			opts := testRunCommandOptions(server)
 			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
 				t.Error("run start must not launch a serve")
 				return 1
 			}
-			args := append([]string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, extra...)
+			args := append([]string{"run", "start"}, selection.operands...)
+			args = append(args, "--event", "scan.requested", "--payload", payloadPath)
+			args = append(args, selection.extra...)
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), repo, args, &stdout, &stderr, opts)
+			code := executeRootCommandWithOptions(context.Background(), selection.cwd, args, &stdout, &stderr, opts)
 			if code != 6 || !strings.Contains(stderr.String(), "No serve running for this deployment: start `swarm serve` first") {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -144,6 +157,7 @@ func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
+			source := writeServedEventPublishFollowUpFixture(t)
 			tokenFile := writeCLIAPITokenFile(t, "serve-token")
 			configuredTokenFile := tokenFile
 			if explicit {
@@ -192,7 +206,7 @@ func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 			if explicit {
 				args = append(args, "--api-token-file", tokenFile)
 			}
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+			code := executeRootCommandWithOptions(context.Background(), source, args, &stdout, &stderr, opts)
 			if code != 0 {
 				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -413,8 +427,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 
 func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
-	root := t.TempDir()
-	payloadPath := filepath.Join(root, "payload.json")
+	root := writeServedEventPublishFollowUpFixture(t)
+	payloadLabel := "tests/payload.json"
+	payloadPath := filepath.Join(root, filepath.FromSlash(payloadLabel))
 	payload, err := json.Marshal(map[string]any{"ok": true})
 	if err != nil {
 		t.Fatal(err)
@@ -422,14 +437,17 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	if err := os.WriteFile(payloadPath, payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	bundleHash := servedEventPublishFixtureBundleHash(t, root)
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			switch req.Method {
 			case "health.check":
-				return runCommandHealthResult()
+				health := runCommandHealthResult()
+				health["bundle"].(map[string]any)["bundle_hash"] = bundleHash
+				return health
 			case "run.start":
-				if got := req.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
+				if got := req.Params["bundle_hash"]; got != bundleHash {
+					t.Fatalf("bundle_hash = %#v, want admitted cwd bundle hash %s", got, bundleHash)
 				}
 				result := runStartCommandResult("9b84a4a3-41c0-5d3a-8ce8-e66c2afb4355", "running")
 				result["event_id"] = "00000000-0000-4000-8000-000000000003"
@@ -451,7 +469,7 @@ func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 
 	chdirForTest(t, t.TempDir())
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), root, []string{"run", "start", "--event", "scan.requested", "--payload", filepath.Base(payloadPath), "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), root, []string{"run", "start", "--event", "scan.requested", "--payload", payloadLabel, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -817,6 +835,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 		assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.diagnose"})
 	})
 	t.Run("continuation_keeps_resolved_port_and_auth", func(t *testing.T) {
+		source := writeServedEventPublishFollowUpFixture(t)
 		const token = "private-continuation-token"
 		tokenFile := writeCLIAPITokenFile(t, token)
 		config := writeCLIAPIConfigFile(t, map[string]string{"serve_api_token_file": tokenFile})
@@ -851,7 +870,7 @@ func TestRunCommandConnectedForegroundReturnsOnRunQuiescence(t *testing.T) {
 				command = append(command, "1ns")
 				wantCode, marker = 8, "Check: "
 			}
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), command, &stdout, &stderr, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), source, command, &stdout, &stderr, defaultRootCommandOptions())
 			text := stdout.String() + stderr.String()
 			if code != wantCode || strings.Contains(text, token) {
 				t.Fatalf("code=%d, leaked token=%t", code, strings.Contains(text, token))
@@ -1017,6 +1036,7 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 
 func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	setCLIAPITestToken(t, "bad-token")
+	source := writeServedEventPublishFollowUpFixture(t)
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -1032,7 +1052,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), source, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
