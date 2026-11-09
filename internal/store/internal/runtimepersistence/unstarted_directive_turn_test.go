@@ -17,10 +17,12 @@ import (
 )
 
 func TestUnstartedDirectiveTurnRecoveryBothStores(t *testing.T) {
-	for _, flow := range []string{"", "completion"} {
+	for _, flow := range []string{"", "global"} {
 		label := flow
 		if label == "" {
 			label = "root"
+		} else {
+			label = "completion"
 		}
 		t.Run(label, func(t *testing.T) {
 			for _, disposition := range []string{"restart", "rollback"} {

@@ -1575,6 +1575,7 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	actor.ID, actor.Identity, actor.Role, actor.Type = agentID, identity, "worker", "managed"
 	actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", memory, "global", flowInstance
 	ctx = requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	ctx = runtimeeffects.WithTurnInstanceSource(ctx, defaultTurnInstanceSourceForTest(t))
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, actor),
 		Status: "active", StartedAt: now,
