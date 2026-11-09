@@ -2271,7 +2271,6 @@ contract_formats:
           mutation; filesystem ancestry, a bare local-node match, or retired package/project coordinates cannot repair it.
         decision_state:
           status: merge_bearing_runtime_behavior
-          implementation_slice: '#1482'
           canonical_code_owner: internal/runtime/bus.RoutePlan.AuthorityState
           states:
           - no_canonical_match
@@ -2306,7 +2305,6 @@ contract_formats:
             consumers.
         route_intent_producer_model:
           status: merge_bearing_runtime_behavior
-          implementation_slice: '#1495'
           canonical_code_owner: internal/runtime/bus.routeIntentProducer
           producers:
           - ordinary
@@ -2341,7 +2339,6 @@ contract_formats:
             producer/consumer path.
         legacy_event_delivery_plan_collapse:
           status: merge_bearing_runtime_behavior
-          implementation_slice: '#1496'
           canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and deliveryPlanner.PlanDirect
           rule: |
             EventBus subscribed and direct planning MUST return and consume
@@ -2356,7 +2353,6 @@ contract_formats:
             post-plan compatibility interpreter.
         direct_delivery_route_plan_consumption:
           status: merge_bearing_runtime_behavior
-          implementation_slice: '#1496'
           canonical_code_owner: internal/runtime/bus.EventBus.PublishDirect, internal/runtime/bus.EventBus.PublishDirectRoutes, and internal/runtime/bus.EventBus.CheckDirectRecipients
           rule: |
             Direct delivery is a distinct public delivery semantic, not
@@ -2383,7 +2379,6 @@ contract_formats:
             copied exactly from the selected original delivery route.
         lowered_connect_route_plan_consumption:
           status: merge_bearing_runtime_behavior
-          implementation_slice: '#1473/#1545'
           canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver
           consumes:
           - internal/runtime/core/pinrouting.ConnectRoutePlan
@@ -2424,7 +2419,6 @@ contract_formats:
             than inferred from connect-route metadata.
           compiled_connect_recipient_boundary:
             status: merge_bearing_runtime_behavior
-            implementation_slice: '#2114'
             canonical_code_owner: internal/runtime/core/pinrouting.CompiledConnectGraph recipient evaluator
             rule: |
               For a matched lowered ConnectRoutePlan, the compiled graph evaluates
@@ -2440,7 +2434,6 @@ contract_formats:
               and MUST NOT authorize runtime or selected-fork admission.
           instance_evidence_boundary:
             status: merge_bearing_runtime_behavior
-            implementation_slice: '#2594/#1485/#1479'
             canonical_code_owner: internal/runtime/pipeline.FlowInstanceIndexReader and native construction validation; internal/runtime/core/pinrouting.MaterializeConnectRoutePlan is static projection only
             rule: |
               Runtime receiver selection consumes exact source/run/declaration/parent/key evidence from the selected
@@ -2457,7 +2450,6 @@ contract_formats:
               route membership, live subscriptions and handler lookup cannot repair missing construction evidence.
           route_authority_drift_guardrails:
             status: merge_bearing_conformance_guardrail
-            implementation_slice: '#1494'
             canonical_artifacts:
             - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
             - internal/runtime/conformance/route_authority_drift_inventory_test.go
@@ -3148,7 +3140,6 @@ event_payload_migration:
     - author-declared envelope fields
 literal_policy_contracts:
   status: merge_bearing_runtime_behavior
-  implementation_slice: '#2303'
   location: flow policy.yaml
   owner: admitted literal values resolved by flowmodel
   rules:
@@ -3170,7 +3161,6 @@ literal_policy_contracts:
   - This direct policy-root check does not prove totality of derived-object or alias dataflow reads. That distinct analysis remains tracked by '#2289'; no arbitrary-object interpreter or permissive execution fallback is introduced.
 rule_set_contracts:
   status: merge_bearing_runtime_behavior
-  implementation_slice: '#2303'
   location: flow rules.yaml
   owner: admitted RulesDocument single scoped namespace
   resolution: Walk ancestors and replace each complete same-name declaration with the nearest one. Every declaration is a machine validation set; malformed nearer declarations refuse rather than falling back to an ancestor.
@@ -3183,7 +3173,6 @@ rule_set_contracts:
   - Alias and merge expansion consumes the same admission and document-wide bounds. Duplicate local declarations, duplicate rule IDs and undeclared classes fail closed.
 policy_validation_contracts:
   status: merge_bearing_runtime_behavior
-  implementation_slice: '#1714'
   description: |
     Flow-local machine-evaluated validation sets are stable-ID rule sets
     declared in the owning flow's flat `rules.yaml`. They use the
@@ -3281,7 +3270,6 @@ policy_validation_contracts:
     and file-backed validation sets are separate gates.
 compute_module_contracts:
   status: merge_bearing_runtime_behavior
-  implementation_slice: '#1669 + #1670 Slice B'
   description: |
     Flow-local tools.yaml declarations with handler_type wasm or python define deterministic
     compute modules. Policy-sheet `compute_module` value rows instantiate those
@@ -13819,7 +13807,6 @@ tool_model:
       rate_limit_max_wait: string — required when rate_limit is present.
 agent_intent_model:
   status: canonical_local_inline_owner
-  canonical_owner: platform-spec.yaml#agent_intent_model
   implementation_owners:
     source_and_artifact: internal/runtime/agentintent
     scoped_resolution: internal/runtime/contracts
@@ -13962,7 +13949,6 @@ agent_intent_model:
     agent intent declaration, artifact, or persistence source.
 agent_execution_frame:
   status: canonical_closed_runtime_owner
-  canonical_owner: platform-spec.yaml#agent_execution_frame
   implementation_owner: internal/runtime/agentframe
   version: agent-execution-frame.v1
   authority_rule: >
@@ -23897,7 +23883,6 @@ environment_source_authority:
   repo_wide_swarm_env_accepted_set:
     parent_tracker: '#1600'
     implementation_status: implemented_first_slice
-    canonical_owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
     scope: >
       Repo-wide acceptance authority for process-visible `SWARM_*` environment variables. This owner defines the closed
       category enum, the static accepted-set catalog, typed delegation admission, doctor reporting, generated-boundary
@@ -24018,7 +24003,6 @@ environment_source_authority:
   workspace_monitor_artifact_debug_slice:
     parent_tracker: '#1600'
     implementation_status: classification_updated_by_1843
-    canonical_owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
     scope: >
       Merge-bearing classification authority for the #1640 workspace/monitor/artifact/debug inventory. #1843 retired the
       workspace Docker/host environment sources, local workspace image/bootstrap knobs, and legacy internal
@@ -24134,7 +24118,6 @@ configuration_source_authority:
     - '#1731'
     - '#1748'
     implementation_status: single_deployment_document_implemented
-    canonical_owner: platform-spec.yaml#configuration_source_authority.unified_swarm_config
     scope: >
       Merge-bearing authority for one deployment configuration document. #1801 and the user ruling6170905244
       supersede the former layered discovery, source trust classes and key-origin model. This owner defines
@@ -24406,7 +24389,6 @@ workspace_model:
     scoping model. Products define workspace classes that map agent roles to specific scope configurations. If a product declares
     a workspace_class on an agent, the platform MUST provide all mounts at the declared scopes.
   runtime_image_packaging:
-    canonical_owner: platform-spec.yaml#workspace_model.runtime_image_packaging
     rule: >
       Runtime workspace startup treats the configured workspace image as a prebuilt runtime dependency. The runtime MUST inspect
       the resolved workspace image before creating workspaces and fail closed with an actionable diagnostic when the image is
@@ -24427,7 +24409,6 @@ workspace_model:
       #997 unless a future gate explicitly widens them.
   local_workspace_image_build_authority:
     implementation_status: implemented_first_slice
-    canonical_owner: platform-spec.yaml#workspace_model.local_workspace_image_build_authority
     implementation_owner: internal/cliapp workspace build command plus embedded workspace Dockerfile materializer
     scope: >
       Merge-bearing local setup authority for building and validating the Docker workspace image needed by local
@@ -24526,7 +24507,6 @@ workspace_model:
     - selected-contract run-fork execution
   workspace_backend_selection:
     implementation_status: implemented_capability_driven_first_slice
-    canonical_owner: platform-spec.yaml#workspace_model.workspace_backend_selection
     scope: >
       Defines the capability-derived effective workspace backend requirement for `swarm serve` boot,
       selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`,
@@ -24627,7 +24607,6 @@ workspace_model:
     - production SQLite multi-writer semantics
   workspace_execution_target_capability:
     implementation_status: implemented_host_file_relay_and_trusted_command_slice
-    canonical_owner: platform-spec.yaml#workspace_model.workspace_execution_target_capability
     scope: >
       Defines the canonical runtime execution-target and capability authority for workspace-backed execution surfaces after
       workspace backend selection. The owner distinguishes Docker container execution, explicit host-local targets, and
@@ -26979,7 +26958,6 @@ cli_specification:
         group assignment to the catalog, explicitly accounting for commands whose merge-bearing rows live elsewhere.
         Generator-style synchronization is not authorized.
     read_window_input:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.read_window_input
       scope: >
         Shared public CLI input authority for optional lower/upper read-window bounds. It applies exactly to
         `swarm run list`, snapshot `swarm run trace`, `swarm event list`, and snapshot `swarm logs`. It owns CLI
@@ -27027,7 +27005,6 @@ cli_specification:
       implementation_framework: github.com/spf13/cobra
       rule: 'Cobra is the only semantic command router. Bare os.Args routing or parallel flag dispatch for operator commands is not authoritative.'
     installed_binary_portability:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.installed_binary_portability
       scope: >
         Merge-bearing CLI v2 authority for source-checkout-independent startup and embedded platform-spec defaults.
         This owner covers root command construction, no-asset command surfaces (`swarm`, help, completion, local
@@ -27059,7 +27036,6 @@ cli_specification:
           workspace mount defaults.
     local_cli_test_gateway_startup:
       implementation_status: implemented_first_slice
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_cli_test_gateway_startup
       scope: >
         Merge-bearing CLI/runtime authority for the narrowed #997 local `cli_test` first slice:
         local serve/run MCP gateway token derivation and MCP-only managed-agent startup proof.
@@ -27104,7 +27080,6 @@ cli_specification:
         boot remains governed by #993 and MUST NOT require LLM/gateway startup credentials.
     local_tool_gateway_binding:
       implementation_status: implemented_first_slice
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
       scope: >
         Merge-bearing source authority for local `serve` / foreground `run` `claude_cli`
         tool gateway reachability in the approved #1568 first slice. The binding is a typed runtime value
@@ -27186,7 +27161,6 @@ cli_specification:
       - local `claude_cli` preflight diagnostics as consumer-only stale-env reporter
       - non-dev serve retired URL-env admission
     local_cli_test_workspace_cli_availability:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_cli_test_workspace_cli_availability
       scope: >
         Merge-bearing CLI/runtime authority for the remaining #997 local `cli_test`
         workspace image/default-agent Claude CLI availability and early actionable
@@ -27214,7 +27188,6 @@ cli_specification:
       - '`internal/runtime/llm` Claude CLI startup probe and per-turn fallback diagnostics'
       - '`internal/runtime/workspace` configured workspace image/container targets'
     local_claude_cli_preflight_admission:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_claude_cli_preflight_admission
       implementation_owner: internal/cliapp local claude_cli preflight/admission owner
       scope: >
         Merge-bearing authority for local `claude_cli` prerequisite diagnostics and admission. The owner materializes typed
@@ -27262,7 +27235,6 @@ cli_specification:
       commands for multi-verb resources, and `swarm control` only for run-state intervention.
       `swarm investigate` is retired legacy topology and MUST NOT be extended.
     output_contract:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract
       future_runtime_owner: internal/cliapp shared output-mode/color policy renderer
       scope: >
         Merge-bearing CLI v2 authority for successful command output mode selection, shared rendering, and
@@ -27325,7 +27297,6 @@ cli_specification:
         cli_specification.foundations.error_channel_and_exit_code_contract. `--json` and `--quiet` do not change
         error exit-code classification and do not create JSON error bodies in this first promoted contract.
       diagnostic_convention:
-        canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention
         scope: >
           Shared source authority for user-facing CLI diagnostic text and public diagnostic/remediation JSON fields.
           This convention is consumed by single command-outcome failures, typed finding lists, verify/doctor
@@ -27416,7 +27387,6 @@ cli_specification:
           - 'run status: test_quiescence_ready=true heuristics=none blocking_layer='
           - 'renamed-key adapters are tracked by an internal issue'
         arg_count_diagnostics:
-          canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention.arg_count_diagnostics
           implementation_owner: internal/cli/argcount/arg_count.go
           scope: >
             Shared source authority for public positional argument-count diagnostics on promoted CLI commands. This
@@ -27444,7 +27414,6 @@ cli_specification:
             `cobra.ExactArgs`/`cobra.MaximumNArgs`/`cobra.MinimumNArgs`/`cobra.RangeArgs` uses and stale raw Cobra
             `accepts N arg(s)` expectations for promoted CLI arg-count diagnostics.
       identifier_resolution:
-        canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.identifier_resolution
         implementation_owner: internal/cliapp/cli_identifier_registry.go, internal/cliapp/cli_identifier_resolver.go, and the
           family-aware identifier cells in internal/cliapp/cli_output.go
         status: implemented_registry_first_slice
@@ -27820,7 +27789,6 @@ cli_specification:
           Default text streams are human-readable; `--json` streams are NDJSON; `--quiet` is unsupported for streams
           unless the command row declares a specific quiet stream value.
         human_code_projection:
-          canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
           implementation_owner: internal/userfacing/human_code_projection.go ProjectHumanCode and HumanCodePhrases; internal/cliapp/cli_output.go formatCLIHumanCode is the CLI adapter
           scope: >
             Authoritative human projection for current public status, mode, state, layer, action, outcome, and
@@ -27968,7 +27936,6 @@ cli_specification:
           command row declares an exception. Eligibility means a later implementation slice must either consume the
           shared output owner for the row or explicitly split the row before adding output-mode behavior.
         output_conformance_registry:
-          canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.command_support.output_conformance_registry
           implementation_owner: internal/cliapp/cli_output_conformance_registry_test.go
           status: implemented
           rule: >
@@ -28619,7 +28586,6 @@ cli_specification:
       - no direct DB/store/runtime/EventBus reads for API-backed output rendering
     cli_logging_policy:
       implementation_status: implemented for current shared-output first-slice consumers only
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.cli_logging_policy
       future_runtime_owner: internal/cliapp shared CLI diagnostic logging policy resolver
       scope: >
         Merge-bearing CLI v2 authority for CLI process diagnostic logging controls. This owner governs
@@ -28682,7 +28648,6 @@ cli_specification:
         quiet: '`--quiet` controls successful stdout rendering only; diagnostics remain stderr-only and may still be filtered by logging level.'
         no_color: '`--no-color` and `NO_COLOR` are color controls, not logging filters. They do not change diagnostic level selection.'
       implemented_logging_policy_first_slice:
-        implemented_by: '#944'
         failure_class: runtime.cli.v2.logging_resolver_for_current_shared_output_consumers
         owner: internal/cliapp shared CLI diagnostic logging policy resolver
         status: implemented
@@ -28740,7 +28705,6 @@ cli_specification:
         discovery. Help, version, completion, remote/API, and other source-free forms remain source-free.
     local_target_resolution_authority:
       implementation_status: implemented_first_slice
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_target_resolution_authority
       implementation_owner: internal/cliapp local target diagnostic resolver
       scope: >
         Merge-bearing authority for local Swarm target/source explanation: the Swarm user/global state directory,
@@ -28893,7 +28857,6 @@ cli_specification:
       - 'API-backed commands consume project/global contexts through the shared #1614 CLI API target resolver only.'
       - 'Store/data/run startup decisions consume local_runtime_state_authority; API-backed connected commands do not start local stores or workspace data.'
     local_runtime_state_authority:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
       implementation_owner: internal/cliapp local runtime state resolver
       scope: >
         Merge-bearing authority for local runtime store path, agent-visible data source defaulting, descriptor store/data
@@ -28960,7 +28923,6 @@ cli_specification:
       - swarm doctor --target dry-run diagnostics
     local_context_registry_authority:
       implementation_status: implemented_primitive_registry
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_context_registry_authority
       implementation_owner: internal/cliapp local context registry helpers and lifecycle commands
       scope: >
         Merge-bearing authority for local context descriptor storage under the resolved Swarm-dir, descriptor schema,
@@ -29051,7 +29013,6 @@ cli_specification:
       - 'No runtime store/data path migration or `swarm run start` behavior change in #1613; #1615 owns that behavior.'
       - 'No unix socket dialing policy in #1613; #1576 owns actual IPC transport behavior.'
     repo_dotenv_source_authority:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.repo_dotenv_source_authority
       scope: >
         Merge-bearing authority for repository `.env` files as local CLI command input. Repo `.env` files are
         non-authoritative for Swarm production and user-facing command startup. Commands MUST NOT implicitly read,
@@ -29087,7 +29048,6 @@ cli_specification:
       loopback_default_implemented_by: '#1124'
       client_env_removed_by: '#1636'
       implementation_status: implemented_loopback_default_no_client_env_sources
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
       scope: >
         Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
         discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
@@ -29254,7 +29214,6 @@ cli_specification:
       - 'Global --config is implemented only as unified config-file selection; no inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
       - 'Future API-backed CLI commands MUST consume this owner rather than the ignored review artifact.'
     source_platform_spec_path_resolution:
-      canonical_owner: platform-spec.yaml#cli_specification.foundations.source_platform_spec_path_resolution
       scope: Platform spec path selection only; authored source root is owned by filesystem_source_model.local_root_selection.
       platform_spec_path:
         accepted_sources:
@@ -29263,7 +29222,6 @@ cli_specification:
         remediation: "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
         rule: The platform spec is always embedded in the swarm binary. No config key, environment variable, flag or file lookup selects an external spec for swarm; changing the spec requires rebuilding the binary.
     error_channel_and_exit_code_contract:
-      implemented_by: '#846'
       scope: >
         First-slice normalization for currently implemented API-backed CLI commands. This applies to diagnostics/read
         paths, mailbox list/view/decisions, version --server, agents list/view, agent mutations, control commands, event
@@ -29415,7 +29373,6 @@ cli_specification:
         provider call or reads/writes retained runtime state. It is separate from the paid doctor --probe tail of #1779.
       schema_inventory:
         flag: --schema-inventory
-        canonical_owner: platform-spec.yaml#cli_specification.command_catalog.doctor.schema_inventory
         implementation_owner: internal/cliapp/doctor_schema_inventory.go doctorSchemaInventory
         source_owner: internal/cliapp/state_store_schema.go StateStoreSchemaPlans
         behavior: >
@@ -29811,7 +29768,6 @@ cli_specification:
         env_config_precedence_implemented_by: '#844'
         server_api_auth_implemented_by: '#1647'
         implementation_status: runtime_bind_env_config_and_server_api_auth_implemented_enable_disable_pending
-        canonical_owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
         summary: >
           Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
           listener and one MCP listener. This is the merge-bearing final topology decision. Runtime binding and
@@ -30028,7 +29984,6 @@ cli_specification:
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'
       boot_observability:
-        implemented_by: '#802/#2010 boot-presentation first slice'
         canonical_presentation_owner: internal/serveapp/serve_lifecycle_presentation.go serveLifecyclePresenter
         flags:
         - --verbose
@@ -30221,7 +30176,6 @@ cli_specification:
           self-check-required state, and nullable self-check pass state. CLI/API readers consume this persisted event; they do not reconstruct boot
           decisions from text logs.
       source_artifact_startup_admission:
-        implemented_by: '#753/#754/#2320'
         rule: >
           After ensuring platform schema and before runtime start/readiness, serve unconditionally verifies every active
           non-standing run's canonical bundle_hash and exact immutable source_artifacts row. Missing or malformed source
@@ -30229,14 +30183,12 @@ cli_specification:
           this gate. When serve loads one or more explicit persisted bundle hashes, it also rejects active non-standing runs
           whose available source artifact is outside that exact pinned set.
       active_run_stop:
-        implemented_by: '#2721'
         command: swarm control stop --all
         semantics: >
           Explicit run stop is an operator command against the running serve, not a boot option. Serve refuses the retired
           --abandon-active-runs spelling with this command as remediation and never terminalizes retained work merely to boot.
           Destructive reset keeps its separate existing run-scoped cleanup and managed-container deletion semantics.
       shutdown_grace_drain_budget:
-        implemented_by: '#825'
         flag: --shutdown-grace <duration>
         default: 30s
         owner: internal/cliapp serve command parses the operator duration; runtime.Runtime.ShutdownWithOptions and
@@ -30269,7 +30221,6 @@ cli_specification:
           connections: a disconnected holder can retain its native session until that connection is detected or closed.
           These settings do not replace native ownership checks or authorize a standby to displace a still-held lease.
       dev_mode_lifecycle_composition:
-        implemented_by: '#830/#2010/#2320/#2360/#2364'
         flag: --dev
         owner: >
           `internal/cliapp` owns command-line composition; internal/store/devscratch.EpochAuthority owns replacement with a
@@ -30618,10 +30569,8 @@ cli_specification:
         - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api, /rpc, /ws, or fallback token paths
       promoted_trace_follow_recovery_contract:
         status: api_owner_promoted_cli_implemented
-        implemented_by: '#928'
         follow_owner: /v1/ws run.subscribe_trace
         follow_shorthand:
-          implemented_by: '#855'
           shorthand: -f
           expands_to: --follow
           behavior: >
@@ -41445,7 +41394,6 @@ api_specification:
       string discriminators).
 
 process_local_work_lifetime_authority:
-  implemented_by: '#2073/#2126'
   owner: one serve-process root with fixed typed runtime, manager-run, route, and selected-fork occurrences
   scope:
     broadest_concept: ownership of every process-local asynchronous operation from admission through completion, cancellation, durable handoff, generation retirement, and final selected-store release
@@ -41660,7 +41608,6 @@ process_local_work_lifetime_authority:
     durable_timer_state: '#2113'
 
 durable_pipeline_processing_obligation_authority:
-  implemented_by: '#2106'
   owner: internal/runtime/pipelineobligation.Store through one required selected-store capability
   broadest_concept: >
     The complete durable platform-pipeline processing obligation from pre-visibility publication exclusion through
