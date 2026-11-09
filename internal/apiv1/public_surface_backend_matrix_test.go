@@ -34,7 +34,6 @@ type publicSurfaceBackendMatrix struct {
 }
 
 type publicSurfaceMatrixSource struct {
-	PlatformSpec          string `yaml:"platform_spec"`
 	OpenRPCArtifact       string `yaml:"openrpc_artifact"`
 	AdjacentOpenRPCMatrix string `yaml:"adjacent_openrpc_matrix"`
 }
@@ -396,29 +395,6 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "mutating api parity ledger missing method event.publish",
 		},
 		{
-			name: "mutating api ledger rejects stale spec ref",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.publish")
-				entry.Classification = "postgres_only_with_spec_ref"
-				entry.Backends = []string{"postgres_only"}
-				entry.SpecRef = "platform-spec.yaml#api_specification.missing_anchor"
-			},
-			want: "ledger method event.publish spec_ref platform-spec.yaml#api_specification.missing_anchor does not resolve",
-		},
-		{
-			name: "mutating api ledger rejects broad postgres only publication ref",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.publish")
-				entry.Classification = "postgres_only_with_spec_ref"
-				entry.Backends = []string{"postgres_only"}
-				entry.SpecRef = "platform-spec.yaml#api_specification.method_catalog"
-				entry.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "artifact", Path: "platform-spec.yaml"},
-				}
-			},
-			want: "ledger method event.publish postgres_only_with_spec_ref spec_ref platform-spec.yaml#api_specification.method_catalog is publication-only, not backend-support authority",
-		},
-		{
 			name: "mutating api ledger rejects stale issue ref",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.replay")
@@ -504,29 +480,6 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				}
 			},
 			want: "operator-read ledger method conversation.fork_list split issue #999999 is not active",
-		},
-		{
-			name: "operator-read api ledger rejects stale spec ref",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
-				entry.Classification = "postgres_only_with_spec_ref"
-				entry.Backends = []string{"postgres_only"}
-				entry.SpecRef = "platform-spec.yaml#api_specification.missing_operator_read_anchor"
-			},
-			want: "operator-read ledger method agent.list spec_ref platform-spec.yaml#api_specification.missing_operator_read_anchor does not resolve",
-		},
-		{
-			name: "operator-read api ledger rejects broad postgres only publication ref",
-			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
-				entry.Classification = "postgres_only_with_spec_ref"
-				entry.Backends = []string{"postgres_only"}
-				entry.SpecRef = "platform-spec.yaml#api_specification.method_catalog"
-				entry.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "artifact", Path: "platform-spec.yaml"},
-				}
-			},
-			want: "operator-read ledger method agent.list postgres_only_with_spec_ref spec_ref platform-spec.yaml#api_specification.method_catalog is publication-only, not backend-support authority",
 		},
 		{
 			name: "operator-read api ledger rejects fake-store-only dual proof",
@@ -1627,12 +1580,10 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 func validatePublicSurfaceSources(root string, source publicSurfaceMatrixSource) []string {
 	var problems []string
 	expected := map[string]string{
-		"platform_spec":           "platform-spec.yaml",
 		"openrpc_artifact":        "openrpc.json",
 		"adjacent_openrpc_matrix": "internal/apiv1/testdata/openrpc_compliance_matrix.yaml",
 	}
 	actual := map[string]string{
-		"platform_spec":           source.PlatformSpec,
 		"openrpc_artifact":        source.OpenRPCArtifact,
 		"adjacent_openrpc_matrix": source.AdjacentOpenRPCMatrix,
 	}

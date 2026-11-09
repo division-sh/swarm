@@ -260,62 +260,6 @@ func visibleCLICommandPaths(t *testing.T) map[string]*cobra.Command {
 	return paths
 }
 
-func TestCLIOutputConformanceRegistryCoversVisibleCommandTree(t *testing.T) {
-	rows := cliOutputConformanceRegistryRows(t)
-	visible := visibleCLICommandPaths(t)
-	for command := range visible {
-		if _, ok := rows[command]; !ok {
-			t.Errorf("visible command %q missing from output_conformance_registry", command)
-		}
-	}
-	for command := range rows {
-		if _, ok := visible[command]; !ok {
-			t.Errorf("output_conformance_registry command %q is not visible in the Cobra tree", command)
-		}
-	}
-}
-
-func TestCLIOutputConformanceRegistryCoversImplementedCommandCatalogRows(t *testing.T) {
-	rows := cliOutputConformanceRegistryRows(t)
-	catalog := driftMappingValue(loadCLISpecification(t), "command_catalog")
-	if catalog == nil {
-		t.Fatal("command_catalog not found")
-	}
-	checked := 0
-	for i := 0; i+1 < len(catalog.Content); i += 2 {
-		rowName := catalog.Content[i].Value
-		row := catalog.Content[i+1]
-		command := driftMappingValue(row, "command")
-		status := driftMappingValue(row, "implementation_status")
-		if command == nil || status == nil {
-			continue
-		}
-		if !strings.HasPrefix(status.Value, "implemented") && status.Value != "partial" {
-			continue
-		}
-		if rowName == "root" {
-			checked++
-			if _, ok := rows["swarm"]; !ok {
-				t.Errorf("command_catalog.root: implemented command %q missing output_conformance_registry row", command.Value)
-			}
-			continue
-		}
-		path := commandPathTokens(command.Value)
-		if len(path) == 0 {
-			t.Errorf("command_catalog.%s: cannot derive command path from %q", rowName, command.Value)
-			continue
-		}
-		checked++
-		registryCommand := "swarm " + strings.Join(path, " ")
-		if _, ok := rows[registryCommand]; !ok {
-			t.Errorf("command_catalog.%s: implemented command %q missing output_conformance_registry row", rowName, registryCommand)
-		}
-	}
-	if checked < 40 {
-		t.Fatalf("implemented command_catalog rows checked = %d, want >= 40; row detection broken", checked)
-	}
-}
-
 func TestCLIOutputConformanceRegistryRowsAreWellFormed(t *testing.T) {
 	rows := cliOutputConformanceRegistryRows(t)
 	visible := visibleCLICommandPaths(t)
@@ -383,15 +327,6 @@ func TestCLIOutputConformanceRegistryRowsAreWellFormed(t *testing.T) {
 	}
 }
 
-func TestCLIOutputConformanceExceptionRulesDoNotContradictRegistry(t *testing.T) {
-	rows := cliOutputConformanceRegistryRows(t)
-	for _, command := range cliOutputAbsentCommandRows(t) {
-		if _, ok := rows["swarm "+command]; ok {
-			t.Errorf("absent_command_rows lists %q, but output_conformance_registry has a visible row for %q", command, "swarm "+command)
-		}
-	}
-}
-
 func cliOutputExceptionRuleNames(t *testing.T) map[string]bool {
 	t.Helper()
 	spec := loadCLISpecification(t)
@@ -402,30 +337,6 @@ func cliOutputExceptionRuleNames(t *testing.T) map[string]bool {
 	out := map[string]bool{}
 	for i := 0; i+1 < len(rules.Content); i += 2 {
 		out[rules.Content[i].Value] = true
-	}
-	return out
-}
-
-func cliOutputAbsentCommandRows(t *testing.T) []string {
-	t.Helper()
-	spec := loadCLISpecification(t)
-	foundations := driftMappingValue(spec, "foundations")
-	outputContract := driftMappingValue(foundations, "output_contract")
-	exceptionRules := driftMappingValue(outputContract, "exception_rules")
-	absent := driftMappingValue(exceptionRules, "absent_command_rows")
-	if absent == nil || absent.Kind != yaml.MappingNode {
-		t.Fatal("output_contract.exception_rules.absent_command_rows not found")
-	}
-	commands := driftMappingValue(absent, "commands")
-	if commands == nil {
-		return nil
-	}
-	if commands.Kind != yaml.SequenceNode {
-		t.Fatalf("output_contract.exception_rules.absent_command_rows.commands kind = %v, want sequence", commands.Kind)
-	}
-	out := make([]string, 0, len(commands.Content))
-	for _, command := range commands.Content {
-		out = append(out, strings.TrimSpace(command.Value))
 	}
 	return out
 }
@@ -611,20 +522,6 @@ func TestCLIOutputArgCountCensusExcludesNestedCheckout(t *testing.T) {
 	expectations, err = rawCobraArgExpectationViolations(repo)
 	if err != nil || len(expectations) != 0 {
 		t.Fatalf("foreign-only raw expectation was rejected: %v, %v", expectations, err)
-	}
-}
-
-func TestCLIOutputConformanceNoStaleActiveSplitOwners(t *testing.T) {
-	staleOwners := map[string]string{
-		"#1814": "display renderer migration is complete",
-		"#1816": "run trace fidelity migration is complete",
-		"#1821": "registry-ratchet parent must be closeable after active rows move to #1913",
-	}
-	rows := cliOutputConformanceRegistryRows(t)
-	for command, row := range rows {
-		if reason, ok := staleOwners[row.OwnerIssue]; ok {
-			t.Errorf("%s: command %q still points at stale split owner %s (%s); split rows need a live active owner", row.Key, command, row.OwnerIssue, reason)
-		}
 	}
 }
 

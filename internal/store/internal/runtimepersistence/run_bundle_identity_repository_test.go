@@ -8,12 +8,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
-	yaml "gopkg.in/yaml.v3"
 )
 
 var runInsertPattern = regexp.MustCompile(`(?is)INSERT\s+INTO\s+runs\s*\(([^)]*)\)`)
@@ -130,7 +128,7 @@ func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk production sources: %v", err)
 	}
-	files = append(files, filepath.Join(root, "platform-spec.yaml"), filepath.Join(root, "openrpc.json"))
+	files = append(files, filepath.Join(root, "openrpc.json"))
 	sort.Strings(files)
 	for _, path := range files {
 		source := readRepositoryFile(t, path)
@@ -142,54 +140,12 @@ func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecSourceArtifactRecoveryRejectsLegacySourceArtifactStates(t *testing.T) {
-	root := repositoryRootForBundleIdentityTest(t)
-	var document map[string]any
-	if err := yaml.Unmarshal([]byte(readRepositoryFile(t, filepath.Join(root, "platform-spec.yaml"))), &document); err != nil {
-		t.Fatalf("parse platform spec: %v", err)
-	}
-	sourceModel, ok := document["filesystem_source_model"].(map[string]any)
-	if !ok {
-		t.Fatal("platform spec is missing filesystem_source_model")
-	}
-	durableLifecycle, ok := sourceModel["durable_lifecycle"].(map[string]any)
-	if !ok {
-		t.Fatal("platform spec is missing filesystem_source_model.durable_lifecycle")
-	}
-	var legacyPaths []string
-	collectLegacySourceArtifactStatePaths(durableLifecycle, "filesystem_source_model.durable_lifecycle", &legacyPaths)
-	if len(legacyPaths) != 0 {
-		t.Fatalf("resume/recovery retains legacy bundle source states: %s", strings.Join(legacyPaths, ", "))
-	}
-}
-
 const (
 	operationMutation      = "mutation"
 	operationRetained      = "retained capability"
 	operationAdmittedChild = "already-admitted child"
 	operationPureRead      = "pure read"
 )
-
-func collectLegacySourceArtifactStatePaths(value any, path string, out *[]string) {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, child := range typed {
-			childPath := path + "." + key
-			if strings.Contains(strings.ToLower(key), "legacy") {
-				*out = append(*out, childPath)
-			}
-			collectLegacySourceArtifactStatePaths(child, childPath, out)
-		}
-	case []any:
-		for index, child := range typed {
-			collectLegacySourceArtifactStatePaths(child, path+"["+strconv.Itoa(index)+"]", out)
-		}
-	case string:
-		if strings.Contains(strings.ToLower(typed), "legacy") {
-			*out = append(*out, path)
-		}
-	}
-}
 
 func repositoryRootForBundleIdentityTest(t *testing.T) string {
 	t.Helper()

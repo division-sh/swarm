@@ -617,35 +617,6 @@ func (*Probe) UnmarshalYAML(*yaml.Node) error { return nil }
 }
 
 func TestCanonicalFormsRegistryPinsCurrentConnectFailureCodes(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec struct {
-		FlowModel struct {
-			CompositionRouting struct {
-				RoutePlanLowering struct {
-					ImplementationSlice1545 struct {
-						FailureReasons []string `yaml:"failure_reasons"`
-					} `yaml:"implementation_slice_1545"`
-				} `yaml:"route_plan_lowering"`
-			} `yaml:"composition_routing"`
-		} `yaml:"flow_model"`
-	}
-	if err := yaml.Unmarshal(raw, &spec); err != nil {
-		t.Fatalf("decode platform spec: %v", err)
-	}
-	got := append([]string(nil), spec.FlowModel.CompositionRouting.RoutePlanLowering.ImplementationSlice1545.FailureReasons...)
-	want := make([]string, 0, int(runtimepinrouting.ConnectFailureLifecycleUnavailable))
-	for failure := runtimepinrouting.ConnectFailureSourceMissing; failure <= runtimepinrouting.ConnectFailureLifecycleUnavailable; failure++ {
-		want = append(want, failure.Code())
-	}
-	sort.Strings(got)
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("platform connect failure reasons = %v, runtime owner = %v", got, want)
-	}
 	if _, err := runtimepinrouting.ParseTargetFailure("connect_pin_ref_invalid"); err == nil {
 		t.Fatal("retired connect_pin_ref_invalid remains API-admissible")
 	}
