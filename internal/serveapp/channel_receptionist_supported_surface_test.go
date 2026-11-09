@@ -114,12 +114,13 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			before := loadStandingMemorySessions(t, backendName, h.storeDSN)
 			requireReceptionistMemory(t, before, 2)
 			requireReceptionistReplies(t, h, expectedDestinations)
+			acknowledgments := len(h.provider.Acknowledgments())
 			for index, foreign := range []struct{ user, chat int64 }{
 				{2001, 1001}, {7000, 2001}, {2002, 2002},
 			} {
 				callbackURL, signing, _ := h.provider.Registration()
 				providerID := fmt.Sprintf("receptionist-foreign-%d", index)
-				if names := postChannelTelegramOperatorUpdate(t, callbackURL, signing, map[string]any{
+				update := map[string]any{
 					"update_id": 83200 + index,
 					"callback_query": map[string]any{
 						"id": providerID, "from": map[string]any{"id": foreign.user},
@@ -127,10 +128,16 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 							"chat": map[string]any{"id": foreign.chat, "type": "private"}},
 						"data": token,
 					},
-				}); len(names) != 0 {
-					t.Fatalf("customer callback became business authority: %v", names)
+				}
+				for repeat := 0; repeat < 2; repeat++ {
+					if names := postChannelTelegramOperatorUpdate(t, callbackURL, signing, update); len(names) != 0 {
+						t.Fatalf("customer callback became business authority: %v", names)
+					}
 				}
 				waitReceptionistActionRejection(t, h, fmt.Sprint(83200+index))
+			}
+			if len(h.provider.Acknowledgments()) != acknowledgments {
+				t.Fatal("foreign customer callback was acknowledged")
 			}
 			if after := receptionistPendingMailbox(t, h); !reflect.DeepEqual(beforeMailbox, after) {
 				t.Fatalf("customer callbacks mutated operator inbox: before=%v after=%v", beforeMailbox, after)
@@ -302,9 +309,13 @@ func waitReceptionistActionRejection(t *testing.T, h *channelOnboardingE2EHarnes
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		var state, disposition string
-		err := db.QueryRow("SELECT state, COALESCE(disposition, '') FROM operator_channel_action_intents WHERE provider_event_id="+placeholder, providerID).Scan(&state, &disposition)
+		var count int
+		err := db.QueryRow("SELECT COUNT(*), COALESCE(MIN(state), ''), COALESCE(MIN(disposition), '') FROM operator_channel_action_intents WHERE provider_event_id="+placeholder, providerID).Scan(&count, &state, &disposition)
 		if err != nil && err != sql.ErrNoRows {
 			t.Fatal(err)
+		}
+		if count > 1 {
+			t.Fatalf("duplicate foreign action intents=%d, want one", count)
 		}
 		if err == nil && state == "settled" {
 			if disposition != "rejected" {
