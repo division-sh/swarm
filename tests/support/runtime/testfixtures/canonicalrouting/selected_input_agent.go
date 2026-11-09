@@ -37,7 +37,7 @@ func CopySelectedConstructedAgentInput(t testing.TB, conversationHistory ...bool
 	}
 	agents := "worker:\n  model: regular\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n"
 	if len(conversationHistory) == 1 && conversationHistory[0] {
-		agents = "worker:\n  model: regular\n  memory: true\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\naudit:\n  model: regular\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n"
+		agents = "worker:\n  model: regular\n  memory: true\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\naudit:\n  model: regular\n  intent:\n    inline: Consume the assigned task.\n  subscriptions: [task.assigned]\n"
 	}
 	root := t.TempDir()
 	for name, body := range map[string]string{
