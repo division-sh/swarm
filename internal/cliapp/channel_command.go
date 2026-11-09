@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -639,34 +637,18 @@ func presentAndWaitForChannelClaim(ctx context.Context, client channelControlCli
 	return current, nil
 }
 
-func writeTelegramClaimInstructions(out io.Writer, result channelOnboardingResult) error {
-	if result.Connection == nil || result.IdentityOperation == nil || result.IdentityOperation.ExpiresAt.IsZero() {
-		return errors.New("operator code requires its exact Telegram destination and expiry")
-	}
-	bot := result.Connection.AccountName
-	if !regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`).MatchString(bot) || result.Connection.AccountPresentation != result.Operation.AccountReference {
-		return errors.New("operator code requires its authenticated Telegram bot address")
-	}
-	identity := result.IdentityOperation
-	fmt.Fprintf(out, "Send the code %s to @%s before %s.\nSEND-CODE LINK: https://t.me/%s?text=%s\nWaiting for an authenticated claimant...\n",
-		identity.Challenge, bot, channelClaimDeadline(identity.ExpiresAt), bot, url.QueryEscape(identity.Challenge))
-	return nil
-}
-
 func writeChannelClaimInstructions(out io.Writer, result channelOnboardingResult) error {
-	if result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram" {
-		return writeTelegramClaimInstructions(out, result)
-	}
-	account := result.Operation.AccountReference
-	if account == "" && result.Connection != nil {
-		account = result.Connection.AccountPresentation
-	}
+	binding, _ := channelprovider.Lookup(result.Operation.Provider)
 	if result.IdentityOperation == nil {
-		return errors.New("operator code requires its exact WhatsApp destination and expiry")
+		return fmt.Errorf("operator code requires its exact %s destination and expiry", binding.DisplayName())
 	}
 	identity := result.IdentityOperation
-	binding, _ := channelprovider.Lookup(result.Operation.Provider)
-	text, err := binding.ClaimInstructions(account, identity.Challenge, identity.ExpiresAt)
+	prompt := channelprovider.ClaimPrompt{Account: result.Operation.AccountReference, Code: identity.Challenge,
+		ExpiresAt: identity.ExpiresAt, Deployment: result.Operation.DeploymentRegistration}
+	if result.Connection != nil {
+		prompt.Connection = &channelprovider.AccountPresentation{Account: result.Connection.AccountPresentation, Name: result.Connection.AccountName}
+	}
+	text, err := binding.ClaimInstructions(prompt)
 	if err != nil {
 		return err
 	}
@@ -890,10 +872,6 @@ func channelAutomaticClaimConfirmation(result channelOnboardingResult) bool {
 	return result.Operation.Provider == "whatsapp" || result.Operation.DeploymentRegistration && result.Operation.Provider == "telegram"
 }
 
-func channelClaimDeadline(expires time.Time) string {
-	return expires.Local().Format("2006-01-02 15:04:05 MST (-07:00)")
-}
-
 func channelClaimantConfirmationRequired(result channelOnboardingResult, now time.Time) bool {
 	identity := result.IdentityOperation
 	if result.Operation.Phase != "awaiting_operator_confirmation" || identity == nil || identity.State != "awaiting_confirmation" {
@@ -951,7 +929,7 @@ func waitForChannelOnboardingClaim(ctx context.Context, client channelControlCli
 	if ctx.Err() != nil {
 		return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
 	}
-	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", channelClaimDeadline(expires), continuation)
+	return channelOnboardingResult{}, fmt.Errorf("operator code expired at %s%s", channelprovider.ClaimDeadline(expires), continuation)
 }
 
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
