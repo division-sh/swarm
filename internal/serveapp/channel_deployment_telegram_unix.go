@@ -5,16 +5,13 @@ package serveapp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
-	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
@@ -50,7 +47,7 @@ func (c *telegramDeploymentSession) AwaitSessionBootstrap(_ context.Context, op 
 }
 
 func (c *telegramDeploymentSession) CheckpointSessionPairing(ctx context.Context, op channelonboarding.Operation) (channelonboarding.Operation, bool, error) {
-	identity, err := c.readAccount(ctx, op)
+	identity, err := c.telegramRead(ctx, op)
 	if err != nil {
 		return op, false, err
 	}
@@ -61,10 +58,6 @@ func (c *telegramDeploymentSession) CheckpointSessionPairing(ctx context.Context
 	next, err := c.opts.Operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
 		ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseAwaitingExternalIdentity, AccountReference: ref.Account, Now: time.Now().UTC()})
 	return next, err == nil, err
-}
-
-func (c *telegramDeploymentSession) readAccount(ctx context.Context, op channelonboarding.Operation) (string, error) {
-	return c.telegramRead(ctx, op)
 }
 
 func (c *telegramDeploymentSession) ReadSessionPairing(context.Context, channelonboarding.Operation, operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
@@ -110,7 +103,7 @@ func (c *telegramDeploymentSession) ConsumeWebhookClaim(ctx context.Context, acc
 }
 
 func (c *telegramDeploymentSession) VerifyRegistration(ctx context.Context, op channelonboarding.Operation) (bool, error) {
-	identity, err := c.readAccount(ctx, op)
+	identity, err := c.telegramRead(ctx, op)
 	if err != nil {
 		return false, err
 	}
@@ -140,5 +133,8 @@ func (c *telegramDeploymentSession) CloseRegistration(context.Context, channelon
 }
 
 func (c *telegramDeploymentSession) AcknowledgeRegisteredOperator(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) error {
+	if c == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
 	return c.acknowledgeRegisteredTelegram(ctx, op, child, binding)
 }
