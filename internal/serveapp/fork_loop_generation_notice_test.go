@@ -73,7 +73,14 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				t.Fatalf("child generation or executed stage: %+v, expected %+v", child, expected)
 			}
 			childRoute := requireForkLoopStateEffect(t, rt, fork.ForkRunID, childEvent, expected.RevisionID)
-			if !reflect.DeepEqual(sourceRoute, childRoute) {
+			sourcePin, sourceClaim := sourceRoute.ConnectClaim.ReceiverIdentity()
+			childPin, childClaim := childRoute.ConnectClaim.ReceiverIdentity()
+			wantRoute := sourceRoute
+			// The new publication carries receiver life in its exact target. Both
+			// full claims are independently checked by the shared delivery oracle.
+			wantRoute.Context.Life = nil
+			wantRoute.ConnectClaim = childRoute.ConnectClaim
+			if !sourceClaim || !childClaim || sourcePin != childPin || !reflect.DeepEqual(wantRoute, childRoute) {
 				t.Fatalf("loop fork changed exact recipient/target/connect identity: source=%+v child=%+v", sourceRoute, childRoute)
 			}
 			beforeRepeat := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)

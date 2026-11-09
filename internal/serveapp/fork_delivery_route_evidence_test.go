@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -22,6 +23,10 @@ type servedForkDeliveryEvidence struct {
 
 func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, runID string) map[string]servedForkDeliveryEvidence {
 	t.Helper()
+	graph := pinrouting.CompileConnectGraph(rt.Runtime.Options.WorkflowModule.SemanticSource())
+	if len(graph.Issues()) != 0 {
+		t.Fatalf("delivery oracle requires its exact admitted connect graph: %+v", graph.Issues())
+	}
 	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT),CAST(receiver_materialization_plan AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +60,18 @@ func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, 
 		if !route.Initialization.Empty() {
 			if err := route.Initialization.ValidatePublication(runID, eventID); err != nil {
 				t.Fatal(err)
+			}
+		}
+		if !route.ConnectClaim.Empty() {
+			matched := 0
+			for _, plan := range graph.Plans() {
+				claim, err := plan.ClaimForRetainedDelivery(route)
+				if err == nil && claim.Equal(route.ConnectClaim) {
+					matched++
+				}
+			}
+			if matched != 1 {
+				t.Fatalf("stored delivery has %d complete compiled claims, want one", matched)
 			}
 		}
 		identityFact, err := route.Identity()
