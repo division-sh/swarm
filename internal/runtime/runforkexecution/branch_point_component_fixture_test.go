@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"reflect"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func q1StageBranchPointComponent(t *testing.T, ctx context.Context, request Sele
 
 // This exercises selected-phase work only. It neither activates the child nor
 // creates the public handoff ACK; those assertions use the live fixture.
-func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request SelectedContractExecutionRequest) (out SelectedContractExecutionResult, finalErr error) {
+func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request SelectedContractExecutionRequest, nativeValidation ...bool) (out SelectedContractExecutionResult, finalErr error) {
 	t.Helper()
 	if !request.AgentRuntime.ExecutionPosture.Valid() {
 		request.AgentRuntime.ExecutionPosture = executionposture.Live
@@ -157,7 +158,35 @@ func q1ExecuteSelectedPhaseComponent(t *testing.T, ctx context.Context, request 
 	}
 	wait, cancel := context.WithTimeout(ctx, selectedContractAgentRuntimeDefaultQuiescenceTimeout)
 	defer cancel()
-	return out, c.attachment.runtime.WaitForQuiescence(wait, c.attachment.runtime.bus)
+	if err := c.attachment.runtime.WaitForQuiescence(wait, c.attachment.runtime.bus); err != nil {
+		return out, err
+	}
+	if len(nativeValidation) != 0 {
+		if len(nativeValidation) != 1 || !nativeValidation[0] {
+			t.Fatal("native component requires its explicit pre-handoff cut")
+		}
+		if err := c.attachment.runtime.stopExecutionWork(); err != nil {
+			return out, err
+		}
+		before := make(map[string]map[string]storetest.SelectedForkStorageTableSnapshot)
+		for _, runID := range []string{request.SourceRunID, materialized.ForkRunID} {
+			before[runID], err = storetest.ReadSelectedForkSourceDomain(ctx, request.Owner.ports.effects, runID)
+			if err != nil {
+				return out, err
+			}
+		}
+		activation, err := attachment.activate(true)
+		if err == nil || err.Error() != "live fork activation requires its durable operation" || activation.Activated || activation.SourceFrozen || activation.ForkRunStatus != runfork.RunForkMaterializedStatus {
+			t.Fatalf("native validation did not stop before durable handoff: activation=%+v err=%v", activation, err)
+		}
+		for runID, original := range before {
+			after, err := storetest.ReadSelectedForkSourceDomain(ctx, request.Owner.ports.effects, runID)
+			if err != nil || !reflect.DeepEqual(original, after) {
+				t.Fatalf("refused native handoff changed source or child evidence: %v", err)
+			}
+		}
+	}
+	return out, nil
 }
 
 func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, materialized runfork.RunForkMaterialization) *q1BranchPointAttachment {
@@ -198,16 +227,23 @@ func q1AttachBranchPointComponent(t *testing.T, prepared *PreparedSelectedFork, 
 	return fixture
 }
 
-func (f *q1BranchPointAttachment) activate() (runfork.RunForkActivation, error) {
+func (f *q1BranchPointAttachment) activate(nativeValidation ...bool) (runfork.RunForkActivation, error) {
 	p := f.prepared
 	process, err := p.agentRuntime.Options.ProcessCapability.Evidence()
 	if err != nil {
 		return runfork.RunForkActivation{}, err
 	}
+	operation := p.forkOperation
+	if len(nativeValidation) != 0 {
+		if len(nativeValidation) != 1 || !nativeValidation[0] {
+			return runfork.RunForkActivation{}, errors.New("invalid native validation cut")
+		}
+		operation = nil
+	}
 	return p.owner.ports.fork.ActivateRunForkForSelectedContractExecution(effects.WithAuthority(p.operation.Context(), f.container.authority), runfork.RunForkSelectedContractExecutionActivateRequest{
 		OriginalRootAdmission: p.originalSource.RootedSource.Admission(),
 		Process:               process.LeaseStamp(),
-		InheritedSchedules:    p.readiness, ForkOperation: p.forkOperation, DataPins: f.materialized.DataPins,
+		InheritedSchedules:    p.readiness, ForkOperation: operation, DataPins: f.materialized.DataPins,
 		ExecutionSource: p.loadedSource.Source, ForkRunID: f.materialized.ForkRunID,
 		AllowedSourceEventIDs: selectedContractExecutionFrontierEventIDs(p.frontier.FrontierEvents),
 		FrontierAdmission:     p.frontier, RouteTopology: p.routeTopology, RecipientPlanning: *p.model.RecipientPlanning,
