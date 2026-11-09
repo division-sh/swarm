@@ -122,10 +122,7 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 		return false
 	}
 	if expected.RegisteredBusiness {
-		return expected.DeploymentRegistration && op.AccountConfirmed && !op.LogoutCompleted &&
-			op.ValidateSessionAccount() == nil && op.Coordinate == (ChannelRuntimeContextCoordinate{}) && op.TargetSelector == "" &&
-			expected.Coordinate.Validate() == nil && expected.TargetSelector != "" && expected.ActivationRevision == 0 &&
-			op.Phase.SupportsAccountBusiness()
+		return expected.matchesRegisteredBusiness(op)
 	}
 	coordinateCurrent := op.Coordinate.Matches(expected.Coordinate)
 	if op.DeploymentRegistration {
@@ -136,6 +133,13 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 		coordinateCurrent = op.Coordinate.MatchesDeclaration(expected.Coordinate)
 	}
 	return expected.OperationID != "" && coordinateCurrent && op.TargetSelector == expected.TargetSelector
+}
+
+func (expected AdmissionResponsibility) matchesRegisteredBusiness(op Operation) bool {
+	return expected.DeploymentRegistration && op.AccountConfirmed && !op.LogoutCompleted &&
+		op.ValidateSessionAccount() == nil && op.Coordinate == (ChannelRuntimeContextCoordinate{}) && op.TargetSelector == "" &&
+		expected.Coordinate.Validate() == nil && expected.TargetSelector != "" && expected.ActivationRevision == 0 &&
+		op.Phase.SupportsAccountBusiness()
 }
 
 // Account business remains eligible while its separate operator ceremony waits.

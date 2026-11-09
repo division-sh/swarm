@@ -248,35 +248,7 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 				err == nil && credentialsCurrent
 		}
 		authenticate := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.AdmittedRequest, error) {
-			matches := matchesDeploymentClaimAdmission(plan, selected, target)
-			if state.Pair.Parent.Kind == channelnative.TransportDeploymentRegistration {
-				matches = state.Pair.Parent.Validate() == nil && selected.Valid() &&
-					selected.Generation().Equal(state.Pair.DeploymentAdmission) && selected.Provider() == target.Provider &&
-					selected.PolicySource() == providertriggers.PolicySourceVerifiedPack && selected.Transport() == packs.ChannelTransportWebhook &&
-					selected.RequestAuthentication() == providertriggers.RequestAuthenticationTokenEquality
-			}
-			if !matches {
-				return providertriggers.AdmittedRequest{}, channelonboarding.ErrConflict
-			}
-			_, signing, err := c.admitCredentials(request.Context(), state.Pair)
-			if err != nil {
-				return providertriggers.AdmittedRequest{}, err
-			}
-			if request.Method != http.MethodPost {
-				return providertriggers.AdmittedRequest{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}
-			}
-			body, err := io.ReadAll(io.LimitReader(request.Body, (1<<20)+1))
-			request.Body = io.NopCloser(bytes.NewReader(body))
-			if err != nil || len(body) > 1<<20 {
-				return providertriggers.AdmittedRequest{}, providertriggers.Error{Status: http.StatusBadRequest, Message: "invalid webhook body"}
-			}
-			var payload any
-			if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
-				return providertriggers.AdmittedRequest{}, err
-			}
-			return selected.AdmitRequest(providertriggers.Request{Provider: target.Provider, Method: request.Method,
-				URL: request.URL.String(), Body: body, Headers: request.Header, Payload: payload, ContentType: request.Header.Get("Content-Type"),
-				Target: providertriggers.Target{WebhookSecret: signing.CredentialValue()}, Received: c.opts.Now()})
+			return c.authenticateDeploymentClaim(request, plan, selected, target, state.Pair)
 		}
 		admit := func(selected providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
 			input, err := authenticate(selected)
@@ -302,6 +274,38 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 		return consume(request.Context(), account, credential, func() (providertriggers.Delivery, error) { return admit(plan) }, admit, operator, current)
 	}
 	return false, channelonboarding.ErrConflict
+}
+
+func (c *ProviderRegistrationController) authenticateDeploymentClaim(request *http.Request, receiver, selected providertriggers.InboundAdmissionPlan, target RegistrationTarget, pair RegistrationPair) (providertriggers.AdmittedRequest, error) {
+	matches := matchesDeploymentClaimAdmission(receiver, selected, target)
+	if pair.Parent.Kind == channelnative.TransportDeploymentRegistration {
+		matches = pair.Parent.Validate() == nil && selected.Valid() &&
+			selected.Generation().Equal(pair.DeploymentAdmission) && selected.Provider() == target.Provider &&
+			selected.PolicySource() == providertriggers.PolicySourceVerifiedPack && selected.Transport() == packs.ChannelTransportWebhook &&
+			selected.RequestAuthentication() == providertriggers.RequestAuthenticationTokenEquality
+	}
+	if !matches {
+		return providertriggers.AdmittedRequest{}, channelonboarding.ErrConflict
+	}
+	_, signing, err := c.admitCredentials(request.Context(), pair)
+	if err != nil {
+		return providertriggers.AdmittedRequest{}, err
+	}
+	if request.Method != http.MethodPost {
+		return providertriggers.AdmittedRequest{}, providertriggers.Error{Status: http.StatusMethodNotAllowed, Message: "method not allowed"}
+	}
+	body, err := io.ReadAll(io.LimitReader(request.Body, (1<<20)+1))
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil || len(body) > 1<<20 {
+		return providertriggers.AdmittedRequest{}, providertriggers.Error{Status: http.StatusBadRequest, Message: "invalid webhook body"}
+	}
+	var payload any
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		return providertriggers.AdmittedRequest{}, err
+	}
+	return selected.AdmitRequest(providertriggers.Request{Provider: target.Provider, Method: request.Method,
+		URL: request.URL.String(), Body: body, Headers: request.Header, Payload: payload, ContentType: request.Header.Get("Content-Type"),
+		Target: providertriggers.Target{WebhookSecret: signing.CredentialValue()}, Received: c.opts.Now()})
 }
 
 func matchesDeploymentClaimAdmission(receiver, selected providertriggers.InboundAdmissionPlan, target RegistrationTarget) bool {
@@ -445,16 +449,7 @@ func (pair RegistrationPair) validateAuthority() error {
 	activationAuthority := pair.ChannelActivationGeneration.Valid()
 	prebindingAuthority := strings.TrimSpace(pair.PrebindingOperationID) != ""
 	if pair.Parent != (channelnative.TransportParent{}) {
-		if pair.Parent.Validate() != nil || pair.Parent.Kind != channelnative.TransportDeploymentRegistration ||
-			activationAuthority || prebindingAuthority || pair.ActivationRevision != 0 ||
-			pair.OnboardingCoordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
-			pair.OnboardingOperationID != pair.Parent.ID || pair.OnboardingRevision != pair.Parent.Revision ||
-			pair.Target.RegisteredOperationID != pair.Parent.ID || pair.OperatorAccount == "" ||
-			!pair.DeploymentAdmission.Valid() || !pair.Target.AdmissionPlanGeneration.Valid() ||
-			key == "" || !pair.PlanGeneration.Valid() || pair.Target.Provider != pair.Registration.Provider() {
-			return fmt.Errorf("deployment registration requires its disjoint exact parent and admitted definition")
-		}
-		return nil
+		return pair.validateDeploymentAuthority(key, activationAuthority, prebindingAuthority)
 	}
 	if key == "" || !pair.PlanGeneration.Valid() || activationAuthority == prebindingAuthority || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
 		return fmt.Errorf("provider registration pair identity is incomplete")
@@ -484,6 +479,19 @@ func (pair RegistrationPair) validateAuthority() error {
 	}
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
 		return fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
+	}
+	return nil
+}
+
+func (pair RegistrationPair) validateDeploymentAuthority(key string, activationAuthority, prebindingAuthority bool) error {
+	if pair.Parent.Validate() != nil || pair.Parent.Kind != channelnative.TransportDeploymentRegistration ||
+		activationAuthority || prebindingAuthority || pair.ActivationRevision != 0 ||
+		pair.OnboardingCoordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
+		pair.OnboardingOperationID != pair.Parent.ID || pair.OnboardingRevision != pair.Parent.Revision ||
+		pair.Target.RegisteredOperationID != pair.Parent.ID || pair.OperatorAccount == "" ||
+		!pair.DeploymentAdmission.Valid() || !pair.Target.AdmissionPlanGeneration.Valid() ||
+		key == "" || !pair.PlanGeneration.Valid() || pair.Target.Provider != pair.Registration.Provider() {
+		return fmt.Errorf("deployment registration requires its disjoint exact parent and admitted definition")
 	}
 	return nil
 }

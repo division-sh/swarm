@@ -161,33 +161,11 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 		}
 		pairs = append(pairs, pair)
 	}
-	if len(deployment) == 1 && deployment[0] != nil && deployment[0].registrations != nil {
-		registrations, err := deployment[0].registrations(ctx)
-		if err != nil {
-			return fail(err)
-		}
-		for _, registration := range registrations {
-			if registration.plan.Transport() != packs.ChannelTransportWebhook {
-				continue
-			}
-			pair, err := deploymentRegistrationPair(registration)
-			if err != nil {
-				return fail(err)
-			}
-			for i := 0; i < len(pairs); i++ {
-				owned := pairs[i]
-				if owned.ActivationSource != channelonboarding.ActivationSourceRegistered || owned.OnboardingOperationID != pair.Parent.ID {
-					continue
-				}
-				// Only routing hints survive. The physical receiver's authority is
-				// the deployment parent, never this holder's execution grant.
-				pair.Target, pair.AccountHolder = owned.Target, owned.AccountHolder
-				pairs = append(pairs[:i], pairs[i+1:]...)
-				i--
-			}
-			pairs = append(pairs, pair)
-		}
+	withDeployment, err := mergeDeploymentRegistrationPairs(ctx, pairs, deployment)
+	if err != nil {
+		return fail(err)
 	}
+	pairs = withDeployment
 	sort.Slice(pairs, func(i, j int) bool {
 		if pairs[i].BindingID != pairs[j].BindingID {
 			return pairs[i].BindingID < pairs[j].BindingID
@@ -196,6 +174,38 @@ func resolveServeRegistrationPairs(ctx context.Context, snapshot serveChannelAct
 	})
 	selection.Pairs = pairs
 	return selection, nil
+}
+
+func mergeDeploymentRegistrationPairs(ctx context.Context, pairs []runtimepublicingress.RegistrationPair, deployment []*serveDeploymentTransport) ([]runtimepublicingress.RegistrationPair, error) {
+	if len(deployment) != 1 || deployment[0] == nil || deployment[0].registrations == nil {
+		return pairs, nil
+	}
+	registrations, err := deployment[0].registrations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, registration := range registrations {
+		if registration.plan.Transport() != packs.ChannelTransportWebhook {
+			continue
+		}
+		pair, err := deploymentRegistrationPair(registration)
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < len(pairs); i++ {
+			owned := pairs[i]
+			if owned.ActivationSource != channelonboarding.ActivationSourceRegistered || owned.OnboardingOperationID != pair.Parent.ID {
+				continue
+			}
+			// Only routing hints survive. The physical receiver's authority is
+			// the deployment parent, never this holder's execution grant.
+			pair.Target, pair.AccountHolder = owned.Target, owned.AccountHolder
+			pairs = append(pairs[:i], pairs[i+1:]...)
+			i--
+		}
+		pairs = append(pairs, pair)
+	}
+	return pairs, nil
 }
 
 func deploymentRegistrationPair(selected serveDeploymentRegistration) (runtimepublicingress.RegistrationPair, error) {
