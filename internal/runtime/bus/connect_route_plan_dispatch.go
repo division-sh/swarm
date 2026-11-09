@@ -58,6 +58,7 @@ type connectRoutePlanDispatch struct {
 	Matched                  bool
 	Failure                  runtimepinrouting.TargetFailure
 	Evaluation               events.ConnectEvaluationLedger
+	ConnectPlans             []runtimepinrouting.ConnectRoutePlan
 	LiveRecipients           []RoutePlanLiveRecipient
 	DeliveryIntents          []RoutePlanDeliveryIntent
 	RoutedRecipients         []Subscriber
@@ -205,7 +206,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	}
 	state := connectMatchedPlanState{
 		out: connectRoutePlanDispatch{
-			Matched: true, Evaluation: emptyEvaluation,
+			Matched: true, Evaluation: emptyEvaluation, ConnectPlans: append([]runtimepinrouting.ConnectRoutePlan(nil), matched...),
 			ExtraDetail: map[string]any{"connect_route_plans_count": len(matched)},
 		},
 		matchedPlans:  matched,
@@ -454,7 +455,7 @@ func stampConnectExecutionClaims(ctx context.Context, event events.Event, plan r
 		if routes[index].Context.Life == nil {
 			routes[index].Context.Life = life
 			var err error
-			routes[index].Context.Life, err = selectedForkRequestExecutionLife(ctx, event, plan, routes[index])
+			routes[index].Context.Life, err = selectedForkExecutionLife(ctx, event, plan, routes[index])
 			if err != nil {
 				return nil, err
 			}

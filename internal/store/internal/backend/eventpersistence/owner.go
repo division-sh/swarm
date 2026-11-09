@@ -38,8 +38,8 @@ import (
 type selectedForkLineageOwner interface {
 	InstallSelectedForkExecutionLineageTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute) error
 	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool, string) (string, error)
-	CommitSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute, []pinrouting.ReplyRequestContinuation, []pinrouting.ReplyReturnContinuation) error
-	RequireSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage) error
+	CommitSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute, []pinrouting.ReplyRequestContinuation, []pinrouting.ReplyReturnContinuation, ...pinrouting.ConnectRoutePlan) error
+	RequireSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, ...pinrouting.ConnectRoutePlan) error
 }
 
 type operatorChannelClaimPostgresOwner interface {

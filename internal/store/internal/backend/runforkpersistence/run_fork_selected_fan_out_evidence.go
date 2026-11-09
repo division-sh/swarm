@@ -19,27 +19,27 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
-func (s *RunForkPostgresOwner) RequireSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage) error {
+func (s *RunForkPostgresOwner) RequireSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, plans ...pinrouting.ConnectRoutePlan) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork publication readback requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return requireSelectedForkExecutionEvidenceTx(ctx, tx, lineage, true)
+		return requireSelectedForkExecutionEvidenceTx(ctx, tx, lineage, true, plans...)
 	})
 }
 
-func (s *RunForkSQLiteOwner) RequireSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage) error {
+func (s *RunForkSQLiteOwner) RequireSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, plans ...pinrouting.ConnectRoutePlan) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork publication readback requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return requireSelectedForkExecutionEvidenceTx(ctx, tx, lineage, false)
+		return requireSelectedForkExecutionEvidenceTx(ctx, tx, lineage, false, plans...)
 	})
 }
 
 // Duplicate publication observes the original evidence; it cannot insert a
 // missing lineage or ordinal merely because the event already exists.
-func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, want runfork.RunForkSelectedContractExecutionLineage, postgres bool) error {
+func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, want runfork.RunForkSelectedContractExecutionLineage, postgres bool, plans ...pinrouting.ConnectRoutePlan) error {
 	stored, found, err := readSelectedForkInputLineageTx(ctx, tx, want.ForkRunID, want.SourceEventID, want.ForkEventID)
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, wan
 	if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, stored.SourceEventID, postgres); err != nil {
 		return err
 	}
-	return requireSelectedForkFanOutPublishedTx(ctx, tx, runfork.RunForkSelectedContractBinding{ForkRunID: stored.ForkRunID, SourceRunID: stored.SourceRunID}, stored.SourceEventID, postgres)
+	return requireSelectedForkFanOutPublishedTx(ctx, tx, runfork.RunForkSelectedContractBinding{ForkRunID: stored.ForkRunID, SourceRunID: stored.SourceRunID}, stored.SourceEventID, postgres, plans...)
 }
 
 // Install lineage before initial delivery validates the persisted publication.
@@ -101,49 +101,50 @@ func (s *RunForkSQLiteOwner) InstallSelectedForkExecutionLineageTx(ctx context.C
 	})
 }
 
-func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation) error {
+func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation, plans ...pinrouting.ConnectRoutePlan) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireRunForkReplyReturnEvidenceTx(ctx, tx, lineage, routes, returns, true); err != nil {
+		if err := requireRunForkReplyReturnEvidenceTx(ctx, tx, lineage, routes, returns, true, plans...); err != nil {
 			return err
 		}
-		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, true); err != nil {
+		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, true, plans...); err != nil {
 			return err
 		}
 		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, true); err != nil {
 			return err
 		}
-		return bindSelectedForkFanOutEvidenceTx(ctx, tx, attempt, lineage, publication, routes, true)
+		return bindSelectedForkFanOutEvidenceTx(ctx, tx, attempt, lineage, publication, routes, true, plans...)
 	})
 }
 
-func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation) error {
+func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation, plans ...pinrouting.ConnectRoutePlan) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireRunForkReplyReturnEvidenceTx(ctx, tx, lineage, routes, returns, false); err != nil {
+		if err := requireRunForkReplyReturnEvidenceTx(ctx, tx, lineage, routes, returns, false, plans...); err != nil {
 			return err
 		}
-		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, false); err != nil {
+		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, false, plans...); err != nil {
 			return err
 		}
 		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, false); err != nil {
 			return err
 		}
-		return bindSelectedForkFanOutEvidenceTx(ctx, tx, attempt, lineage, publication, routes, false)
+		return bindSelectedForkFanOutEvidenceTx(ctx, tx, attempt, lineage, publication, routes, false, plans...)
 	})
 }
 
 // The fixed source partition determines which ordinal is continuing. The
 // selected publication and its fresh delivery authority still own execution.
-func bindSelectedForkFanOutEvidenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, postgres bool) error {
+func bindSelectedForkFanOutEvidenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, postgres bool, plans ...pinrouting.ConnectRoutePlan) error {
 	snapshot, plan, err := loadSelectedForkFanOutSourceEvidenceTx(ctx, tx, lineage.ForkRunID, lineage.SourceRunID, postgres)
 	if err != nil || snapshot == nil {
 		return err
 	}
+	snapshot.connectPlans = plans
 	key, replay, found, err := selectedForkFanOutContinuationTx(ctx, tx, lineage.ForkRunID, plan, lineage.SourceEventID)
 	if err != nil || !found {
 		return err
@@ -345,6 +346,26 @@ func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event eve
 		projected.Context, err = projectRunForkConstructionContext(plan, childRun, projected.Context)
 		if err != nil {
 			return events.DeliveryRoute{}, err
+		}
+	}
+	if !delivery.Route.ConnectClaim.Empty() {
+		matched := false
+		for _, plan := range snapshot.connectPlans {
+			original, err := plan.ClaimForRetainedDelivery(delivery.Route)
+			if err != nil || !original.Equal(delivery.Route.ConnectClaim) {
+				continue
+			}
+			if matched {
+				return events.DeliveryRoute{}, fmt.Errorf("continued recipient has ambiguous complete compiled claims")
+			}
+			projected.ConnectClaim, err = plan.ClaimForRetainedDelivery(projected)
+			if err != nil {
+				return events.DeliveryRoute{}, err
+			}
+			matched = true
+		}
+		if !matched {
+			return events.DeliveryRoute{}, fmt.Errorf("continued recipient changed its captured complete compiled claim")
 		}
 	}
 	if _, err := projected.Identity(); err != nil {

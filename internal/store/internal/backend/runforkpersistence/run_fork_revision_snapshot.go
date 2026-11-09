@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -195,6 +196,7 @@ type runForkRevisionFanOutFact struct {
 }
 
 type runForkRevisionSnapshot struct {
+	connectPlans          []pinrouting.ConnectRoutePlan
 	StartProjection       *runforkrevision.StartProjection
 	RunID                 string
 	Revision              int64

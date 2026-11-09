@@ -248,7 +248,7 @@ func commitSelectedForkEvent(
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	if result.AppendOutcome == runtimebus.EventAppendExactDuplicate {
-		if err := lineageOwner.RequireSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage); err != nil {
+		if err := lineageOwner.RequireSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.ConnectPlans...); err != nil {
 			return runtimebus.CommittedSelectedForkEvent{}, err
 		}
 		return result, result.Validate()
@@ -263,7 +263,7 @@ func commitSelectedForkEvent(
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
-	if err := lineageOwner.CommitSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes, req.Commit.ReplyContinuations, req.Commit.ReplyReturns); err != nil {
+	if err := lineageOwner.CommitSelectedForkExecutionEvidenceTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes, req.Commit.ReplyContinuations, req.Commit.ReplyReturns, req.Commit.ConnectPlans...); err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	return result, result.Validate()

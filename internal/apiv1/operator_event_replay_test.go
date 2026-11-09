@@ -885,7 +885,8 @@ func completeOperatorReplaySource(t *testing.T) semanticview.Source {
 			members[flow+"/schema.yaml"] = []byte("stages: []\n")
 		}
 		members[receiver.flow+"/instance/events.yaml"] = []byte("scan.requested:\n")
-		members[receiver.flow+"/instance/agents.yaml"] = []byte(receiver.agent + ":\n  role: observer\n  intent: Observe the synthetic replay.\n  subscriptions: [scan.requested]\n")
+		members[receiver.flow+"/instance/agents.yaml"] = []byte(receiver.agent + ":\n  role: observer\n  intent: prompts/observer.md\n  subscriptions: [scan.requested]\n")
+		members[receiver.flow+"/instance/prompts/observer.md"] = []byte("Observe the synthetic replay.\n")
 	}
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {

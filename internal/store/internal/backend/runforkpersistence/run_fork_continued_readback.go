@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -24,7 +25,7 @@ type runForkContinuedOutcomeRow struct {
 	createdAt              time.Time
 }
 
-func requireSelectedForkFanOutPublishedTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, sourceEventID string, postgres bool) error {
+func requireSelectedForkFanOutPublishedTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, sourceEventID string, postgres bool, plans ...pinrouting.ConnectRoutePlan) error {
 	snapshot, plan, err := loadSelectedForkFanOutSourceEvidenceTx(ctx, tx, binding.ForkRunID, binding.SourceRunID, postgres)
 	if err != nil || snapshot == nil {
 		return err
@@ -37,7 +38,7 @@ func requireSelectedForkFanOutPublishedTx(ctx context.Context, tx *sql.Tx, bindi
 	if err != nil {
 		return err
 	}
-	return requireRunForkContinuedPublicationReadback(ctx, tx, postgres, binding.ForkRunID, plan, replay, row, present)
+	return requireRunForkContinuedPublicationReadback(ctx, tx, postgres, binding.ForkRunID, plan, replay, row, present, plans...)
 }
 
 func loadRunForkContinuedOutcomeTx(ctx context.Context, tx *sql.Tx, key fanoutobligation.IntentKey, ordinal int) (runForkContinuedOutcomeRow, bool, error) {
@@ -123,7 +124,7 @@ func loadRunForkContinuedLineageOwnerTx(ctx context.Context, tx *sql.Tx, childRu
 	return owner, found, nil
 }
 
-func requireRunForkContinuedPublicationReadback(ctx context.Context, tx *sql.Tx, postgres bool, childRun string, plan runfork.RunForkPlan, replay runfork.RunForkFanOutPendingReplay, outcome runForkContinuedOutcomeRow, present bool) error {
+func requireRunForkContinuedPublicationReadback(ctx context.Context, tx *sql.Tx, postgres bool, childRun string, plan runfork.RunForkPlan, replay runfork.RunForkFanOutPendingReplay, outcome runForkContinuedOutcomeRow, present bool, plans ...pinrouting.ConnectRoutePlan) error {
 	owner, found, err := loadRunForkContinuedLineageOwnerTx(ctx, tx, childRun, plan.SourceRunID, replay.SourceEventID)
 	if err != nil {
 		return err
@@ -165,10 +166,10 @@ func requireRunForkContinuedPublicationReadback(ctx context.Context, tx *sql.Tx,
 	if owner.kind != "selected" && owner.kind != "generic" {
 		return fmt.Errorf("continued fan-out publication has an unsupported owner")
 	}
-	return requireRunForkContinuedPublishedRecipientsTx(ctx, tx, postgres, childRun, plan, replay, owner, publication)
+	return requireRunForkContinuedPublishedRecipientsTx(ctx, tx, postgres, childRun, plan, replay, owner, publication, plans...)
 }
 
-func requireRunForkContinuedPublishedRecipientsTx(ctx context.Context, tx *sql.Tx, postgres bool, childRun string, plan runfork.RunForkPlan, replay runfork.RunForkFanOutPendingReplay, owner runForkContinuedLineageOwner, publication eventrecord.AdmittedRecord) error {
+func requireRunForkContinuedPublishedRecipientsTx(ctx context.Context, tx *sql.Tx, postgres bool, childRun string, plan runfork.RunForkPlan, replay runfork.RunForkFanOutPendingReplay, owner runForkContinuedLineageOwner, publication eventrecord.AdmittedRecord, plans ...pinrouting.ConnectRoutePlan) error {
 	eventID := owner.eventID
 	adapter := sqliteDeliveryAdapter
 	validate, resolve := runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint
@@ -207,5 +208,6 @@ func requireRunForkContinuedPublishedRecipientsTx(ctx context.Context, tx *sql.T
 	if err != nil {
 		return err
 	}
+	admission.snapshot.connectPlans = plans
 	return requireSelectedFanOutRecipientPartition(admission.snapshot, replay, publication.Event, routes)
 }

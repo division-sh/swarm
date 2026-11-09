@@ -176,9 +176,9 @@ func selectedForkContextRouteIdentity(route events.DeliveryRoute) (events.Delive
 // An inherited request's projected execution life is part of its full claim,
 // so it must be available before hashing. Accept only an exact compiled claim
 // and context; the later route/partition checks remain independent admission.
-func selectedForkRequestExecutionLife(ctx context.Context, event events.Event, compiled pinrouting.ConnectRoutePlan, route pinrouting.ConnectDeliveryRoute) (*events.InstanceLife, error) {
+func selectedForkExecutionLife(ctx context.Context, event events.Event, compiled pinrouting.ConnectRoutePlan, route pinrouting.ConnectDeliveryRoute) (*events.InstanceLife, error) {
 	selected, found := selectedForkRecipientPlanFromContext(ctx, event)
-	if !found || selected.requests == nil || selected.contexts == nil {
+	if !found || selected.contexts == nil {
 		return route.Context.Life, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -187,6 +187,22 @@ func selectedForkRequestExecutionLife(ctx context.Context, event events.Event, c
 	var matched *events.InstanceLife
 	found = false
 	for _, retained := range selected.contextRoutes {
+		if selected.requests == nil {
+			candidate := route
+			candidate.Context.Life = retained.Context.Life
+			claim, err := pinrouting.ConnectExecutionClaim(compiled, candidate)
+			if err != nil {
+				return nil, err
+			}
+			if !claim.Equal(retained.ConnectClaim) || !reflect.DeepEqual(candidate.Context.Normalized(), retained.Context.Normalized()) {
+				continue
+			}
+			if found {
+				return nil, fmt.Errorf("selected recipient has ambiguous exact execution-life claims")
+			}
+			matched, found = retained.Context.Life, true
+			continue
+		}
 		var continuation *pinrouting.ReplyRequestContinuation
 		for _, record := range selected.requests {
 			if retained.Context.ReplyContextID() == record.ID && compiled.MatchesReplyRecord(record) {
@@ -219,7 +235,7 @@ func selectedForkRequestExecutionLife(ctx context.Context, event events.Event, c
 		matched, found = retained.Context.Life, true
 	}
 	if !found {
-		return nil, fmt.Errorf("selected request execution life lacks its exact compiled claim")
+		return nil, fmt.Errorf("selected recipient execution life lacks its exact compiled claim")
 	}
 	return matched, nil
 }

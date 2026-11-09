@@ -421,6 +421,7 @@ func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan 
 func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) RoutePlan {
 	routePlan := newRoutePlan(evt)
 	routePlan.ConnectEvaluation = connectPlan.Evaluation
+	routePlan.ConnectPlans = connectPlan.ConnectPlans
 	if !connectPlan.Failure.Empty() {
 		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, connectPlan.Failure)
 	} else {

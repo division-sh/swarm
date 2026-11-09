@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -245,8 +246,8 @@ func (r PreparedForkSourceEventsResult) Outcome(err error) ([]runfork.RunForkSel
 }
 
 func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapability, store interface {
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error)
-}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, result *PreparedForkSourceEventsResult) (PreparedProcessOperation, error) {
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission, ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error)
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, result *PreparedForkSourceEventsResult, plans ...pinrouting.ConnectRoutePlan) (PreparedProcessOperation, error) {
 	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
 	if err != nil {
 		return PreparedProcessOperation{}, err
@@ -258,6 +259,7 @@ func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapab
 		return PreparedProcessOperation{}, errors.New("prepared source events require their result")
 	}
 	ids := slices.Clone(eventIDs)
+	plans = slices.Clone(plans)
 	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		parsed, err := uuid.Parse(id)
@@ -272,7 +274,7 @@ func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapab
 			return err
 		}
 		var err error
-		result.Events, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage, originalRoot)
+		result.Events, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage, originalRoot, plans...)
 		if err == nil {
 			result.failure = nil
 			return nil

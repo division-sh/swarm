@@ -12,6 +12,7 @@ import (
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -30,6 +31,7 @@ type runForkFanOutBarrierOwner interface {
 }
 
 type forkDeploymentCarriage struct {
+	connectPlans      []pinrouting.ConnectRoutePlan
 	inherit           bool
 	cursor            int
 	status            fanoutobligation.Status
@@ -262,7 +264,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		}
 		for _, replay := range obligation.PendingReplays {
 			row, present := bound[replay.Ordinal]
-			if err := requireRunForkContinuedPublicationReadback(ctx, tx, postgres, forkRunID, plan, replay, row, present); err != nil {
+			if err := requireRunForkContinuedPublicationReadback(ctx, tx, postgres, forkRunID, plan, replay, row, present, plan.OriginalConnectPlans...); err != nil {
 				return err
 			}
 		}

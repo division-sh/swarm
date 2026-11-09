@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -255,11 +256,11 @@ func (p *selectedRuntimeOutcomeProbe) DiscardMaterializedSelectedContractExecuti
 	return p.SelectedContractForkLifecycle.DiscardMaterializedSelectedContractExecutionFork(ctx, id)
 }
 
-func (p *selectedRuntimeOutcomeProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, source, fork string, ids []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+func (p *selectedRuntimeOutcomeProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, source, fork string, ids []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, plans ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error) {
 	p.mu.Lock()
 	p.loads++
 	p.mu.Unlock()
-	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, source, fork, ids, original, originalRoot)
+	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, source, fork, ids, original, originalRoot, plans...)
 	if err != nil {
 		p.t.Fatalf("real event preparation must succeed before outcome injection: %v", err)
 	}

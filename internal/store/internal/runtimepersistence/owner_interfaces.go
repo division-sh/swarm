@@ -23,6 +23,7 @@ import (
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	identity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	managedcapabilities "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	pinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	deadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -436,7 +437,7 @@ type runForkOwnerMethods interface {
 	LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, bool, error)
 	LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractRouteRecovery, bool, error)
 	LoadRunForkSelectedContractSourceEventModes(ctx context.Context, sourceRunID string, sourceEventIDs []string) ([]executionmode.Mode, error)
-	LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, plans ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error)
 	MaterializeRunFork(ctx context.Context, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 	MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)

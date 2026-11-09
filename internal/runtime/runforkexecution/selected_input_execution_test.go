@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -42,8 +43,8 @@ func (p selectedInputClaimProbe) ClaimRunForkSelectedContractRuntimeExecution(ct
 	return authority, err
 }
 
-func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage, originalRoot)
+func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, plans ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage, originalRoot, plans...)
 	if err == nil {
 		p.mutate(ctx, events)
 	}

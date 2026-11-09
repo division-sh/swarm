@@ -1035,6 +1035,7 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		authority = *p.recoveryDeliveryAuthority
 	}
 	request := CommitPublishRequest{
+		ConnectPlans:        append([]runtimepinrouting.ConnectRoutePlan(nil), p.plan.ConnectPlans...),
 		Event:               p.admitted,
 		RouteSettlement:     p.settlement,
 		DeliveryRoutes:      p.plan.DeliveryRoutes(),
