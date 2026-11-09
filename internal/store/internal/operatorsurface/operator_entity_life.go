@@ -78,7 +78,7 @@ func operatorEntityLifeProjection(current operatorread.OperatorEntityFull, metad
 		EntityID: metadata.EntityID, RunID: current.Entity.RunID, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType,
 		StageDefined: &metadata.StageDefined, Life: &metadata.Life, Revision: &metadata.InstanceRevision,
 		LifecycleCreatedAt: &metadata.CreatedAt, LifecycleUpdatedAt: &metadata.UpdatedAt,
-		CreatedAt: *metadata.DataCreatedAt, UpdatedAt: *metadata.DataUpdatedAt, Slug: metadata.Slug, Name: metadata.Name,
+		CreatedAt: metadata.DataCreatedAt, UpdatedAt: metadata.DataUpdatedAt, Slug: metadata.Slug, Name: metadata.Name,
 	}
 	if metadata.StageDefined {
 		summary.CurrentState, summary.EnteredStateAt = &metadata.CurrentState, &metadata.EnteredStateAt

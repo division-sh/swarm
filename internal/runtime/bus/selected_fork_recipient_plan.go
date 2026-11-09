@@ -173,7 +173,7 @@ func selectedForkContextRouteIdentity(route events.DeliveryRoute) (events.Delive
 	return route.Identity()
 }
 
-// An inherited request's projected execution life is part of its full claim,
+// An inherited recipient's projected execution life is part of its full claim,
 // so it must be available before hashing. Accept only an exact compiled claim
 // and context; the later route/partition checks remain independent admission.
 func selectedForkExecutionLife(ctx context.Context, event events.Event, compiled pinrouting.ConnectRoutePlan, route pinrouting.ConnectDeliveryRoute) (*events.InstanceLife, error) {
@@ -187,38 +187,26 @@ func selectedForkExecutionLife(ctx context.Context, event events.Event, compiled
 	var matched *events.InstanceLife
 	found = false
 	for _, retained := range selected.contextRoutes {
-		if selected.requests == nil {
-			candidate := route
-			candidate.Context.Life = retained.Context.Life
-			claim, err := pinrouting.ConnectExecutionClaim(compiled, candidate)
+		expected := retained.ConnectClaim
+		if selected.requests != nil {
+			var continuation *pinrouting.ReplyRequestContinuation
+			for _, record := range selected.requests {
+				if retained.Context.ReplyContextID() == record.ID && compiled.MatchesReplyRecord(record) {
+					if continuation != nil {
+						return nil, fmt.Errorf("selected request has ambiguous compiled reply bindings")
+					}
+					value := pinrouting.ReplyRequestContinuation{Record: record, Plan: compiled}
+					continuation = &value
+				}
+			}
+			if continuation == nil {
+				continue
+			}
+			var err error
+			expected, err = continuation.ClaimForDelivery(retained)
 			if err != nil {
 				return nil, err
 			}
-			if !claim.Equal(retained.ConnectClaim) || !reflect.DeepEqual(candidate.Context.Normalized(), retained.Context.Normalized()) {
-				continue
-			}
-			if found {
-				return nil, fmt.Errorf("selected recipient has ambiguous exact execution-life claims")
-			}
-			matched, found = retained.Context.Life, true
-			continue
-		}
-		var continuation *pinrouting.ReplyRequestContinuation
-		for _, record := range selected.requests {
-			if retained.Context.ReplyContextID() == record.ID && compiled.MatchesReplyRecord(record) {
-				if continuation != nil {
-					return nil, fmt.Errorf("selected request has ambiguous compiled reply bindings")
-				}
-				value := pinrouting.ReplyRequestContinuation{Record: record, Plan: compiled}
-				continuation = &value
-			}
-		}
-		if continuation == nil {
-			continue
-		}
-		expected, err := continuation.ClaimForDelivery(retained)
-		if err != nil {
-			return nil, err
 		}
 		candidate := route
 		candidate.Context.Life = retained.Context.Life
@@ -230,7 +218,7 @@ func selectedForkExecutionLife(ctx context.Context, event events.Event, compiled
 			continue
 		}
 		if found {
-			return nil, fmt.Errorf("selected request has ambiguous exact execution-life claims")
+			return nil, fmt.Errorf("selected recipient has ambiguous exact execution-life claims")
 		}
 		matched, found = retained.Context.Life, true
 	}
