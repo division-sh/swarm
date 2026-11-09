@@ -112,8 +112,17 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 		result = listed.Accounts[0]
 		ack := hitl[0].Delivery(0)
 		if result.Binding == nil || ack == nil || ack["chat_id"] != result.Binding.ConversationRef ||
-			ack["text"] != "Swarm operator successfully connected" || hitl[0].Delivery(1) != nil {
+			ack["text"] != "Swarm operator successfully connected" {
 			t.Fatal("deployment connect did not acknowledge exactly its committed operator binding", ack)
+		}
+		acknowledgments := 0
+		for index := 0; hitl[0].Delivery(index) != nil; index++ {
+			if hitl[0].Delivery(index)["text"] == "Swarm operator successfully connected" {
+				acknowledgments++
+			}
+		}
+		if acknowledgments != 1 {
+			t.Fatalf("deployment connect acknowledgment count=%d, want one", acknowledgments)
 		}
 	} else if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
 		t.Fatal(err)
