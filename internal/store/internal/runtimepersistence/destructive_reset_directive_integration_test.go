@@ -100,7 +100,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		t.Fatalf("derive test agent prompt: %v", err)
 	}
 	rec := runtimemanager.PersistedAgent{
-		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Identity: identity, Role: "test", Model: "regular", Intent: intent, Prompt: prompt},
+		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Identity: identity, FlowID: ".", Role: "test", Model: "regular", Intent: intent, Prompt: prompt},
 		Status:    "active",
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),

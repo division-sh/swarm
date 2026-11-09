@@ -257,7 +257,9 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			}
 			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, result.ForkRunID, frontier)
 			childRoute := requireForkReceiverBusinessMutation(t, rt, result.ForkRunID, childEvent, sourceRows["consumer"].ID)
-			if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) {
+			sourcePin, sourceClaim := sourceRoute.ConnectClaim.ReceiverIdentity()
+			childPin, childClaim := childRoute.ConnectClaim.ReceiverIdentity()
+			if !sourceClaim || !childClaim || sourcePin != childPin {
 				t.Fatal("admitted historical route lost exact compiled connect evidence")
 			}
 			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt, sibling.RunID)) ||

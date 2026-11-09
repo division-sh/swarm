@@ -3273,7 +3273,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatal(err)
 	}
 	record := runtimemanager.PersistedAgent{Config: targetConfig, Topology: topology, Status: "active", HiredBy: "test", StartedAt: now}
-	if _, err := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+	current, err := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Trigger: "competition-proof",
 		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{
 			Owner: runfork.LifecycleDiagnosticSelectedFork, Causality: runfork.LifecycleDiagnosticObservation,
@@ -3281,9 +3281,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 			ForkPoint: admission.ForkPoint, ForkEventID: admission.ForkEventID,
 		},
 		Identity: targetIdentity, AgentID: targetIdentity.AgentID(), ConfigRevision: targetRevision,
-		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered, RunMode: runtimemanager.AgentRunModeStopped,
+		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRunning, RunMode: runtimemanager.AgentRunModeAuthoritativeDeliveryOnly,
 		Topology: topology, Agent: &record, Now: now,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	authority.Target = runtimeeffects.UsageTarget{
@@ -3319,6 +3320,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	frame, causalEvent := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.SourceArtifactFact, targetConfig.Model, targetConfig.ResolvedModel)
 	providerCtx = runtimecorrelation.WithSourceArtifactFact(providerCtx, baseRequest.LoadedSource.SourceArtifactFact)
 	providerCtx = runtimeeffects.WithTurnInstanceSource(providerCtx, baseRequest.LoadedSource.Source)
+	providerCtx = runtimeeffects.WithLifecycleToken(providerCtx, runtimeeffects.LifecycleToken{
+		RuntimeEpoch: current.RuntimeEpoch, Identity: current.Identity, AgentID: current.AgentID, Generation: current.Generation,
+	})
 	providerCtx = runtimecorrelation.WithInboundEvent(providerCtx, causalEvent)
 	causalEvent, err = eventfixture.BindPayload(causalEvent)
 	if err != nil {

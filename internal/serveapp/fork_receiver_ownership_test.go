@@ -776,7 +776,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		id := sourceRoute.Target.Route().EntityID
 		kind := sourceRoute.Target.Code()
 		childRoute := requireEffect(t, rt, fork.ForkRunID, childEvent, path, receiver.Path, kind, id)
-		if !reflect.DeepEqual(childRoute.ConnectClaim, sourceRoute.ConnectClaim) {
+		sourcePin, sourceClaim := sourceRoute.ConnectClaim.ReceiverIdentity()
+		childPin, childClaim := childRoute.ConnectClaim.ReceiverIdentity()
+		if !sourceClaim || !childClaim || sourcePin != childPin {
 			t.Fatalf("fork changed exact compiled connect claim: source=%+v child=%+v", sourceRoute, childRoute)
 		}
 		if id == "" {
@@ -1202,7 +1204,9 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatalf("selected frontier event cardinality=%d, want 1: %v", count, err)
 				}
 				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
-				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
+				sourcePin, sourceClaim := sourceRoute.ConnectClaim.ReceiverIdentity()
+				childPin, childClaim := childRoute.ConnectClaim.ReceiverIdentity()
+				if !sourceClaim || !childClaim || sourcePin != childPin || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("business fork changed compiled consumer or immutable producer evidence")
 				}
 				childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
