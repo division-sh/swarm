@@ -351,7 +351,7 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 	t.Helper()
 	var matched []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID, sourceEvent) {
 		node, ok := delivery.route.Recipient.Node()
 		if delivery.eventID == sourceEvent && ok && node.FlowPath() == path && node.NodeID() == "collector" {
 			matched = append(matched, delivery)
@@ -1079,7 +1079,7 @@ func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRunt
 	t.Helper()
 	var exact []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID, eventID) {
 		if node, ok := delivery.route.Recipient.Node(); delivery.eventID == eventID && ok && node.FlowPath() == "consumer" && node.NodeID() == "collector" {
 			exact = append(exact, delivery)
 			deliveryID = id
