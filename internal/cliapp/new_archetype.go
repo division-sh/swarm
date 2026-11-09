@@ -137,7 +137,7 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 		return nil
 	}
 	fmt.Fprintln(out, "  swarm verify --portable")
-	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")
+	fmt.Fprintln(out, "  swarm test tests/smoke.yaml")
 	fmt.Fprintln(out, "  swarm secrets set -- 'telegram.telegram_bot_token'")
 	fmt.Fprintln(out, "  swarm serve --dev")
 	return nil

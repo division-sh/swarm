@@ -15013,6 +15013,7 @@ flow_model:
   nesting:
     canonical_owner: platform-spec.yaml#filesystem_source_model.flow_tree
     rule: Nested flows are ordinary live child directories; resource branches are not flows.
+    authoring_depth: YAML nesting depth is unbounded with no soft-depth heuristic; any future change is considered with its own concrete example.
   pins:
     description: Pins are declared names-only event interfaces. The platform validates exact boundary wiring at boot.
     input_event_pins:
@@ -29483,7 +29484,7 @@ cli_specification:
       - API/runtime method semantics
     source_root_resolution:
       canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
-      rule: Source-aware local commands use the captured invocation directory when the root operand is omitted or `.`; one positional directory selects an alternate root. The first positional slot of `test` is always the root. Source-free modes never inspect a local root.
+      rule: Source-aware local commands use the captured invocation directory when the root operand is omitted or `.`; one positional directory selects an alternate root. A sole admitted scenario file or label selects that scenario from cwd for `test`; ambiguous directory/scenario arguments refuse with explicit-form teaching. Source-free modes never inspect a local root.
   tiers:
     must_have: 'Closure-gate command set for the promoted CLI v2 catalog.'
     should_have: 'Subsequent slices and backlog commands; each still requires a gated implementation child before code changes.'
@@ -29633,7 +29634,7 @@ cli_specification:
         status:
           output: 'Project owner: <native lease observation; separately labeled last admitted generation>'
     test:
-      command: swarm test [directory] [scenario-label] [--derive <flow>] [--input <pin>|--all-inputs] [--timeout <duration>] [--poll-interval <duration>] [--workspace-backend host|docker]
+      command: swarm test [directory|scenario-label] [scenario-label] [--derive <flow>] [--input <pin>|--all-inputs] [--timeout <duration>] [--poll-interval <duration>] [--workspace-backend host|docker]
       group: author_validate
       tier: should_have
       implementation_status: implemented_first_slice
@@ -43934,13 +43935,13 @@ filesystem_source_model:
     invocation_invariance: |
       With effective config and platform inputs fixed, relative/absolute operands under or outside cwd, omission/dot, explicit root aliases, and symlinked invocation directories selecting the same tree have identical verification outcomes, bundle hashes, catalog labels, static-data IDs, and static content. Host paths in diagnostics are not semantic identity. Catalog reconstruction and runtime read_flow_data consume admitted bytes, not the original directory.
     rule: |
-      Omission and `.` select exactly the captured invocation directory. One positional root is the only alternate. There is no ancestor, repository, manifest, package, config, environment, selected-context, or inferred-project fallback. For `swarm test`, the first positional slot is always the root; targeting one scenario from cwd therefore uses `swarm test . <scenario-label>`.
+      Omission and `.` select exactly the captured invocation directory. One positional root is the only alternate. There is no ancestor, repository, manifest, package, config, environment, selected-context, or inferred-project fallback. For `swarm test`, an existing directory selects the root without admitting unrelated cwd source; a sole exact admitted tests-resource file or label selects that scenario from cwd. Directory plus label remains explicit, including `swarm test . <scenario-label>`. A positive directory observation normally excludes the same path as a scenario; distinct normalized-file evidence requires native cwd membership checking, with ambiguity refused and IO/admission errors preserved rather than treated as absence. Only that exceptional successful nonmember check may admit both a candidate cwd artifact and the selected directory artifact; execution still captures one selected bundle before session startup.
     source_aware_commands:
       - swarm verify [directory]
       - swarm describe [directory]
       - swarm describe routes [directory]
       - swarm describe pack [provider] [directory]
-      - swarm test [directory] [scenario-label]
+      - swarm test [directory|scenario-label] [scenario-label]
       - swarm run start [directory]
       - swarm serve [directory]
       - swarm packs list [directory]

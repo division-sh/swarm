@@ -84,7 +84,7 @@ func TestScaffoldNextStepsUseCurrentDirectory(t *testing.T) {
 			if name == "whatsapp-receptionist" {
 				want += "  swarm channel connect whatsapp\n  Set operator_account in policy.yaml to the linked number, including +.\n  swarm verify --portable\n  swarm serve\n"
 			} else {
-				want += "  swarm verify --portable\n  swarm test . tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
+				want += "  swarm verify --portable\n  swarm test tests/smoke.yaml\n  swarm secrets set -- 'telegram.telegram_bot_token'\n  swarm serve --dev\n"
 			}
 			if !strings.HasSuffix(out.String(), want) {
 				t.Fatalf("wrong next steps:\n%s", out.String())

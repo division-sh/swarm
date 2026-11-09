@@ -115,6 +115,12 @@ func TestScenarioFixturePreparationUsesArtifactAndSingleEvaluation(t *testing.T)
 			t.Fatalf("accepted %s", label)
 		}
 	}
+	if err := requireUnambiguousScenarioDirectory("tests/fixture.yaml ", "tests/fixture.yaml", artifact); err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "swarm test . tests/fixture.yaml") {
+		t.Fatalf("captured scenario/directory collision: %v", err)
+	}
+	if err := requireUnambiguousScenarioDirectory("tests/fixture.json ", "tests/fixture.json", artifact); err != nil {
+		t.Fatalf("non-scenario member inferred as a scenario: %v", err)
+	}
 }
 
 func TestScenarioAdmissionRefusesBeforeSessionAcquisition(t *testing.T) {
@@ -141,13 +147,57 @@ func TestScenarioAdmissionRefusesBeforeSessionAcquisition(t *testing.T) {
 				acquired = true
 				return errors.New("must not acquire")
 			}
-			var out, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"test", sourceRoot, "tests/negative.yaml"}, &out, &stderr, opts)
-			if code != scenarioTestExitValidation || acquired {
-				t.Fatalf("code=%d acquired=%v stderr=%s", code, acquired, stderr.String())
+			for _, selection := range []struct {
+				cwd  string
+				args []string
+			}{
+				{RepoRoot(), []string{"test", sourceRoot, "tests/negative.yaml"}},
+				{sourceRoot, []string{"test", "tests/negative.yaml"}},
+			} {
+				var out, stderr bytes.Buffer
+				code := executeRootCommandWithOptions(context.Background(), selection.cwd, selection.args, &out, &stderr, opts)
+				if code != scenarioTestExitValidation || acquired {
+					t.Fatalf("code=%d acquired=%v stderr=%s", code, acquired, stderr.String())
+				}
 			}
 		})
 	}
+	t.Run("selection refuses before session", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		root := writeScenarioRunnerFixture(t)
+		var acquired bool
+		opts := defaultRootCommandOptions()
+		opts.runTest = func(context.Context, TestSessionRequest, func(context.Context, TestSessionEndpoint) error) error {
+			acquired = true
+			return errors.New("must not acquire")
+		}
+		for _, row := range []struct {
+			args []string
+			want string
+		}{
+			{[]string{"missing.yaml"}, "no such file"},
+			{[]string{"broken"}, "no such file"},
+			{[]string{"tests/fixtures/item-received.yaml"}, "unsupported scenario field"},
+			{[]string{"tests/empire-routing.yaml", "tests/other.yaml"}, "use a directory"},
+			{[]string{"tests/empire-routing.yaml", "--derive", "."}, "--derive cannot be combined"},
+		} {
+			if row.args[0] == "broken" {
+				if err := os.Symlink("absent", filepath.Join(root, "broken")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), root, append([]string{"test"}, row.args...), &out, &stderr, opts)
+			if row.args[0] == "broken" {
+				if err := os.Remove(filepath.Join(root, "broken")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code != scenarioTestExitValidation || acquired || !strings.Contains(stderr.String(), row.want) {
+				t.Fatalf("%v: code=%d acquired=%v stderr=%s", row.args, code, acquired, &stderr)
+			}
+		}
+	})
 }
 
 func TestScenarioPreparationRetainsExactKeysAndRejectsCollisions(t *testing.T) {

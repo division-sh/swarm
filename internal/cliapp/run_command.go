@@ -247,6 +247,9 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 	}
+	if strings.TrimSpace(opts.sourceRoot) == "" && strings.TrimSpace(opts.connectURL) == "" {
+		opts.sourceRoot = root.Path()
+	}
 	if strings.TrimSpace(opts.sourceRoot) != "" {
 		_, bundle, _, err := loadConfiguredCLIWorkflowModule(root.Path(), CLISourcePathOptions{SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath})
 		if err != nil {
