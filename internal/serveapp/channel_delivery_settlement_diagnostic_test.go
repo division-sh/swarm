@@ -91,6 +91,14 @@ func readChannelDeliverySettlementDiagnostic(ctx context.Context, db *sql.DB, de
 			ON a.principal_id=p.principal_id AND a.interface_key=p.interface_key
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			WHERE CAST(p.delivery_id AS TEXT)=$1 ORDER BY a.created_at,a.activation_id LIMIT 21`},
+		{"deployment_registrations", `SELECT CAST(o.operation_id AS TEXT) AS operation_id,
+			CAST(o.operation_revision AS TEXT) AS operation_revision, o.phase,
+			CAST(child.operation_id AS TEXT) AS identity_operation_id, child.state AS identity_state
+			FROM channel_delivery_plans p JOIN operator_channel_bindings binding
+			ON binding.interface_key=p.interface_key AND binding.principal_id=p.principal_id
+			JOIN operator_channel_operations child ON child.operation_id=binding.operation_id
+			JOIN deployment_channel_operations o ON o.operation_id=child.onboarding_operation_id
+			WHERE CAST(p.delivery_id AS TEXT)=$1 ORDER BY o.created_at,o.operation_id LIMIT 21`},
 		{"renders", `SELECT CAST(r.render_id AS TEXT) AS render_id,
 			CAST(r.source_revision AS TEXT) AS source_revision, r.render_hash,
 			CAST(r.created_at AS TEXT) AS created_at,
@@ -209,22 +217,12 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "chat")
-			if h.registration.DeploymentRegistration {
-				registeredChannelMailboxCLI(t, h, true, "view", card)
-			} else {
-				waitChannelAnchorReceipt(t, db, card)
-				waitChannelDeliverySendsSettled(t, db, backend)
-			}
+			waitChannelAnchorReceipt(t, db, card)
+			waitChannelDeliverySendsSettled(t, db, backend)
 			var deliveryID string
 			err := db.QueryRow(`SELECT CAST(p.delivery_id AS TEXT) FROM channel_delivery_plans p
 				JOIN channel_delivery_receipts r ON r.delivery_id=p.delivery_id
 				WHERE p.source_kind='card' ORDER BY p.created_at LIMIT 1`).Scan(&deliveryID)
-			if h.registration.DeploymentRegistration {
-				if err != sql.ErrNoRows {
-					t.Fatalf("CLI-only card acquired channel receipt authority: delivery=%s err=%v", deliveryID, err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -233,10 +231,19 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(evidence["plan_source_default"].([]map[string]string)) != 1 ||
-				len(evidence["activations"].([]map[string]string)) == 0 ||
 				len(evidence["receipts"].([]map[string]string)) == 0 ||
 				len(evidence["operations"].([]map[string]any)) == 0 {
 				t.Fatal("diagnostic omitted actual plan/default/activation/receipt/operation evidence")
+			}
+			activations := evidence["activations"].([]map[string]string)
+			registrations := evidence["deployment_registrations"].([]map[string]string)
+			if h.registration.DeploymentRegistration {
+				if len(activations) != 0 || len(registrations) != 1 || registrations[0]["operation_id"] != h.registration.OperationID ||
+					registrations[0]["phase"] != "succeeded" || registrations[0]["identity_state"] != "bound" {
+					t.Fatal("diagnostic confused the actual deployment parent with a runtime activation", evidence)
+				}
+			} else if len(activations) == 0 || len(registrations) != 0 {
+				t.Fatal("diagnostic lost its runtime parent", evidence)
 			}
 		})
 	}

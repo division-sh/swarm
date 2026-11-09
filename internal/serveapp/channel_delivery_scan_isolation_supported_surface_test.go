@@ -15,96 +15,96 @@ import (
 
 func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		t.Run(string(backend), func(t *testing.T) {
-			workerLog := &lockedBuffer{}
-			previousLog := log.Writer()
-			log.SetOutput(io.MultiWriter(previousLog, workerLog))
-			defer log.SetOutput(previousLog)
-			h, db, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
-			var cards [2]string
-			var messages [2]int
-			for index := range cards {
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
-					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
-				})
-				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
-				if !h.registration.DeploymentRegistration {
-					messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+		for _, presentation := range []string{"cli", "channel"} {
+			t.Run(string(backend)+"/"+presentation, func(t *testing.T) {
+				workerLog := &lockedBuffer{}
+				previousLog := log.Writer()
+				log.SetOutput(io.MultiWriter(previousLog, workerLog))
+				defer log.SetOutput(previousLog)
+				h, db, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
+				var cards [2]string
+				var messages [2]int
+				for index := range cards {
+					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+						"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
+						"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
+					})
+					cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+					if presentation == "channel" {
+						messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+					}
+					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
+						"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("scan-isolation-pause-%d", index),
+					})
 				}
-				requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
-					"run_id": seed.RunID, "idempotency_key": fmt.Sprintf("scan-isolation-pause-%d", index),
-				})
-			}
-			if h.registration.DeploymentRegistration {
-				before := readRegisteredChannelCard(t, h, cards[0])
-				registeredChannelMailboxCLI(t, h, false, "decide", cards[0], "not-an-authored-option")
-				registeredChannelMailboxCLI(t, h, true, "defer", cards[1], "--until", time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
-				if after := readRegisteredChannelCard(t, h, cards[0]); after.Status != before.Status || after.DecisionEventID != "" || string(after.Snapshot) != string(before.Snapshot) {
-					t.Fatal("refused CLI option gained authority over the sibling decision")
+				if presentation == "cli" {
+					before := readRegisteredChannelCard(t, h, cards[0])
+					registeredChannelMailboxCLI(t, h, false, "decide", cards[0], "not-an-authored-option")
+					registeredChannelMailboxCLI(t, h, true, "defer", cards[1], "--until", time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano))
+					if after := readRegisteredChannelCard(t, h, cards[0]); after.Status != before.Status || after.DecisionEventID != "" || string(after.Snapshot) != string(before.Snapshot) {
+						t.Fatal("refused CLI option gained authority over the sibling decision")
+					}
+					var second struct {
+						Card struct {
+							DeferredUntil string `json:"deferred_until"`
+						} `json:"decision_card"`
+					}
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cards[1]}, &second)
+					if second.Card.DeferredUntil == "" {
+						t.Fatal("independent CLI deferral was starved")
+					}
+					return
 				}
-				var second struct {
-					Card struct {
-						DeferredUntil string `json:"deferred_until"`
-					} `json:"decision_card"`
-				}
-				requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cards[1]}, &second)
-				if second.Card.DeferredUntil == "" {
-					t.Fatal("independent CLI deferral was starved")
-				}
-				// The compiled channel-render fault and receipt update checks below
-				// remain deferred; this is canonical CLI mutation isolation only.
-				return
-			}
-			// Negative fault injection only: neither source cards nor authority are fabricated.
-			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancelInjection()
-			conn, err := db.Conn(injectionCtx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer conn.Close()
-			if backend == servedparity.BackendDefaultSQLite {
-				// The served writer may hold SQLite's lock; configure only this fault-injection connection.
-				if _, err := conn.ExecContext(injectionCtx, `PRAGMA busy_timeout=5000`); err != nil {
+				// Negative fault injection only: neither source cards nor authority are fabricated.
+				injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelInjection()
+				conn, err := db.Conn(injectionCtx)
+				if err != nil {
 					t.Fatal(err)
 				}
-			}
-			result, err := conn.ExecContext(injectionCtx, `UPDATE channel_delivery_renders SET render_input='{}'
+				defer conn.Close()
+				if backend == servedparity.BackendDefaultSQLite {
+					// The served writer may hold SQLite's lock; configure only this fault-injection connection.
+					if _, err := conn.ExecContext(injectionCtx, `PRAGMA busy_timeout=5000`); err != nil {
+						t.Fatal(err)
+					}
+				}
+				result, err := conn.ExecContext(injectionCtx, `UPDATE channel_delivery_renders SET render_input='{}'
 				WHERE render_id IN (SELECT current_render_id FROM channel_delivery_plans WHERE source_id=$1)`, cards[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-				t.Fatalf("fault did not address one actual frozen render: rows=%d err=%v", rows, err)
-			}
-			if err := conn.Close(); err != nil {
-				t.Fatal(err)
-			}
-			var deferred map[string]any
-			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{
-				"card_id": cards[1], "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
-				"idempotency_key": "scan-isolation-defer",
-			}, &deferred)
-			deadline := time.Now().Add(20 * time.Second)
-			for {
-				updated := false
-				for _, edit := range h.provider.Edits() {
-					updated = updated || (fmt.Sprint(edit["message_id"]) == fmt.Sprint(messages[1]) && strings.Contains(fmt.Sprint(edit["text"]), "Deferred until: "))
+				if err != nil {
+					t.Fatal(err)
 				}
-				if updated && strings.Contains(workerLog.String(), "freeze channel delivery") {
-					break
+				if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+					t.Fatalf("fault did not address one actual frozen render: rows=%d err=%v", rows, err)
 				}
-				if time.Now().After(deadline) {
-					t.Fatalf("compiled scan did not isolate corrupt render and update second receipt: edits=%v\n%s", h.provider.Edits(), h.process.outputString())
+				if err := conn.Close(); err != nil {
+					t.Fatal(err)
 				}
-				time.Sleep(20 * time.Millisecond)
-			}
-			var state, status string
-			if err := db.QueryRow(`SELECT p.state,c.status FROM channel_delivery_plans p
+				var deferred map[string]any
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{
+					"card_id": cards[1], "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
+					"idempotency_key": "scan-isolation-defer",
+				}, &deferred)
+				deadline := time.Now().Add(20 * time.Second)
+				for {
+					updated := false
+					for _, edit := range h.provider.Edits() {
+						updated = updated || (fmt.Sprint(edit["message_id"]) == fmt.Sprint(messages[1]) && strings.Contains(fmt.Sprint(edit["text"]), "Deferred until: "))
+					}
+					if updated && strings.Contains(workerLog.String(), "freeze channel delivery") {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("compiled scan did not isolate corrupt render and update second receipt: edits=%v\n%s", h.provider.Edits(), h.process.outputString())
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				var state, status string
+				if err := db.QueryRow(`SELECT p.state,c.status FROM channel_delivery_plans p
 				JOIN decision_cards c ON c.card_id=p.source_id WHERE p.source_id=$1`, cards[0]).Scan(&state, &status); err != nil || state != "sent" || status != "pending" {
-				t.Fatalf("corrupt render gained new authority: state=%s status=%s err=%v", state, status, err)
-			}
-		})
+					t.Fatalf("corrupt render gained new authority: state=%s status=%s err=%v", state, status, err)
+				}
+			})
+		}
 	}
 }

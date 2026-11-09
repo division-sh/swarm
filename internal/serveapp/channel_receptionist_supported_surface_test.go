@@ -81,7 +81,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 				t.Fatalf("operator card escaped operator conversation: %v", card)
 			}
 			var found bool
-			token, found = telegramCallbackToken(card, "retire")
+			token, found = telegramCallbackToken(card, "Retire")
 			if !found {
 				t.Fatalf("operator card has no retire action: %v", card)
 			}
