@@ -459,15 +459,20 @@ func (c *DeploymentChannelControl) DeploymentTransport(ctx context.Context, expe
 	if err != nil || c.service == nil || c.operatorAccount.Provider != c.provider {
 		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, errors.Join(channelonboarding.ErrNotFound, err)
 	}
+	if expected == (channelnative.TransportParent{}) {
+		op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), c.operatorAccount)
+		if err != nil {
+			return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
+		}
+		if op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation {
+			return channelonboarding.Result{}, packs.OutboundBindingPlan{}, channelonboarding.ErrNotFound
+		}
+	}
 	selected, err := c.service.DeploymentOperatorBinding(ctx, c.operatorAccount)
 	if err != nil {
 		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
 	}
 	op, binding, identity := selected.Operation, selected.Binding, selected.IdentityOperation
-	if expected == (channelnative.TransportParent{}) &&
-		(op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) {
-		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, channelonboarding.ErrNotFound
-	}
 	if op.Phase != channelonboarding.PhaseSucceeded || op.FailureCode != "" || binding == nil || identity == nil || selected.Candidate == nil {
 		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, channelonboarding.ErrRevisionConflict
 	}

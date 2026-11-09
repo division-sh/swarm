@@ -190,7 +190,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 		args := []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "--yes",
 			"--client-language", "en", "--api-server", h.endpoint}
 		if h.registration.IdentityOperationID == "" {
-			args = append(args, "--account", "420079")
+			args = append(args, "420079")
 		}
 		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
 		done <- code
