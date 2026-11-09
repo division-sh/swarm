@@ -40,6 +40,7 @@ func requireExactMaterializedRunForkDeploymentFeeds(ctx context.Context, tx *sql
 		if err != nil {
 			return err
 		}
+		carriage.connectPlans = plan.OriginalConnectPlans
 		cursor, err := requireRunForkDeploymentFeedRowTx(ctx, tx, key, targetBundleHash, target, carriage)
 		if err != nil {
 			return err
@@ -181,7 +182,7 @@ func requireRunForkDeploymentOutcomesTx(ctx context.Context, tx *sql.Tx, postgre
 			runfork.RunForkPlan{SourceRunID: carriage.sourceRunID}, runfork.RunForkFanOutPendingReplay{
 				Ordinal: pending.Ordinal, SourceEventID: pending.SourceEventID, SourceDeliveryIDs: pending.SourceDeliveryIDs,
 				InheritedDisposition: pending.InheritedDisposition,
-			}, row, present); err != nil {
+			}, row, present, carriage.connectPlans...); err != nil {
 			return err
 		}
 	}

@@ -632,7 +632,7 @@ type selectedActivityProjectionStore interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	RequireMaterializedRunForkForSelectedContractExecution(context.Context, string, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission, ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 }
 

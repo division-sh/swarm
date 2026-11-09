@@ -13,6 +13,7 @@ import (
 	runtimebudgetspend "github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	managedcapabilities "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -79,7 +80,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 // selected-fork event commit.
 type SelectedContractReplayPersistence interface {
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission, ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	RequireSelectedForkInputPublished(context.Context, runtimeeffects.Authority, runfork.RunForkSelectedContractSourceEvent, events.PayloadSchemaBinding) (bool, error)
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }

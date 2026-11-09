@@ -522,6 +522,7 @@ const (
 // mandatory initial side effects are the delivery manifest, replay scope, and
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
+	ConnectPlans        []runtimepinrouting.ConnectRoutePlan
 	inbound             *preparedInboundPublication
 	Event               events.AdmittedEvent
 	RouteSettlement     events.RouteSettlement

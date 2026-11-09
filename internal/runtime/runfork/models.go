@@ -15,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -226,6 +227,7 @@ const (
 )
 
 type RunForkMaterializeRequest struct {
+	OriginalConnectPlans    []pinrouting.ConnectRoutePlan     `json:"-"`
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	SourceRunID             string
 	At                      string
@@ -275,6 +277,7 @@ type RunForkPlanRequest struct {
 }
 
 type RunForkPlan struct {
+	OriginalConnectPlans      []pinrouting.ConnectRoutePlan                   `json:"-"`
 	SourceRunID               string                                          `json:"source_run_id"`
 	SourceRunStatus           string                                          `json:"source_run_status,omitempty"`
 	SourceRunStartedAt        *time.Time                                      `json:"source_run_started_at,omitempty"`
@@ -1417,6 +1420,7 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
+	OriginalConnectPlans     []pinrouting.ConnectRoutePlan        `json:"-"`
 	PublishedActivityResult  activityresult.PublishedContinuation `json:"-"`
 	InputPublication         InputPublication                     `json:"-"`
 	JoinContinuation         genericschedule.JoinContinuation     `json:"-"`

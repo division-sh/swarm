@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -28,6 +29,7 @@ import (
 
 // MaterializeRequest carries an admitted relation, never caller-authored states.
 type MaterializeRequest struct {
+	OriginalConnectPlans    []pinrouting.ConnectRoutePlan `json:"-"`
 	ForkOperation           *runfork.ForkOperationRequest
 	Preparation             runfork.SelectedForkPreparation
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`

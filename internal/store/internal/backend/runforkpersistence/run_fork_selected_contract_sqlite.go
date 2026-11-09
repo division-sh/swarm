@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -66,7 +67,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return modes, err
 }
 
-func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
+func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, plans ...pinrouting.ConnectRoutePlan) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite store is required")
 	}
@@ -121,6 +122,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				return err
 			}
 			stateAdmission.carriage = original
+			stateAdmission.snapshot.connectPlans = append([]pinrouting.ConnectRoutePlan(nil), plans...)
 			stateAdmission.sourceAt = func(readctx context.Context, readtx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				if runID == sourceRunID {
 					readctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(readctx, originalFact), originalRoot)
@@ -141,7 +143,8 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 					return fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
 				}
 				out = append(out, runfork.RunForkSelectedContractSourceEvent{
-					SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
+					OriginalConnectPlans: append([]pinrouting.ConnectRoutePlan(nil), plans...),
+					SourceEventID:        event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
 					Scope:         string(event.Scope()),
 					RoutingSource: event.RoutingSource(), Payload: event.Payload(),
 				})
