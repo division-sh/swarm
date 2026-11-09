@@ -36,16 +36,22 @@ func CopySelectedConstructedAgentInput(t testing.TB, conversationHistory ...bool
 		t.Fatal("constructed input accepts one conversation-history variant")
 	}
 	agents := "worker:\n  model: regular\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\n"
+	inputs := "  - task.assigned\n"
+	connections := "  - {event: task.assigned, from: ., to: child}\n"
+	events := "task.assigned:\n"
 	if len(conversationHistory) == 1 && conversationHistory[0] {
-		agents = "worker:\n  model: regular\n  memory: true\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\naudit:\n  model: regular\n  intent:\n    inline: Consume the assigned task.\n  subscriptions: [task.assigned]\n"
+		agents = "worker:\n  model: regular\n  memory: true\n  intent: prompts/worker.md\n  subscriptions: [task.assigned]\naudit:\n  model: regular\n  intent:\n    inline: Consume the assigned task.\n  subscriptions: [audit.assigned]\n"
+		inputs += "  - audit.assigned\n"
+		connections += "  - {event: audit.assigned, from: ., to: child}\n"
+		events += "audit.assigned:\n"
 	}
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		"child/manifest.yaml":     "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":             "# fixture: selected-constructed-input\ninputs:\n  - task.assigned\noutputs:\n  - task.assigned\nconnect:\n  - {event: task.assigned, from: ., to: child}\n",
-		"events.yaml":             "task.assigned:\n",
-		"child/schema.yaml":       "# fixture: child\ninputs:\n  - task.assigned\n",
+		"schema.yaml":             "# fixture: selected-constructed-input\ninputs:\n" + inputs + "outputs:\n" + inputs + "connect:\n" + connections,
+		"events.yaml":             events,
+		"child/schema.yaml":       "# fixture: child\ninputs:\n" + inputs,
 		"child/agents.yaml":       agents,
 		"child/prompts/worker.md": "Consume the assigned task.\n",
 	} {
