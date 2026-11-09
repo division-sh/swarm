@@ -98,7 +98,7 @@ func readChannelDeliverySettlementDiagnostic(ctx context.Context, db *sql.DB, de
 			ON binding.interface_key=p.interface_key AND binding.principal_id=p.principal_id
 			JOIN operator_channel_operations child ON child.operation_id=binding.operation_id
 			JOIN deployment_channel_operations o ON o.operation_id=child.onboarding_operation_id
-			WHERE CAST(p.delivery_id AS TEXT)=$1 ORDER BY o.created_at,o.operation_id LIMIT 21`},
+			WHERE CAST(p.delivery_id AS TEXT)=$1 ORDER BY o.operation_id LIMIT 21`},
 		{"renders", `SELECT CAST(r.render_id AS TEXT) AS render_id,
 			CAST(r.source_revision AS TEXT) AS source_revision, r.render_hash,
 			CAST(r.created_at AS TEXT) AS created_at,

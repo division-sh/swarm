@@ -88,6 +88,9 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 							return nil, fmt.Errorf("deployment operator connection has no exact restored control")
 						}
 						result, plan, err := owned.DeploymentTransport(ctx, channelnative.TransportParent{})
+						if errors.Is(err, channelonboarding.ErrNotFound) {
+							continue
+						}
 						if err != nil {
 							return nil, err
 						}

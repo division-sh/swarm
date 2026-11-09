@@ -464,6 +464,10 @@ func (c *DeploymentChannelControl) DeploymentTransport(ctx context.Context, expe
 		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
 	}
 	op, binding, identity := selected.Operation, selected.Binding, selected.IdentityOperation
+	if expected == (channelnative.TransportParent{}) &&
+		(op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) {
+		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, channelonboarding.ErrNotFound
+	}
 	if op.Phase != channelonboarding.PhaseSucceeded || op.FailureCode != "" || binding == nil || identity == nil || selected.Candidate == nil {
 		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, channelonboarding.ErrRevisionConflict
 	}
