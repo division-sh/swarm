@@ -33,6 +33,20 @@ func noticeRequestSource(ctx context.Context, req apiidempotency.Request) (corre
 	return fact, nil
 }
 
+func lockNoticeActionParentTx(ctx context.Context, tx *sql.Tx, action *operatorchannel.InboundAction, postgres bool) error {
+	if action == nil {
+		return nil
+	}
+	return storechannel.LockActionInputParentTx(ctx, tx, *action, postgres)
+}
+
+func requireNoticeActionStateTx(ctx context.Context, tx *sql.Tx, action *operatorchannel.InboundAction, principal, resource string, postgres bool) (string, error) {
+	if action == nil {
+		return "", nil
+	}
+	return storechannel.RequireNoticeActionTx(ctx, tx, *action, principal, resource, postgres)
+}
+
 func (s *MailboxPostgresOwner) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (completion apiidempotency.Completion, replayed bool, err error) {
 	return s.acknowledgeMailboxNotice(ctx, req, nil)
 }
@@ -54,10 +68,8 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 	var changed bool
 	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		changed = false
-		if action != nil {
-			if err := storechannel.LockActionInputParentTx(txctx, tx, *action, true); err != nil {
-				return err
-			}
+		if err := lockNoticeActionParentTx(txctx, tx, action, true); err != nil {
+			return err
 		}
 		if err := storesource.RequirePostgresSourceArtifactTx(txctx, tx, fact.BundleHash()); err != nil {
 			return err
@@ -65,12 +77,9 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 		if err := storeoperator.RequirePrincipalTx(txctx, tx, req.Actor.ID, true); err != nil {
 			return err
 		}
-		state := ""
-		if action != nil {
-			state, err = storechannel.RequireNoticeActionTx(txctx, tx, *action, req.Actor.ID, req.ResourceID, true)
-			if err != nil {
-				return err
-			}
+		state, err := requireNoticeActionStateTx(txctx, tx, action, req.Actor.ID, req.ResourceID, true)
+		if err != nil {
+			return err
 		}
 		if completion, replayed = lease.Replay(); replayed {
 			if action != nil && state != "settled" {
@@ -81,7 +90,6 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 		if action != nil && state != "pending" {
 			return fmt.Errorf("channel notice action already settled without completion")
 		}
-		var err error
 		completion, changed, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, true)
 		if err != nil {
 			return err
@@ -124,10 +132,8 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 	var changed bool
 	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "sqlite notice acknowledgment", func(txctx context.Context, tx *sql.Tx) error {
 		changed = false
-		if action != nil {
-			if err := storechannel.LockActionInputParentTx(txctx, tx, *action, false); err != nil {
-				return err
-			}
+		if err := lockNoticeActionParentTx(txctx, tx, action, false); err != nil {
+			return err
 		}
 		if err := storesource.RequireSQLiteSourceArtifactTx(txctx, tx, fact.BundleHash()); err != nil {
 			return err
@@ -135,12 +141,9 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 		if err := storeoperator.RequirePrincipalTx(txctx, tx, req.Actor.ID, false); err != nil {
 			return err
 		}
-		state := ""
-		if action != nil {
-			state, err = storechannel.RequireNoticeActionTx(txctx, tx, *action, req.Actor.ID, req.ResourceID, false)
-			if err != nil {
-				return err
-			}
+		state, err := requireNoticeActionStateTx(txctx, tx, action, req.Actor.ID, req.ResourceID, false)
+		if err != nil {
+			return err
 		}
 		if completion, replayed = lease.Replay(); replayed {
 			if action != nil && state != "settled" {
@@ -151,7 +154,6 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 		if action != nil && state != "pending" {
 			return fmt.Errorf("channel notice action already settled without completion")
 		}
-		var err error
 		completion, changed, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, false)
 		if err != nil {
 			return err

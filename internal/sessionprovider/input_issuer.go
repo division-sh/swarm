@@ -163,34 +163,42 @@ func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nati
 		ActivationRevision:     native.ActivationRevision, Coordinate: native.SourceContext.Coordinate, TargetSelector: native.TargetSelector,
 		Provider: native.Account.Provider, SessionAccount: native.Account}
 	if !recovery {
-		if !native.matchesOriginalOperation(op, native.SourceContext.Coordinate) {
-			return original, fmt.Errorf("native capture is outside its original responsibility")
+		return o.currentInputResponsibility(ctx, native, op, original)
+	}
+	return o.recoveredInputResponsibility(ctx, native, op, original)
+}
+
+func (o *sessionInputOwner) currentInputResponsibility(ctx context.Context, native nativeSessionInput, op channelonboarding.Operation, original channelonboarding.AdmissionResponsibility) (channelonboarding.AdmissionResponsibility, error) {
+	if !native.matchesOriginalOperation(op, native.SourceContext.Coordinate) {
+		return original, fmt.Errorf("native capture is outside its original responsibility")
+	}
+	original.Credentials = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
+	if native.DeploymentRegistration && !native.RegisteredBusiness && op.Phase == channelonboarding.PhaseSucceeded {
+		if native.Scope != channelonboarding.SessionInputOnboarding || o.operatorAccount.Provider != op.Provider || o.operatorAccount.Account != op.AccountReference {
+			return original, errCaptureScopeChanged
 		}
-		original.Credentials = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
-		if native.DeploymentRegistration && !native.RegisteredBusiness && op.Phase == channelonboarding.PhaseSucceeded {
-			if native.Scope != channelonboarding.SessionInputOnboarding || o.operatorAccount.Provider != op.Provider || o.operatorAccount.Account != op.AccountReference {
-				return original, errCaptureScopeChanged
-			}
-			original.DeploymentOperator = true
-		}
-		if native.RegisteredBusiness {
-			if o.registered == nil || !o.registered.Coordinate.Matches(native.SourceContext.Coordinate) ||
-				o.registered.TargetSelector != native.TargetSelector || o.registered.Publication != native.PublicationBinding {
-				return original, errCaptureScopeChanged
-			}
-			return original, nil
-		}
-		if native.Scope == channelonboarding.SessionInputBusiness {
-			activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
-			if err != nil {
-				return original, err
-			}
-			if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation) {
-				return original, errCaptureScopeChanged
-			}
+		original.DeploymentOperator = true
+	}
+	if native.RegisteredBusiness {
+		if o.registered == nil || !o.registered.Coordinate.Matches(native.SourceContext.Coordinate) ||
+			o.registered.TargetSelector != native.TargetSelector || o.registered.Publication != native.PublicationBinding {
+			return original, errCaptureScopeChanged
 		}
 		return original, nil
 	}
+	if native.Scope == channelonboarding.SessionInputBusiness {
+		activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
+		if err != nil {
+			return original, err
+		}
+		if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation) {
+			return original, errCaptureScopeChanged
+		}
+	}
+	return original, nil
+}
+
+func (o *sessionInputOwner) recoveredInputResponsibility(ctx context.Context, native nativeSessionInput, op channelonboarding.Operation, original channelonboarding.AdmissionResponsibility) (channelonboarding.AdmissionResponsibility, error) {
 	if native.RegisteredBusiness {
 		if o.registered == nil || !o.registered.Coordinate.MatchesDurableIdentity(native.SourceContext.Coordinate) ||
 			o.registered.TargetSelector != native.TargetSelector || o.registered.Publication != native.PublicationBinding ||

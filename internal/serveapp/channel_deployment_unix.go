@@ -66,50 +66,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			if rootErr != nil {
 				return nil, rootErr
 			}
-			var selected []serveDeploymentRegistration
-			for _, provider := range []string{"telegram", "whatsapp"} {
-				client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, provider, stores, process, factory)
-				if err != nil {
-					return nil, err
-				}
-				if account := client.DeploymentOperatorAccount(); provider == "whatsapp" && account.Provider == provider {
-					op, readErr := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
-					if readErr != nil && !errors.Is(readErr, channelonboarding.ErrNotFound) {
-						return nil, errors.Join(readErr, client.Close(context.WithoutCancel(ctx)))
-					}
-					if readErr == nil {
-						mu.Lock()
-						owned := clients[provider+":"+op.OperationID]
-						mu.Unlock()
-						if err := client.Close(context.WithoutCancel(ctx)); err != nil {
-							return nil, err
-						}
-						if owned == nil {
-							return nil, fmt.Errorf("deployment operator connection has no exact restored control")
-						}
-						result, plan, err := owned.DeploymentTransport(ctx, channelnative.TransportParent{})
-						if errors.Is(err, channelonboarding.ErrNotFound) {
-							continue
-						}
-						if err != nil {
-							return nil, err
-						}
-						selected = append(selected, serveDeploymentRegistration{result: result, plan: plan, trigger: owned.DeploymentTrigger()})
-						continue
-					}
-				}
-				result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
-				trigger := client.DeploymentTrigger()
-				closeErr := client.Close(context.WithoutCancel(ctx))
-				if errors.Is(err, channelonboarding.ErrNotFound) && closeErr == nil {
-					continue
-				}
-				if err != nil || closeErr != nil {
-					return nil, errors.Join(err, closeErr)
-				}
-				selected = append(selected, serveDeploymentRegistration{result: result, plan: plan, trigger: trigger})
-			}
-			return selected, nil
+			return readDeploymentTransportRegistrations(ctx, root, config, directory, stores, process, factory, clients, &mu)
 		}
 		runtimeOptions.deployment.read = func(ctx context.Context, parent channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error) {
 			op, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, parent.ID)
@@ -134,58 +91,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if rootErr != nil {
 			return nil, rootErr
 		}
-		if err := requireDeploymentHolder(ctx, capability, req.Params["holder"]); err != nil {
-			return nil, err
-		}
-		var err error
-		provider, _ := req.Params["provider"].(string)
-		id, _ := req.Params["operation_id"].(string)
-		account, _ := req.Params["account"].(string)
-		if req.Method == "channel.list" && account != "" && runtimeOptions.manager != nil {
-			ref := channelonboarding.AccountReference{Provider: provider, Account: account}
-			return observeDeploymentAccountStatus(ctx, ref, runtimeOptions, stores.DeploymentChannels(), clients, &mu)
-		}
-		key := provider + ":" + id
-		mu.Lock()
-		client, found := clients[key]
-		if !found {
-			client, err = cliapp.UseDeploymentChannelControl(ctx, root, config, directory, provider, stores, process, factory)
-		}
-		mu.Unlock()
-		if err != nil {
-			return nil, err
-		}
-		var result json.RawMessage
-		err = client.Dispatch(ctx, req.Method, req.Params, &result)
-		if err == nil && req.Method == "channel.list" && runtimeOptions.manager != nil {
-			result, err = observeDeploymentAccountList(ctx, result, runtimeOptions, stores.DeploymentChannels(), clients, &mu)
-		}
-		head, decodeErr := deploymentControlResult(result, err)
-		if decodeErr != nil {
-			return nil, decodeErr
-		}
-		if err == nil && req.Method == "channel.confirm" {
-			var confirmed struct {
-				Operation operatorchannel.Operation `json:"operation"`
-			}
-			if err := json.Unmarshal(result, &confirmed); err != nil {
-				return nil, err
-			}
-			parent, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, confirmed.Operation.OnboardingOperationID)
-			if err != nil || parent.Provider != provider || parent.IdentityOperationID != confirmed.Operation.OperationID ||
-				parent.PrincipalID != confirmed.Operation.PrincipalID {
-				return nil, errors.Join(channelonboarding.ErrRevisionConflict, err)
-			}
-			head.Operation = parent
-		}
-		rememberDeploymentControl(clients, &mu, provider, head.Operation, client)
-		if !found && head.Operation.OperationID == "" {
-			err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
-		}
-		if err == nil && !slices.Contains([]string{"channel.list", "channel.onboarding_get", "channel.onboarding_select"}, req.Method) && runtimeOptions.refresh != nil {
-			err = runtimeOptions.refresh(ctx, channelonboarding.AccountReference{Provider: head.Operation.Provider, Account: head.Operation.AccountReference})
-		}
-		return result, err
+		return dispatchDeploymentControl(ctx, req, root, config, directory, stores, process, capability, factory, runtimeOptions, clients, &mu)
 	}
 	close := func() error {
 		mu.Lock()
@@ -201,6 +107,125 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu)
 	}
 	return handler, claim, restore, close
+}
+
+func dispatchDeploymentControl(ctx context.Context, req apiv1.Request, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (any, error) {
+	if err := requireDeploymentHolder(ctx, capability, req.Params["holder"]); err != nil {
+		return nil, err
+	}
+	var err error
+	provider, _ := req.Params["provider"].(string)
+	id, _ := req.Params["operation_id"].(string)
+	account, _ := req.Params["account"].(string)
+	if req.Method == "channel.list" && account != "" && runtimeOptions.manager != nil {
+		ref := channelonboarding.AccountReference{Provider: provider, Account: account}
+		return observeDeploymentAccountStatus(ctx, ref, runtimeOptions, stores.DeploymentChannels(), clients, mu)
+	}
+	key := provider + ":" + id
+	mu.Lock()
+	client, found := clients[key]
+	if !found {
+		client, err = cliapp.UseDeploymentChannelControl(ctx, root, config, directory, provider, stores, process, factory)
+	}
+	mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	var result json.RawMessage
+	err = client.Dispatch(ctx, req.Method, req.Params, &result)
+	if err == nil && req.Method == "channel.list" && runtimeOptions.manager != nil {
+		result, err = observeDeploymentAccountList(ctx, result, runtimeOptions, stores.DeploymentChannels(), clients, mu)
+	}
+	head, decodeErr := deploymentControlResult(result, err)
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	if err == nil && req.Method == "channel.confirm" {
+		head.Operation, err = confirmedDeploymentControlParent(ctx, stores, result, provider)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rememberDeploymentControl(clients, mu, provider, head.Operation, client)
+	if !found && head.Operation.OperationID == "" {
+		err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+	}
+	if err == nil && !slices.Contains([]string{"channel.list", "channel.onboarding_get", "channel.onboarding_select"}, req.Method) && runtimeOptions.refresh != nil {
+		err = runtimeOptions.refresh(ctx, channelonboarding.AccountReference{Provider: head.Operation.Provider, Account: head.Operation.AccountReference})
+	}
+	return result, err
+}
+
+func confirmedDeploymentControlParent(ctx context.Context, stores *selected.Owner, result json.RawMessage, provider string) (channelonboarding.Operation, error) {
+	var confirmed struct {
+		Operation operatorchannel.Operation `json:"operation"`
+	}
+	if err := json.Unmarshal(result, &confirmed); err != nil {
+		return channelonboarding.Operation{}, err
+	}
+	parent, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, confirmed.Operation.OnboardingOperationID)
+	if err != nil || parent.Provider != provider || parent.IdentityOperationID != confirmed.Operation.OperationID ||
+		parent.PrincipalID != confirmed.Operation.PrincipalID {
+		return channelonboarding.Operation{}, errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	return parent, nil
+}
+
+func readDeploymentTransportRegistrations(ctx context.Context, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) ([]serveDeploymentRegistration, error) {
+	var selected []serveDeploymentRegistration
+	for _, provider := range []string{"telegram", "whatsapp"} {
+		client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, provider, stores, process, factory)
+		if err != nil {
+			return nil, err
+		}
+		registration, found, err := readDeploymentTransportRegistration(ctx, provider, client, stores, clients, mu)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			selected = append(selected, registration)
+		}
+	}
+	return selected, nil
+}
+
+func readDeploymentTransportRegistration(ctx context.Context, provider string, client *cliapp.DeploymentChannelControl, stores *selected.Owner, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (serveDeploymentRegistration, bool, error) {
+	var absent serveDeploymentRegistration
+	if account := client.DeploymentOperatorAccount(); provider == "whatsapp" && account.Provider == provider {
+		op, readErr := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
+		if readErr != nil && !errors.Is(readErr, channelonboarding.ErrNotFound) {
+			return absent, false, errors.Join(readErr, client.Close(context.WithoutCancel(ctx)))
+		}
+		if readErr == nil {
+			mu.Lock()
+			owned := clients[provider+":"+op.OperationID]
+			mu.Unlock()
+			if err := client.Close(context.WithoutCancel(ctx)); err != nil {
+				return absent, false, err
+			}
+			if owned == nil {
+				return absent, false, fmt.Errorf("deployment operator connection has no exact restored control")
+			}
+			result, plan, err := owned.DeploymentTransport(ctx, channelnative.TransportParent{})
+			if errors.Is(err, channelonboarding.ErrNotFound) {
+				return absent, false, nil
+			}
+			if err != nil {
+				return absent, false, err
+			}
+			return serveDeploymentRegistration{result: result, plan: plan, trigger: owned.DeploymentTrigger()}, true, nil
+		}
+	}
+	result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
+	trigger := client.DeploymentTrigger()
+	closeErr := client.Close(context.WithoutCancel(ctx))
+	if errors.Is(err, channelonboarding.ErrNotFound) && closeErr == nil {
+		return absent, false, nil
+	}
+	if err != nil || closeErr != nil {
+		return absent, false, errors.Join(err, closeErr)
+	}
+	return serveDeploymentRegistration{result: result, plan: plan, trigger: trigger}, true, nil
 }
 
 func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions) publicingress.PendingDeploymentClaim {

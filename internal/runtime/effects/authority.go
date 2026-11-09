@@ -447,46 +447,58 @@ func (a Authority) Valid() bool {
 	case AuthorityChannelConfirmation:
 		return a.validChannelConfirmation()
 	case AuthorityChannelDelivery:
-		delivery := a.ChannelDelivery
-		operationID, err := ChannelDeliveryOperationID(delivery.DeliveryID, delivery.RenderID)
-		return err == nil && delivery.EffectOperationID == operationID && a.ID == operationID &&
-			(delivery.PreviousReceiptOperationID == "" || validUUIDs(delivery.PreviousReceiptOperationID)) &&
-			validUUIDs(delivery.PrincipalID) && delivery.DeliveryEpoch > 0 && delivery.BindingRevision > 0 &&
-			channelTransportValid(delivery.Parent, delivery.ActivationID, delivery.ActivationRevision,
-				delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration,
-				delivery.RuntimeInstanceID, delivery.ContextPublicationGeneration) &&
-			channelTransportFence(delivery.Parent, delivery.ContextPublicationGeneration) == a.FenceGeneration &&
-			nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash) && delivery.PlanGeneration.Valid()
+		return a.validChannelDelivery()
 	case AuthorityChannelActionAck:
-		ack := a.ChannelActionAck
-		operationID, err := ChannelActionAckOperationID(ack.PublicationID)
-		return err == nil && ack.EffectOperationID == operationID && a.ID == operationID &&
-			validUUIDs(ack.Token) && nonEmpty(ack.Provider, ack.ProviderEventID, ack.ProviderAuthorization, ack.InterfaceKey,
-			ack.ExternalAccountRef, ack.ConversationRef, ack.ConversationScope, ack.MessageReference, ack.InteractionRef) &&
-			validUUIDs(ack.ReceiptOperationID, ack.PrincipalID) && ack.BindingRevision > 0 &&
-			channelTransportValid(ack.Parent, ack.ActivationID, ack.ActivationRevision,
-				ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration,
-				ack.RuntimeInstanceID, ack.ContextPublicationGeneration) &&
-			channelTransportFence(ack.Parent, ack.ContextPublicationGeneration) == a.FenceGeneration && ack.PlanGeneration.Valid()
+		return a.validChannelActionAck()
 	case AuthorityChannelNativeSetting:
-		setting := a.ChannelNativeSetting
-		operationID, err := channelnative.InstallOperationID(setting.SettingID, setting.SettingGeneration)
-		entryCommand, commandErr := channelnative.EntryCommand(setting.SettingID, setting.SettingGeneration)
-		return err == nil && setting.EffectOperationID == operationID && a.ID == operationID &&
-			commandErr == nil && setting.EntryCommand == entryCommand &&
-			((setting.ScopeKind == "chat" && setting.MemberReference == "") ||
-				(setting.ScopeKind == "chat_member" && setting.MemberReference != "")) &&
-			setting.SettingGeneration == int64(a.FenceGeneration) &&
-			validUUIDs(setting.PrincipalID) && setting.BindingRevision > 0 &&
-			channelTransportValid(setting.Parent, setting.ActivationID, setting.ActivationRevision,
-				setting.BundleHash, setting.BundleIdentity, setting.PackInventoryGeneration,
-				setting.RuntimeInstanceID, setting.ContextPublicationGeneration) &&
-			strings.HasPrefix(setting.ResourceSlotID, setting.Provider+":") &&
-			nonEmpty(setting.Provider, setting.ConversationRef, setting.EntryContractHash,
-				setting.PackID, setting.PackVersion, setting.PackManifestHash) && setting.PlanGeneration.Valid()
+		return a.validChannelNativeSetting()
 	default:
 		return false
 	}
+}
+
+func (a Authority) validChannelDelivery() bool {
+	delivery := a.ChannelDelivery
+	operationID, err := ChannelDeliveryOperationID(delivery.DeliveryID, delivery.RenderID)
+	return err == nil && delivery.EffectOperationID == operationID && a.ID == operationID &&
+		(delivery.PreviousReceiptOperationID == "" || validUUIDs(delivery.PreviousReceiptOperationID)) &&
+		validUUIDs(delivery.PrincipalID) && delivery.DeliveryEpoch > 0 && delivery.BindingRevision > 0 &&
+		channelTransportValid(delivery.Parent, delivery.ActivationID, delivery.ActivationRevision,
+			delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration,
+			delivery.RuntimeInstanceID, delivery.ContextPublicationGeneration) &&
+		channelTransportFence(delivery.Parent, delivery.ContextPublicationGeneration) == a.FenceGeneration &&
+		nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash) && delivery.PlanGeneration.Valid()
+}
+
+func (a Authority) validChannelActionAck() bool {
+	ack := a.ChannelActionAck
+	operationID, err := ChannelActionAckOperationID(ack.PublicationID)
+	return err == nil && ack.EffectOperationID == operationID && a.ID == operationID &&
+		validUUIDs(ack.Token) && nonEmpty(ack.Provider, ack.ProviderEventID, ack.ProviderAuthorization, ack.InterfaceKey,
+		ack.ExternalAccountRef, ack.ConversationRef, ack.ConversationScope, ack.MessageReference, ack.InteractionRef) &&
+		validUUIDs(ack.ReceiptOperationID, ack.PrincipalID) && ack.BindingRevision > 0 &&
+		channelTransportValid(ack.Parent, ack.ActivationID, ack.ActivationRevision,
+			ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration,
+			ack.RuntimeInstanceID, ack.ContextPublicationGeneration) &&
+		channelTransportFence(ack.Parent, ack.ContextPublicationGeneration) == a.FenceGeneration && ack.PlanGeneration.Valid()
+}
+
+func (a Authority) validChannelNativeSetting() bool {
+	setting := a.ChannelNativeSetting
+	operationID, err := channelnative.InstallOperationID(setting.SettingID, setting.SettingGeneration)
+	entryCommand, commandErr := channelnative.EntryCommand(setting.SettingID, setting.SettingGeneration)
+	return err == nil && setting.EffectOperationID == operationID && a.ID == operationID &&
+		commandErr == nil && setting.EntryCommand == entryCommand &&
+		((setting.ScopeKind == "chat" && setting.MemberReference == "") ||
+			(setting.ScopeKind == "chat_member" && setting.MemberReference != "")) &&
+		setting.SettingGeneration == int64(a.FenceGeneration) &&
+		validUUIDs(setting.PrincipalID) && setting.BindingRevision > 0 &&
+		channelTransportValid(setting.Parent, setting.ActivationID, setting.ActivationRevision,
+			setting.BundleHash, setting.BundleIdentity, setting.PackInventoryGeneration,
+			setting.RuntimeInstanceID, setting.ContextPublicationGeneration) &&
+		strings.HasPrefix(setting.ResourceSlotID, setting.Provider+":") &&
+		nonEmpty(setting.Provider, setting.ConversationRef, setting.EntryContractHash,
+			setting.PackID, setting.PackVersion, setting.PackManifestHash) && setting.PlanGeneration.Valid()
 }
 
 func (a Authority) validChannelConfirmation() bool {
