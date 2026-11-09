@@ -135,43 +135,9 @@ func (s *flowInstanceIndexSnapshot) readAgentOwnership(ctx context.Context, fact
 		if !complete {
 			return fmt.Errorf("turn ownership requires its complete source-bound actor roster")
 		}
-		constructed := observed.Identity()
-		if observed.Owner().RunID != actor.RunID {
-			return fmt.Errorf("turn ownership construction crosses its exact run")
-		}
-		if err := constructed.ValidateConstruction(s.source, actor.RunID); err != nil {
-			return err
-		}
-		if bundle, available := semanticview.Bundle(s.source); !available || bundle == nil {
-			return fmt.Errorf("turn ownership requires its complete declaration inventory")
-		}
-		flow, found := s.source.FlowScopeByID(constructed.TemplateID)
-		if !found {
-			return fmt.Errorf("turn ownership requires its exact declaration scope")
-		}
-		route, err := constructed.Route().AgentIdentityRoute()
+		member, err := s.declaresObservedAgent(observed, actor)
 		if err != nil {
 			return err
-		}
-		member := false
-		declared := 0
-		for _, declaration := range semanticview.AgentDeclarations(s.source) {
-			if strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(flow.ID) {
-				continue
-			}
-			declared++
-			plan, err := semanticview.ScopedAgentNamePlan(s.source, declaration)
-			if err != nil {
-				return err
-			}
-			name, err := plan.Materialize()
-			if err != nil {
-				return err
-			}
-			member = member || name == actor.Name && route == actor.Route
-		}
-		if declared != len(flow.AgentURIs) {
-			return fmt.Errorf("turn ownership declaration inventory is incomplete")
 		}
 		if member {
 			instance, err := observed.WorkflowInstance()
@@ -185,4 +151,46 @@ func (s *flowInstanceIndexSnapshot) readAgentOwnership(ctx context.Context, fact
 		return nil
 	})
 	return ownership, err
+}
+
+func (s *flowInstanceIndexSnapshot) declaresObservedAgent(observed pipeline.FlowInstanceObservation, actor agentidentity.Identity) (bool, error) {
+	constructed := observed.Identity()
+	if observed.Owner().RunID != actor.RunID {
+		return false, fmt.Errorf("turn ownership construction crosses its exact run")
+	}
+	if err := constructed.ValidateConstruction(s.source, actor.RunID); err != nil {
+		return false, err
+	}
+	if bundle, available := semanticview.Bundle(s.source); !available || bundle == nil {
+		return false, fmt.Errorf("turn ownership requires its complete declaration inventory")
+	}
+	flow, found := s.source.FlowScopeByID(constructed.TemplateID)
+	if !found {
+		return false, fmt.Errorf("turn ownership requires its exact declaration scope")
+	}
+	route, err := constructed.Route().AgentIdentityRoute()
+	if err != nil {
+		return false, err
+	}
+	member := false
+	declared := 0
+	for _, declaration := range semanticview.AgentDeclarations(s.source) {
+		if strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(flow.ID) {
+			continue
+		}
+		declared++
+		plan, err := semanticview.ScopedAgentNamePlan(s.source, declaration)
+		if err != nil {
+			return false, err
+		}
+		name, err := plan.Materialize()
+		if err != nil {
+			return false, err
+		}
+		member = member || name == actor.Name && route == actor.Route
+	}
+	if declared != len(flow.AgentURIs) {
+		return false, fmt.Errorf("turn ownership declaration inventory is incomplete")
+	}
+	return member, nil
 }
