@@ -8,11 +8,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
@@ -23,7 +27,22 @@ type servedForkDeliveryEvidence struct {
 
 func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, runID string) map[string]servedForkDeliveryEvidence {
 	t.Helper()
-	graph := pinrouting.CompileConnectGraph(rt.Runtime.Options.WorkflowModule.SemanticSource())
+	var rooted sourceartifact.RootedSource
+	var err error
+	if rt.Postgres != nil {
+		rooted, err = rt.Postgres.LoadRunRootedSource(t.Context(), runID)
+	} else {
+		rooted, err = rt.SQLite.LoadRunRootedSource(t.Context(), runID)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := repoRootForTest()
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := pinrouting.CompileConnectGraph(semanticview.Wrap(bundle))
 	if len(graph.Issues()) != 0 {
 		t.Fatalf("delivery oracle requires its exact admitted connect graph: %+v", graph.Issues())
 	}
