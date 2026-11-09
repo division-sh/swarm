@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "project": "zero-agent-automation",
+  "next": [
+    "cd zero-agent-automation",
+    "swarm verify --portable",
+    "swarm test tests/smoke.yaml",
+    "swarm secrets set -- 'telegram.telegram_bot_token'",
+    "swarm serve --dev"
+  ],
+  "verify": "verify ok: source=zero-agent-automation@1.0.0\nportable structural checks passed; deployment admission not evaluated",
+  "test": "scenario ok: tests/smoke.yaml\nswarm test ok: scenarios=1",
+  "secret": [
+    "Secret value: ",
+    "Confirm secret value: ",
+    "secret set: key=telegram.telegram_bot_token source=file writable=yes shadowed=no present=yes",
+    "Credential presence here is inventory only; static provider/channel requirements use the file tier."
+  ],
+  "serve": [
+    "scratch store; retained store",
+    "is not used",
+    "workspace                  not required",
+    "ready — waiting for events",
+    "shutdown · complete"
+  ]
+}

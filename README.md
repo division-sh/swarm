@@ -162,8 +162,9 @@ swarm test ok: scenarios=1
 
 That is a deterministic mock result, not a Telegram send. The test owns a
 fresh private runtime; it needs no running server, Docker, LLM key or bot
-token. Keep the dot in the test command: its first argument is the source
-directory. Serve and verify use the current directory when it is omitted.
+token. For the v0.7.1 artifact above, keep the dot in the test command: its
+first argument is the source directory. Serve and verify use the current
+directory when it is omitted.
 
 ### The printed follow-on steps
 
@@ -200,6 +201,19 @@ project-local scratch history on each invocation. No explicit SQLite path
 is written by this starter. Plain `serve` uses retained state instead.
 `run start` publishes into an existing serve; it does not boot a one-shot
 runtime in v0.7.1.
+
+### Current source after #3001 (unreleased)
+
+Builds containing [#3001](https://github.com/division-sh/swarm/pull/3001)
+accept a scenario file as the first argument and use the current directory:
+
+```bash
+swarm test tests/smoke.yaml
+```
+
+Their scaffold prints that dotless test command. This is separate from the
+v0.7.1 archive instructions and recorded output above; it does not assert
+that a newer release archive is available.
 
 ### Deployment configuration
 
