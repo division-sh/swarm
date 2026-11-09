@@ -499,10 +499,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			t.Fatalf("fresh actors did not consume their two distinct authored inputs: %+v", result.ForkEvents)
 		}
 		forkRunID := result.Materialization.ForkRunID
+		fresh := q1ComponentSnapshot(t, selected)
 		for table, want := range map[string]int{"agent_sessions": 1, "agent_conversation_audits": 1, "agent_turns": 2} {
-			var count int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, forkRunID).Scan(&count); err != nil || count != want {
-				t.Fatalf("fresh %s rows=%d want=%d err=%v", table, count, want, err)
+			if count := len(q1ComponentRowsWithIdentity(t, fresh, table, "run_id", forkRunID)); count != want {
+				t.Fatalf("fresh %s rows=%d want=%d", table, count, want)
 			}
 		}
 		return
