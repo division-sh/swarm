@@ -7,9 +7,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -20,7 +17,7 @@ import (
 )
 
 func (s *PipelinePostgresOwner) ReadRetainedAgentInstanceOwnershipTx(ctx context.Context, tx *sql.Tx, actor agentidentity.Identity, hash string) (events.InstanceOwnership, error) {
-	source, fact, err := retainedTurnSourceTx(ctx, tx, actor, hash, false)
+	source, fact, err := retainedTurnSourceTx(ctx, tx, actor, hash, false, &s.retainedTurnSource)
 	if err != nil {
 		return events.InstanceOwnership{}, err
 	}
@@ -28,7 +25,7 @@ func (s *PipelinePostgresOwner) ReadRetainedAgentInstanceOwnershipTx(ctx context
 }
 
 func (s *PipelineSQLiteOwner) ReadRetainedAgentInstanceOwnershipTx(ctx context.Context, tx *sql.Tx, actor agentidentity.Identity, hash string) (events.InstanceOwnership, error) {
-	source, fact, err := retainedTurnSourceTx(ctx, tx, actor, hash, true)
+	source, fact, err := retainedTurnSourceTx(ctx, tx, actor, hash, true, &s.retainedTurnSource)
 	if err != nil {
 		return events.InstanceOwnership{}, err
 	}
@@ -37,7 +34,7 @@ func (s *PipelineSQLiteOwner) ReadRetainedAgentInstanceOwnershipTx(ctx context.C
 
 // The outer owner already holds every actor lock. This is retained-source
 // observation, never a demand that an obsolete execution token become current.
-func retainedTurnSourceTx(ctx context.Context, tx *sql.Tx, actor agentidentity.Identity, hash string, sqlite bool) (semanticview.Source, correlation.SourceArtifactFact, error) {
+func retainedTurnSourceTx(ctx context.Context, tx *sql.Tx, actor agentidentity.Identity, hash string, sqlite bool, memo *retainedTurnSourceMemo) (semanticview.Source, correlation.SourceArtifactFact, error) {
 	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
 		return nil, correlation.SourceArtifactFact{}, err
 	}
@@ -59,16 +56,12 @@ func retainedTurnSourceTx(ctx context.Context, tx *sql.Tx, actor agentidentity.I
 	if err != nil {
 		return nil, correlation.SourceArtifactFact{}, err
 	}
-	spec, err := platform.MaterializePlatformSpecFile()
-	if err != nil {
-		return nil, correlation.SourceArtifactFact{}, err
-	}
-	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, spec, contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	source, err := memo.load(ctx, rooted)
 	if err != nil {
 		return nil, correlation.SourceArtifactFact{}, err
 	}
 	fact, err := correlation.DecodeSourceArtifactFact(hash)
-	return semanticview.Wrap(bundle), fact, err
+	return source, fact, err
 }
 
 // The admission owner holds the actor/source/run prefix for this transaction.

@@ -115,6 +115,43 @@ func proveCanceledTurnHistoricalOwnership(t *testing.T, ctx context.Context, f c
 	if !attempt.InstanceOwnership.RunOwned {
 		t.Fatal("historical run-owned control lost its native nonmembership proof")
 	}
+	// Launch has already warmed the owner's compiler memo. It must still read
+	// and validate native root/content rows on each recovery transaction.
+	var hash, root string
+	if err := f.db.QueryRowContext(ctx, `SELECT bundle_hash,source_root_directory FROM runs WHERE run_id=$1`, attempt.Authority.Target.AgentIdentity.RunID).Scan(&hash, &root); err != nil {
+		t.Fatal(err)
+	}
+	var sourceBlob []byte
+	if err := f.db.QueryRowContext(ctx, `SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&sourceBlob); err != nil {
+		t.Fatal(err)
+	}
+	for _, fault := range []struct {
+		name, statement   string
+		key, restoredKey  string
+		changed, original any
+	}{
+		{"missing-root", `UPDATE source_root_admissions SET root_directory=$1 WHERE root_directory=$2 AND bundle_hash=$3`, root, "retired-recovery", "retired-recovery", root},
+		{"corrupt-source", `UPDATE source_artifacts SET source_blob=$1 WHERE bundle_hash=$2`, hash, hash, []byte("not a source artifact"), sourceBlob},
+	} {
+		func() {
+			args := []any{fault.changed, fault.key}
+			restore := []any{fault.original, fault.restoredKey}
+			if fault.name == "missing-root" {
+				args, restore = append(args, hash), append(restore, hash)
+			}
+			if _, err := f.db.ExecContext(ctx, fault.statement, args...); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if _, err := f.db.ExecContext(ctx, fault.statement, restore...); err != nil {
+					t.Fatal(err)
+				}
+			}()
+			if rows, err := f.store.(effects.CanceledTurnRecoveryStore).ListCanceledTurnRecoveries(ctx, request); err == nil || len(rows) != 0 {
+				t.Fatalf("warm compiler memo bypassed %s: rows=%+v err=%v", fault.name, rows, err)
+			}
+		}()
+	}
 	var original []byte
 	if err := f.db.QueryRowContext(ctx, `SELECT authority_evidence FROM runtime_external_effect_attempts WHERE attempt_id=$1`, attempt.AttemptID).Scan(&original); err != nil {
 		t.Fatal(err)
