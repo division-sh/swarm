@@ -228,6 +228,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			constructionOwner := any(eventStore).(runtimebus.FlowInstanceActivationCommitOwner)
 			parent := seedRuntimeTestKeylessSource(t, ctx, constructionOwner, coordinator, semanticview.RootExecutionFlowID(source))
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(flowInstance)}
+			var managedLife events.InstanceLife
 			{
 				construction224Ctx := testLiveExecutionContext(ctx)
 				construction224At := time.Now().UTC()
@@ -251,6 +252,10 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				}
 				if err == nil && !construction224Committed.Acknowledged {
 					t.Fatal("fixture activation was not acknowledged")
+				}
+				managedLife = events.InstanceLife{RunID: runID, FlowInstance: flowInstance, Life: construction224Committed.Plan.Instance.Life}
+				if err := managedLife.Validate(); err != nil {
+					t.Fatalf("acknowledged channel instance life: %v", err)
 				}
 				if construction224Committed.Acknowledged && construction224Committed.Created {
 					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction224Ctx, construction224Committed.Lifecycle); finalizeErr != nil {
@@ -473,7 +478,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if err := fencedOwner.Replace(testAdmittedChannelActivationPublication(t, credentialStore, binding)); err != nil {
 				t.Fatal(err)
 			}
-			proveRegisteredManagedChannelTransport(t, ctx, eventStore, base, fencedExecutor, fencedOwner, binding, actor, calls.Load)
+			managedCtx := events.WithDeliveryContext(ctx, events.DeliveryContext{Life: &managedLife})
+			proveRegisteredManagedChannelTransport(t, managedCtx, eventStore, base, fencedExecutor, fencedOwner, binding, actor, calls.Load)
 		})
 	}
 }
