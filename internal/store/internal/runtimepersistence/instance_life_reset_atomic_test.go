@@ -750,7 +750,7 @@ func prepareNativeResetPlan(t *testing.T, f receiverConfigActivationFixture, pre
 	req.OccurredAt = time.Now().UTC()
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "review.created", "constructor-fixture", "", []byte(`{"account_id":"preserved"}`), 0, previous.Readiness.RunID, events.EventEnvelope{}, req.OccurredAt)
 	if schema, found := semanticview.Wrap(f.bundle).FlowSchemaByID(previous.Identity.TemplateID); found && schema.Instance.Empty() {
-		req.ConstructorInput, req.ResolvedKey, req.TriggerEvent = "", "", events.Event{}
+		req.ConstructorInput, req.ResolvedKey, req.TriggerEvent = "", nil, events.Event{}
 	}
 	req.Restart = &pipeline.FlowInstanceRestart{Life: current.Life, Revision: current.Revision, FinalStage: stage}
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
