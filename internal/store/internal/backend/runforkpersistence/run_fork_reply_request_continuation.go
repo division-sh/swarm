@@ -172,7 +172,7 @@ func (a runForkSourceStateAdmission) projectRequestReplies(ctx context.Context, 
 	return projectRunForkRequestReplies(ctx, tx, a.snapshot, a.point, eventID, a.forkRunID)
 }
 
-func requireRunForkRequestReplyEvidenceTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, postgres bool) error {
+func requireRunForkRequestReplyEvidenceTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, postgres bool, plans ...pinrouting.ConnectRoutePlan) error {
 	validate, resolve := runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint
 	if postgres {
 		validate, resolve = runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint
@@ -184,6 +184,7 @@ func requireRunForkRequestReplyEvidenceTx(ctx context.Context, tx *sql.Tx, linea
 	if admission.snapshot.RunID != lineage.SourceRunID {
 		return fmt.Errorf("request continuation has foreign source binding")
 	}
+	admission.snapshot.connectPlans = plans
 	expected, err := admission.projectRequestReplies(ctx, tx, lineage.SourceEventID)
 	if err != nil {
 		return err

@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -315,7 +316,7 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
 	process := req.Prepared.processOwner
 	var sourceResult startupownership.PreparedForkSourceEventsResult
-	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, req.OriginalRootAdmission, &sourceResult)
+	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, req.OriginalRootAdmission, &sourceResult, pinrouting.CompileConnectGraph(req.Prepared.originalSource.Source).Plans()...)
 	if err != nil {
 		return err
 	}

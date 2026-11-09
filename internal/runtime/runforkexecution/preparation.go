@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
@@ -410,6 +411,7 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		return runforkreadiness.MaterializeRequest{}, err
 	}
 	return runforkreadiness.MaterializeRequest{
+		OriginalConnectPlans:  pinrouting.CompileConnectGraph(p.originalSource.Source).Plans(),
 		RootAdmission:         p.loadedSource.RootedSource.Admission(),
 		ForkOperation:         forkOperation,
 		OriginalLoopCarriage:  p.originalLoopCarriage,

@@ -168,7 +168,7 @@ func projectReplyReturnRoutes(snapshot *runForkRevisionSnapshot, eventID, child 
 	return routes, nil
 }
 
-func requireRunForkReplyReturnEvidenceTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage, routes []events.DeliveryRoute, returns []pinrouting.ReplyReturnContinuation, postgres bool) error {
+func requireRunForkReplyReturnEvidenceTx(ctx context.Context, tx *sql.Tx, lineage runfork.RunForkSelectedContractExecutionLineage, routes []events.DeliveryRoute, returns []pinrouting.ReplyReturnContinuation, postgres bool, plans ...pinrouting.ConnectRoutePlan) error {
 	validate, resolve := runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint
 	if postgres {
 		validate, resolve = runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint
@@ -180,6 +180,7 @@ func requireRunForkReplyReturnEvidenceTx(ctx context.Context, tx *sql.Tx, lineag
 	if a.snapshot.RunID != lineage.SourceRunID {
 		return fmt.Errorf("retained return has foreign source binding")
 	}
+	a.snapshot.connectPlans = plans
 	expected, err := a.projectReplyReturn(ctx, tx, lineage.SourceEventID)
 	if err != nil {
 		return err

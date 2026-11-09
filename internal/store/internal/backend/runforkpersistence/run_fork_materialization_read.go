@@ -58,6 +58,7 @@ func requireMaterializedRunForkSnapshot(ctx context.Context, tx *sql.Tx, postgre
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
+	plan.OriginalConnectPlans = req.OriginalConnectPlans
 	loadSource := sourceadmission.LoadSQLiteTx
 	if postgres {
 		loadSource = sourceadmission.LoadPostgresTx

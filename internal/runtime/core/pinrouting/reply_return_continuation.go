@@ -60,16 +60,30 @@ func (c ReplyReturnContinuation) OrdinaryClaimForDelivery(route events.DeliveryR
 		if !retainedRecipientMatches(plan, route) {
 			continue
 		}
-		target := route.Target.Route()
-		if plan.ReceiverEndpoint().IsRoot() {
-			// Root composition admits the instance before receiver state ownership.
-			// The ordinary claim binds that blueprint, not the later state row.
-			target.EntityID = ""
-		}
-		claim, err := retainedRecipientClaim(plan, route, target)
+		claim, err := plan.ClaimForRetainedDelivery(route)
 		return claim, true, err
 	}
 	return events.ConnectExecutionClaim{}, false, nil
+}
+
+// This recomputes evidence only. The native continuation owner must first
+// match the original complete claim before using the plan for a child route.
+func (p ConnectRoutePlan) ClaimForRetainedDelivery(route events.DeliveryRoute) (events.ConnectExecutionClaim, error) {
+	if !retainedRecipientMatches(p, route) {
+		return events.ConnectExecutionClaim{}, fmt.Errorf("retained recipient differs from its compiled receiver pin")
+	}
+	target := route.Target.Route()
+	if p.ReplyRole() == ConnectReplyRoleRequest {
+		var err error
+		target, err = (ReplyRequestContinuation{Plan: p}).claimTarget(target)
+		if err != nil {
+			return events.ConnectExecutionClaim{}, err
+		}
+	} else if p.ReplyRole() == 0 && p.ReceiverEndpoint().IsRoot() {
+		// Root composition adds state ownership after hashing the blueprint.
+		target.EntityID = ""
+	}
+	return retainedRecipientClaim(p, route, target)
 }
 
 func retainedRecipientClaim(plan ConnectRoutePlan, route events.DeliveryRoute, target events.RouteIdentity) (events.ConnectExecutionClaim, error) {

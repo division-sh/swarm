@@ -72,6 +72,7 @@ type RoutePlan struct {
 	ordinarySource           ordinaryPublicationSource
 	Event                    events.Event
 	ConnectEvaluation        events.ConnectEvaluationLedger
+	ConnectPlans             []runtimepinrouting.ConnectRoutePlan
 	canonicalAdmission       bool
 	AuthorityOwner           routeIntentProducer
 	LiveRecipients           []RoutePlanLiveRecipient
@@ -240,6 +241,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), p.ActivationPlans...)
 	p.ReplyCreations = append([]runtimereplycontext.Record(nil), p.ReplyCreations...)
 	p.ReplyContinuations = append([]runtimepinrouting.ReplyRequestContinuation(nil), p.ReplyContinuations...)
+	p.ConnectPlans = append([]runtimepinrouting.ConnectRoutePlan(nil), p.ConnectPlans...)
 	p.ReplyReturns = append([]runtimepinrouting.ReplyReturnContinuation(nil), p.ReplyReturns...)
 	for i := range p.ReplyReturns {
 		p.ReplyReturns[i] = p.ReplyReturns[i].Normalized()

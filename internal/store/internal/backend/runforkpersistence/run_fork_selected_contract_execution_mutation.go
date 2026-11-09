@@ -14,6 +14,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -658,7 +659,7 @@ func loadSQLiteRunForkSelectedContractEvents(ctx context.Context, q eventrecords
 	return out, nil
 }
 
-func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission, plans ...pinrouting.ConnectRoutePlan) ([]runfork.RunForkSelectedContractSourceEvent, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -714,6 +715,7 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				return err
 			}
 			stateAdmission.carriage = original
+			stateAdmission.snapshot.connectPlans = append([]pinrouting.ConnectRoutePlan(nil), plans...)
 			stateAdmission.sourceAt = func(readctx context.Context, readtx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				if runID == sourceRunID {
 					readctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(readctx, originalFact), originalRoot)
@@ -745,7 +747,8 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 					return fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
 				}
 				out = append(out, runfork.RunForkSelectedContractSourceEvent{
-					SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
+					OriginalConnectPlans: append([]pinrouting.ConnectRoutePlan(nil), plans...),
+					SourceEventID:        event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
 					Scope:         string(event.Scope()),
 					RoutingSource: event.RoutingSource(),
 					Payload:       event.Payload(),
