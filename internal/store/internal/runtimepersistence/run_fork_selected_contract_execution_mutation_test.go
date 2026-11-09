@@ -1509,10 +1509,10 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		forkEventID := seedSelectedContractExecutionForkLineage(t, ctx, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 		finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
 		sessionID := uuid.NewString()
-		identity := mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "flow-a/1")
+		identity := canonicalSelectedContractAgentIdentity(t, materialized.ForkRunID, "agent-a")
 		fields := testAgentIdentityStorageFields(t, identity)
-		seedManagedTurnFixtureAgent(t, ctx, pg, materialized.ForkRunID, identity.AgentID(), identity.FlowInstance())
-		forkRoute := testAgentDeliveryRoute(t, materialized.ForkRunID, "agent-a", "flow-a/1")
+		seedManagedTurnFixtureAgent(t, ctx, pg, materialized.ForkRunID, identity.AgentID(), identity.FlowInstance(), identity)
+		forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 		forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 		forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
 		if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
@@ -1572,7 +1572,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		}
 		turnID := uuid.NewString()
 		turnEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, followUp.ID())
-		turnRoute := testAgentDeliveryRoute(t, materialized.ForkRunID, identity.AgentID(), identity.FlowInstance())
+		turnRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 		if err := commitDeliveryObligationFixture(ctx, pg, turnEvent, turnRoute); err != nil {
 			t.Fatalf("commit fork turn origin: %v", err)
 		}

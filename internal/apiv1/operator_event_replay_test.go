@@ -293,13 +293,8 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				auditTarget := events.RouteIdentity{FlowID: "audit-flow/instance", FlowInstance: "audit-flow/instance", EntityID: auditEntityID}
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.store.(storetest.RunFixtureStore), runID, createdAt.Add(-time.Minute))
-				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
-				opts := runtimebus.EventBusOptions{ContractBundle: source, DeliveryAuthority: authority, SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))}
-				bus, err := newScopedAPITestEventBus(t, f.store, opts)
-				if err != nil {
-					t.Fatal(err)
-				}
-				constructor, err := newAPITestFlowConstructor(t, f.store, bus, opts)
+				opts := runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))}
+				constructor, err := newAPITestFlowConstructor(t, f.store, nil, opts)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -312,10 +307,6 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				})
 				if err != nil {
 					t.Fatal(err)
-				}
-				committed, err := bus.CommitFlowInstanceActivation(ctx, plan)
-				if err != nil || !committed.Acknowledged || !committed.Created {
-					t.Fatalf("construct replay receivers: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
 				}
 				var agentIdentity, auditIdentity agentidentity.Identity
 				for _, construction := range plan.ConstructionPlans() {
@@ -354,6 +345,16 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					}, mustAPITestSourceArtifactFact(runStartTestBundleHashForSource(source))); err != nil {
 						t.Fatalf("UpsertAgent(%s): %v", auditIdentity.AgentID(), err)
 					}
+				}
+				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
+				opts.DeliveryAuthority = authority
+				bus, err := newScopedAPITestEventBus(t, f.store, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed, err := bus.CommitFlowInstanceActivation(ctx, plan)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("construct replay receivers: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
 				}
 				ch := subscribeOperatorReplayIdentity(t, bus, agentIdentity)
 				defer runtimebustest.Unsubscribe(bus, agentID)
