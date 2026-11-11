@@ -7,6 +7,7 @@
   <a href="platform-spec.yaml"><img src="https://img.shields.io/badge/platform--spec-v0.7.0-15803D.svg" alt="Platform spec v0.7.0"></a>
   <a href="https://goreportcard.com/report/github.com/division-sh/swarm"><img src="https://goreportcard.com/badge/github.com/division-sh/swarm" alt="Go Report Card"></a>
   <a href="https://github.com/division-sh/swarm/discussions"><img src="https://img.shields.io/github/discussions/division-sh/swarm" alt="GitHub Discussions"></a>
+  <a href="https://discord.gg/myePVHQM"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://docs.division.sh"><img src="https://img.shields.io/badge/docs-docs.division.sh-15803D.svg" alt="Docs"></a>
 </p>
 
@@ -375,6 +376,7 @@ Available in this repo too:
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | You want to contribute issues, docs, code, or tests. |
 | [`SECURITY.md`](SECURITY.md) | You need to report a suspected vulnerability privately. |
 | [GitHub Discussions](https://github.com/division-sh/swarm/discussions) | You want to ask a question, share a flow, or propose a feature. |
+| [Discord](https://discord.gg/myePVHQM) | You want to chat with the team and other Swarm users. |
 
 ---
 
