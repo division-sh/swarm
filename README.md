@@ -19,7 +19,7 @@ More than a simple orchestrator that decides which agent runs next, Swarm runs t
 
 Single Go binary, local/dev SQLite by default with Postgres as a production opt-in. Multiple LLM backends ship today: the Anthropic API, the Claude CLI, OpenAI-compatible Chat Completions endpoints, native OpenAI Responses, and a credentialless deterministic Python mock runtime.
 
-**Long-term direction:** entire divisions (engineering, support, operations) running as autonomous Swarm flows. Humans in the loop where judgment is required; agents and deterministic system nodes everywhere else.
+**Join the community on [Discord](https://discord.gg/myePVHQM)!**
 
 ---
 
