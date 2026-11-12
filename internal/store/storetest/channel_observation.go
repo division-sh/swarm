@@ -5,13 +5,79 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
 type ChannelObservation interface {
 	render.Observer
 	ListAuthorActivity(context.Context, authoractivity.ListOptions) (authoractivity.ListResult, error)
+	NativeConsumerParent(context.Context, string, bool) (channelnative.TransportParent, error)
+	NativeHistory(context.Context) ([8]string, error)
+	PreservedHistory(context.Context, []string) (string, error)
+	FrozenCardHistory(context.Context, string) (string, error)
+	HistoricalReceipt(context.Context, string) (string, error)
+	GenerationZeroSentPlan(context.Context, string) (string, error)
+	ControlCounts(context.Context, string) (ChannelControlCounts, error)
+	CountSourceCards(context.Context, string, string) (int, error)
+	CountEntryIntents(context.Context) (int, error)
+	RegistrationIndex(context.Context) (string, error)
+	RegistrationCounts(context.Context) (int, int, int, error)
+	DeliveryDefaultState(context.Context) (string, error)
+	CountUnsettledResponsibilities(context.Context) (int, error)
+	EventCardinality(context.Context, string, string) (int, error)
 	Close() error
+}
+
+type ChannelControlCounts = private.ChannelControlCounts
+
+func (o channelObservation) NativeConsumerParent(ctx context.Context, operation string, currentOnly bool) (channelnative.TransportParent, error) {
+	return private.ReadChannelNativeConsumerForTest(ctx, o.selected, operation, currentOnly)
+}
+func (o channelObservation) NativeHistory(ctx context.Context) ([8]string, error) {
+	return private.ReadChannelNativeHistoryForTest(ctx, o.selected)
+}
+func (o channelObservation) PreservedHistory(ctx context.Context, successors []string) (string, error) {
+	return private.ReadChannelPreservedHistoryForTest(ctx, o.selected, successors)
+}
+func (o channelObservation) FrozenCardHistory(ctx context.Context, card string) (string, error) {
+	return private.ReadChannelFrozenCardHistoryForTest(ctx, o.selected, card)
+}
+func (o channelObservation) HistoricalReceipt(ctx context.Context, card string) (string, error) {
+	return private.ReadChannelHistoricalReceiptForTest(ctx, o.selected, card)
+}
+func (o channelObservation) GenerationZeroSentPlan(ctx context.Context, card string) (string, error) {
+	return private.ReadChannelGenerationZeroSentPlanForTest(ctx, o.selected, card)
+}
+func (o channelObservation) ControlCounts(ctx context.Context, token string) (ChannelControlCounts, error) {
+	return private.ReadChannelControlCountsForTest(ctx, o.selected, token)
+}
+func (o channelObservation) CountSourceCards(ctx context.Context, run, source string) (int, error) {
+	return private.CountChannelSourceCardsForTest(ctx, o.selected, run, source)
+}
+func (o channelObservation) CountEntryIntents(ctx context.Context) (int, error) {
+	return private.CountChannelEntryIntentsForTest(ctx, o.selected)
+}
+func (o channelObservation) RegistrationIndex(ctx context.Context) (string, error) {
+	return private.ReadChannelRegistrationIndexForTest(ctx, o.selected)
+}
+func (o channelObservation) RegistrationCounts(ctx context.Context) (int, int, int, error) {
+	return private.ReadChannelRegistrationCountsForTest(ctx, o.selected)
+}
+func (o channelObservation) DeliveryDefaultState(ctx context.Context) (string, error) {
+	return private.ReadChannelDeliveryDefaultStateForTest(ctx, o.selected)
+}
+func (o channelObservation) CountUnsettledResponsibilities(ctx context.Context) (int, error) {
+	return private.CountUnsettledChannelResponsibilitiesForTest(ctx, o.selected)
+}
+func (o channelObservation) EventCardinality(ctx context.Context, run, event string) (int, error) {
+	var count int
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		count, err = private.ReadLifecycleEventCardinalityForTest(ctx, o.selected, run, event)
+		return err
+	})
+	return count, err
 }
 
 func ReadServedChannelConnection(ctx context.Context, selected ReleaseProcessReadOnlyInspection, operationID string) (string, error) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -110,35 +111,31 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				if oldEdits != 1 {
 					t.Fatalf("uncertain provider write was automatically retried/re-edited: %d", oldEdits)
 				}
-				assertUncertainCopyLogoutConnectFence(t, h, db, cardID, backend)
+				assertUncertainCopyLogoutConnectFence(t, h, cardID, backend)
 			})
 		}
 	}
 }
 
-func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string, backend servedparity.Backend) {
+func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2EHarness, cardID string, backend servedparity.Backend) {
 	t.Helper()
+	observer := openChannelFixtureObservation(t, string(backend), h.storeDSN)
 	oldCommand := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
-	indexQuery := `SELECT sql FROM sqlite_master WHERE name='idx_deployment_channel_account'`
-	if backend == servedparity.BackendExplicitPostgres {
-		indexQuery = `SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='idx_deployment_channel_account'`
-	}
-	var originalIndex string
-	if err := db.QueryRow(indexQuery).Scan(&originalIndex); err != nil {
+	originalIndex, err := observer.RegistrationIndex(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
 	priorParent := h.registration.OperationID
+	priorInterface := h.registration.Interface.Key()
 	logoutDeploymentChannelFixtureAccount(t, h)
 	h.registration = connectDeploymentChannelFixtureOperator(t, h, "uncertain-copy-token", 901209, 1002, 7002, "private")
-	var parents, confirmed, retired int
-	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN account_confirmed AND phase<>'retired' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN phase='retired' AND logout_completed THEN 1 ELSE 0 END)
-		FROM deployment_channel_operations WHERE provider='telegram'`).Scan(&parents, &confirmed, &retired); err != nil ||
+	parents, confirmed, retired, err := observer.RegistrationCounts(t.Context())
+	if err != nil ||
 		parents != 2 || confirmed != 1 || retired != 1 || h.registration.OperationID == priorParent {
 		t.Fatalf("logout/connect retained a second reservation: parents=%d confirmed=%d retired=%d err=%v", parents, confirmed, retired, err)
 	}
-	var currentIndex string
-	if err := db.QueryRow(indexQuery).Scan(&currentIndex); err != nil || currentIndex != originalIndex {
+	currentIndex, err := observer.RegistrationIndex(t.Context())
+	if err != nil || currentIndex != originalIndex {
 		t.Fatalf("logout/connect changed the account uniqueness constraint: %v", err)
 	}
 	t.Logf("logout/connect: historical_parents=%d confirmed_current=%d retired_logout=%d unique_index_unchanged=true operator_chat=1002", parents, confirmed, retired)
@@ -174,14 +171,14 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var rejected int
 		// Independent SHA-256 of ["telegram","420079","901110"], not an
 		// identifier learned from the incoming receipt being checked.
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id='788f337676ac8e8813e269fe48d0dfa5327d81c5893120d287a2f8864e97644b'
-			AND state='settled' AND disposition='entry_rejected'`).Scan(&rejected); err != nil {
+		intent, found, err := observer.ObserveChannelIntent(t.Context(), render.IntentObservationQuery{Kind: render.IntentText,
+			Provider: "telegram", InterfaceKey: priorInterface, ProviderEventID: "788f337676ac8e8813e269fe48d0dfa5327d81c5893120d287a2f8864e97644b"})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if rejected == 1 {
+		if found && intent.State == "settled" && intent.Disposition == "entry_rejected" {
 			break
 		}
 		if time.Now().After(deadline) {

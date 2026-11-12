@@ -713,16 +713,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			if writes := provider.CommandWrites(); len(writes) != 0 {
 				t.Fatalf("replacement wrote before delayed predecessor release: %v", writes)
 			}
-			db, err := sql.Open(backend, observerDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			var evidence []byte
-			if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, registered.OperationID).Scan(&evidence); err != nil {
-				t.Fatal(err)
-			}
-			parent, err := channelnative.DecodeTransportParent(evidence)
+			reader := openChannelFixtureObservation(t, backend, observerDSN)
+			parent, err := reader.NativeConsumerParent(t.Context(), registered.OperationID, false)
 			if err != nil || qualificationReader == nil || parent.ID != registered.OperationID || parent.Revision != registered.Revision {
 				t.Fatalf("launched predecessor lost exact parent evidence: %+v err=%v", parent, err)
 			}
@@ -733,11 +725,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 			releaseCommandApply()
 		})
-		db, err := sql.Open(backend, observerDSN)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
+		reader := openChannelFixtureObservation(t, backend, observerDSN)
 		var qualification channelnative.Qualification
 		deadline := time.Now().Add(15 * time.Second)
 		for {
@@ -766,11 +754,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			// Logout ends the predecessor's authority; the new destination must
 			// qualify its own installation rather than inherit a cumulative write.
 			if len(writes) == 2 && byChat["1001"] == 1 && byChat["1002"] == 1 && cardDelivered {
-				var evidence []byte
-				if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, h.registration.OperationID).Scan(&evidence); err != nil {
-					t.Fatal(err)
-				}
-				parent, err := channelnative.DecodeTransportParent(evidence)
+				parent, err := reader.NativeConsumerParent(t.Context(), h.registration.OperationID, false)
 				if err != nil || parent.ID != h.registration.OperationID || parent.Revision != h.registration.Revision {
 					t.Fatalf("fresh installation lost its own parent: %+v err=%v", parent, err)
 				}
@@ -803,16 +787,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if writes := provider.CommandWrites(); len(writes) != wantWrites {
 			t.Fatalf("non-usable native setting caused %d writes, want %d: %v", len(writes), wantWrites, writes)
 		}
-		db, err := sql.Open(backend, observerDSN)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		var evidence []byte
-		if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, connectedOperationID).Scan(&evidence); err != nil {
-			t.Fatal(err)
-		}
-		parent, err := channelnative.DecodeTransportParent(evidence)
+		reader := openChannelFixtureObservation(t, backend, observerDSN)
+		parent, err := reader.NativeConsumerParent(t.Context(), connectedOperationID, false)
 		if err != nil || parent.ID != registered.OperationID || parent.Revision != registered.Revision || qualificationReader == nil {
 			t.Fatalf("native fault lacks its original deployment parent: %+v err=%v", parent, err)
 		}
@@ -838,14 +814,11 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	cardMessages := map[string]int{}
 	if scenario == "draft_chooser" || scenario == "quoted_two" || scenario == "notice_uncertainty_readback" {
-		db, err := sql.Open(backend, observerDSN)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
-		cardMessages["."] = waitChannelCardMessageID(t, db, backend, ".")
+		reader := openChannelFixtureObservation(t, backend, observerDSN)
+		h := &channelOnboardingE2EHarness{process: process, endpoint: endpoint}
+		cardMessages["."] = waitObservedChannelCardMessage(t, h, reader, ".")
 		if scenario == "draft_chooser" || scenario == "quoted_two" {
-			cardMessages["telegram-stopped"] = waitChannelCardMessageID(t, db, backend, "telegram-stopped")
+			cardMessages["telegram-stopped"] = waitObservedChannelCardMessage(t, h, reader, "telegram-stopped")
 			if cardMessages["."] == cardMessages["telegram-stopped"] {
 				t.Fatal("independent standing cards share one provider message")
 			}
@@ -934,12 +907,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		cardMessageID := 2
 		if deploymentTransport {
-			db, err := sql.Open(backend, observerDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = db.Close() })
-			cardMessageID = waitChannelCardMessageID(t, db, backend, ".")
+			reader := openChannelFixtureObservation(t, backend, observerDSN)
+			cardMessageID = waitObservedChannelCardMessage(t, &channelOnboardingE2EHarness{process: process, endpoint: endpoint}, reader, ".")
 		}
 		if scenario == "quoted_two" || scenario == "draft_chooser" {
 			cardMessageID = cardMessages["."]
@@ -988,7 +957,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		t.Fatal(err)
 	}
 	if rollback {
-		proveDeploymentCallbackRollback(t, observerDSN, provider, callbackURL, signing, update, requestBody)
+		proveDeploymentCallbackRollback(t, servedTestProcessRuntime(t, process).Bus.Store(), provider, callbackURL, signing, update, requestBody)
 	}
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, callbackURL, strings.NewReader(string(requestBody)))
 	if err != nil {
@@ -1173,22 +1142,17 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 }
 
-func proveDeploymentCallbackRollback(t *testing.T, dsn string, provider *telegramapi.Double, callback, signing string, update map[string]any, body []byte) {
+func proveDeploymentCallbackRollback(t *testing.T, selected any, provider *telegramapi.Double, callback, signing string, update map[string]any, body []byte) {
 	t.Helper()
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 	id := channelFixtureProviderEventID(t, fmt.Sprint(update["update_id"]))
 	// Inject only an abort after the genuine owner inserts this occurrence.
 	// Neither the authenticated input nor its authority is manufactured.
-	if _, err := db.Exec(`CREATE TRIGGER reject_deployment_callback BEFORE UPDATE ON operator_channel_action_intents
-		WHEN NEW.provider_event_id='` + id + `' BEGIN SELECT RAISE(ABORT,'deployment callback rollback probe'); END`); err != nil {
+	fault, err := storetest.OpenChannelCallbackRollbackFault(selected, id)
+	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if _, err := db.Exec(`DROP TRIGGER reject_deployment_callback`); err != nil {
+		if err := fault.Close(); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -1197,24 +1161,16 @@ func proveDeploymentCallbackRollback(t *testing.T, dsn string, provider *telegra
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("aborted deployment callback status=%d", status)
 	}
-	for _, query := range []string{
-		`SELECT COUNT(*) FROM operator_channel_action_intents WHERE provider_event_id=$1`,
-		`SELECT COUNT(*) FROM runtime_external_effect_operations WHERE authority_kind='channel_action_ack' AND json_extract(authority_evidence,'$.provider_event_id')=$1`,
-	} {
-		var count int
-		if err := db.QueryRow(query, id).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("aborted deployment callback retained mutation evidence: count=%d err=%v", count, err)
-		}
+	token := update["callback_query"].(map[string]any)["data"].(string)
+	evidence, err := fault.ReadEvidence(t.Context())
+	if err != nil || evidence.Actions != 0 || evidence.Acknowledgments != 0 {
+		t.Fatalf("aborted deployment callback retained mutation evidence: actions=%d acknowledgments=%d err=%v", evidence.Actions, evidence.Acknowledgments, err)
 	}
 	if len(provider.Acknowledgments()) != acks {
 		t.Fatal("aborted deployment callback caused an external acknowledgment")
 	}
-	var state string
-	token := update["callback_query"].(map[string]any)["data"]
-	if err := db.QueryRow(`SELECT card.status FROM channel_delivery_actions action
-		JOIN channel_delivery_renders render ON render.render_id=action.render_id
-		JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
-		JOIN decision_cards card ON card.card_id=plan.source_id WHERE action.action_token=$1`, token).Scan(&state); err != nil || state != "pending" {
+	state, err := fault.CardState(t.Context(), token)
+	if err != nil || state != "pending" {
 		t.Fatalf("aborted callback changed its card: state=%s err=%v", state, err)
 	}
 }
