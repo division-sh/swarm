@@ -72,32 +72,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			if rootErr != nil {
 				return nil, rootErr
 			}
-			loaded, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: config})
-			if err != nil {
-				return nil, err
-			}
-			if loaded.Config.Channels.HITL == nil {
-				return nil, nil
-			}
-			op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), *loaded.Config.Channels.HITL)
-			if errors.Is(err, channelonboarding.ErrNotFound) {
-				return nil, nil
-			}
-			if err != nil {
-				return nil, err
-			}
-			client, err := control(ctx, op)
-			if err != nil {
-				return nil, err
-			}
-			result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
-			if errors.Is(err, channelonboarding.ErrNotFound) {
-				return nil, nil
-			}
-			if err != nil {
-				return nil, err
-			}
-			return []serveDeploymentRegistration{{result: result, plan: plan, trigger: client.DeploymentTrigger()}}, nil
+			return readDeploymentTransportRegistrations(ctx, root, config, stores, control)
 		}
 		runtimeOptions.deployment.read = func(ctx context.Context, parent channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error) {
 			op, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, parent.ID)
@@ -131,6 +106,35 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu)
 	}
 	return handler, claim, restore, close
+}
+
+func readDeploymentTransportRegistrations(ctx context.Context, root cliapp.InvocationRoot, config string, stores *selected.Owner, control func(context.Context, channelonboarding.Operation) (*cliapp.DeploymentChannelControl, error)) ([]serveDeploymentRegistration, error) {
+	loaded, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: config})
+	if err != nil {
+		return nil, err
+	}
+	if loaded.Config.Channels.HITL == nil {
+		return nil, nil
+	}
+	op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), *loaded.Config.Channels.HITL)
+	if errors.Is(err, channelonboarding.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	client, err := control(ctx, op)
+	if err != nil {
+		return nil, err
+	}
+	result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
+	if errors.Is(err, channelonboarding.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []serveDeploymentRegistration{{result: result, plan: plan, trigger: client.DeploymentTrigger()}}, nil
 }
 
 func dispatchDeploymentControl(ctx context.Context, req apiv1.Request, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (any, error) {
