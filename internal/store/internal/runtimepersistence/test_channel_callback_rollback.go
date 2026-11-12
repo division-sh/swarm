@@ -28,7 +28,7 @@ type channelCallbackRollbackFault struct {
 func OpenChannelCallbackRollbackFaultForTest(selected any, event string) (ChannelCallbackRollbackFault, error) {
 	decoded, err := hex.DecodeString(event)
 	owner, ok := selected.(*SQLiteRuntimeStore)
-	if !ok || owner == nil || owner.backend == nil || !owner.backend.Valid() || err != nil || len(decoded) != 32 {
+	if !ok || owner == nil || owner.backend == nil || !owner.backend.Valid() || err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != event {
 		return nil, fmt.Errorf("callback rollback fault requires its original SQLite owner and exact provider event")
 	}
 	fault := &channelCallbackRollbackFault{owner: owner, event: event}
