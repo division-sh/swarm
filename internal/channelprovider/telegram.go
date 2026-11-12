@@ -9,8 +9,8 @@ import (
 
 var telegram = Binding{
 	id: "telegram", displayName: "Telegram", webhook: true, pollClaims: true, credential: true, signingCredential: true,
-	canonicalAccount:             telegramAccount,
-	claimInstructions:            telegramClaimInstructions,
+	canonicalAccount:             TelegramAccount,
+	claimInstructions:            TelegramClaimInstructions,
 	registrationTeaching:         "Telegram ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
 	omitBoundRegistrationReceipt: true,
 	languageHelp: func(operation string) string {
@@ -20,7 +20,7 @@ var telegram = Binding{
 
 var telegramBotName = regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`)
 
-func telegramClaimInstructions(prompt ClaimPrompt) (string, error) {
+func TelegramClaimInstructions(prompt ClaimPrompt) (string, error) {
 	if prompt.Deployment {
 		if prompt.Connection == nil || prompt.ExpiresAt.IsZero() {
 			return "", fmt.Errorf("operator code requires its exact Telegram destination and expiry")
@@ -36,7 +36,7 @@ func telegramClaimInstructions(prompt ClaimPrompt) (string, error) {
 		prompt.Code, ClaimDeadline(prompt.ExpiresAt)), nil
 }
 
-func telegramAccount(account string) (string, error) {
+func TelegramAccount(account string) (string, error) {
 	id, err := strconv.ParseUint(account, 10, 64)
 	if err != nil || id == 0 || strconv.FormatUint(id, 10) != account {
 		return "", fmt.Errorf("account must be the exact Telegram bot ID shown by channel list")
