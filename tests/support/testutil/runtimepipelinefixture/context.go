@@ -27,10 +27,6 @@ func SQLTx(ctx context.Context) (*sql.Tx, bool) {
 	return tx, ok && tx != nil
 }
 
-func WithoutSQLTx(ctx context.Context) context.Context {
-	return context.WithValue(ctx, txKey{}, (*sql.Tx)(nil))
-}
-
 func WithSQLConn(ctx context.Context, conn *sql.Conn) context.Context {
 	return context.WithValue(ctx, connKey{}, conn)
 }
@@ -49,15 +45,6 @@ func WithPostCommitActions(ctx context.Context, actions *[]OwnerAction) context.
 
 func WithRollbackActions(ctx context.Context, actions *[]OwnerAction) context.Context {
 	return context.WithValue(ctx, rollbackKey{}, actions)
-}
-
-func QueuePostCommitAction(ctx context.Context, action OwnerAction) bool {
-	actions, ok := ctx.Value(postCommitKey{}).(*[]OwnerAction)
-	if !ok || actions == nil || action == nil {
-		return false
-	}
-	*actions = append(*actions, action)
-	return true
 }
 
 func QueueRollbackAction(ctx context.Context, action OwnerAction) bool {
