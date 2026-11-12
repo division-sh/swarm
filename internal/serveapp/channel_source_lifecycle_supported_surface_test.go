@@ -750,7 +750,7 @@ func waitRegisteredSourceQualification(t *testing.T, h *channelOnboardingE2EHarn
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		parent, err := observation.NativeConsumerParent(t.Context(), h.registration.OperationID, true)
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !channelObservationAbsent(err) {
 			t.Fatal(err)
 		}
 		var qualified channelnative.Qualification
@@ -844,6 +844,25 @@ func channelHistoryWithoutSuccessorPlan(history, successorPlan string) (string, 
 }
 
 func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
+	t.Run("inspection_absence", func(t *testing.T) {
+		for _, tc := range []struct {
+			err  error
+			want bool
+		}{
+			{sql.ErrNoRows, true},
+			{errors.Join(sql.ErrNoRows), true},
+			{errors.Join(errors.Join(sql.ErrNoRows)), true},
+			{nil, false},
+			{context.Canceled, false},
+			{errors.Join(sql.ErrNoRows, context.Canceled), false},
+			{errors.Join(sql.ErrNoRows, context.DeadlineExceeded), false},
+			{errors.Join(sql.ErrNoRows, errors.New("independent read disposal failure")), false},
+		} {
+			if got := channelObservationAbsent(tc.err); got != tc.want {
+				t.Errorf("inspection absence %v: got %t want %t", tc.err, got, tc.want)
+			}
+		}
+	})
 	before := make([]any, 15)
 	before[6] = [][]string{{"old-plan", "card", "old-card", "frozen"}}
 	want, err := json.Marshal(before)

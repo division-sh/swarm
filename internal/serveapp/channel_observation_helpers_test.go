@@ -61,11 +61,30 @@ func waitObservedChannelReceipt(t *testing.T, reader storetest.ChannelObservatio
 			}
 			return reference.Delivery.ID
 		}
-		if err != sql.ErrNoRows || time.Now().After(deadline) {
+		if !channelObservationAbsent(err) || time.Now().After(deadline) {
 			t.Fatalf("real card was not delivered: %v", err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func channelObservationAbsent(err error) bool {
+	if err == sql.ErrNoRows {
+		return true
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		for _, child := range children {
+			if !channelObservationAbsent(child) {
+				return false
+			}
+		}
+		return len(children) != 0
+	case interface{ Unwrap() error }:
+		return channelObservationAbsent(wrapped.Unwrap())
+	}
+	return false
 }
 
 func waitObservedChannelDecision(t *testing.T, h *channelOnboardingE2EHarness, card string) {
