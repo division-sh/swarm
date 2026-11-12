@@ -49,7 +49,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				return err
 			}
 			attemptSettlement := settlement
-			permit, err := resolveCompletionSettlementPermitPostgres(txctx, tx, attempt)
+			permit, err := resolveCompletionSettlementPermitPostgres(txctx, s.channelChecks, tx, attempt)
 			if err != nil {
 				return err
 			}
@@ -202,7 +202,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				return err
 			}
 			attemptSettlement := settlement
-			permit, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt)
+			permit, err := resolveCompletionSettlementPermitSQLite(txctx, s.channelChecks, tx, attempt)
 			if err != nil {
 				return err
 			}
