@@ -169,24 +169,6 @@ func corruptOrigin(
 	return err
 }
 
-func CorruptPostgresState(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	state string,
-	endedAt time.Time,
-) {
-	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET status = $2, ended_at = $3
-		WHERE run_id = $1::uuid
-	`, strings.TrimSpace(runID), strings.TrimSpace(state), nullableFixtureTime(endedAt)); err != nil {
-		t.Fatalf("corrupt PostgreSQL run state %s: %v", runID, err)
-	}
-}
-
 func CorruptSQLiteState(
 	t testing.TB,
 	ctx context.Context,
@@ -221,40 +203,4 @@ func marshalFixtureFailure(failure *runtimefailures.Envelope) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
-}
-
-// CorruptPostgresSource is reserved for hostile readback tests that replace a
-// valid run source with a storage value no constructor can produce.
-func CorruptPostgresSource(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	bundleHash string,
-) {
-	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = $2
-		WHERE run_id = $1::uuid
-	`, strings.TrimSpace(runID), strings.TrimSpace(bundleHash)); err != nil {
-		t.Fatalf("corrupt PostgreSQL run source %s: %v", runID, err)
-	}
-}
-
-func CorruptSQLiteSource(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	runID string,
-	bundleHash string,
-) {
-	t.Helper()
-	if _, err := db.ExecContext(ctx, `
-		UPDATE runs
-		SET bundle_hash = ?
-		WHERE run_id = ?
-	`, strings.TrimSpace(bundleHash), strings.TrimSpace(runID)); err != nil {
-		t.Fatalf("corrupt SQLite run source %s: %v", runID, err)
-	}
 }

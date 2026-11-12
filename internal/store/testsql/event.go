@@ -43,23 +43,6 @@ func CorruptEventStore(
 	}
 }
 
-func RejectEventStoreCorruption(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
-	claim EventCorruptionClaim,
-	sqliteStatement string,
-	postgresStatement string,
-	args ...any,
-) {
-	t.Helper()
-	statement := eventCorruptionStatement(t, dialect, claim, sqliteStatement, postgresStatement)
-	if _, err := db.ExecContext(ctx, statement, args...); err == nil {
-		t.Fatalf("event store accepted corruption for %s (%s)", claim.Invariant, claim.Reason)
-	}
-}
-
 func RejectEventStoreCorruptionCategory(
 	t testing.TB,
 	ctx context.Context,
