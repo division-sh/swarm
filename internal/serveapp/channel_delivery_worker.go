@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/mailbox"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -205,6 +206,9 @@ func (d *serveChannelDeliveryDispatcher) processPendingChannelAction(ctx context
 	}
 	ackErr := d.acknowledgeChannelAction(ctx, intent, resolved)
 	actionErr := d.processResolvedChannelAction(ctx, intent, resolved)
+	if resolved.Parent.Kind == runtimechannelnative.TransportDeploymentRegistration && errors.Is(actionErr, errChannelCardSourceUnloaded) {
+		actionErr = errors.Join(actionErr, d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionRejected))
+	}
 	var unsupported *runfork.SelectedForkControlUnsupported
 	if errors.As(actionErr, &unsupported) {
 		actionErr = d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionUnsupported)

@@ -26,6 +26,7 @@ func registeredChannelMailboxCLI(t *testing.T, h *channelOnboardingE2EHarness, w
 type registeredChannelCard struct {
 	CardID          string          `json:"card_id"`
 	RunID           string          `json:"run_id"`
+	BundleHash      string          `json:"bundle_hash"`
 	Status          string          `json:"status"`
 	Verdict         string          `json:"verdict"`
 	Snapshot        json.RawMessage `json:"snapshot"`
