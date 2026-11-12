@@ -251,6 +251,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != settled.Deliveries[0].DeliveryID || after.Deliveries[0].Status != "delivered" {
 		t.Fatal("retried original delivery did not succeed", after)
 	}
+	after = operatorread.OperatorEventFull{}
 	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": exhausted.EventID}, &after)
 	record["exhausted_after_restore"] = after
 	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != terminal.DeliveryID || after.Deliveries[0].Status != terminal.Status || after.Deliveries[0].Failure == nil || after.Deliveries[0].Failure.Detail.Code != terminal.Failure.Detail.Code {
