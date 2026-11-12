@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -39,14 +41,26 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				var deliveryReader servedRunDeliveryReader
 				var receiverReader receiverProofStateReader
 				var sourceReader sourceArtifactReader
+				var nativeRead func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 					deliveryReader = p.deps.DeliveryStore.SummarizeRun
 					receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
 					sourceReader = p.sourceReader
+					if reader, ok := p.channelOnboarding.(interface {
+						ReadNativeInboxQualificationParent(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)
+					}); ok {
+						nativeRead = reader.ReadNativeInboxQualificationParent
+					}
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				if h.registration.DeploymentRegistration {
-					runRegisteredCLISourceLifecycle(t, h, &sourceReader, hash, operation, receiverReader, deliveryReader)
+					if nativeRead == nil {
+						t.Fatal("registered lifecycle lacks the native qualification owner")
+					}
+					runRegisteredSourceLifecycle(t, h, db, backend, &sourceReader, hash, operation, receiverReader, deliveryReader,
+						func(ctx context.Context, parent channelnative.TransportParent) (channelnative.Qualification, error) {
+							return nativeRead(ctx, parent)
+						})
 					return
 				}
 				var standingRun string
@@ -432,12 +446,23 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	}
 }
 
-func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, sourceReader *sourceArtifactReader, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader) {
+func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, backend servedparity.Backend, sourceReader *sourceArtifactReader, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader, nativeRead func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)) {
 	t.Helper()
+	command := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
+	initialNative := waitRegisteredSourceQualification(t, h, db, nativeRead)
+	nativeHistory := readChannelNativeHistory(t, db)
+	writes := len(h.provider.CommandWrites())
 	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-source-seed",
 	})
 	card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
+	messageID := waitChannelAnchorReceipt(t, db, card)
+	token, found := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
+	if !found {
+		t.Fatal("registered lifecycle lacks its frozen channel control")
+	}
+	waitChannelDeliverySendsSettled(t, db, backend)
+	frozenHistory := readChannelSourceHistory(t, db, card)
 	before := readRegisteredChannelCard(t, h, card)
 	source, err := (*sourceReader).GetSourceArtifact(t.Context(), hash)
 	if err != nil {
@@ -462,13 +487,28 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			decideRegisteredAnchorCLI(t, h, card, false)
+			callback, signing, _ := h.provider.Registration()
+			postChannelSourceControl(t, callback, signing, card, token, messageID)
+			waitChannelAnchorDecision(t, db, card)
+			var standingRun string
+			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
+				t.Fatal(err)
+			}
+			standingCard := waitChannelPublicCard(t, h, standingRun, decisioncard.AnchorKindStageGate, "chat")
+			decideRegisteredAnchorCLI(t, h, standingCard, false)
 		} else {
 			h.stop(t)
 			h.start(t)
 			requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
 			if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash == hash {
 				t.Fatal("new process did not capture the new source")
+			}
+			callback, signing, _ := h.provider.Registration()
+			postChannelSourceControl(t, callback, signing, card, token, messageID)
+			waitChannelRejectedCallback(t, db, token)
+			var decisions int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
+				t.Fatalf("replacement source admitted a predecessor control: count=%d err=%v", decisions, err)
 			}
 		}
 		if retained, err := (*sourceReader).GetSourceArtifact(t.Context(), hash); err != nil || !bytes.Equal(retained.SourceBlob, source.SourceBlob) {
@@ -479,17 +519,58 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 		}
 	case "retained_reset", "source_reset":
 		clear := operation == "source_reset"
+		callback, signing, _ := h.provider.Registration()
+		postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
+			"update_id": 978001, "message": map[string]any{"message_id": 978001, "from": map[string]any{"id": 7000},
+				"chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command},
+		})
+		waitNativeIntentCount(t, db, "entry", 1)
+		waitNativeInboxDeliveries(t, h, "1001", 1)
+		rejectedToken := uuid.NewString()
+		postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
+			"update_id": 978002, "callback_query": map[string]any{"id": "registered-reset-history-refusal", "from": map[string]any{"id": 7000},
+				"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": rejectedToken},
+		})
+		waitChannelRejectedCallback(t, db, rejectedToken)
+		waitChannelDeliverySendsSettled(t, db, backend)
+		preserved := readChannelPreservedHistory(t, db)
 		params := map[string]any{"include_source_artifacts": clear, "idempotency_key": "cli-source-reset"}
 		dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{"dry_run": true, "include_source_artifacts": clear, "idempotency_key": "cli-source-dry"})
-		if dry.Error != nil || readRegisteredChannelCard(t, h, card).Status != before.Status {
+		if dry.Error != nil || readRegisteredChannelCard(t, h, card).Status != before.Status || readChannelNativeHistory(t, db) != nativeHistory || readChannelPreservedHistory(t, db) != preserved {
 			t.Fatal("dry reset changed card authority", dry.Error)
 		}
 		if reset := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); reset.Error != nil {
 			t.Fatalf("public reset failed: error=%+v\n%s", reset.Error, h.process.outputString())
 		}
+		if readChannelNativeHistory(t, db) != nativeHistory || len(h.provider.CommandWrites()) != writes {
+			t.Fatal("runtime reset changed deployment-owned native identity or replayed installation")
+		}
+		successorPlan := ""
+		if !clear {
+			var successorRun string
+			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&successorRun); err != nil {
+				t.Fatal(err)
+			}
+			fresh := waitChannelPublicCard(t, h, successorRun, decisioncard.AnchorKindStageGate, "chat")
+			if successorRun == seed.RunID || fresh == card {
+				t.Fatal("retained reset reused predecessor run/card identity")
+			}
+			waitChannelAnchorReceipt(t, db, fresh)
+			waitChannelDeliverySendsSettled(t, db, backend)
+			if err := db.QueryRow(`SELECT delivery_id FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1 AND resend_generation=0`, fresh).Scan(&successorPlan); err != nil {
+				t.Fatal(err)
+			}
+		}
+		requireChannelPreservedHistory(t, db, preserved, successorPlan)
 		if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil {
 			t.Fatal(replay.Error)
 		}
+		if readChannelNativeHistory(t, db) != nativeHistory || len(h.provider.CommandWrites()) != writes {
+			t.Fatal("reset replay changed deployment-owned native authority")
+		}
+		requireChannelPreservedHistory(t, db, preserved, successorPlan)
+		postChannelSourceControl(t, callback, signing, card, token, messageID)
+		waitChannelRejectedCallback(t, db, token)
 		if result := requestServedJSONRPC(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": card}); result.Error == nil {
 			t.Fatal("reset retained deleted card execution")
 		}
@@ -529,8 +610,17 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 		}
 		h.stop(t)
 		h.start(t)
-		if writes := h.provider.CommandWrites(); len(writes) != 0 {
-			t.Fatal("reset/restart installed a deferred native consumer")
+		qualified := waitRegisteredSourceQualification(t, h, db, nativeRead)
+		if qualified.SettingID != initialNative.SettingID || qualified.SettingGeneration != initialNative.SettingGeneration || readChannelNativeHistory(t, db) != nativeHistory || len(h.provider.CommandWrites()) != writes {
+			t.Fatal("restart changed the deployment parent or repeated its acknowledged installation")
+		}
+		var out, errOut lockedBuffer
+		if code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "420079", "--yes", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
+			t.Fatalf("public registered-account reverify exit=%d err=%s", code, errOut.String())
+		}
+		var reverified channelonboarding.Result
+		if json.Unmarshal([]byte(out.String()), &reverified) != nil || reverified.Operation.OperationID != h.registration.OperationID || reverified.Operation.IdentityOperationID != h.registration.IdentityOperationID || reverified.Operation.Phase != channelonboarding.PhaseSucceeded || len(h.provider.CommandWrites()) != writes {
+			t.Fatalf("reverification replaced the parent/child or reinstalled native settings: %s", out.String())
 		}
 	case "fork":
 		frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
@@ -543,22 +633,64 @@ func runRegisteredCLISourceLifecycle(t *testing.T, h *channelOnboardingE2EHarnes
 		if fork.ForkRunID == seed.RunID || child == card {
 			t.Fatal("selected fork reused predecessor identity")
 		}
-		decideRegisteredAnchorCLI(t, h, child, false)
+		childMessage := waitChannelAnchorReceipt(t, db, child)
+		childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "approve")
+		if !found || childToken == token {
+			t.Fatal("selected fork reused the parent's channel control")
+		}
+		callback, signing, _ := h.provider.Registration()
+		postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
+		waitChannelAnchorDecision(t, db, child)
 		if got := readRegisteredChannelCard(t, h, card); got.DecisionEventID != "" {
 			t.Fatal("child decision escaped to parent")
 		}
 		decided := readRegisteredChannelCard(t, h, child)
 		h.stop(t)
 		h.start(t)
+		callback, signing, _ = h.provider.Registration()
+		postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
 		if got := readRegisteredChannelCard(t, h, child); got.DecisionEventID != decided.DecisionEventID || got.Verdict != decided.Verdict {
 			t.Fatal("restart changed selected-fork decision")
 		}
+	}
+	if after := readChannelSourceHistory(t, db, card); after != frozenHistory {
+		t.Fatal("registered source lifecycle changed its historical render/receipt evidence")
+	}
+}
+
+func waitRegisteredSourceQualification(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, read func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)) channelnative.Qualification {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var raw []byte
+		err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration' AND state='current'`, h.registration.OperationID).Scan(&raw)
+		if err != nil && err != sql.ErrNoRows {
+			t.Fatal(err)
+		}
+		var qualified channelnative.Qualification
+		if err == nil {
+			parent, err := channelnative.DecodeTransportParent(raw)
+			if err != nil || parent.ID != h.registration.OperationID || parent.Revision != h.registration.Revision {
+				t.Fatalf("registered native setting lost its exact parent: %+v, %v", parent, err)
+			}
+			qualified, err = read(t.Context(), parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if qualified.State == channelnative.QualificationQualified {
+				return qualified
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registered native qualification did not converge: %+v", qualified)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
 func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory, successorPlan string) {
 	t.Helper()
-	afterHistory := readChannelPreservedHistory(t, db)
+	afterHistory := readChannelPreservedHistory(t, db, successorPlan)
 	afterHistory, err := channelHistoryWithoutSuccessorPlan(afterHistory, successorPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -676,7 +808,7 @@ func readChannelNativeHistory(t *testing.T, db *sql.DB) [8]string {
 
 // Mutable retirement and qualification metadata are deliberately not compared
 // as immutable evidence. Each historical identity and frozen artifact is.
-func readChannelPreservedHistory(t *testing.T, db *sql.DB) string {
+func readChannelPreservedHistory(t *testing.T, db *sql.DB, successor ...string) string {
 	t.Helper()
 	queries := []string{
 		`SELECT * FROM operator_principals ORDER BY principal_id`,
@@ -696,8 +828,28 @@ func readChannelPreservedHistory(t *testing.T, db *sql.DB) string {
 		`SELECT a.* FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY a.attempt_id`,
 	}
 	var snapshots [][][]any
-	for _, query := range queries {
-		rows, err := db.Query(query)
+	for index, query := range queries {
+		var args []any
+		if len(successor) != 0 && successor[0] != "" {
+			// Only artifacts linked to the independently observed successor
+			// plan are new work. All unrelated/retained rows still compare.
+			predicate := map[int]string{
+				7:  `delivery_id<>$1`,
+				8:  `delivery_id<>$1`,
+				9:  `render_id NOT IN (SELECT render_id FROM channel_delivery_renders WHERE delivery_id=$1)`,
+				13: `operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`,
+				14: `a.operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`,
+			}[index]
+			if predicate != "" {
+				join := " WHERE "
+				if index >= 13 {
+					join = " AND "
+				}
+				query = strings.Replace(query, " ORDER BY", join+predicate+" ORDER BY", 1)
+				args = []any{successor[0]}
+			}
+		}
+		rows, err := db.Query(query, args...)
 		if err != nil {
 			t.Fatalf("history query %s: %v", query, err)
 		}
