@@ -66,7 +66,7 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 	repo := pipeline.WorkflowRepoRoot()
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, f.rooted,
-		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: activeInputAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func sessionBusinessSemanticFixture(t *testing.T, rooted sourceartifact.RootedSo
 	t.Helper()
 	repo := pipeline.WorkflowRepoRoot()
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted,
-		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: activeInputAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}

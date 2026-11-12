@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -725,7 +726,7 @@ func activeInputChannelFixture(t *testing.T, catalog *providertriggers.CatalogSn
 func capturedActiveInputChannelFixture(t *testing.T, rooted sourceartifact.RootedSource) (*providertriggers.CatalogSnapshot, providertriggers.InboundAdmissionPlan, packs.SatisfactionPlan) {
 	t.Helper()
 	repo := pipeline.WorkflowRepoRoot()
-	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: activeInputAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,4 +764,12 @@ func capturedActiveInputChannelFixture(t *testing.T, rooted sourceartifact.Roote
 		t.Fatal(err)
 	}
 	return catalog, trigger, plan.WithProviderFacts(channelfixture.For("whatsapp"))
+}
+
+func activeInputAdmission(rooted sourceartifact.RootedSource, inventory *packartifact.EffectivePackInventory, spec contracts.PlatformSpecDocument) (contracts.PackAdmissionProjection, error) {
+	value, err := packadmission.AdmitInventory(rooted, inventory, spec)
+	if err != nil {
+		return nil, err
+	}
+	return value.(packadmission.Projection).WithProviderFacts(channelfixture.For("whatsapp")), nil
 }
