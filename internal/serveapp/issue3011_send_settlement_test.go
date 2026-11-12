@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"go.mau.fi/whatsmeow/types"
 	"gopkg.in/yaml.v3"
@@ -41,6 +41,9 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	peer := newServeNativeProtocolPeer(t)
 	opts := cliapp.DefaultServeOptions()
+	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
+	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
+	opts.SelfCheck = true
 	opts.SourceRoot = filepath.Join(t.TempDir(), "source")
 	copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply"), opts.SourceRoot)
 	issue3011NoticeSource(t, opts.SourceRoot)
@@ -67,7 +70,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	record := map[string]any{"backend": backend, "source": os.Getenv("TEST_ISSUE3011_PIN"),
-		"surface": "exact-pin Go test binary plus test-only authored-source overlay; public Go CLI registration and public RPC input; existing peer-trust RunServe subprocess, NOT published CLI/provider handshake",
+		"surface": "exact-pin Go test binary plus test-only authored-source overlay; public Go CLI registration and public RPC input; existing peer-trust IN-PROCESS RunServe, NOT subprocess/published CLI/provider handshake",
 		"started": time.Now().UTC(), "complete": false, "stage": "setup"}
 	self, err := os.Executable()
 	if err != nil {
@@ -86,7 +89,15 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 		record[file+"_sha256"] = fmt.Sprintf("%x", sha256.Sum256(raw))
 		writeStandingCandidateFile(t, filepath.Join(root, file), string(raw))
 	}
-	var process *channelOnboardingCrashServeProcess
+	var selected atomic.Value
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected.Store(p) })
+	start := func() (*serveRuntimeTestProcess, string) {
+		p := startServeRuntimeTestProcess(t, opts)
+		p.waitForReadyLine()
+		return p, "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc"
+	}
+	var process *serveRuntimeTestProcess
+	var endpoint string
 	var logs []string
 	stop := func() {
 		t.Helper()
@@ -94,11 +105,11 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 			return
 		}
 		joined := process.stop()
-		logs = append(logs, process.output.String())
+		logs = append(logs, process.outputString())
 		process = nil
 		joins, _ := record["serve_joins"].([]string)
 		record["serve_joins"] = append(joins, fmt.Sprint(joined))
-		if joined != nil {
+		if joined != 0 {
 			t.Error("owned serve join", joined)
 		}
 	}
@@ -118,8 +129,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 
 	// The negative is a fresh unregistered store, not a fabricated missing row.
 	record["stage"] = "unlinked public-input control"
-	process = startServedNativeSDKProcess(t, opts, peer)
-	endpoint := process.endpoint(t) + "/v1/rpc"
+	process, endpoint = start()
 	unlinked := issue3011PublishAndSettle(t, endpoint, "unlinked", record)
 	record["unlinked"] = unlinked
 	if len(unlinked.Deliveries) != 1 || unlinked.Deliveries[0].Failure == nil {
@@ -138,8 +148,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	op := issue3011RegisterForSend(t, opts, peer)
 	peer.senderFrom(types.NewJID("15557654321", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
 	record["operation_id"], record["account"] = op.OperationID, op.AccountReference
-	process = startServedNativeSDKProcess(t, opts, peer)
-	endpoint = process.endpoint(t) + "/v1/rpc"
+	process, endpoint = start()
 	peer.awaitPostLogin()
 	before := issue3011RegisteredStatus(t, opts, endpoint, op)
 	record["before"] = before
@@ -187,39 +196,35 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if t.Failed() {
 		return
 	}
-	stop()
-	if t.Failed() {
-		return
-	}
-	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := inspection.Close(); err != nil {
-			t.Error(err)
+	reader := selected.Load().(serveRuntimePersistence).deps.DeliveryStore
+	var snapshot deliverylifecycle.Snapshot
+	var outcomes []deliverylifecycle.Outcome
+	if err := reader.(interface {
+		InspectSnapshot(context.Context, func(context.Context) error) error
+	}).InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		var err error
+		snapshot, err = reader.Snapshot(ctx, settled.Deliveries[0].DeliveryID)
+		if err == nil {
+			outcomes, err = reader.Outcomes(ctx, snapshot.DeliveryID)
 		}
-	}()
-	reader := inspection.(interface {
-		Snapshot(context.Context, string) (deliverylifecycle.Snapshot, error)
-		Outcomes(context.Context, string) ([]deliverylifecycle.Outcome, error)
-	})
-	snapshot, err := reader.Snapshot(t.Context(), settled.Deliveries[0].DeliveryID)
-	if err != nil {
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	outcomes, err := reader.Outcomes(t.Context(), snapshot.DeliveryID)
-	if err != nil || len(outcomes) == 0 {
-		t.Fatal("retry has no committed outcome", err)
+	if len(outcomes) == 0 {
+		t.Fatal("retry has no committed outcome")
 	}
 	last := outcomes[len(outcomes)-1]
 	if snapshot.EventID != settled.EventID || snapshot.RunID != settled.RunID || !snapshot.RetryScheduled || last.Outcome != "retry_scheduled" || last.DeliveryID != snapshot.DeliveryID || last.ClaimVersion != snapshot.ClaimVersion || last.RetryEligibleAt == nil || !snapshot.NextEligibleAt.Equal(*last.RetryEligibleAt) || !snapshot.NextEligibleAt.After(last.SettledAt) {
 		t.Fatal("retry lost exact committed eligibility/outcome", snapshot, outcomes)
 	}
 	record["retry_due"], record["retry_outcomes"] = snapshot.NextEligibleAt, outcomes
+	stop()
+	if t.Failed() {
+		return
+	}
 	record["stage"] = "explicit existing startup restore"
-	process = startServedNativeSDKProcess(t, opts, peer)
-	endpoint = process.endpoint(t) + "/v1/rpc"
+	process, endpoint = start()
 	peer.awaitPostLogin()
 	restored := issue3011RegisteredStatus(t, opts, endpoint, op)
 	record["restored"] = restored
@@ -239,7 +244,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if len(requests.Events) != 1 || requests.Events[0].Payload["source_event_id"] != settled.EventID || requests.Events[0].CreatedAt.Before(snapshot.NextEligibleAt) {
 		t.Fatal("activity ran before committed due or lost original input", requests)
 	}
-	waitServedRunDeliveryQuiescence(t, servedInspectionDeliveryReader(t, inspection), settled.RunID)
+	waitServedRunDeliveryQuiescence(t, selected.Load().(serveRuntimePersistence).deps.DeliveryStore.SummarizeRun, settled.RunID)
 	var after operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": settled.EventID}, &after)
 	record["down_input_after_restore"] = after
