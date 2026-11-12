@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
@@ -45,6 +46,44 @@ func newOccurrenceFixture(t *testing.T, peer *sdkPeer, device *store.Device, con
 		t.Fatal("synthetic occurrence authentication did not complete")
 	}
 	return o
+}
+
+func TestWhatsAppTransientAdmissionRequiresObservedSocketCutAndUnmixedFence(t *testing.T) {
+	peer := newSDKPeer(t)
+	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+	o := newOccurrenceFixture(t, peer, newSDKDeviceFixture(t, container), container, uuid.NewString(), nil)
+	peer.mu.Lock()
+	socket := peer.peers[0]
+	peer.mu.Unlock()
+	if err := socket.conn.CloseNow(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-o.ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("real SDK socket cut did not fence")
+	}
+	if !o.transientAdmissionRefusal(errClientOccurrenceFenced) {
+		t.Fatal("observed transient fence lost positive classification")
+	}
+	for _, other := range []error{context.Canceled, errCaptureScopeChanged, errors.New("storage failure"), failures.New(failures.ClassOutcomeUncertain, "native_activity_acknowledgment_invalid", "whatsapp", "send", nil)} {
+		if o.transientAdmissionRefusal(errors.Join(errClientOccurrenceFenced, other)) {
+			t.Fatal("mixed/canceled/storage/uncertain error became retryable", other)
+		}
+	}
+	failedCapture := &clientOccurrence{fenced: true, transientDisconnect: true, callbacks: &callbackGuard{failure: errors.New("capture failed")}}
+	if failedCapture.transientAdmissionRefusal(errClientOccurrenceFenced) {
+		t.Fatal("capture failure became transient transport")
+	}
+	for _, permanent := range []string{"", "logged out", "account temporarily banned", "session replaced by another connection"} {
+		o.mu.Lock()
+		o.transientDisconnect = true
+		o.mu.Unlock()
+		o.fenceAfterDisconnect(false, permanent)
+		if o.transientAdmissionRefusal(errClientOccurrenceFenced) {
+			t.Fatal("generic cleanup or permanent cause retained retry admission", permanent)
+		}
+	}
 }
 
 func runOccurrenceProbe(ctx context.Context, o *clientOccurrence, operation, id string) error {
