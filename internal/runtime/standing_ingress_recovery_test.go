@@ -706,7 +706,7 @@ func TestRegisteredStandingAdmissionWithdrawsOnlyCompletedLogout(t *testing.T) {
 			case "account":
 				retired.AccountReference = "another-account"
 			case "interface":
-				retired.Interface = operatorchannel.InterfaceIdentity{Service: "another-service"}
+				retired.Interface = operatorchannel.InterfaceIdentity{InterfaceRef: "another-service"}
 			case "revision":
 				retired.Revision = previous.Revision
 			case "admissions":
