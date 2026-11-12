@@ -52,3 +52,11 @@ func (s *PostgresOwner) RequireSessionBusinessInputTx(ctx context.Context, tx *s
 func (s *SQLiteOwner) RequireSessionBusinessInputTx(ctx context.Context, tx *sql.Tx, postgres bool, input nativeinput.Admission) error {
 	return requireSessionBusinessInputTx(ctx, sqliteRunner{s}, tx, postgres, input)
 }
+
+func (s *PostgresOwner) ReadSessionConnectionForTest(ctx context.Context, tx *sql.Tx, postgres bool, operationID string) (string, error) {
+	return readSessionConnectionForTest(ctx, postgresRunner{s}, tx, postgres, operationID)
+}
+
+func (s *SQLiteOwner) ReadSessionConnectionForTest(ctx context.Context, tx *sql.Tx, postgres bool, operationID string) (string, error) {
+	return readSessionConnectionForTest(ctx, sqliteRunner{s}, tx, postgres, operationID)
+}
