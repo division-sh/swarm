@@ -70,6 +70,8 @@ type channelCardActionResult struct {
 	Replayed bool
 }
 
+var errChannelCardSourceUnloaded = errors.New("channel card runtime source is unavailable")
+
 func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, pending runtimechanneldelivery.PendingAction) (channelCardActionResult, error) {
 	if d == nil || d.store == nil || d.cards == nil {
 		return channelCardActionResult{}, fmt.Errorf("channel card action owners are unavailable")
@@ -214,7 +216,10 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 	if err != nil {
 		return nil, false, err
 	}
-	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
+	if !lookup.Loaded() {
+		return nil, false, errChannelCardSourceUnloaded
+	}
+	if use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
 		return nil, false, fmt.Errorf("channel card runtime source is unavailable")
 	}
 	defer use.Done()

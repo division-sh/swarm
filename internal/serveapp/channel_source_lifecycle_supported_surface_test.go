@@ -514,13 +514,51 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash == hash {
 				t.Fatal("new process did not capture the new source")
 			}
+			var header struct {
+				Run operatorread.RunHeader `json:"run"`
+			}
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.get", map[string]any{"run_id": seed.RunID}, &header)
+			var reissued int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE run_id=$1 AND bundle_hash=$2`, seed.RunID, identity.SourceArtifacts[0].BundleHash).Scan(&reissued); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("changed-source facts backend=%s own_run_status=%s own_run_on_new_source=%t card_on_original_source=%t cards_on_new_source=%d", backend, header.Run.Status, header.Run.BundleHash == identity.SourceArtifacts[0].BundleHash, before.BundleHash == hash, reissued)
+			cliFailure := registeredChannelMailboxCLI(t, h, false, "decide", card, "approve", "--idempotency-key", "unloaded-cli-"+card)
+			t.Logf("changed-source CLI refusal backend=%s: %s", backend, strings.TrimSpace(cliFailure))
 			callback, signing, _ := h.provider.Registration()
 			postChannelSourceControl(t, callback, signing, card, token, messageID)
 			waitChannelRejectedCallback(t, db, token)
+			refused := readRegisteredChannelCard(t, h, card)
+			if refused.Status != decisioncard.StatusPending || refused.Verdict != "" || refused.DecisionEventID != "" || refused.BundleHash != hash || !bytes.Equal(refused.Snapshot, before.Snapshot) {
+				t.Fatalf("refusing an unavailable source consumed or changed its card: %+v", refused)
+			}
 			var decisions int
 			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
 				t.Fatalf("replacement source admitted a predecessor control: count=%d err=%v", decisions, err)
 			}
+			if err := os.WriteFile(path, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			h.stop(t)
+			h.start(t)
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+			if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
+				t.Fatal("explicit restoration did not load the exact original source")
+			}
+			callback, signing, _ = h.provider.Registration()
+			postChannelSourceUpdate(t, callback, signing, map[string]any{"update_id": 979101, "callback_query": map[string]any{
+				"id": "restored-source-" + card, "from": map[string]any{"id": 7000},
+				"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token,
+			}})
+			waitChannelAnchorDecision(t, db, card)
+			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
+				t.Fatalf("restored source did not admit exactly one later answer: count=%d err=%v", decisions, err)
+			}
+			var refusedIntents int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents WHERE state='settled' AND disposition='rejected' AND CAST(fact AS TEXT) LIKE $1 AND CAST(fact AS TEXT) NOT LIKE $2`, "%"+token+"%", "%restored-source-%").Scan(&refusedIntents); err != nil || refusedIntents != 1 {
+				t.Fatalf("later answer changed the original refused action: count=%d err=%v", refusedIntents, err)
+			}
+			t.Logf("explicit original-source restoration backend=%s later_decisions=%d original_refused_intents=%d", backend, decisions, refusedIntents)
 		}
 		if retained, err := (*sourceReader).GetSourceArtifact(t.Context(), hash); err != nil || !bytes.Equal(retained.SourceBlob, source.SourceBlob) {
 			t.Fatal("source replacement altered retained bytes", err)
@@ -598,8 +636,18 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			t.Fatal("reset replay changed deployment-owned native authority")
 		}
 		requireChannelPreservedHistory(t, db, preserved, successorPlan)
-		postChannelSourceControl(t, callback, signing, card, token, messageID)
-		waitChannelRejectedCallback(t, db, token)
+		status := postChannelSourceControl(t, callback, signing, card, token, messageID)
+		t.Logf("registered reset old callback backend=%s operation=%s HTTP=%d", backend, operation, status)
+		if status == http.StatusAccepted {
+			waitChannelRejectedCallback(t, db, token)
+		} else if status == http.StatusNotFound {
+			var intents int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents WHERE CAST(fact AS TEXT) LIKE $1`, "%"+token+"%").Scan(&intents); err != nil || intents != 0 {
+				t.Fatalf("withdrawn callback route created an action: count=%d err=%v", intents, err)
+			}
+		} else {
+			t.Fatalf("deleted card callback was neither refused at ingress nor admitted for terminal rejection: HTTP %d", status)
+		}
 		if result := requestServedJSONRPC(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": card}); result.Error == nil {
 			t.Fatal("reset retained deleted card execution")
 		}
@@ -720,6 +768,36 @@ func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory, suc
 	for index, row := range before {
 		if !bytes.Equal(row, after[index]) {
 			t.Errorf("reset altered preserved history table index %d: byte length %d -> %d", index, len(row), len(after[index]))
+			var oldRows, newRows [][]json.RawMessage
+			if json.Unmarshal(row, &oldRows) != nil || json.Unmarshal(after[index], &newRows) != nil {
+				continue
+			}
+			oldByID := make(map[string][]json.RawMessage, len(oldRows))
+			for _, values := range oldRows {
+				if len(values) > 0 {
+					oldByID[string(values[0])] = values
+				}
+			}
+			for _, values := range newRows {
+				if len(values) == 0 {
+					continue
+				}
+				id := string(values[0])
+				prior, found := oldByID[id]
+				if !found {
+					t.Logf("history diff table=%d added_identity=%s", index, id)
+					continue
+				}
+				delete(oldByID, id)
+				for column, value := range values {
+					if column >= len(prior) || !bytes.Equal(prior[column], value) {
+						t.Logf("history diff table=%d changed_identity=%s column=%d", index, id, column)
+					}
+				}
+			}
+			for id := range oldByID {
+				t.Logf("history diff table=%d deleted_identity=%s", index, id)
+			}
 		}
 	}
 	t.FailNow()
