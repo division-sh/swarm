@@ -4,6 +4,7 @@ package serveapp
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -65,7 +66,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	}
 	writeStandingCandidateFile(t, opts.ConfigPath, string(config)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\n", opts.SwarmDir))
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
-	root := filepath.Join(os.Getenv("TEST_ISSUE3011_OUT"), backend)
+	root := filepath.Join(cmp.Or(os.Getenv("TEST_ISSUE3011_OUT"), t.TempDir()), backend)
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
