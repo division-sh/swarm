@@ -71,7 +71,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -2651,7 +2650,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
 	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, selected, forkEventID, sourceRunID, "selected.proof",
 		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	revision := captureSelectedExecutionSourceRevision(t, ctx, selected, sourceRunID)
 	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, storerunlifecycle.ForkOriginPointEvent, revision, forkEventID)
@@ -3045,7 +3044,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: loaded.RootedSource.Artifact(), RootAdmission: admittedRoot,
 	})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, servedStore, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	captureSelectedExecutionSourceRevision(t, ctx, servedStore, sourceRunID)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
@@ -4010,8 +4009,8 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	turnEvent := storetest.InsertExistingRunRootEventRecord(
-		t, ctx, db, authoractivityfixture.DialectPostgres, uuid.NewString(), sourceRunID, "turn.fixture",
+	turnEvent := storetest.InsertRevisionedExistingRunRootEventRecord(
+		t, ctx, pg, uuid.NewString(), sourceRunID, "turn.fixture",
 		eventtest.Producer(events.EventProducerExternal, "run-fork-turn-fixture"), []byte(`{}`), events.EventEnvelope{}, at,
 	)
 	persistRunForkManagedTurn(t, ctx, pg, turnEvent, agentIdentity, sourceRunID, sessionID, turnID, entityID, at)

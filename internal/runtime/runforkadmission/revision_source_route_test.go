@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -237,7 +236,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			at := time.Now().UTC()
 			storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			if !tc.explicitSelector {
-				storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
+				storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, pg, uuid.NewString(), runID, "platform.precursor",
 					eventtest.Producer(events.EventProducerExternal, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))
 				captureRunForkRevision(t, ctx, db, runID)
 			}
@@ -255,7 +254,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 					}
 				}
 			} else {
-				storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, event)
+				storetest.InsertCanonicalEventRecord(t, ctx, pg, event)
 			}
 			captureRunForkRevision(t, ctx, db, runID)
 

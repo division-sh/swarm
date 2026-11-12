@@ -610,6 +610,20 @@ func insertCanonicalFixtureRecordForTest(ctx context.Context, attempt *mutationp
 	return false, nil
 }
 
+func InsertCanonicalEventRecordForTest(ctx context.Context, selected any, record eventrecord.Record) (bool, error) {
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return false, err
+	}
+	var inserted bool
+	err = runEventFixtureMutationForTest(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		inserted, err = insertCanonicalFixtureRecordForTest(txctx, attempt, dialect, record)
+		return err
+	})
+	return inserted, err
+}
+
 // CommitRevisionedSemanticEventFixtureForTest exercises the canonical event
 // and delivery adapters, including their fork revision projection.
 func CommitRevisionedSemanticEventFixtureForTest(ctx context.Context, selected any, admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition) (bool, error) {
