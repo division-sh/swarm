@@ -195,18 +195,22 @@ func (rt *Runtime) withdrawLoggedOutRegisteredStandingCredentials(ctx context.Co
 		if err != nil {
 			return err
 		}
-		if previous.OperationID == "" || previous.Revision <= 0 || !previous.DeploymentRegistration || !previous.AccountConfirmed ||
-			!retired.DeploymentRegistration || !retired.AccountConfirmed || retired.OperationID != previous.OperationID ||
-			retired.PrincipalID != previous.PrincipalID || retired.Provider != previous.Provider || retired.AccountReference != previous.AccountReference ||
-			retired.Interface.Normalized() != previous.Interface.Normalized() || retired.SlotKey != previous.SlotKey ||
-			retired.TargetSelector != previous.TargetSelector || retired.Coordinate.Normalized() != previous.Coordinate.Normalized() ||
-			retired.Posture != previous.Posture || retired.Ceremony != previous.Ceremony || !slices.Equal(retired.CredentialAdmissions, previous.CredentialAdmissions) ||
+		if !sameRegisteredStandingPredecessor(previous, retired) ||
 			retired.Revision <= previous.Revision || retired.Phase != channelonboarding.PhaseRetired || !retired.LogoutCompleted {
 			return channelonboarding.ErrRevisionConflict
 		}
 		delete(bindings, key)
 	}
 	return nil
+}
+
+func sameRegisteredStandingPredecessor(previous, current channelonboarding.Operation) bool {
+	return previous.OperationID != "" && previous.Revision > 0 && previous.DeploymentRegistration && previous.AccountConfirmed &&
+		current.DeploymentRegistration && current.AccountConfirmed && current.OperationID == previous.OperationID &&
+		current.PrincipalID == previous.PrincipalID && current.Provider == previous.Provider && current.AccountReference == previous.AccountReference &&
+		current.Interface.Normalized() == previous.Interface.Normalized() && current.SlotKey == previous.SlotKey &&
+		current.TargetSelector == previous.TargetSelector && current.Coordinate.Normalized() == previous.Coordinate.Normalized() &&
+		current.Posture == previous.Posture && current.Ceremony == previous.Ceremony && slices.Equal(current.CredentialAdmissions, previous.CredentialAdmissions)
 }
 
 func (rt *Runtime) sealStandingCredentialBindings(ctx context.Context, bindings map[string]standingBindingCredentials, selected string) (*credentials.SecretBindingProjection, error) {
