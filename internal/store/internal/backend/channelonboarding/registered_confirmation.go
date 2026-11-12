@@ -13,7 +13,7 @@ import (
 	identityowner "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 )
 
-func RegisteredConfirmationCurrent(ctx context.Context, q queryer, a effects.Authority, postgres, lock bool) (bool, error) {
+func registeredConfirmationCurrent(ctx context.Context, owner runner, q queryer, a effects.Authority, postgres, lock bool) (bool, error) {
 	if !a.Valid() || a.Kind != effects.AuthorityChannelConfirmation || a.ChannelConfirmation.TransportParent == nil {
 		return false, nil
 	}

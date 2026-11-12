@@ -90,7 +90,7 @@ func proveChannelResponseReceiptMatrix(t *testing.T, ctx context.Context, select
 							return err
 						}
 					}
-					if currentTxResponseTest(t, ctx, tx, authority, postgres) {
+					if currentTxResponseTest(t, ctx, selected, tx, authority, postgres) {
 						return fmt.Errorf("two source intents acquired response authority")
 					}
 					if err := requireResponseAuthorityTx(selected, ctx, tx, authority); err == nil {
@@ -157,7 +157,7 @@ func proveChannelResponseReceiptMatrix(t *testing.T, ctx context.Context, select
 				if _, err := tx.ExecContext(ctx, `UPDATE channel_delivery_defaults SET delivery_epoch=delivery_epoch+1`); err != nil {
 					return err
 				}
-				if currentTxResponseTest(t, ctx, tx, edit, postgres) {
+				if currentTxResponseTest(t, ctx, selected, tx, edit, postgres) {
 					return fmt.Errorf("authority loss after authorization was ignored")
 				}
 				if err := requireResponseAuthorityTx(selected, ctx, tx, edit); err == nil {
@@ -283,7 +283,7 @@ func proveResponseAuthorityNegatives(t *testing.T, original context.Context, sel
 					return err
 				}
 				_, postgres := selected.(*PostgresStore)
-				if currentTxResponseTest(t, ctx, tx, edit, postgres) {
+				if currentTxResponseTest(t, ctx, selected, tx, edit, postgres) {
 					return fmt.Errorf("%s was admitted", test.name)
 				}
 				if err := requireResponseAuthorityTx(selected, ctx, tx, edit); err == nil {
@@ -305,13 +305,15 @@ func requireResponseAuthorityTx(selected selectedChannelDeliveryTestStore, ctx c
 	return selected.(*SQLiteRuntimeStore).effectSQLiteOwner.RequireExternalEffectAuthorityTx(ctx, tx, authority, false)
 }
 
-func currentTxResponseTest(t *testing.T, ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) bool {
+func currentTxResponseTest(t *testing.T, ctx context.Context, selected selectedChannelDeliveryTestStore, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) bool {
 	t.Helper()
-	current := effectpersistence.ExternalEffectAuthorityCurrentSQLite
+	var ok bool
+	var err error
 	if postgres {
-		current = effectpersistence.ExternalEffectAuthorityCurrentPostgres
+		ok, err = effectpersistence.ExternalEffectAuthorityCurrentPostgres(ctx, selected.(*PostgresStore).channelOnboardingPostgresOwner, tx, authority)
+	} else {
+		ok, err = effectpersistence.ExternalEffectAuthorityCurrentSQLite(ctx, selected.(*SQLiteRuntimeStore).channelOnboardingSQLiteOwner, tx, authority)
 	}
-	ok, err := current(ctx, tx, authority)
 	if err != nil {
 		t.Fatal(err)
 	}
