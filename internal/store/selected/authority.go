@@ -5,14 +5,16 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
 type AuthorityRequest struct {
-	Selection   storebackend.Selection
-	PostgresDSN string
+	ProviderFacts channelprovider.FactsLookup
+	Selection     storebackend.Selection
+	PostgresDSN   string
 }
 
 type authorityInspectionPort interface {

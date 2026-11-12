@@ -1,5 +1,3 @@
-//go:build linux || darwin
-
 package serveapp
 
 import (
@@ -30,6 +28,8 @@ type serveSessionConnection interface {
 	SessionPreviewConnected(context.Context, channelonboarding.Operation) (bool, error)
 	UnclaimedCount(context.Context) (int64, error)
 	AdmitSessionAccount(context.Context, operatorchannel.SessionAccountAdmission) (authority.Admission, error)
+	AdmitActivityAccount(context.Context, operatorchannel.SessionAccountAdmission) (authority.Admission, error)
+	ValidateActivityRequestAccount(context.Context, operatorchannel.SessionAccountAdmission, string, int64) error
 	ObserveSession(context.Context) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, error)
 	ChannelExecution(context.Context) (execution.Channel, error)
 	VerifyDeploymentRegistration(context.Context, channelonboarding.Operation) (bool, error)

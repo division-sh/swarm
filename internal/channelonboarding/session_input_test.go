@@ -42,7 +42,7 @@ func TestSessionActiveResponsibilityUsesFrozenActivationRevision(t *testing.T) {
 					store.op.Phase = PhaseAwaitingOperatorConfirmation
 				}
 				store.activation.BindingRevision, store.activation.ConversationRef, store.activation.ProofID, store.activation.ProofRevision = 0, "", "", 0
-				if !expected.MatchesAccountBusiness(store.op, store.activation) {
+				if !expected.MatchesAccountBusiness(store.op, store.activation, store.op.ProviderFacts()) {
 					t.Fatal("pending operator ceremony revoked the independent current customer activation")
 				}
 			case "foreign_account":

@@ -1,6 +1,8 @@
 package generationauthority_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -41,7 +43,7 @@ func TestNativeProcessGenerationTransactionsBothStores(t *testing.T) {
 			var bootstrap func(context.Context, schemastore.SchemaBootstrapRequest) error
 			backendName := processbinding.SQLiteLeaseBackend
 			if sqlite {
-				owner, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, filepath.Join(t.TempDir(), "process.db"))
+				owner, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, filepath.Join(t.TempDir(), "process.db"), channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}

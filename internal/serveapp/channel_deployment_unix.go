@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
@@ -48,13 +47,14 @@ func (c *deploymentChannelSession) AcknowledgeRegisteredOperator(ctx context.Con
 
 func deploymentChannelHandlers(repo, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, webhook func(context.Context, string, string) bool, runtimeOptions deploymentRuntimeOptions) (apiv1.MethodHandler, publicingress.PendingDeploymentClaim, func(context.Context) error, func() error) {
 	root, rootErr := cliapp.NewInvocationRoot(repo)
-	factory := func(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
-		opts.CurrentWebhook = webhook
-		value, err := OpenChannelRegistration(ctx, opts)
-		if err == nil {
+	factory := channelRegistrations{
+		configure: func(opts cliapp.ChannelRegistrationOptions) cliapp.ChannelRegistrationOptions {
+			opts.CurrentWebhook = webhook
+			return opts
+		},
+		opened: func(value cliapp.ChannelRegistrationSession) {
 			configureDeploymentRuntimeSession(value, runtimeOptions)
-		}
-		return value, err
+		},
 	}
 	var mu sync.Mutex
 	clients := map[string]*cliapp.DeploymentChannelControl{}
@@ -211,7 +211,7 @@ func deploymentTransportControl(ctx context.Context, op channelonboarding.Operat
 	if client != nil {
 		return client, nil
 	}
-	if channelprovider.Session(op.Provider) {
+	if isInstalledSession(op.Provider) {
 		return nil, fmt.Errorf("deployment operator connection has no exact restored control")
 	}
 	client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
@@ -286,7 +286,7 @@ func rememberDeploymentControl(clients map[string]*cliapp.DeploymentChannelContr
 }
 
 func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex, output io.Writer, sessions serveSessionBootstrapOwner) error {
-	for _, binding := range channelprovider.Installed() {
+	for _, binding := range installedChannelFacts() {
 		if !binding.Session() {
 			continue
 		}
@@ -356,21 +356,23 @@ func closeDeploymentControls(clients map[string]*cliapp.DeploymentChannelControl
 // OpenChannelRegistration composes an invocation, not Run or a runtime target.
 // Keeping native wiring here follows the existing CLI executable-runner seam.
 func OpenChannelRegistration(ctx context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
+	binding, found := installedChannelProvider(opts.Plan.Provider())
+	if !found {
+		return nil, channelonboarding.ErrInvalidRequest
+	}
+	return openChannelRegistration(ctx, opts, binding)
+}
+
+func openChannelRegistration(ctx context.Context, opts cliapp.ChannelRegistrationOptions, binding installedChannelBinding) (cliapp.ChannelRegistrationSession, error) {
 	if ctx == nil || ctx.Err() != nil || opts.Process == nil || opts.Operations == nil || opts.Store == nil ||
 		opts.Credentials == nil || opts.Principal.Validate() != nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
-	binding, installed := channelprovider.Lookup(opts.Plan.Provider())
-	if !installed {
+	if !binding.facts.MatchesProvider(opts.Plan.Provider()) || binding.registration == nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
-	if binding.PollsClaim() {
-		return openTelegramChannelRegistration(ctx, opts)
-	}
-	if binding.Session() {
-		return openWhatsAppChannelRegistration(ctx, opts)
-	}
-	return nil, channelonboarding.ErrInvalidRequest
+	opts.Plan = opts.Plan.WithProviderFacts(binding.facts)
+	return binding.registration(ctx, opts)
 }
 
 func (c *deploymentChannelSession) QualifySessionPlan(candidate channelonboarding.Candidate) error {
@@ -380,7 +382,11 @@ func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op chan
 	if c.connection != nil {
 		return c.connection.CheckBootstrap(ctx)
 	}
-	connection, err := openWhatsAppDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
+	binding, installed := installedChannelProvider(c.opts.Plan.Provider())
+	if !installed || binding.deployment == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	connection, err := binding.deployment(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
 		OperationID: op.OperationID, Principal: c.opts.Principal, Process: c.opts.Process, Operations: c.opts.Operations,
 		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger, RegisteredBusiness: c.business,
 		OperatorAccount: c.opts.OperatorAccount, OperatorBinding: c.opts.OperatorBinding})
@@ -594,7 +600,7 @@ func (c *deploymentChannelSession) LogoutRegistration(ctx context.Context, op ch
 }
 
 func (c *deploymentChannelSession) CloseRegistration(ctx context.Context, op channelonboarding.Operation) error {
-	if !channelprovider.Session(op.Provider) || op.Provider != c.opts.Plan.Provider() || c.connection == nil ||
+	if !isInstalledSession(op.Provider) || op.Provider != c.opts.Plan.Provider() || c.connection == nil ||
 		op.PrincipalID != c.opts.Principal.ID || c.connection.ConnectionID() != op.SessionConnectionID {
 		return channelonboarding.ErrRevisionConflict
 	}

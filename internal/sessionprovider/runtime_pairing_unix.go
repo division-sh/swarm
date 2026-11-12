@@ -61,7 +61,7 @@ func (c *RuntimeConnection) CheckpointPairing(ctx context.Context, expectedRevis
 	if op.Phase == channelonboarding.PhaseActivatingProvider {
 		accountReference := ""
 		if op.DeploymentRegistration {
-			ref, err := channelonboarding.CanonicalAccount(op.Provider, "+"+device.ID.User)
+			ref, err := channelonboarding.CanonicalAccount(c.plan.ProviderFacts().ForProvider(op.Provider), "+"+device.ID.User)
 			if err != nil {
 				return result, false, err
 			}

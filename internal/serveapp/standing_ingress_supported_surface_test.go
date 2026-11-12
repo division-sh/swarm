@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -291,7 +293,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("second serve exit = %d", code)
 	}
 
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
+	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath, channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("open SQLite runtime store: %v", err)
 	}
@@ -413,7 +415,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	isolateCLIAPIConfigEnv(t)
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	runtimePG, err := store.NewPostgresStore(dsn)
+	runtimePG, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
@@ -494,7 +496,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
-	runtimePG, err = store.NewPostgresStore(dsn)
+	runtimePG, err = store.NewPostgresStore(dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("reopen PostgresStore: %v", err)
 	}
@@ -583,7 +585,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 			t.Fatal(err)
 		}
 		var reopenErr error
-		runtimePG, reopenErr = store.NewPostgresStore(dsn)
+		runtimePG, reopenErr = store.NewPostgresStore(dsn, channelfixture.Facts)
 		if reopenErr != nil {
 			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
 		}
@@ -645,7 +647,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 					var err error
-					opened, err = store.NewPostgresStore(dsn)
+					opened, err = store.NewPostgresStore(dsn, channelfixture.Facts)
 					if err != nil {
 						return nil, err
 					}
@@ -1098,7 +1100,7 @@ func standingPostgresDiagnostics(dsn string) string {
 }
 
 func standingSQLiteDiagnostics(path string) string {
-	selected, err := store.NewSQLiteRuntimeStore(path)
+	selected, err := store.NewSQLiteRuntimeStore(path, channelfixture.Facts)
 	if err != nil {
 		return err.Error()
 	}

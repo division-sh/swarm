@@ -1,6 +1,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,7 +122,7 @@ func TestWhatsAppIncomingAcceptedPackProjectionIsNotAdmission(t *testing.T) {
 					}
 					event.Message = &waE2E.Message{ProtocolMessage: protocol}
 				}
-				captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+				captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -162,7 +164,7 @@ func TestWhatsAppIncomingAcceptedPackReplyAndForwardParity(t *testing.T) {
 				}
 				event.Message = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 					Text: proto.String("current text"), ContextInfo: info}}
-				captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+				captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -186,7 +188,7 @@ func TestWhatsAppIncomingAcceptedPackRefusesMalformedPayload(t *testing.T) {
 			t.Fatalf("malformed/objectless payload accepted: %s", body)
 		}
 	}
-	captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), incomingMessageFixture(), captureFixture(t).ReceivedAt)
+	captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), incomingMessageFixture(), captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}

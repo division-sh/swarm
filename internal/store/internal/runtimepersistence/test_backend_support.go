@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/events"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -13,8 +14,8 @@ import (
 
 // NewPostgresStoreForTest binds an externally managed test database to the
 // selected-store facade. Production construction must use NewPostgresStore.
-func NewPostgresStoreForTest(db *sql.DB) *PostgresStore {
-	return newPostgresStoreWithBackend(mustPostgresBackend(db))
+func NewPostgresStoreForTest(db *sql.DB, providerFacts channelprovider.FactsLookup) *PostgresStore {
+	return newPostgresStoreWithBackend(mustPostgresBackend(db), providerFacts)
 }
 
 func mustPostgresBackend(db *sql.DB) *postgresbackend.Backend {
@@ -28,7 +29,7 @@ func mustPostgresBackend(db *sql.DB) *postgresbackend.Backend {
 // NewSQLiteRuntimeStoreForTest binds an externally managed test database to
 // the selected-store facade. Production construction must use
 // NewSQLiteRuntimeStore.
-func NewSQLiteRuntimeStoreForTest(db *sql.DB) *SQLiteRuntimeStore {
+func NewSQLiteRuntimeStoreForTest(db *sql.DB, providerFacts channelprovider.FactsLookup) *SQLiteRuntimeStore {
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
 		panic(err)
@@ -37,7 +38,7 @@ func NewSQLiteRuntimeStoreForTest(db *sql.DB) *SQLiteRuntimeStore {
 	if err != nil {
 		panic(err)
 	}
-	store, err := newSQLiteStoreComposition(schema, backend, nil)
+	store, err := newSQLiteStoreComposition(schema, backend, nil, providerFacts)
 	if err != nil {
 		panic(err)
 	}

@@ -43,7 +43,7 @@ func (p publicationTargetOwnerEvidence) selectedAccountInstance(ctx context.Cont
 		return flowidentity.Instance{}, false, nil
 	}
 	account := channelonboarding.AccountReference{Provider: plan.Provider(), Account: publication.account}
-	if account.Validate() != nil || p.instances == nil {
+	if account.Validate(plan.ProviderFacts()) != nil || p.instances == nil {
 		return flowidentity.Instance{}, true, fmt.Errorf("account-selected ingress requires its authenticated receiving account and native instance index")
 	}
 	fact, present := correlation.SourceArtifactFactFromContext(ctx)
@@ -68,7 +68,7 @@ func (p publicationTargetOwnerEvidence) selectedAccountInstance(ctx context.Cont
 		if !assigned || value == "" || !instance.TerminatedAt.IsZero() {
 			continue
 		}
-		candidate, err := channelonboarding.CanonicalAccount(plan.Provider(), value)
+		candidate, err := channelonboarding.CanonicalAccount(plan.ProviderFacts(), value)
 		if err != nil {
 			return selected, true, fmt.Errorf("flow %s operator_account: %w", flow, err)
 		}

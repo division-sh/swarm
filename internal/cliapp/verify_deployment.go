@@ -130,12 +130,12 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 	return false
 }
 
-func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult, registration ChannelRegistrationFactory) {
 	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
 	inspectVerifyListeners(ctx, repo, cfg, result)
 	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
 	inspectVerifyPublicIngress(ctx, cfg, result, "source:"+result.BootReport.SourceArtifactHash)
-	inspectVerifySelectedStore(ctx, repo, paths, cfg, swarmDir, source, opts, packBases, workspaces, workspaceOK, result)
+	inspectVerifySelectedStore(ctx, repo, paths, cfg, swarmDir, source, opts, packBases, workspaces, workspaceOK, result, nativeChannelFacts(registration))
 	result.BootReport.Sort()
 }
 

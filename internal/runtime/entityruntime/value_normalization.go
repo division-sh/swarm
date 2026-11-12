@@ -122,7 +122,7 @@ func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, e
 			if !ok {
 				return nil, fieldTypeError(fieldName, "must be an account string")
 			}
-			canonical, err := channelonboarding.CanonicalAccount(plan.Provider(), text)
+			canonical, err := channelonboarding.CanonicalAccount(plan.ProviderFacts(), text)
 			if err != nil {
 				return nil, fieldTypeError(fieldName, err.Error())
 			}

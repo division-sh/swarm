@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -297,7 +296,7 @@ func admitServeRegisteredWebhookCredentials(ctx context.Context, manager *runtim
 			}
 			for _, op := range channelonboarding.RetainedConfirmedAccounts(registered, candidate.Provider) {
 				ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
-				holders, err := manager.AccountHolders(ctx, ref)
+				holders, err := manager.AccountHolders(ctx, ref, candidate.ProviderFacts())
 				if err != nil {
 					return err
 				}
@@ -358,7 +357,7 @@ func compileServeLearnedChannelActivations(ctx context.Context, store channelonb
 func compileServePrebindingActivations(ctx context.Context, catalog *channelonboarding.CandidateCatalog, operations []channelonboarding.Operation, projection *runtimecredentials.SecretBindingProjection) ([]servePrebindingActivation, error) {
 	prebinding := []servePrebindingActivation{}
 	for _, op := range operations {
-		if !op.Phase.SupportsPrebindingRegistration() || op.AccountConnection() && op.ActivationRevision > 0 {
+		if !op.Phase.SupportsPrebindingRegistration() || op.AccountConnection(op.ProviderFacts()) && op.ActivationRevision > 0 {
 			continue
 		}
 		candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)
@@ -849,12 +848,12 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 				ActivationGeneration: facts.ActivationGeneration.Diagnostic(), ObservedAt: facts.ObservedAt}, true, nil
 		}
 	}
-	if op.AccountConnection() {
+	if op.AccountConnection(op.ProviderFacts()) {
 		responsibility := channelonboarding.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 			ActivationRevision: op.ActivationRevision, Coordinate: candidate.Coordinate, TargetSelector: op.TargetSelector,
 			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
 		facts.AccountOnly = true
-		facts.ActivationCurrent = responsibility.MatchesAccountBusiness(op, activation)
+		facts.ActivationCurrent = responsibility.MatchesAccountBusiness(op, activation, op.ProviderFacts())
 		facts.CredentialsCurrent = len(activation.CredentialAdmissions) == 0
 		return channelonboarding.ProjectReadiness(facts), true, nil
 	}
@@ -1188,8 +1187,8 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 }
 
 func (r *serveChannelActivationRefresher) refreshRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference) error {
-	provider, _ := channelprovider.Lookup(ref.Provider)
-	if provider.Webhook() && ref.Validate() == nil {
+	provider, _ := installedChannelFactsFor(ref.Provider)
+	if provider.Webhook() && ref.Validate(provider) == nil {
 		if err := admitServeRegisteredWebhookCredentials(ctx, r.manager, r.store, ref); err != nil {
 			return err
 		}
@@ -1237,7 +1236,7 @@ func (r *serveChannelActivationRefresher) PublishChannelActivation(ctx context.C
 		return fmt.Errorf("successor channel activation process publication is unavailable")
 	}
 	defer lease.Release()
-	if op.AccountConnection() {
+	if op.AccountConnection(op.ProviderFacts()) {
 		return nil
 	}
 	wantBinding := channelonboarding.LearnedBindingID(activation.SlotKey)

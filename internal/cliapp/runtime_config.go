@@ -8,23 +8,36 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type RuntimeConfigLoadOptions struct {
-	RepoRoot        string
-	ExplicitPath    string
-	BackendOverride string
+	ChannelRegistration ChannelRegistrationFactory
+	RepoRoot            string
+	ExplicitPath        string
+	BackendOverride     string
 }
 
 type RuntimeConfigLoadResult struct {
-	Config        *config.Config
-	Source        string
-	Path          string
-	Diagnostics   []unifiedConfigDiagnostic
-	cli           cliCommandConfig
-	sourcePresent *bool
-	validated     bool // Source projection and Config.Validate, before ambient env/readiness.
+	admitPackInventory func(sourceartifact.RootedSource, *packartifact.EffectivePackInventory, runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error)
+	Config             *config.Config
+	Source             string
+	Path               string
+	Diagnostics        []unifiedConfigDiagnostic
+	cli                cliCommandConfig
+	sourcePresent      *bool
+	validated          bool // Source projection and Config.Validate, before ambient env/readiness.
+}
+
+func (r RuntimeConfigLoadResult) AdmitPackInventory(rooted sourceartifact.RootedSource, inventory *packartifact.EffectivePackInventory, spec runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error) {
+	if r.admitPackInventory != nil {
+		return r.admitPackInventory(rooted, inventory, spec)
+	}
+	return packadmission.AdmitInventory(rooted, inventory, spec)
 }
 
 // DeploymentConfigured uses the selected file, not a default backend or an
@@ -65,9 +78,10 @@ func (r RuntimeConfigLoadResult) Detail() string {
 
 func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigLoadResult, error) {
 	loaded, err := loadUnifiedConfig(unifiedConfigLoadOptions{
-		RepoRoot:        opts.RepoRoot,
-		ExplicitPath:    opts.ExplicitPath,
-		BackendOverride: opts.BackendOverride,
+		ChannelRegistration: opts.ChannelRegistration,
+		RepoRoot:            opts.RepoRoot,
+		ExplicitPath:        opts.ExplicitPath,
+		BackendOverride:     opts.BackendOverride,
 	})
 	result := RuntimeConfigLoadResult{
 		Config:        loaded.Config,
@@ -77,6 +91,9 @@ func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigL
 		cli:           loaded.CLI,
 		sourcePresent: loaded.sourcePresent,
 		validated:     loaded.validated,
+	}
+	if opts.ChannelRegistration != nil {
+		result.admitPackInventory = opts.ChannelRegistration.AdmitInventory
 	}
 	if err != nil {
 		return result, err

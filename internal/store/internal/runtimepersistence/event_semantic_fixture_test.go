@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -541,7 +543,7 @@ func insertPostgresCanonicalEventRecordFixture(ctx context.Context, db *sql.DB, 
 	if db == nil {
 		return fmt.Errorf("postgres canonical event record fixture requires a database")
 	}
-	return insertCanonicalEventRecordFixture(ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), event)
+	return insertCanonicalEventRecordFixture(ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), event)
 }
 
 func insertPostgresStagedCanonicalEventRecordFixture(ctx context.Context, db *sql.DB, event events.Event) error {

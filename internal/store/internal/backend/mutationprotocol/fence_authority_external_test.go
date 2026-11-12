@@ -1,6 +1,8 @@
 package mutationprotocol_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"testing"
 
@@ -19,7 +21,7 @@ import (
 func prepareNativeFenceAuthority(t *testing.T, dsn string) context.Context {
 	t.Helper()
 	ctx := context.Background()
-	selected, _, err := construction.OpenPostgresRuntime(ctx, dsn)
+	selected, _, err := construction.OpenPostgresRuntime(ctx, dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

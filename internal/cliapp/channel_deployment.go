@@ -42,7 +42,7 @@ type DeploymentChannelControl struct {
 	capability      startupownership.ProcessCapability
 	session         ChannelRegistrationSession
 	expectedAccount string
-	provider        string
+	provider        channelprovider.Binding
 	operatorAccount channelonboarding.AccountReference
 	operatorTrigger providertriggers.InboundAdmissionPlan
 	borrowed        bool
@@ -66,7 +66,7 @@ func UseDeploymentChannelControl(ctx context.Context, root InvocationRoot, confi
 
 func openDeploymentChannelClient(ctx context.Context, provider string, opts rootCommandOptions, existing ...registrationHolder) (_ *DeploymentChannelControl, err error) {
 	root := opts.invocationRoot
-	loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: rootConfigPath(opts)})
+	loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: rootConfigPath(opts), ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +92,9 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 	projection, err := packadmission.Admit(inventory, spec)
 	if err != nil {
 		return nil, err
+	}
+	for i, plan := range projection.ChannelPlans {
+		projection.ChannelPlans[i] = plan.WithProviderFacts(selectedChannelFacts(opts.channelRegistration, plan.Provider()))
 	}
 	candidate, err := deploymentChannelCandidate(provider, projection.ChannelPlans)
 	if err != nil {
@@ -188,7 +191,7 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 	if err != nil {
 		return nil, err
 	}
-	request, err := selectedAuthorityRequest(ctx, selection, loaded.Config)
+	request, err := selectedAuthorityRequest(ctx, selection, loaded.Config, nativeChannelFacts(opts.channelRegistration))
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +200,14 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 			return nil, err
 		}
 	}
-	c := &DeploymentChannelControl{process: worklifetime.NewProcess(), provider: provider}
+	var registration ChannelRegistrationBinding
+	var providerFacts channelprovider.FactsLookup
+	if opts.channelRegistration != nil {
+		registration, _ = opts.channelRegistration.Select(provider)
+		providerFacts = opts.channelRegistration.NativeFacts()
+	}
+	request.ProviderFacts = providerFacts
+	c := &DeploymentChannelControl{process: worklifetime.NewProcess(), provider: registration.Facts}
 	if len(existing) == 1 {
 		c.store, c.process, c.borrowed = existing[0].store, existing[0].process, true
 		return c, nil
@@ -226,10 +236,10 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 			if err != nil {
 				return nil, err
 			}
-			return &DeploymentChannelControl{remote: remote, provider: provider}, nil
+			return &DeploymentChannelControl{remote: remote, provider: registration.Facts}, nil
 		}
 	}
-	c.store, err = selected.OpenRuntime(ctx, selected.RuntimeRequest{Selection: selection, PostgresDSN: request.PostgresDSN})
+	c.store, err = selected.OpenRuntime(ctx, selected.RuntimeRequest{Selection: selection, PostgresDSN: request.PostgresDSN, ProviderFacts: providerFacts})
 	return c, err
 }
 
@@ -241,7 +251,7 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 	if err != nil {
 		return err
 	}
-	owner, provider := c.store, c.provider
+	owner, provider := c.store, c.provider.Provider()
 	credentialStore, err := CredentialFileStore()
 	if err != nil {
 		return err
@@ -259,7 +269,8 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 		return err
 	}
 	var trigger, webhook providertriggers.InboundAdmissionPlan
-	binding, installed := channelprovider.Lookup(provider)
+	binding := c.provider
+	installed := binding.MatchesProvider(provider)
 	if !installed {
 		return channelonboarding.ErrInvalidRequest
 	}
@@ -282,7 +293,11 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 	if opts.channelRegistration == nil {
 		return errors.New("channel registration is not installed in this executable")
 	}
-	c.session, err = opts.channelRegistration(ctx, ChannelRegistrationOptions{Directory: directory, Principal: principal, OperatorAccount: c.operatorAccount,
+	registration, found := opts.channelRegistration.Select(provider)
+	if !found || registration.Open == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	c.session, err = registration.Open(ctx, ChannelRegistrationOptions{Directory: directory, Principal: principal, OperatorAccount: c.operatorAccount,
 		OperatorBinding: func(ctx context.Context, op channelonboarding.Operation) (channelonboarding.Result, error) {
 			if c.service == nil || c.operatorAccount.Provider != op.Provider || c.operatorAccount.Account != op.AccountReference {
 				return channelonboarding.Result{}, channelonboarding.ErrNotFound
@@ -309,8 +324,13 @@ func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, d
 	if err != nil {
 		return err
 	}
-	c.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: hitl,
-		Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Identities: identities, Credentials: writer, Sessions: c.session,
+	var operatorFacts channelprovider.Binding
+	if hitl != nil {
+		operatorFacts = selectedChannelFacts(opts.channelRegistration, hitl.Provider)
+	}
+	c.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: hitl, OperatorAccountFacts: operatorFacts,
+		ProviderFacts: c.provider,
+		Store:         owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Identities: identities, Credentials: writer, Sessions: c.session,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
 		}})
@@ -321,7 +341,7 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.remote != nil {
-		params["scope"], params["provider"] = "deployment", c.provider
+		params["scope"], params["provider"] = "deployment", c.provider.Provider()
 		if method == "channel.onboarding_start" && c.expectedAccount != "" {
 			params["account"] = c.expectedAccount
 		}
@@ -353,7 +373,7 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 		if readErr != nil {
 			return readErr
 		}
-		binding, _ := channelprovider.Lookup(current.Operation.Provider)
+		binding := current.Operation.ProviderFacts()
 		if binding.PollsClaim() && current.IdentityOperation != nil && current.IdentityOperation.State == operatorchannel.StateAwaitingClaim {
 			if err := c.session.PollOperatorClaim(ctx, current.Operation); err != nil {
 				return err
@@ -379,7 +399,7 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 			result, err = c.service.DeploymentAccountStatus(ctx, ref)
 			break
 		}
-		rows, failure := c.service.DeploymentAccounts(ctx, c.provider)
+		rows, failure := c.service.DeploymentAccounts(ctx, c.provider.Provider())
 		result, err = map[string]any{"accounts": rows}, failure
 	default:
 		return channelonboarding.ErrInvalidRequest
@@ -391,7 +411,21 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(raw, target)
+	if err := json.Unmarshal(raw, target); err != nil {
+		return err
+	}
+	switch value := target.(type) {
+	case *channelonboarding.Result:
+		*value = value.WithProviderFacts(c.provider)
+	case *map[string][]channelonboarding.Result:
+		for key, rows := range *value {
+			for i, row := range rows {
+				rows[i] = row.WithProviderFacts(c.provider)
+			}
+			(*value)[key] = rows
+		}
+	}
+	return nil
 }
 
 func (c *DeploymentChannelControl) retryRegistration(ctx context.Context, params map[string]any) (channelonboarding.Result, error) {
@@ -447,7 +481,7 @@ func (c *DeploymentChannelControl) Dispatch(ctx context.Context, method string, 
 func (c *DeploymentChannelControl) ResumeRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference, expected ...channelonboarding.Operation) (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.process == nil || c.remote != nil || c.store == nil || ref.Provider != c.provider || len(expected) > 1 {
+	if c.closed || c.process == nil || c.remote != nil || c.store == nil || ref.Provider != c.provider.Provider() || len(expected) > 1 {
 		return channelonboarding.ErrInvalidRequest
 	}
 	if process, found := worklifetime.ProcessFromContext(ctx); found && process != c.process {
@@ -462,7 +496,7 @@ func (c *DeploymentChannelControl) ResumeRegisteredAccount(ctx context.Context, 
 		return err
 	}
 	defer func() { err = errors.Join(err, work.Done()) }()
-	op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), ref)
+	op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), ref, c.provider)
 	if err != nil {
 		return err
 	}
@@ -481,11 +515,11 @@ func (c *DeploymentChannelControl) DeploymentTransport(ctx context.Context, expe
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ctx, err := c.registrationContext(ctx)
-	if err != nil || c.service == nil || c.operatorAccount.Provider != c.provider {
+	if err != nil || c.service == nil || c.operatorAccount.Provider != c.provider.Provider() {
 		return channelonboarding.Result{}, packs.OutboundBindingPlan{}, errors.Join(channelonboarding.ErrNotFound, err)
 	}
 	if expected == (channelnative.TransportParent{}) {
-		op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), c.operatorAccount)
+		op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), c.operatorAccount, c.provider)
 		if err != nil {
 			return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
 		}
@@ -522,7 +556,7 @@ func (c *DeploymentChannelControl) DeploymentTransport(ctx context.Context, expe
 func (c *DeploymentChannelControl) AccountStatus(ctx context.Context, ref channelonboarding.AccountReference) (channelonboarding.AccountStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.service == nil || ref.Provider != c.provider {
+	if c.service == nil || ref.Provider != c.provider.Provider() {
 		return channelonboarding.AccountStatus{}, channelonboarding.ErrInvalidRequest
 	}
 	return c.service.DeploymentAccountStatus(ctx, ref)
@@ -635,7 +669,7 @@ func (opts channelConnectOptions) requireDeploymentSelection() error {
 
 func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	accounts := []channelonboarding.Result{}
-	for _, binding := range channelprovider.Installed() {
+	for _, binding := range opts.channelRegistration.Providers() {
 		provider := binding.Provider()
 		client, err := openDeploymentChannelClient(ctx, provider, opts)
 		if err != nil {
@@ -677,7 +711,7 @@ func runDeploymentChannelStatus(ctx context.Context, out, errOut io.Writer, prov
 		return returnCLIValidationError(errOut, err)
 	}
 	if account != "" {
-		ref, err := channelonboarding.CanonicalAccount(provider, account)
+		ref, err := channelonboarding.CanonicalAccount(selectedChannelFacts(opts.channelRegistration, provider), account)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -739,7 +773,7 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 		return returnCLIValidationError(errOut, err)
 	}
 	if account != "" {
-		ref, err := channelonboarding.CanonicalAccount(provider, account)
+		ref, err := channelonboarding.CanonicalAccount(selectedChannelFacts(opts.channelRegistration, provider), account)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -754,7 +788,7 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if len(rows) == 0 && channelprovider.Session(provider) && account == "" {
+	if len(rows) == 0 && selectedChannelFacts(opts.channelRegistration, provider).Session() && account == "" {
 		if err := client.Close(context.WithoutCancel(ctx)); err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
