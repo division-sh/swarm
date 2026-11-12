@@ -101,7 +101,7 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 			return err
 		}
 		source := string(raw)
-		if relative == "internal/store/internal/runtimepersistence/test_mailbox_fixture.go" {
+		if relative == "internal/store/internal/backend/runlifecycle/test_mailbox_source_fixture.go" {
 			source, err = maskNamedMailboxSourceFixtureWrite(source)
 			if err != nil {
 				violations = append(violations, relative+": "+err.Error())
@@ -1014,7 +1014,7 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 // Exempt only its exact CAS literal, never another write in the same file.
 func maskNamedMailboxSourceFixtureWrite(source string) (string, error) {
 	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, "test_mailbox_fixture.go", source, 0)
+	file, err := parser.ParseFile(set, "test_mailbox_source_fixture.go", source, 0)
 	if err != nil {
 		return source, err
 	}
@@ -1022,7 +1022,7 @@ func maskNamedMailboxSourceFixtureWrite(source string) (string, error) {
 	count := 0
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "SwapMailboxRunSourceForTest" {
+		if !ok || fn.Name.Name != "swapMailboxRunSourceTx" {
 			continue
 		}
 		ast.Inspect(fn, func(node ast.Node) bool {
@@ -1047,7 +1047,7 @@ func maskNamedMailboxSourceFixtureWrite(source string) (string, error) {
 }
 
 func TestRunLifecycleFixtureGuardRejectsSiblingWrites(t *testing.T) {
-	const source = "package fixture\nfunc SwapMailboxRunSourceForTest() { use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`) }\n"
+	const source = "package fixture\nfunc swapMailboxRunSourceTx() { use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`) }\n"
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
 	for _, tc := range []struct {
 		name, input string
@@ -1057,7 +1057,7 @@ func TestRunLifecycleFixtureGuardRejectsSiblingWrites(t *testing.T) {
 		{"sibling_function", source + "func other() { use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`) }", false},
 		{"same_function_extra", strings.Replace(source, "use(", "use(`DELETE FROM runs`); use(", 1), false},
 		{"duplicate_exact", strings.Replace(source, "use(", "use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`); use(", 1), false},
-		{"wrong_function", strings.ReplaceAll(source, "SwapMailboxRunSourceForTest", "unapproved"), false},
+		{"wrong_function", strings.ReplaceAll(source, "swapMailboxRunSourceTx", "unapproved"), false},
 		{"missing_CAS", strings.ReplaceAll(source, " AND bundle_hash=$3", ""), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

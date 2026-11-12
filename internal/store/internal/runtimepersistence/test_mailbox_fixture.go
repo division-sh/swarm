@@ -18,88 +18,54 @@ func CorruptHumanTaskRequesterForTest(ctx context.Context, selected any, runID, 
 	if runID == "" || cardID == "" {
 		return nil, fmt.Errorf("requester fixture requires exact run and card")
 	}
-	query := `SELECT CAST(` + coordinate + ` AS TEXT) FROM human_task_continuations WHERE card_id=$1 AND run_id=$2`
-	if _, postgres := selected.(*PostgresStore); postgres {
-		query += ` FOR UPDATE`
+	switch store := selected.(type) {
+	case *PostgresStore:
+		if store == nil || store.backend == nil {
+			return nil, fmt.Errorf("postgres fixture store is required")
+		}
+		return store.decisionPostgresOwner.CorruptHumanTaskRequesterForTest(ctx, runID, cardID, coordinate, hostile)
+	case *SQLiteRuntimeStore:
+		if store == nil || store.backend == nil {
+			return nil, fmt.Errorf("sqlite fixture store is required")
+		}
+		return store.decisionSQLiteOwner.CorruptHumanTaskRequesterForTest(ctx, runID, cardID, coordinate, hostile)
+	default:
+		return nil, fmt.Errorf("unsupported mailbox fixture store %T", selected)
 	}
-	update := `UPDATE human_task_continuations SET ` + coordinate + `=$1 WHERE card_id=$2 AND run_id=$3`
-	read := func(ctx context.Context, tx *sql.Tx) (sql.NullString, error) {
-		var value sql.NullString
-		err := tx.QueryRowContext(ctx, query, cardID, runID).Scan(&value)
-		return value, err
-	}
-	write := func(ctx context.Context, tx *sql.Tx, value sql.NullString) error {
-		result, err := tx.ExecContext(ctx, update, value, cardID, runID)
-		if err != nil {
-			return err
-		}
-		if err := requireMailboxFixtureRow(result); err != nil {
-			return err
-		}
-		got, err := read(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if got != value {
-			return fmt.Errorf("requester fixture witness mismatch: got %+v, want %+v", got, value)
-		}
-		return nil
-	}
-	var original sql.NullString
-	installed := sql.NullString{String: hostile, Valid: true}
-	err := runMailboxFixtureTransaction(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		original, err = read(ctx, tx)
-		if err != nil {
-			return err
-		}
-		return write(ctx, tx, installed)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return func(ctx context.Context) error {
-		return runMailboxFixtureTransaction(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-			current, err := read(ctx, tx)
-			if err != nil {
-				return err
-			}
-			if current != installed {
-				return fmt.Errorf("requester fixture changed before restoration: got %+v, want %+v", current, installed)
-			}
-			return write(ctx, tx, original)
-		})
-	}, nil
 }
 
 func SwapMailboxRunSourceForTest(ctx context.Context, selected any, runID, from, to string) error {
-	return runMailboxFixtureTransaction(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`, to, runID, from)
-		if err != nil {
-			return err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		if store == nil || store.backend == nil {
+			return fmt.Errorf("postgres fixture store is required")
 		}
-		if err := requireMailboxFixtureRow(result); err != nil {
-			return err
+		return store.runLifecyclePostgresOwner.SwapMailboxRunSourceForTest(ctx, runID, from, to)
+	case *SQLiteRuntimeStore:
+		if store == nil || store.backend == nil {
+			return fmt.Errorf("sqlite fixture store is required")
 		}
-		var got string
-		if err := tx.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&got); err != nil {
-			return err
-		}
-		if got != to {
-			return fmt.Errorf("mailbox source fixture witness mismatch: %q != %q", got, to)
-		}
-		return nil
-	})
+		return store.runLifecycleSQLiteOwner.SwapMailboxRunSourceForTest(ctx, runID, from, to)
+	default:
+		return fmt.Errorf("unsupported mailbox fixture store %T", selected)
+	}
 }
 
 func SetMailboxNoticeTimeForTest(ctx context.Context, selected any, itemID string, at time.Time) error {
-	return runMailboxFixtureTransaction(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE mailbox SET created_at=$1 WHERE item_id=$2`, at, itemID)
-		if err != nil {
-			return err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		if store == nil || store.backend == nil {
+			return fmt.Errorf("postgres fixture store is required")
 		}
-		return requireMailboxFixtureRow(result)
-	})
+		return store.mailboxPostgresOwner.SetMailboxNoticeTimeForTest(ctx, itemID, at)
+	case *SQLiteRuntimeStore:
+		if store == nil || store.backend == nil {
+			return fmt.Errorf("sqlite fixture store is required")
+		}
+		return store.mailboxSQLiteOwner.SetMailboxNoticeTimeForTest(ctx, itemID, at)
+	default:
+		return fmt.Errorf("unsupported mailbox fixture store %T", selected)
+	}
 }
 
 func requireMailboxFixtureRow(result sql.Result) error {
