@@ -112,6 +112,14 @@ func CountChannelEntryIntentsForTest(ctx context.Context, selected any) (int, er
 	return count, err
 }
 
+func CountChannelObservedEventsForTest(ctx context.Context, selected any, run, event string) (int, error) {
+	var count int
+	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, run, event).Scan(&count)
+	})
+	return count, err
+}
+
 func ReadChannelRegistrationIndexForTest(ctx context.Context, selected any) (string, error) {
 	query := `SELECT sql FROM sqlite_master WHERE name='idx_deployment_channel_account'`
 	if _, postgres := selected.(*PostgresStore); postgres {
