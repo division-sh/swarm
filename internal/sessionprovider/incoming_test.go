@@ -1,6 +1,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -66,7 +68,7 @@ func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
 					event.Message = client.BuildRevoke(keyChat, self, "ORIGINAL")
 					event.Info.Edit = types.EditAttributeSenderRevoke
 				}
-				captured, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+				captured, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -106,7 +108,7 @@ func TestWhatsAppIncomingReplyAndForwardUseOnlyCurrentText(t *testing.T) {
 				info.StanzaID = nil
 			}
 			event.Message = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("current reply text"), ContextInfo: info}}
-			captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+			captured, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 			if variant == "id_without_quote" || variant == "quote_without_id" {
 				if !errors.Is(err, errIncomingMalformed) {
 					t.Fatalf("incomplete reply became evidence: %v", err)
@@ -132,7 +134,7 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 	for _, account := range []string{"synthetic_account", "100000002@lid", "100000002:3@s.whatsapp.net", "100000002@g.us"} {
 		scope := captureFixture(t).Scope
 		scope.Session.AccountRef = account
-		captured, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), incomingMessageFixture(), captureFixture(t).ReceivedAt)
+		captured, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), incomingMessageFixture(), captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 		if !errors.Is(err, errCaptureScopeChanged) || len(captured.Body) != 0 {
 			t.Fatalf("invalid receiving account produced customer ingress: %v", err)
 		}
@@ -169,7 +171,7 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			event := incomingMessageFixture()
 			tc.mutate(event)
-			if _, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt); !errors.Is(err, tc.want) {
+			if _, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp")); !errors.Is(err, tc.want) {
 				t.Fatalf("wrong refusal: %v", err)
 			}
 		})
@@ -207,7 +209,7 @@ func TestWhatsAppUnsupportedContentStillRequiresExactEnvelope(t *testing.T) {
 					want = errIncomingMalformed
 				}
 				if _, err := captureSDKMessage(captureFixture(t).Scope, captureFixture(t).Source,
-					uuid.NewString(), event, captureFixture(t).ReceivedAt); !errors.Is(err, want) {
+					uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp")); !errors.Is(err, want) {
 					t.Fatal("unsupported content hid a different refusal", err)
 				}
 			})
@@ -218,7 +220,7 @@ func TestWhatsAppUnsupportedContentStillRequiresExactEnvelope(t *testing.T) {
 func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *testing.T) {
 	scope := captureFixture(t).Scope
 	event := incomingMessageFixture()
-	original, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+	original, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +229,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 		t.Fatal(err)
 	}
 	event.Info.PushName, event.RetryCount = "changed display name", 3
-	repeated, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+	repeated, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 	if err != nil || !bytes.Equal(repeated.Body, original.Body) {
 		t.Fatal("delivery-attempt metadata changed stable captured content")
 	}
@@ -238,7 +240,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	if bytes.Contains(original.Body, []byte("changed after capture")) {
 		t.Fatal("SDK mutation changed frozen capture")
 	}
-	changed, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+	changed, err := captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +249,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	}
 	*event.Message.Conversation = "exact current text"
 	event.Info.Sender = types.NewJID("100000004", types.HiddenUserServer)
-	changed, err = captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt)
+	changed, err = captureSDKMessage(scope, captureFixture(t).Source, uuid.NewString(), event, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}

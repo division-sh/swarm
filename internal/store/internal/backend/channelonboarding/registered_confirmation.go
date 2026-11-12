@@ -36,7 +36,7 @@ func registeredConfirmationCurrent(ctx context.Context, owner providerFactReader
 	}
 	if op.Revision != parent.Revision || op.IdentityOperationID != parent.BindingOperationID ||
 		op.Phase != domain.PhaseAwaitingOperatorConfirmation || !op.AccountConfirmed || op.LogoutCompleted || op.FailureCode != "" ||
-		op.PrincipalID != c.PrincipalID || op.ValidateSessionAccountWithFacts(owner.providerFact(op.Provider)) != nil {
+		op.PrincipalID != c.PrincipalID || op.ValidateSessionAccount(owner.providerFact(op.Provider)) != nil {
 		return false, nil
 	}
 	binding, child, err := identityowner.ReadEffectBinding(ctx, q, postgres, lock, op.Interface, parent.BindingOperationID)

@@ -117,7 +117,7 @@ func resolveSwarmDirForCommand(cmd *cobra.Command, opts rootCommandOptions) (CLI
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ExplicitPath: configPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ExplicitPath: configPath, ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}

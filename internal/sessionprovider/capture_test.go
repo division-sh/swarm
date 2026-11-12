@@ -1,6 +1,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -195,7 +197,7 @@ func openCaptureFixture(t *testing.T, path, connectionID string) (*sessionstate.
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture, err := newCaptureStore(context.Background(), owner, connectionID)
+	capture, err := newCaptureStore(context.Background(), owner, connectionID, channelfixture.For("whatsapp"))
 	if err != nil {
 		_ = fixture.Close()
 		t.Fatal(err)

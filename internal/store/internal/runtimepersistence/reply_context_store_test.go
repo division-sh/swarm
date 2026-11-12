@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -328,7 +330,7 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 	t.Cleanup(cleanup)
 	store := admitTestPostgresStore(t, db)
 	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
+		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 		for i, eventID := range eventIDs {
 			eventName := "provider.replied"
 			if i == 0 {

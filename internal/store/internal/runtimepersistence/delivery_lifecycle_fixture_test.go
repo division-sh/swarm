@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"fmt"
@@ -19,7 +21,7 @@ import (
 )
 
 func postgresDeliveryFixtureStore(db *sql.DB) *PostgresStore {
-	store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	store.acceptCurrentSchemaForTest()
 	return store
 }

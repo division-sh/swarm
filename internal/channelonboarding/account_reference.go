@@ -13,29 +13,16 @@ type AccountReference struct {
 	Account  string `yaml:"account" json:"account"`
 }
 
-func CanonicalAccount(provider, account string) (AccountReference, error) {
-	binding, _ := channelprovider.Lookup(provider)
-	return canonicalAccountWithFacts(provider, account, binding)
-}
-
-func canonicalAccountWithFacts(provider, account string, binding channelprovider.Binding) (AccountReference, error) {
-	if !binding.MatchesProvider(provider) {
-		binding = channelprovider.Binding{}
-	}
+func CanonicalAccount(binding channelprovider.Binding, account string) (AccountReference, error) {
 	canonical, err := binding.CanonicalAccount(account)
 	if err != nil {
 		return AccountReference{}, err
 	}
-	return AccountReference{Provider: provider, Account: canonical}, nil
+	return AccountReference{Provider: binding.Provider(), Account: canonical}, nil
 }
 
-func (r AccountReference) Validate() error {
-	binding, _ := channelprovider.Lookup(r.Provider)
-	return r.ValidateWithFacts(binding)
-}
-
-func (r AccountReference) ValidateWithFacts(binding channelprovider.Binding) error {
-	canonical, err := canonicalAccountWithFacts(r.Provider, r.Account, binding)
+func (r AccountReference) Validate(binding channelprovider.Binding) error {
+	canonical, err := CanonicalAccount(binding.ForProvider(r.Provider), r.Account)
 	if err == nil && canonical != r {
 		return fmt.Errorf("account reference must use its canonical provider/account")
 	}

@@ -7,16 +7,6 @@ import (
 	"strings"
 )
 
-var whatsapp = Binding{
-	id: "whatsapp", displayName: "WhatsApp", session: true, canonicalAccount: WhatsAppAccount,
-	claimInstructions: WhatsAppClaimInstructions,
-	nativeRead:        "whatsapp.read_account", nativeWrite: "whatsapp.send_text",
-	captureKey:    "whatsapp_capture",
-	readyTeaching: "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
-	notLinked:     "Not linked: run swarm channel connect whatsapp",
-	pairingPrompt: "Open WhatsApp > Linked Devices > Link a device, then scan (expires %s):\n%s\n",
-}
-
 func WhatsAppClaimInstructions(prompt ClaimPrompt) (string, error) {
 	account := prompt.Account
 	if account == "" && prompt.Connection != nil {

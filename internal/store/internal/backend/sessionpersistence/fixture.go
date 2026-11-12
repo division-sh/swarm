@@ -209,7 +209,7 @@ func (o *Owner) SeedCaptureQuota(ctx context.Context, event sessioncapture.Event
 	if count < 1 || count > sessioncapture.MaxPendingCaptureCount {
 		return fmt.Errorf("invalid capture quota fixture count")
 	}
-	capture, err := o.Captures(ctx, event.Scope.Session.ConnectionID)
+	capture, err := o.Captures(ctx, event.Scope.Session.ConnectionID, event.ProviderFacts())
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1990,7 +1991,7 @@ func (s *cancellationTestStore) observe(ctx context.Context) {
 
 func (s *cancellationTestStore) ReserveChannelOnboarding(ctx context.Context, req StartRequest) (Operation, error) {
 	s.observe(ctx)
-	if err := req.Validate(); err != nil {
+	if err := req.Validate(channelfixture.For(req.Provider)); err != nil {
 		return Operation{}, err
 	}
 	s.op = Operation{

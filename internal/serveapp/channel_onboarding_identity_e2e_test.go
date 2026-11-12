@@ -63,7 +63,7 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 		}
 	}()
 	go func() {
-		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
+		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, ChannelRegistrations())
 		done <- code
 		progressDone <- code
 	}()
@@ -102,7 +102,7 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 			t.Fatalf("deployment connect did not confirm the operator: %s", out.String())
 		}
 		out, errOut = &lockedBuffer{}, &lockedBuffer{}
-		code = cliapp.Execute(t.Context(), []string{"--config", config, "channel", "list", "--json"}, out, errOut, nil, nil, OpenChannelRegistration)
+		code = cliapp.Execute(t.Context(), []string{"--config", config, "channel", "list", "--json"}, out, errOut, nil, nil, ChannelRegistrations())
 		var listed struct {
 			Accounts []channelonboarding.Result `json:"accounts"`
 		}

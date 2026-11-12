@@ -1,6 +1,8 @@
 package construction_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -226,7 +228,7 @@ func releaseInspectionWriter(t *testing.T, backend string) (any, string, *sql.DB
 	t.Helper()
 	if backend == "sqlite" {
 		writer := storetest.StartSQLiteRuntimeStore(t)
-		setup, db, err := construction.OpenSQLiteRuntime(writer.Path())
+		setup, db, err := construction.OpenSQLiteRuntime(writer.Path(), channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +240,7 @@ func releaseInspectionWriter(t *testing.T, backend string) (any, string, *sql.DB
 		return writer, writer.Path(), db
 	}
 	dsn := testutil.StartPostgresDSN(t)
-	writer, db, err := construction.OpenPostgres(dsn)
+	writer, db, err := construction.OpenPostgres(dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

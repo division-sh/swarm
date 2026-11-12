@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -82,12 +84,12 @@ func assertRetiredPlatformTableRejectedUnchanged(t *testing.T, backend SchemaDia
 	} else {
 		_, postgresDB, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		accepted := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB))
+		accepted := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB), channelfixture.Facts)
 		if err := accepted.BootstrapSchema(ctx, SchemaBootstrapRequest{PlatformPlans: request.PlatformPlans, Origin: request.Origin}); err != nil {
 			t.Fatalf("canonical bootstrap: %v", err)
 		}
 		db = postgresDB
-		unaccepted := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB))
+		unaccepted := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB), channelfixture.Facts)
 		bootstrap = unaccepted.BootstrapSchema
 		runtimeProbe = func() error {
 			_, err := unaccepted.ListActiveAgentDescriptors(ctx, unacceptedAdmissionEventID)
@@ -279,7 +281,7 @@ func TestSchemaBootstrapRejectsUnstampedStoresUnchanged(t *testing.T) {
 			} else {
 				_, postgresDB, cleanup := testutil.StartEmptyPostgres(t)
 				t.Cleanup(cleanup)
-				store := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB))
+				store := newPostgresStoreWithBackend(mustPostgresBackend(postgresDB), channelfixture.Facts)
 				db, bootstrap = postgresDB, store.BootstrapSchema
 			}
 			if _, err := db.ExecContext(testAuthorActivityContext(), `CREATE TABLE product_probe (id TEXT PRIMARY KEY)`); err != nil {
@@ -315,11 +317,11 @@ func legacyShapeTestStore(t *testing.T, backend SchemaDialect, request SchemaBoo
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	accepted := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	accepted := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	if err := accepted.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("bootstrap canonical PostgreSQL store: %v", err)
 	}
-	candidate := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	candidate := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	return db, candidate.BootstrapSchema
 }
 
@@ -533,7 +535,7 @@ func TestPostgresSchemaBootstrapAcceptsCanonicalTemplateAndRejectsDrift(t *testi
 	request := canonicalSchemaBootstrapTestRequest(t)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 		t.Fatalf("compatible template boot: %v", err)
 	}
@@ -583,7 +585,7 @@ func TestSchemaBootstrapRejectsRetiredGlobalFlowInstanceIdentityWithFreshStoreRe
 	t.Run("postgres", func(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+		store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 		if err := store.BootstrapSchema(testAuthorActivityContext(), request); err != nil {
 			t.Fatalf("bootstrap canonical PostgreSQL schema: %v", err)
 		}
@@ -640,7 +642,7 @@ func TestSchemaBootstrapRejectsStageOnlyDecisionCardStoreBeforeMutation(t *testi
 	t.Run("postgres", func(t *testing.T) {
 		_, db, cleanup := testutil.StartEmptyPostgres(t)
 		t.Cleanup(cleanup)
-		store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+		store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 		if err := store.BootstrapSchema(testAuthorActivityContext(), legacy); err != nil {
 			t.Fatalf("bootstrap stage-only fixture: %v", err)
 		}
@@ -797,7 +799,7 @@ func TestSchemaBootstrapRejectsUnexpectedIndex(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+		store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 		if _, err := db.Exec(createUnexpectedIndex); err != nil {
 			t.Fatal(err)
 		}
@@ -848,7 +850,7 @@ func TestPostgresSchemaBootstrapRejectsMalformedStoredOrigin(t *testing.T) {
 	request := canonicalSchemaBootstrapTestRequest(t)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	var target string
 	if err := db.QueryRow(`SELECT current_database()`).Scan(&target); err != nil {
 		t.Fatal(err)
@@ -909,7 +911,7 @@ func TestPostgresSchemaBootstrapConcurrentFreshCreatorsConverge(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = second.backend.Close() })
-	stores := []*PostgresStore{newPostgresStoreWithBackend(mustPostgresBackend(db)), second}
+	stores := []*PostgresStore{newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), second}
 	errs := make([]error, len(stores))
 	var wg sync.WaitGroup
 	for i := range stores {
@@ -938,7 +940,7 @@ func TestPostgresSchemaBootstrapRejectsBeforeExtensionOrSchemaMutation(t *testin
 	if _, err := db.Exec(`CREATE TABLE legacy_state (id TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 	if err := store.BootstrapSchema(testAuthorActivityContext(), request); err == nil {
 		t.Fatal("unstamped non-empty PostgreSQL store was accepted")
 	}
@@ -988,7 +990,7 @@ func TestSchemaBootstrapRollsBackFailedFreshCreation(t *testing.T) {
 			}
 			_, db, cleanup := testutil.StartEmptyPostgres(t)
 			t.Cleanup(cleanup)
-			store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+			store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 			if err := store.BootstrapSchema(testAuthorActivityContext(), request); err == nil {
 				t.Fatal("invalid fresh bootstrap succeeded")
 			}

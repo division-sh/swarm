@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -607,7 +609,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		if err != nil {
 			t.Fatalf("generate SQLite schema: %v", err)
 		}
-		sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.db"))
+		sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.db"), channelfixture.Facts)
 		if err != nil {
 			t.Fatalf("new SQLite runtime store: %v", err)
 		}

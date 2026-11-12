@@ -24,7 +24,7 @@ func TestOnboardingSelectedProviderRequirementSurvivesReadback(t *testing.T) {
 			t.Fatal(err)
 		}
 		var decoded Result
-		if err := json.Unmarshal(body, &decoded); err != nil || decoded.Operation.ValidateSessionAccount() != nil ||
+		if err := json.Unmarshal(body, &decoded); err != nil || decoded.Operation.ValidateSessionAccount(decoded.Operation.ProviderFacts()) != nil ||
 			strings.Contains(string(body), `"coordinate"`) || strings.Contains(string(body), `"target"`) || decoded.Readiness != nil {
 			t.Fatalf("deployment readback acquired runtime scope: %s, %v", body, err)
 		}
