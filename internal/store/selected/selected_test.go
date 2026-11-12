@@ -1,6 +1,8 @@
 package selected
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"path/filepath"
@@ -62,7 +64,7 @@ func TestPostgresFailedPingClosesTheConstructedPool(t *testing.T) {
 		t.Fatalf("serialize missing PostgreSQL database DSN: %v", err)
 	}
 
-	selected, _, err := construction.OpenPostgres(missingDSN)
+	selected, _, err := construction.OpenPostgres(missingDSN, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

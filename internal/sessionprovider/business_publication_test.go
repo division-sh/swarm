@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -431,7 +433,7 @@ func TestWhatsAppBusinessCommitRuntimeDispatchAndHistoryBothStores(t *testing.T)
 			if err != nil || !settled {
 				t.Fatalf("original committed history required live SDK: %t %v", settled, err)
 			}
-			original, err := publicationCaptureProvenance(record.Request)
+			original, err := publicationCaptureProvenance(record.Request, channelfixture.For("whatsapp"))
 			if err != nil || !bytes.Equal(original.Body, event.Body) || !original.SameCapture(event) {
 				t.Fatalf("receipt lost original capture: %v", err)
 			}

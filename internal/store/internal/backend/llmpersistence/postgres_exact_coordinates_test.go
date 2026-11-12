@@ -1,6 +1,8 @@
 package llmpersistence_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"strings"
 	"testing"
@@ -29,7 +31,7 @@ import (
 func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 	dsn, _, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	selected, db, err := construction.OpenPostgresRuntime(ctx, dsn)
+	selected, db, err := construction.OpenPostgresRuntime(ctx, dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

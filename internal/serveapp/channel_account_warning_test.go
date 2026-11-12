@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -38,7 +37,7 @@ func requireWhatsAppBootAccountMismatchWarning(t *testing.T, account string) {
 	definition := runtime.BundleContext{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
 		RootAdmission: rooted.Admission(), RuntimeInstanceID: uuid.NewString(), PublicationGeneration: 1,
 		PackInventoryDigest: "sha256:discovery-inventory", ProviderTriggerCatalog: catalog, ChannelPlans: []packs.SatisfactionPlan{plan}, BundleIdentity: identity}
-	binding, _ := channelprovider.Lookup("whatsapp")
+	binding, _ := installedChannelFactsFor("whatsapp")
 	for _, test := range []struct {
 		name, account, provider string
 		phase                   channelonboarding.Phase

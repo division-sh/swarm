@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -47,6 +48,7 @@ type RegistrationTarget struct {
 }
 
 type RegistrationPair struct {
+	ProviderFacts               channelprovider.Binding `json:"-"`
 	Parent                      channelnative.TransportParent
 	DeploymentAdmission         triggergeneration.Generation
 	BindingID                   string
@@ -89,6 +91,7 @@ type currentRegistrationTargetContextKey struct{}
 type receivingAccountContextKey struct{}
 
 type receivingAccount struct {
+	facts      channelprovider.Binding
 	account    channelonboarding.AccountReference
 	current    func(context.Context) bool
 	generation triggergeneration.Generation
@@ -109,7 +112,7 @@ func BindReceivingAccount(ctx context.Context, plan providertriggers.InboundAdmi
 	if err != nil {
 		return providertriggers.AdmittedRequest{}, err
 	}
-	return plan.BindReceivingAccount(admitted, evidence.account, secret)
+	return plan.BindReceivingAccount(admitted, evidence.account, secret, evidence.facts)
 }
 
 // CurrentRegistrationTarget returns the exact registration target selected by
@@ -269,7 +272,7 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			if err != nil {
 				return providertriggers.AdmittedRequest{}, err
 			}
-			return selected.BindReceivingAccount(input, account, signing.CredentialValue())
+			return selected.BindReceivingAccount(input, account, signing.CredentialValue(), state.Pair.ProviderFacts)
 		}
 		return consume(request.Context(), account, credential, func() (providertriggers.Delivery, error) { return admit(plan) }, admit, operator, current)
 	}
@@ -537,7 +540,7 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 		return admittedPair{}, err
 	}
 	if pair.ActivationSource == channelonboarding.ActivationSourceRegistered &&
-		(resourceID != pair.OperatorAccount || (channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount}).Validate() != nil) {
+		(resourceID != pair.OperatorAccount || (channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount}).Validate(pair.ProviderFacts) != nil) {
 		return admittedPair{}, channelonboarding.ErrConflict
 	}
 	slotID := strings.Join([]string{pair.Registration.Provider(), pair.Registration.SlotNamespace(), resourceID}, ":")
@@ -932,12 +935,12 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 				return
 			}
 			account := channelonboarding.AccountReference{Provider: target.Provider, Account: strings.TrimPrefix(state.SelectionSlotID, prefix)}
-			if account.Validate() != nil {
+			if account.Validate(state.Pair.ProviderFacts) != nil {
 				http.Error(response, "receiving account unavailable", http.StatusServiceUnavailable)
 				return
 			}
 			token := request.URL.Query().Get("swarm_callback_generation")
-			evidence := receivingAccount{account: account, generation: target.AdmissionPlanGeneration, signing: func(ctx context.Context) (string, error) {
+			evidence := receivingAccount{facts: state.Pair.ProviderFacts, account: account, generation: target.AdmissionPlanGeneration, signing: func(ctx context.Context) (string, error) {
 				_, signing, err := c.admitCredentials(ctx, state.Pair)
 				if err != nil {
 					return "", err

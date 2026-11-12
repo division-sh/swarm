@@ -24,12 +24,7 @@ type SessionLogoutPreparation struct {
 	ProcessBinding    processbinding.Binding                  `json:"process_binding"`
 }
 
-func (t SessionLogoutPreparation) Validate() error {
-	binding, _ := channelprovider.Lookup(t.Account.Provider)
-	return t.ValidateWithFacts(binding)
-}
-
-func (t SessionLogoutPreparation) ValidateWithFacts(binding channelprovider.Binding) error {
+func (t SessionLogoutPreparation) Validate(binding channelprovider.Binding) error {
 	if uuid.Validate(t.OperationID) != nil || uuid.Validate(t.OccurrenceID) != nil || t.OperationRevision < 1 || strings.TrimSpace(t.TargetSelector) == "" ||
 		!binding.MatchesProvider(t.Account.Provider) || !binding.Session() || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil ||
 		t.ProcessBinding.Validate() != nil || t.ProcessBinding.BundleHash != t.Coordinate.BundleHash ||
@@ -39,13 +34,8 @@ func (t SessionLogoutPreparation) ValidateWithFacts(binding channelprovider.Bind
 	return nil
 }
 
-func (t SessionLogoutPreparation) MatchesOperation(op Operation) bool {
-	binding, _ := channelprovider.Lookup(t.Account.Provider)
-	return t.MatchesOperationWithFacts(op, binding)
-}
-
-func (t SessionLogoutPreparation) MatchesOperationWithFacts(op Operation, binding channelprovider.Binding) bool {
-	return t.ValidateWithFacts(binding) == nil && op.Posture == ActivationSessionConnection &&
+func (t SessionLogoutPreparation) MatchesOperation(op Operation, binding channelprovider.Binding) bool {
+	return t.Validate(binding) == nil && op.Posture == ActivationSessionConnection &&
 		op.Provider == t.Account.Provider && op.OperationID == t.OperationID && op.Revision == t.OperationRevision &&
 		op.SessionConnectionID == t.Account.ConnectionID && op.SessionAccount == t.Account && op.Coordinate == t.Coordinate && op.TargetSelector == t.TargetSelector
 }
@@ -55,13 +45,8 @@ type SessionLogoutTarget struct {
 	ProcessStamp processbinding.LeaseStamp `json:"process_stamp"`
 }
 
-func (t SessionLogoutTarget) Validate() error {
-	binding, _ := channelprovider.Lookup(t.Account.Provider)
-	return t.ValidateWithFacts(binding)
-}
-
-func (t SessionLogoutTarget) ValidateWithFacts(binding channelprovider.Binding) error {
-	if err := t.SessionLogoutPreparation.ValidateWithFacts(binding); err != nil {
+func (t SessionLogoutTarget) Validate(binding channelprovider.Binding) error {
+	if err := t.SessionLogoutPreparation.Validate(binding); err != nil {
 		return err
 	}
 	if t.ProcessStamp.Validate() != nil || t.ProcessStamp.RuntimeInstanceID != t.Coordinate.RuntimeInstanceID ||
@@ -80,7 +65,7 @@ type SessionLogoutLifecycle interface {
 // Pending logout retains the original transport while refusing business use.
 // Ordinary inactive-session cleanup must not disconnect before unlink settles.
 func RetainedSessionLogoutPending(ctx context.Context, store Store, retained Operation) (bool, error) {
-	if ctx == nil || store == nil || retained.Posture != ActivationSessionConnection || retained.ValidateSessionAccount() != nil {
+	if ctx == nil || store == nil || retained.Posture != ActivationSessionConnection || retained.ValidateSessionAccount(retained.ProviderFacts()) != nil {
 		return false, ErrInvalidRequest
 	}
 	rows, err := store.ListChannelTeardowns(ctx)
@@ -92,7 +77,7 @@ func RetainedSessionLogoutPending(ctx context.Context, store Store, retained Ope
 		if op.Kind != TeardownLogout || op.Logout == nil || op.Logout.Account.ConnectionID != retained.SessionConnectionID {
 			continue
 		}
-		if matched || op.Logout.Validate() != nil || op.PrincipalID != retained.PrincipalID || op.Logout.Account != retained.SessionAccount {
+		if matched || op.Logout.Validate(op.ProviderFacts()) != nil || op.PrincipalID != retained.PrincipalID || op.Logout.Account != retained.SessionAccount {
 			return false, ErrConflict
 		}
 		matched = true
@@ -123,7 +108,7 @@ func (r SessionLogoutReadback) Validate() error {
 }
 
 func NewSessionLogoutReadback(op TeardownOperation) (SessionLogoutReadback, error) {
-	if op.Kind != TeardownLogout || op.Logout == nil || op.Logout.Validate() != nil {
+	if op.Kind != TeardownLogout || op.Logout == nil || op.Logout.Validate(op.ProviderFacts()) != nil {
 		return SessionLogoutReadback{}, fmt.Errorf("%w: logout readback has no exact retained target", ErrConflict)
 	}
 	effectID, err := effects.ChannelLogoutOperationID(op.TeardownID)
@@ -228,7 +213,7 @@ func (s *DestructiveService) prepareSessionLogout(ctx context.Context, principal
 	if err != nil {
 		return Operation{}, SessionLogoutPreparation{}, err
 	}
-	if !target.MatchesOperation(*retained) {
+	if !target.MatchesOperation(*retained, retained.ProviderFacts()) {
 		return Operation{}, SessionLogoutPreparation{}, ErrConflict
 	}
 	return *retained, target, nil

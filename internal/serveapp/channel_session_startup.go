@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -46,7 +45,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 	var operations []channelonboarding.Operation
 	presentations := map[string]string{}
 	for _, activation := range activations {
-		binding, installed := channelprovider.Lookup(activation.Provider)
+		binding, installed := installedChannelFactsFor(activation.Provider)
 		if !installed || !binding.Session() {
 			continue
 		}
@@ -111,7 +110,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.
 					return err
 				}
 			}
-			binding, _ := channelprovider.Lookup(op.Provider)
+			binding, _ := installedChannelFactsFor(op.Provider)
 			fmt.Fprintf(d.output, "%s: reconnected (%s)\n", binding.DisplayName(), presentation)
 		}
 		d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0

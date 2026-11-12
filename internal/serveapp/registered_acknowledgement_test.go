@@ -190,7 +190,7 @@ func requireRegisteredAckCut(t *testing.T, ctx context.Context, peer *serveNativ
 		}
 		return OpenChannelRegistration(call, opts)
 	}
-	next := cliapp.Execute(ctx, []string{"--config", config, "channel", "connect", "whatsapp", cut.operations[0].AccountReference, "--yes"}, &out, &errOut, nil, nil, factory)
+	next := cliapp.Execute(ctx, []string{"--config", config, "channel", "connect", "whatsapp", cut.operations[0].AccountReference, "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if cut.mode == "response_observed" {
 		if next == 0 || !strings.Contains(errOut.String(), "refusing blind resend") {
 			t.Fatal("uncertain acknowledgement did not refuse replay", next, errOut.String())

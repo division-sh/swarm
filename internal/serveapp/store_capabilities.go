@@ -90,7 +90,8 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 	}
 	if _, available := owner.DestructiveReset(); available {
 		caps.ResetCoordinator = buildSelectedResetCoordinator(owner, req.ProcessCapability, req.RuntimeSupervisor, runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: req.RepoRoot, Store: owner.SourceArtifactStore(), PlatformPackBases: req.PlatformPackBases,
+			AdmitPackInventory: ChannelRegistrations().AdmitInventory,
+			RepoRoot:           req.RepoRoot, Store: owner.SourceArtifactStore(), PlatformPackBases: req.PlatformPackBases,
 		})
 	}
 	family, available := owner.RunFork()
@@ -103,7 +104,8 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 			return selectedAPICapabilities{}, fmt.Errorf("run.fork requires selected source artifact reader")
 		}
 		loader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: req.RepoRoot, PlatformPackBases: req.PlatformPackBases, Store: artifactStore,
+			AdmitPackInventory: ChannelRegistrations().AdmitInventory,
+			RepoRoot:           req.RepoRoot, PlatformPackBases: req.PlatformPackBases, Store: artifactStore,
 		}
 		deps := owner.RuntimeDeps()
 		executor := apiv1.SelectedContractRunForkExecutor{

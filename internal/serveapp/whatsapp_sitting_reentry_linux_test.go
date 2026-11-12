@@ -93,7 +93,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		}
 	}()
 	go func() {
-		done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp", retained.operation.AccountReference}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, factory)
+		done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp", retained.operation.AccountReference}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, fixtureRegistration(factory))
 	}()
 	select {
 	case <-login.held:
@@ -266,7 +266,7 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 		session, err := OpenChannelRegistration(call, options)
 		return sittingReentryObserver{session, listedViews}, err
 	}
-	if code := cliapp.Execute(ctx, []string{"--config", config, "channel", "list", "--json"}, listed, errOut, nil, nil, listFactory); code != 0 {
+	if code := cliapp.Execute(ctx, []string{"--config", config, "channel", "list", "--json"}, listed, errOut, nil, nil, fixtureRegistration(listFactory)); code != 0 {
 		t.Fatal("restored public account readback failed", code, errOut.String())
 	}
 	if json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 {

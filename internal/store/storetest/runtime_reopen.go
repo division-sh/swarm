@@ -1,6 +1,8 @@
 package storetest
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"path/filepath"
 	"sync"
@@ -48,7 +50,7 @@ func StartPostgresRuntimeStoreWithReopen(t *testing.T, locations ...string) (*st
 	})
 	open := func() *store.PostgresStore {
 		t.Helper()
-		selected, err := store.NewPostgresStore(dsn)
+		selected, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 		if err != nil {
 			t.Fatalf("construct postgres runtime store: %v", err)
 		}
@@ -93,7 +95,7 @@ func StartSQLiteRuntimeStoreWithReopen(t testing.TB, ctx context.Context, locati
 	})
 	open := func() *store.SQLiteRuntimeStore {
 		t.Helper()
-		selected, err := store.NewSQLiteRuntimeStore(path)
+		selected, err := store.NewSQLiteRuntimeStore(path, channelfixture.Facts)
 		if err != nil {
 			t.Fatalf("construct sqlite runtime store: %v", err)
 		}

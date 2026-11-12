@@ -90,14 +90,14 @@ func teardownRequestMatches(op domain.TeardownOperation, req domain.ReserveTeard
 
 func admitLogoutTarget(nativeOwner providerFactReader, op domain.Operation, req domain.ReserveTeardownRequest) error {
 	if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired || op.PrincipalID != req.PrincipalID ||
-		op.Interface.Normalized() != req.Scope.Interface.Normalized() || op.ValidateSessionAccountWithFacts(nativeOwner.providerFact(op.Provider)) != nil ||
+		op.Interface.Normalized() != req.Scope.Interface.Normalized() || op.ValidateSessionAccount(nativeOwner.providerFact(op.Provider)) != nil ||
 		op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
 		return domain.ErrConflict
 	}
 	if op.Revision != req.Logout.OperationRevision {
 		return domain.ErrRevisionConflict
 	}
-	if !req.Logout.MatchesOperationWithFacts(op, nativeOwner.providerFact(op.Provider)) {
+	if !req.Logout.MatchesOperation(op, nativeOwner.providerFact(op.Provider)) {
 		return domain.ErrConflict
 	}
 	return nil
@@ -215,7 +215,7 @@ func decodeLogoutTarget(nativeOwner providerFactReader, kind domain.TeardownKind
 	if d == dialectSQLite {
 		backend = processbinding.SQLiteLeaseBackend
 	}
-	if decoder.Decode(new(any)) != io.EOF || target.ValidateWithFacts(nativeOwner.providerFact(target.Account.Provider)) != nil || target.ProcessStamp.Backend != backend || !connection.Valid || target.Account.ConnectionID != connection.String || err != nil || string(canonical) != raw.String {
+	if decoder.Decode(new(any)) != io.EOF || target.Validate(nativeOwner.providerFact(target.Account.Provider)) != nil || target.ProcessStamp.Backend != backend || !connection.Valid || target.Account.ConnectionID != connection.String || err != nil || string(canonical) != raw.String {
 		return nil, fmt.Errorf("%w: contradictory logout target", domain.ErrConflict)
 	}
 	return &target, nil

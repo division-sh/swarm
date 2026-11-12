@@ -5,7 +5,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packs"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -156,8 +155,7 @@ func compileSessionActivityDeclaration(source semanticview.Source, site contract
 		return absent, "", "", fmt.Errorf("session activity requires its scoped private connector")
 	}
 	target, native := tool.InProcess()
-	binding, installed := channelprovider.Lookup(target.Provider())
-	if !native || !installed || !binding.NativeWrite(target.String()) {
+	if !native || !target.IsWrite() {
 		return absent, "", "", fmt.Errorf("session activity has no supported private write contract")
 	}
 	if _, hasAccount := site.Spec.Input["account"]; !hasAccount {

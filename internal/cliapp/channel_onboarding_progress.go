@@ -98,7 +98,7 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			cliSanitizeOneLineValue(result.Operation.FailureCode), cliSanitizeOneLineValue(result.Operation.FailureMessage)))
 	}
 	now := time.Now()
-	binding, _ := channelprovider.Lookup(result.Operation.Provider)
+	binding := result.Operation.ProviderFacts()
 	pending, err := result.SessionPairingPending(now)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
@@ -185,7 +185,7 @@ func writeChannelPairingQR(out, errOut io.Writer, output cliOutputOptions, resul
 }
 
 func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions, result channelOnboardingResult) error {
-	if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateDeploymentRegistration() != nil ||
+	if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateDeploymentRegistration(result.Operation.ProviderFacts()) != nil ||
 		!result.Operation.AccountConfirmed || result.Operation.ActivationRevision != 0 || result.Operation.FailureCode != "" || result.Readiness != nil {
 		return returnCLIValidationError(errOut, errors.New("deployment registration readback is incomplete or carries runtime authority"))
 	}
@@ -194,7 +194,7 @@ func renderDeploymentRegistration(out, errOut io.Writer, output cliOutputOptions
 		if result.Operation.ExpectedAccount != "" {
 			verb = "Reverified"
 		}
-		binding, _ := channelprovider.Lookup(result.Operation.Provider)
+		binding := result.Operation.ProviderFacts()
 		if binding.ShowRegistrationReceipt(result.Binding != nil) {
 			fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
 		}

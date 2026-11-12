@@ -1,6 +1,8 @@
 package selected
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"path/filepath"
@@ -42,14 +44,14 @@ func TestAdmissionPossessionDoesNotMaskCorruptProcessGenerationBothStores(t *tes
 			var db *sql.DB
 			if backend == backendselection.BackendSQLite {
 				request.Selection.SQLitePath = filepath.Join(t.TempDir(), "store.db")
-				selected, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, request.Selection.SQLitePath)
+				selected, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, request.Selection.SQLitePath, channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}
 				owner, db = selected, handle
 			} else {
 				request.PostgresDSN, _, _ = testutil.StartEmptyPostgres(t)
-				selected, handle, err := construction.OpenPostgres(request.PostgresDSN)
+				selected, handle, err := construction.OpenPostgres(request.PostgresDSN, channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}

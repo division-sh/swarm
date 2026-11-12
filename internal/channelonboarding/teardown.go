@@ -89,15 +89,7 @@ type ReserveTeardownRequest struct {
 	Logout                  *SessionLogoutPreparation
 }
 
-func (r ReserveTeardownRequest) Validate() error {
-	var binding channelprovider.Binding
-	if r.Logout != nil {
-		binding, _ = channelprovider.Lookup(r.Logout.Account.Provider)
-	}
-	return r.ValidateWithFacts(binding)
-}
-
-func (r ReserveTeardownRequest) ValidateWithFacts(binding channelprovider.Binding) error {
+func (r ReserveTeardownRequest) Validate(binding channelprovider.Binding) error {
 	if _, err := uuid.Parse(strings.TrimSpace(r.TeardownID)); err != nil || strings.TrimSpace(r.RequestKeyHash) == "" || strings.TrimSpace(r.RequestHash) == "" || strings.TrimSpace(r.PrincipalID) == "" || !r.Kind.Valid() || r.RequestedAt.IsZero() {
 		return fmt.Errorf("%w: teardown identity, request identity, principal, kind, and time are required", ErrInvalidRequest)
 	}
@@ -124,7 +116,7 @@ func (r ReserveTeardownRequest) ValidateWithFacts(binding channelprovider.Bindin
 		if r.ExpectedBindingRevision != 0 || r.ExpectedProofRevision != 0 || r.Logout == nil || r.Scope.BundleHash != "" || r.Scope.ContextPublicationGeneration != 0 {
 			return fmt.Errorf("%w: logout requires one exact session target, not binding or proof revisions", ErrInvalidRequest)
 		}
-		if err := r.Logout.ValidateWithFacts(binding); err != nil {
+		if err := r.Logout.Validate(binding); err != nil {
 			return err
 		}
 	}
@@ -132,6 +124,8 @@ func (r ReserveTeardownRequest) ValidateWithFacts(binding channelprovider.Bindin
 }
 
 type TeardownOperation struct {
+	// Native readback metadata; absent from the frozen target and durable rows.
+	providerFacts           channelprovider.Binding
 	TeardownID              string               `json:"teardown_id"`
 	RequestKeyHash          string               `json:"-"`
 	RequestHash             string               `json:"-"`
@@ -166,6 +160,18 @@ type CompleteTeardownRequest struct {
 	FailureCode      string
 	FailureMessage   string
 	Now              time.Time
+}
+
+func (o TeardownOperation) WithProviderFacts(facts channelprovider.Binding) TeardownOperation {
+	o.providerFacts = facts
+	return o
+}
+
+func (o TeardownOperation) ProviderFacts() channelprovider.Binding {
+	if o.Logout == nil || !o.providerFacts.MatchesProvider(o.Logout.Account.Provider) {
+		return channelprovider.Binding{}
+	}
+	return o.providerFacts
 }
 
 type TeardownStore interface {

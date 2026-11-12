@@ -143,6 +143,7 @@ func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference Se
 		return input.Admission{}, err
 	}
 	return inputfact.SealOwnedCapture(inputfact.Capture{Store: o.store, Responsibility: responsibility,
+		ProviderFacts:           native.OriginalCapture.ProviderFacts(),
 		OriginalProviderEventID: providerID, OriginalCaptureFingerprint: fingerprint,
 		AccountOnly: native.AccountOnly,
 		Scope:       native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
@@ -202,7 +203,7 @@ func (o *sessionInputOwner) currentInputResponsibility(ctx context.Context, nati
 		if err != nil {
 			return original, err
 		}
-		if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation) {
+		if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation, op.ProviderFacts()) {
 			return original, errCaptureScopeChanged
 		}
 	}
@@ -221,7 +222,7 @@ func (o *sessionInputOwner) recoveredInputResponsibility(ctx context.Context, na
 		return original, nil
 	}
 	if native.Scope != channelonboarding.SessionInputBusiness || native.PrincipalID != op.PrincipalID ||
-		!native.Source.Matches(op.Coordinate.DurableIdentity()) || op.ValidateSessionAccount() != nil {
+		!native.Source.Matches(op.Coordinate.DurableIdentity()) || op.ValidateSessionAccount(op.ProviderFacts()) != nil {
 		return original, errCaptureScopeChanged
 	}
 	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)

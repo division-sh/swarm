@@ -7,17 +7,6 @@ import (
 	"strconv"
 )
 
-var telegram = Binding{
-	id: "telegram", displayName: "Telegram", webhook: true, pollClaims: true, credential: true, signingCredential: true,
-	canonicalAccount:             TelegramAccount,
-	claimInstructions:            TelegramClaimInstructions,
-	registrationTeaching:         "Telegram ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
-	omitBoundRegistrationReceipt: true,
-	languageHelp: func(operation string) string {
-		return fmt.Sprintf("Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", operation)
-	},
-}
-
 var telegramBotName = regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`)
 
 func TelegramClaimInstructions(prompt ClaimPrompt) (string, error) {

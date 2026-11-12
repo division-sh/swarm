@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -691,7 +693,7 @@ func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, path string) *S
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := newSQLiteStoreComposition(original.schema, backend, nil)
+	store, err := newSQLiteStoreComposition(original.schema, backend, nil, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

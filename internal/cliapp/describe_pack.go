@@ -101,7 +101,7 @@ func validateDescribePackOptions(opts describePackOptions, toolRequested bool) e
 }
 
 func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (describePackContext, error) {
-	cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root)})
+	cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root), ChannelRegistration: opts.root.channelRegistration})
 	if err != nil {
 		return describePackContext{}, err
 	}
@@ -133,7 +133,7 @@ func loadDescribePackContext(opts packCommandOptions, inspectProject bool) (desc
 				return describePackContext{}, err
 			}
 			loaded.bundle, err = runtimecontracts.LoadWorkflowContractBundleFromRootedSource(opts.repoRoot, rooted, specPath,
-				runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory})
+				runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base, AdmitPackInventory: cfg.AdmitPackInventory})
 			if err != nil {
 				return describePackContext{}, err
 			}

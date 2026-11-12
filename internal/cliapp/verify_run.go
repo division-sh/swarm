@@ -119,7 +119,7 @@ func inspectVerifyRun(ctx context.Context, repo string, opts verifyCommandOption
 }
 
 func prepareVerifyRunInspection(ctx context.Context, repo string, opts verifyCommandOptions) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
-	cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath, ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
@@ -139,7 +139,7 @@ func prepareVerifyRunInspection(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
-	return prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, opts.swarmDir, source)
+	return prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, opts.swarmDir, source, nativeChannelFacts(opts.channelRegistration))
 }
 
 func verifyRunFailure(runID string, cause error) error {

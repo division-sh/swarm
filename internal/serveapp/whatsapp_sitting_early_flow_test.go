@@ -163,7 +163,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				}
 			}()
 			go func() {
-				done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, writer, errOut, nil, nil, factory)
+				done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, writer, errOut, nil, nil, fixtureRegistration(factory))
 			}()
 			var pairing channelonboarding.Result
 			select {
@@ -272,7 +272,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				Accounts []channelonboarding.Result `json:"accounts"`
 			}
 			var listed, listErr bytes.Buffer
-			if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
+			if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, ChannelRegistrations()); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
 				t.Fatal("public account readback failed", code, listErr.String())
 			}
 			registered := listing.Accounts[0]

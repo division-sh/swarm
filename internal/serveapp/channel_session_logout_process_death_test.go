@@ -28,7 +28,7 @@ type servedNativeLogoutReservationCut struct {
 
 func (s servedNativeLogoutReservationCut) DispatchSessionLogout(ctx context.Context, op channelonboarding.TeardownOperation) error {
 	if op.Kind != channelonboarding.TeardownLogout || op.Phase != channelonboarding.TeardownAuthorityRetired ||
-		op.Logout == nil || op.Logout.Validate() != nil {
+		op.Logout == nil || op.Logout.Validate(op.ProviderFacts()) != nil {
 		return channelonboarding.ErrConflict
 	}
 	fmt.Fprintln(os.Stdout, "NATIVE_LOGOUT_RESERVED "+op.TeardownID)

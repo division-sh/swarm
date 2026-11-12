@@ -3,6 +3,7 @@ package sessionstate
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
@@ -36,8 +37,8 @@ func (o *Owner) GetDevice(ctx context.Context, jid types.JID) (*store.Device, er
 	return o.owner.GetDevice(ctx, jid)
 }
 func (o *Owner) LIDMap() store.LIDStore { return o.owner.LIDMap() }
-func (o *Owner) Captures(ctx context.Context, connectionID string) (*Capture, error) {
-	capture, err := o.owner.Captures(ctx, connectionID)
+func (o *Owner) Captures(ctx context.Context, connectionID string, facts channelprovider.Binding) (*Capture, error) {
+	capture, err := o.owner.Captures(ctx, connectionID, facts)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package channelonboarding_test
 
 import (
 	"errors"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
 			}
 			for _, provider := range []string{"telegram", "whatsapp"} {
 				t.Run(provider+"_facts", func(t *testing.T) {
-					matched, _ := channelprovider.Lookup(provider)
+					matched, _ := channelfixture.Facts(provider)
 					selected, found := matched, true
 					f := newCallbackLockFixtureWithFacts(t, backend, func(requested string) (channelprovider.Binding, bool) {
 						return selected, found && requested == provider
@@ -110,7 +111,7 @@ func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
 					if provider == other {
 						other = "whatsapp"
 					}
-					mismatched, _ := channelprovider.Lookup(other)
+					mismatched, _ := channelfixture.Facts(other)
 					for _, cell := range []struct {
 						name  string
 						facts channelprovider.Binding

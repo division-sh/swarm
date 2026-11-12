@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"path/filepath"
 	"strings"
@@ -49,7 +51,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 		if _, err := pg.Exec(`CREATE TABLE timers (timer_id TEXT PRIMARY KEY, due_at TIMESTAMPTZ NOT NULL)`); err != nil {
 			t.Fatalf("create legacy timers table: %v", err)
 		}
-		pgStore := storetest.NewPostgresStoreForTest(pg)
+		pgStore := storetest.NewPostgresStoreForTest(pg, channelfixture.Facts)
 		request.Stores = serveRuntimePersistence{schema: pgStore}
 
 		_, err := buildServeRuntimeBundleContext(request)
@@ -58,7 +60,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "legacy-timers.db")
-		sqliteStore, sqliteDB, err := storeconstruction.OpenSQLiteRuntime(path)
+		sqliteStore, sqliteDB, err := storeconstruction.OpenSQLiteRuntime(path, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}

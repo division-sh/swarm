@@ -48,14 +48,15 @@ type verifyFindingOutput struct {
 }
 
 type verifyCommandOptions struct {
-	sourceRoot   string
-	configPath   string
-	swarmDir     cliSwarmDirOptions
-	portable     bool
-	runID        string
-	runRequested bool
-	output       cliOutputOptions
-	logging      cliLoggingOptions
+	channelRegistration ChannelRegistrationFactory
+	sourceRoot          string
+	configPath          string
+	swarmDir            cliSwarmDirOptions
+	portable            bool
+	runID               string
+	runRequested        bool
+	output              cliOutputOptions
+	logging             cliLoggingOptions
 }
 
 func defaultVerifyCommandOptions() verifyCommandOptions {
@@ -86,7 +87,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	if err := opts.logging.validate(); err != nil {
 		return refuse("verify_logging_options", "internal/cliapp.cliLoggingOptions.validate", "verify", err, nil)
 	}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath, ChannelRegistration: opts.channelRegistration})
 	if configResult.DeploymentConfigured() && !opts.portable {
 		purpose = runtimebootverify.ExecutionValidation
 	}
@@ -133,7 +134,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if purpose == runtimebootverify.ExecutionValidation {
-			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, opts.swarmDir, source, validationOpts, packBases, &result)
+			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, opts.swarmDir, source, validationOpts, packBases, &result, opts.channelRegistration)
 		} else {
 			reason := "no explicit, project or local operator deployment configuration was selected"
 			if opts.portable {

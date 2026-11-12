@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packadmission"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -36,8 +37,8 @@ func (rt *Runtime) accountDeclarations() (packadmission.ProviderSource, *contrac
 
 // AccountHolders observes ordinary state through the canonical instance reader.
 // Registration/link availability is deliberately not a construction condition.
-func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
-	if ref.Validate() != nil || rt == nil || rt.Pipeline == nil {
+func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channelonboarding.AccountReference, facts channelprovider.Binding) ([]channelonboarding.AccountHolder, error) {
+	if ref.Validate(facts) != nil || rt == nil || rt.Pipeline == nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
 	providers, bundle, err := rt.accountDeclarations()
@@ -70,7 +71,7 @@ func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channel
 			if !present || value == "" {
 				continue // Dynamic keyless holders may be populated by a later event.
 			}
-			account, err := channelonboarding.CanonicalAccount(ref.Provider, value)
+			account, err := channelonboarding.CanonicalAccount(plan.ProviderFacts().ForProvider(ref.Provider), value)
 			if err != nil {
 				return nil, fmt.Errorf("flow %s operator_account: %w", flow, err)
 			}
@@ -86,16 +87,16 @@ func (rt *Runtime) AccountHolders(ctx context.Context, runID string, ref channel
 
 // AccountHolders reads only currently admitted runs, acquiring their original
 // runtime use. A stale loaded bundle is not a live account holder.
-func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
-	return m.accountHolders(ctx, ref, false)
+func (m *RuntimeContextManager) AccountHolders(ctx context.Context, ref channelonboarding.AccountReference, facts channelprovider.Binding) ([]channelonboarding.AccountHolder, error) {
+	return m.accountHolders(ctx, ref, facts, false)
 }
 
 // RegistrationAccountHolders only reads the candidates for registration currentness.
-func (m *RuntimeContextManager) RegistrationAccountHolders(ctx context.Context, ref channelonboarding.AccountReference) ([]channelonboarding.AccountHolder, error) {
-	return m.accountHolders(ctx, ref, true)
+func (m *RuntimeContextManager) RegistrationAccountHolders(ctx context.Context, ref channelonboarding.AccountReference, facts channelprovider.Binding) ([]channelonboarding.AccountHolder, error) {
+	return m.accountHolders(ctx, ref, facts, true)
 }
 
-func (m *RuntimeContextManager) accountHolders(ctx context.Context, ref channelonboarding.AccountReference, registration bool) ([]channelonboarding.AccountHolder, error) {
+func (m *RuntimeContextManager) accountHolders(ctx context.Context, ref channelonboarding.AccountReference, facts channelprovider.Binding, registration bool) ([]channelonboarding.AccountHolder, error) {
 	holders := []channelonboarding.AccountHolder{}
 	seen := map[string]bool{}
 	for _, loaded := range m.LoadedContexts() {
@@ -104,7 +105,7 @@ func (m *RuntimeContextManager) accountHolders(ctx context.Context, ref channelo
 				continue
 			}
 			seen[activation.RunID] = true
-			rows, err := m.activationAccountHolders(ctx, activation, ref, registration)
+			rows, err := m.activationAccountHolders(ctx, activation, ref, facts, registration)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +130,7 @@ func (m *RuntimeContextManager) accountHolders(ctx context.Context, ref channelo
 	return holders, nil
 }
 
-func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, activation StandingActivation, ref channelonboarding.AccountReference, registration bool) ([]channelonboarding.AccountHolder, error) {
+func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, activation StandingActivation, ref channelonboarding.AccountReference, facts channelprovider.Binding, registration bool) ([]channelonboarding.AccountHolder, error) {
 	if m.landingRuns == nil {
 		return nil, fmt.Errorf("account binding requires the deployment landing-run reader")
 	}
@@ -143,7 +144,7 @@ func (m *RuntimeContextManager) activationAccountHolders(ctx context.Context, ac
 	var rows []channelonboarding.AccountHolder
 	_, lookup, availability, err := m.acquireRun(ctx, activation.RunID, registration, func(readCtx context.Context, rt *Runtime, _ *BundleContext, state runbundle.Availability) (err error) {
 		if state.Status == string(runlifecycle.StateLive) {
-			rows, err = rt.AccountHolders(readCtx, activation.RunID, ref)
+			rows, err = rt.AccountHolders(readCtx, activation.RunID, ref, facts)
 		}
 		return err
 	})

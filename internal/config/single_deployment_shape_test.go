@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"reflect"
 	"strings"
 	"testing"
@@ -64,7 +65,7 @@ func TestSingleDeploymentConfigPreservesOmittedAndExplicitLeafValues(t *testing.
 		if err := decodeConfigSourceTest("channels: {hitl: {provider: whatsapp, account: '+1 (555) 010-0123'}}", &got); err != nil {
 			t.Fatal(err)
 		}
-		if err := got.validateChannels(); err != nil {
+		if err := got.validateChannels(channelfixture.For("whatsapp")); err != nil {
 			t.Fatal(err)
 		}
 		if got.Channels.HITL == nil || got.Channels.HITL.Provider != "whatsapp" || got.Channels.HITL.Account != "+15550100123" {

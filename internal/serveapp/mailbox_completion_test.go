@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -214,7 +216,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
 		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			pg, err := store.NewPostgresStore(dsn)
+			pg, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 			if err != nil {
 				return nil, err
 			}
