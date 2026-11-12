@@ -48,6 +48,7 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	if err := json.Unmarshal(input.OriginalCapture(), &event); err != nil {
 		return absent, err
 	}
+	event = event.WithProviderFacts(input.ProviderFacts())
 	identity, err := event.PublicationIdentity()
 	if err != nil {
 		return absent, err

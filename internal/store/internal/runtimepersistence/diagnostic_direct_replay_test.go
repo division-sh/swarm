@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"encoding/json"
 	"testing"
@@ -23,7 +25,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle(), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	runtimeLogID := persistSQLiteRuntimeLogForReplayTest(t, ctx, store, runID)
 	executableID := uuid.NewString()
@@ -87,7 +89,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 	ctx = originalStoreFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	now := time.Now().Add(-time.Minute).UTC()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	runtimeLogID := persistPostgresRuntimeLogForReplayTest(t, ctx, pg, runID)
 	executableID := uuid.NewString()

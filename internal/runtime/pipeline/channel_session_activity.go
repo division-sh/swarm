@@ -15,6 +15,7 @@ import (
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func (pc *PipelineCoordinator) prepareSessionActivityIntents(ctx context.Context, intents []engine.ActivityIntent) ([]engine.ActivityIntent, func(), error) {
@@ -57,7 +58,17 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	if !object || !supplied {
 		return intent, nil, fmt.Errorf("authored session activity requires account: state.operator_account or policy.operator_account")
 	}
-	ref, err := channelonboarding.CanonicalAccount(nativeTarget.Provider(), account)
+	bundle, _ := semanticview.Bundle(pc.SemanticSource())
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
+	if err != nil {
+		return intent, nil, err
+	}
+	scope, err := providers.Scope(intent.ExecutionFlowID.String())
+	if err != nil {
+		return intent, nil, err
+	}
+	facts := scope.ProviderFacts(nativeTarget.Provider())
+	ref, err := channelonboarding.CanonicalAccount(facts.ForProvider(nativeTarget.Provider()), account)
 	if err != nil {
 		return intent, nil, fmt.Errorf("session activity account: %w", err)
 	}
@@ -73,7 +84,7 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 		if err == nil || pc.registeredAccounts == nil {
 			return
 		}
-		if _, accountErr := pc.activityAccountRegistration(ctx, ref); accountErr != nil {
+		if _, accountErr := pc.activityAccountRegistration(ctx, ref, facts); accountErr != nil {
 			err = accountErr
 		}
 	}()

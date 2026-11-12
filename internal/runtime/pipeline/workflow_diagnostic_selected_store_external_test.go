@@ -1,6 +1,8 @@
 package pipeline_test
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"fmt"
 	"reflect"
@@ -54,7 +56,7 @@ func newWorkflowDiagnosticNativeFixture(t *testing.T, backend string, bundle *ru
 		selected, cards, persistence = s, s, runtimepipeline.NewWorkflowPersistence(s)
 	case "postgres":
 		dsn, _, _ := testutil.StartPostgres(t)
-		s, err := store.NewPostgresStore(dsn)
+		s, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}

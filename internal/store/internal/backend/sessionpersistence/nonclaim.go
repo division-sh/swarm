@@ -20,6 +20,7 @@ func (s *CaptureStore) SettleNonClaim(ctx context.Context, fact authority.NonCla
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return err
 	}
+	event = event.WithProviderFacts(s.providerFacts)
 	parentID, revision := fact.Parent()
 	fingerprint, err := event.PublicationFingerprint()
 	if err != nil || event.Scope.Kind != channelonboarding.SessionInputOnboarding ||

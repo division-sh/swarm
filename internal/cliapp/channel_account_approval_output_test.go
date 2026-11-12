@@ -3,6 +3,7 @@ package cliapp
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"strings"
 	"testing"
 )
@@ -101,7 +102,8 @@ func deploymentAccountPreviewCLIResult(t *testing.T, provider string, confirmed 
 	if err != nil || json.Unmarshal(raw, &decoded) != nil {
 		t.Fatal("account preview fixture failed its public encoding", err)
 	}
-	if _, err := decoded.ProviderCredentialRequirement(); err != nil || decoded.Operation.ValidateDeploymentRegistration() != nil {
+	decoded = decoded.WithProviderFacts(channelfixture.For(decoded.Operation.Provider))
+	if _, err := decoded.ProviderCredentialRequirement(); err != nil || decoded.Operation.ValidateDeploymentRegistration(decoded.Operation.ProviderFacts()) != nil {
 		t.Fatal("account preview fixture contradicts its provider/deployment declaration", err)
 	}
 	return result

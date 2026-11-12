@@ -212,7 +212,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 					}
 				}()
 				go func() {
-					done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp"}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, factory)
+					done <- cliapp.Execute(command, []string{"--config", config, "channel", "connect", "whatsapp"}, writer, sittingPromptWriter{Writer: errOut, prompts: prompts}, nil, nil, fixtureRegistration(factory))
 				}()
 				var pairedOperation channelonboarding.Operation
 				select {

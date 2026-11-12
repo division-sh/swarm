@@ -359,7 +359,7 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 	defer p.mu.Unlock()
 	for _, binding := range bindings {
 		if binding.BlockReason == runtimerunlifecycle.StandingBindingSessionRequired {
-			provider, _ := channelprovider.Lookup(binding.Provider)
+			provider, _ := installedChannelFactsFor(binding.Provider)
 			if provider.NotLinked() != "" {
 				p.operatorWarnings = append(p.operatorWarnings, provider.NotLinked())
 				continue
@@ -829,7 +829,7 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 	}
 	for _, account := range accounts {
 		provider := account.Provider
-		if binding, installed := channelprovider.Lookup(provider); installed {
+		if binding, installed := installedChannelFactsFor(provider); installed {
 			provider = binding.DisplayName()
 		}
 		label := provider + " " + account.Account

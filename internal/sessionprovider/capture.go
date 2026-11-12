@@ -3,6 +3,7 @@ package sessionprovider
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	capturedata "github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
@@ -28,8 +29,8 @@ type captureStore struct {
 	connectionID string
 }
 
-func newCaptureStore(ctx context.Context, owner *sessionstate.Owner, connectionID string) (*captureStore, error) {
-	capture, err := owner.Captures(ctx, connectionID)
+func newCaptureStore(ctx context.Context, owner *sessionstate.Owner, connectionID string, facts channelprovider.Binding) (*captureStore, error) {
+	capture, err := owner.Captures(ctx, connectionID, facts)
 	if err != nil {
 		return nil, err
 	}

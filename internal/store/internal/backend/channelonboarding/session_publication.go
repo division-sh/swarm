@@ -26,7 +26,7 @@ func requireSessionBusinessInputTx(ctx context.Context, owner providerFactReader
 	if err != nil {
 		return err
 	}
-	if !found || !expected.MatchesOperationWithFacts(op, owner.providerFact(op.Provider)) {
+	if !found || !expected.MatchesOperation(op, owner.providerFact(op.Provider)) {
 		return domain.ErrRevisionConflict
 	}
 	// Preserve confirmation's parent-before-principal order and the shared
@@ -40,12 +40,12 @@ func requireSessionBusinessInputTx(ctx context.Context, owner providerFactReader
 		}
 		return nil // The enclosing publication transaction fences the exact run/source.
 	}
-	if op.AccountConnectionWithFacts(owner.providerFact(op.Provider)) {
+	if op.AccountConnection(owner.providerFact(op.Provider)) {
 		activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)
 		if err != nil {
 			return err
 		}
-		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountBusinessWithFacts(op, activation, owner.providerFact(op.Provider)) || !input.LifetimeCurrent(ctx) {
+		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountBusiness(op, activation, owner.providerFact(op.Provider)) || !input.LifetimeCurrent(ctx) {
 			return domain.ErrRevisionConflict
 		}
 		return nil
@@ -61,7 +61,7 @@ func requireSessionBusinessInputTx(ctx context.Context, owner providerFactReader
 	if err != nil {
 		return err
 	}
-	if !found || !expected.MatchesBusinessBindingWithFacts(op, activation, binding, input.BindingRevision(), owner.providerFact(op.Provider)) || !input.LifetimeCurrent(ctx) {
+	if !found || !expected.MatchesBusinessBinding(op, activation, binding, input.BindingRevision(), owner.providerFact(op.Provider)) || !input.LifetimeCurrent(ctx) {
 		return domain.ErrRevisionConflict
 	}
 	return nil

@@ -53,7 +53,7 @@ func registeredAccountMismatch(binding channelprovider.Binding, contexts []runti
 			if !account.FromPolicy {
 				continue
 			}
-			ref, err := channelonboarding.CanonicalAccount(binding.Provider(), account.Policy)
+			ref, err := channelonboarding.CanonicalAccount(binding, account.Policy)
 			if err != nil {
 				return false, err
 			}
@@ -71,7 +71,7 @@ func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboa
 		if !op.DeploymentRegistration || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
 			continue
 		}
-		if err := (channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}).Validate(); err != nil {
+		if err := (channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}).Validate(op.ProviderFacts()); err != nil {
 			return nil, err
 		}
 		value, err := read(ctx, apiv1.Request{Method: "channel.list", Params: map[string]any{
@@ -97,11 +97,12 @@ func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboa
 }
 
 func observeDeploymentAccountStatus(ctx context.Context, ref channelonboarding.AccountReference, runtimeOptions deploymentRuntimeOptions, operations channelonboarding.OperationStore, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (json.RawMessage, error) {
-	ref, err := channelonboarding.CanonicalAccount(ref.Provider, ref.Account)
+	facts, _ := installedChannelFactsFor(ref.Provider)
+	ref, err := channelonboarding.CanonicalAccount(facts, ref.Account)
 	if err != nil {
 		return nil, err
 	}
-	status, op, err := channelonboarding.RegisteredAccountStatus(ctx, operations, ref)
+	status, op, err := channelonboarding.RegisteredAccountStatus(ctx, operations, ref, facts)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,8 @@ func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runt
 		ref := channelonboarding.AccountReference{Provider: row.Status.Provider, Account: row.Status.Account}
 		operation := row.Operation
 		if row.Status.Linked {
-			_, current, err := channelonboarding.RegisteredAccountStatus(ctx, operations, ref)
+			facts, _ := installedChannelFactsFor(ref.Provider)
+			_, current, err := channelonboarding.RegisteredAccountStatus(ctx, operations, ref, facts)
 			if err != nil {
 				return nil, err
 			}
@@ -210,7 +212,8 @@ func observeDeploymentWebhookAccount(ctx context.Context, opts deploymentRuntime
 
 func observeDeploymentAccountHolder(ctx context.Context, manager *runtime.RuntimeContextManager, status *channelonboarding.AccountStatus) error {
 	ref := channelonboarding.AccountReference{Provider: status.Provider, Account: status.Account}
-	holders, err := manager.AccountHolders(ctx, ref)
+	facts, _ := installedChannelFactsFor(ref.Provider)
+	holders, err := manager.AccountHolders(ctx, ref, facts)
 	if err != nil && !errors.Is(err, channelonboarding.ErrConflict) {
 		return err
 	}
@@ -228,10 +231,10 @@ func serveRegisteredBusinessSelector(manager *runtime.RuntimeContextManager) ses
 	return func(ctx context.Context, op channelonboarding.Operation) (sessionprovider.RegisteredBusinessBinding, error) {
 		var absent sessionprovider.RegisteredBusinessBinding
 		ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
-		if !op.DeploymentRegistration || !op.AccountConfirmed || ref.Validate() != nil {
+		if !op.DeploymentRegistration || !op.AccountConfirmed || ref.Validate(op.ProviderFacts()) != nil {
 			return absent, channelonboarding.ErrInvalidRequest
 		}
-		holders, err := manager.AccountHolders(ctx, ref)
+		holders, err := manager.AccountHolders(ctx, ref, op.ProviderFacts())
 		if err != nil {
 			return absent, err
 		}
@@ -265,7 +268,7 @@ func serveRegisteredBusinessSelector(manager *runtime.RuntimeContextManager) ses
 			return fail(err)
 		}
 		current := func(ctx context.Context) error {
-			rows, err := manager.AccountHolders(ctx, ref)
+			rows, err := manager.AccountHolders(ctx, ref, op.ProviderFacts())
 			if err != nil {
 				return err
 			}

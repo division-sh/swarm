@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -223,7 +225,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		beforeReplay := snapshotRotationEffects(t, ctx, selected.db, fixture.runID)
 		var reopened llmSessionAttemptJourneyOwner
 		if selected.postgres {
-			reopened = newPostgresStoreWithBackend(mustPostgresBackend(selected.db))
+			reopened = newPostgresStoreWithBackend(mustPostgresBackend(selected.db), channelfixture.Facts)
 		} else {
 			reopened = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
 		}
@@ -380,7 +382,7 @@ func TestSelectedRotationSameKeyConcurrentBothStores(t *testing.T) {
 				}
 				var second llmSessionAttemptJourneyOwner
 				if selected.postgres {
-					second = newPostgresStoreWithBackend(mustPostgresBackend(selected.db))
+					second = newPostgresStoreWithBackend(mustPostgresBackend(selected.db), channelfixture.Facts)
 				} else {
 					second = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
 				}
@@ -456,7 +458,7 @@ func TestSelectedRotationReceiptPrecisionBothStores(t *testing.T) {
 		}
 		var reopened llmSessionAttemptJourneyOwner
 		if selected.postgres {
-			reopened = newPostgresStoreWithBackend(mustPostgresBackend(selected.db))
+			reopened = newPostgresStoreWithBackend(mustPostgresBackend(selected.db), channelfixture.Facts)
 		} else {
 			reopened = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
 		}

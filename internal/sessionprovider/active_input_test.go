@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -255,7 +257,7 @@ func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, sav
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.spool, err = newCaptureStore(f.ctx, f.state.database, connectionID)
+	f.spool, err = newCaptureStore(f.ctx, f.state.database, connectionID, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +311,7 @@ func (f *activeInputFixture) bindCaptureCallbacks(t *testing.T) {
 		f.mu.Lock()
 		scope := f.scope
 		f.mu.Unlock()
-		event, err := captureSDKMessage(scope, f.source, f.occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+		event, err := captureSDKMessage(scope, f.source, f.occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond), channelfixture.For("whatsapp"))
 		if err != nil {
 			return err
 		}
@@ -760,5 +762,5 @@ func capturedActiveInputChannelFixture(t *testing.T, rooted sourceartifact.Roote
 	if err != nil {
 		t.Fatal(err)
 	}
-	return catalog, trigger, plan
+	return catalog, trigger, plan.WithProviderFacts(channelfixture.For("whatsapp"))
 }

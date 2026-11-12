@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -180,7 +182,7 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			if err != nil || !found || record.OutputCount != 2 {
 				t.Fatal("registered account acknowledged before its exact current runtime publication", found, err)
 			}
-			original, err := publicationCaptureProvenance(record.Request)
+			original, err := publicationCaptureProvenance(record.Request, channelfixture.For("whatsapp"))
 			if err != nil || original.Scope != f.scope || original.Scope.ActivationID != "" || original.Scope.ActivationRevision != 0 {
 				t.Fatal("registration was adopted as a learned runtime activation", err)
 			}
@@ -271,7 +273,7 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			if err != nil || !found || record.OutputCount != 2 {
 				t.Fatal("SDK acknowledgment preceded complete native publication", found, err)
 			}
-			original, err := publicationCaptureProvenance(record.Request)
+			original, err := publicationCaptureProvenance(record.Request, channelfixture.For("whatsapp"))
 			if err != nil || original.Scope != f.scope || original.OccurrenceID != c.state.currentOccurrence().occurrenceID {
 				t.Fatal("runtime incoming publication changed its original admitted scope", err)
 			}
@@ -641,7 +643,7 @@ func TestWhatsAppRuntimeIncomingRecoversOriginalRequestBothStores(t *testing.T) 
 				if err != nil || !found || record.OutputCount != 2 {
 					t.Fatal("recovery lost the complete original publication", found, err)
 				}
-				original, err := publicationCaptureProvenance(record.Request)
+				original, err := publicationCaptureProvenance(record.Request, channelfixture.For("whatsapp"))
 				if err != nil || !original.SameCapture(event) {
 					t.Fatal("runtime recovery rewrote original capture authority", err)
 				}

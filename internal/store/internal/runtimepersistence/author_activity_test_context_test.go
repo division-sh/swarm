@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -455,7 +457,7 @@ func admitTestPostgresStore(t testing.TB, db *sql.DB, inspection ...pq.Config) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	pg := newPostgresStoreWithBackend(backend)
+	pg := newPostgresStoreWithBackend(backend, channelfixture.Facts)
 	bootstrapTestPostgresStore(t, pg)
 	return pg
 }

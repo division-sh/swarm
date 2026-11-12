@@ -35,6 +35,23 @@ import (
 
 type registrationProviderRead func(*http.Request) (*http.Response, error)
 
+type externalRegistrationFixture struct {
+	cliapp.ChannelRegistrationFactory
+	open cliapp.ChannelRegistrationConstructor
+}
+
+func (f externalRegistrationFixture) Select(provider string) (cliapp.ChannelRegistrationBinding, bool) {
+	binding, found := f.ChannelRegistrationFactory.Select(provider)
+	if found {
+		binding.Open = f.open
+	}
+	return binding, found
+}
+
+func fixtureRegistration(open cliapp.ChannelRegistrationConstructor) cliapp.ChannelRegistrationFactory {
+	return externalRegistrationFixture{ChannelRegistrationFactory: serveapp.ChannelRegistrations(), open: open}
+}
+
 func (f registrationProviderRead) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
 }
@@ -314,7 +331,7 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 		func(context.Context, cliapp.InvocationRoot, cliapp.ServeOptions) int {
 			t.Fatal("registration started serve")
 			return 1
-		}, nil, factory)
+		}, nil, fixtureRegistration(factory))
 	if code != 0 || reads == 0 || !strings.Contains(out.String(), "Registered telegram account 420079.") {
 		t.Fatalf("public registration exit=%d reads=%d out=%s err=%s", code, reads, out.String(), errOut.String())
 	}
@@ -323,20 +340,20 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || !strings.Contains(out.String(), "Reverified telegram account 420079.") {
 		t.Fatalf("retained registration exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 	botID++
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code == 0 || strings.Contains(out.String(), "Reverified") {
 		t.Fatal("reverify accepted a different provider account")
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "list"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "list"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || strings.Count(out.String(), "telegram 420079") != 1 || strings.Contains(out.String(), "420080") {
 		t.Fatalf("deployment readback exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
@@ -347,20 +364,20 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	botID = 420079
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code == 0 || strings.Contains(out.String(), "Send the code") || strings.Contains(out.String(), "t.me/") || telegram.Delivery(0) != nil {
 		t.Fatalf("missing bot address invented a destination or sent an acknowledgement: exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 	botAddressAvailable = true
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code == 0 || confirmations != 1 || polls != 2 || !regexp.MustCompile(`Send the code [0-9]{5} to @SwarmTestBot `).MatchString(out.String()) {
 		t.Fatalf("failed confirmation was not retained after settlement: exit=%d polls=%d confirmations=%d out=%s err=%s", code, polls, confirmations, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if cut != "acknowledged" {
 		if code == 0 || strings.Contains(out.String(), "Telegram ready.") || acknowledgement.operationID == "" {
 			t.Fatal("interrupted acknowledgement reported success or lacked its exact journal operation", code, out.String(), errOut.String())
@@ -375,7 +392,7 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 		}
 		out.Reset()
 		errOut.Reset()
-		code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079"}, &out, &errOut, nil, nil, factory)
+		code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420079"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 		if (code == 0) != (cut != "response_lost") || telegram.Delivery(0) == nil || telegram.Delivery(1) != nil {
 			t.Fatal("reentry changed uncertain/retry/settled semantics or duplicated the acknowledgement", code, out.String(), errOut.String())
 		}
@@ -390,7 +407,7 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "list", "--json"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "list", "--json"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	var readback struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
@@ -423,7 +440,7 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "420079", "--json"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "420079", "--json"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	var status channelonboarding.AccountStatus
 	if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || registered.Status == nil ||
 		status.Provider != "telegram" || status.Account != "420079" || status.State != "stopped" ||
@@ -432,7 +449,7 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "420081", "--json"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "420081", "--json"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || status.Account != "420081" || status.Linked ||
 		status.State != "stopped" || status.Reason != "not_linked" {
 		t.Fatalf("unlinked account cannot be polled without fabricating registration: exit=%d status=%+v err=%s", code, status, errOut.String())
@@ -457,13 +474,13 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	botID = 420080
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || !strings.Contains(out.String(), "Registered telegram account 420080.") || strings.Contains(out.String(), "Send the code") {
 		t.Fatalf("second account exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "--json"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "status", "telegram", "--json"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code == 0 || !strings.Contains(errOut.String(), "account") {
 		t.Fatalf("ambiguous noninteractive status selected a first account: exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
@@ -474,25 +491,25 @@ func runDeploymentChannelRegistration(t *testing.T, backend, cut string) {
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420080", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420080", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || webhookClaims != 2 || polls != 2 || !strings.Contains(out.String(), "Telegram ready.") {
 		t.Fatalf("existing-holder claim exit=%d claims=%d polls=%d out=%s err=%s", code, webhookClaims, polls, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "logout", "telegram", "420079"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "logout", "telegram", "420079"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || !strings.Contains(out.String(), "Logged out telegram account 420079.") {
 		t.Fatalf("exact logout exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "list"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "list"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || strings.Contains(out.String(), "420079") || strings.Count(out.String(), "telegram 420080") != 1 {
 		t.Fatalf("isolated logout readback exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420080", "--yes"}, &out, &errOut, nil, nil, factory)
+	code = cliapp.Execute(context.Background(), []string{"--config", path, "channel", "connect", "telegram", "420080", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory))
 	if code != 0 || !strings.Contains(out.String(), "Telegram ready.") {
 		t.Fatalf("other account lost its credentials exit=%d out=%s err=%s", code, out.String(), errOut.String())
 	}

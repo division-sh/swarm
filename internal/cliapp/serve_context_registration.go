@@ -92,7 +92,7 @@ func ResolveServeContextRegistrationSwarmDir(root InvocationRoot, opts ServeOpti
 		path, err := normalizeCLISwarmDir(root, opts.SwarmDir, "--swarm-dir")
 		return CLISwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath, ChannelRegistration: opts.ChannelRegistration})
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}

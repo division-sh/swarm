@@ -1,5 +1,5 @@
-// Package channelprovider binds the compiled embedded adapters. A binding is
-// declaration and presentation data, never identity or execution authority.
+// Package channelprovider defines immutable declaration and presentation facts,
+// never installation, identity or execution authority.
 package channelprovider
 
 import (
@@ -30,8 +30,10 @@ type Definition struct {
 	CaptureKey                   string
 }
 
+type FactsLookup func(string) (Binding, bool)
+
 func Define(definition Definition) Binding {
-	return Binding{
+	return Binding{definition: &bindingDefinition{
 		id: definition.ID, displayName: definition.DisplayName,
 		session: definition.Session, webhook: definition.Webhook, pollClaims: definition.PollClaims,
 		credential: definition.Credential, signingCredential: definition.SigningCredential,
@@ -40,10 +42,14 @@ func Define(definition Definition) Binding {
 		omitBoundRegistrationReceipt: definition.OmitBoundRegistrationReceipt,
 		notLinked:                    definition.NotLinked, pairingPrompt: definition.PairingPrompt, languageHelp: definition.LanguageHelp,
 		nativeRead: definition.NativeRead, nativeWrite: definition.NativeWrite, captureKey: definition.CaptureKey,
-	}
+	}}
 }
 
 type Binding struct {
+	definition *bindingDefinition
+}
+
+type bindingDefinition struct {
 	id                           string
 	displayName                  string
 	session                      bool
@@ -64,6 +70,13 @@ type Binding struct {
 	captureKey                   string
 }
 
+func (b Binding) value() bindingDefinition {
+	if b.definition == nil {
+		return bindingDefinition{}
+	}
+	return *b.definition
+}
+
 type AccountPresentation struct {
 	Account string
 	Name    string
@@ -78,87 +91,70 @@ type ClaimPrompt struct {
 	Connection *AccountPresentation
 }
 
-// Keep installation in one compiled seat. Packs cannot register callbacks or
-// construct bindings; a new native operation still needs the finite catalog.
-var installed = [...]Binding{telegram, whatsapp}
-
-func Lookup(provider string) (Binding, bool) {
-	for _, binding := range installed {
-		if binding.id == provider {
-			return binding, true
-		}
-	}
-	return Binding{}, false
-}
-
-func ForNativeTarget(target string) (Binding, bool) {
-	for _, binding := range installed {
-		if binding.NativeRead(target) || binding.NativeWrite(target) {
-			return binding, true
-		}
-	}
-	return Binding{}, false
-}
-
-func Installed() []Binding { return append([]Binding(nil), installed[:]...) }
-
-func (b Binding) Provider() string { return b.id }
+func (b Binding) Provider() string { return b.value().id }
 func (b Binding) MatchesProvider(provider string) bool {
-	return b.id != "" && b.id == provider
+	return b.value().id != "" && b.value().id == provider
 }
-func (b Binding) DisplayName() string   { return b.displayName }
-func (b Binding) ReadyTeaching() string { return b.readyTeaching }
-func (b Binding) RegistrationTeaching() string {
-	if b.registrationTeaching != "" {
-		return b.registrationTeaching
+
+func (b Binding) ForProvider(provider string) Binding {
+	if !b.MatchesProvider(provider) {
+		return Binding{}
 	}
-	return b.readyTeaching
+	return b
+}
+func (b Binding) DisplayName() string   { return b.value().displayName }
+func (b Binding) ReadyTeaching() string { return b.value().readyTeaching }
+func (b Binding) RegistrationTeaching() string {
+	if b.value().registrationTeaching != "" {
+		return b.value().registrationTeaching
+	}
+	return b.value().readyTeaching
 }
 func (b Binding) ShowRegistrationReceipt(bound bool) bool {
-	return !bound || !b.omitBoundRegistrationReceipt
+	return !bound || !b.value().omitBoundRegistrationReceipt
 }
-func (b Binding) NotLinked() string { return b.notLinked }
-func (b Binding) Session() bool     { return b.id != "" && b.session }
-func (b Binding) Webhook() bool     { return b.id != "" && b.webhook }
-func (b Binding) PollsClaim() bool  { return b.id != "" && b.pollClaims }
+func (b Binding) NotLinked() string { return b.value().notLinked }
+func (b Binding) Session() bool     { return b.value().id != "" && b.value().session }
+func (b Binding) Webhook() bool     { return b.value().id != "" && b.value().webhook }
+func (b Binding) PollsClaim() bool  { return b.value().id != "" && b.value().pollClaims }
 
-func (b Binding) CaptureProvenanceKey() string { return b.captureKey }
+func (b Binding) CaptureProvenanceKey() string { return b.value().captureKey }
 
 func (b Binding) AcceptsCaptureKind(kind string) bool {
-	return b.captureKey != "" && (kind == "message" || kind == "edit" || kind == "revoke")
+	return b.value().captureKey != "" && (kind == "message" || kind == "edit" || kind == "revoke")
 }
 
 func (b Binding) DeploymentPosture() string {
-	if b.id == "" {
+	if b.value().id == "" {
 		return ""
 	}
-	if b.session {
+	if b.value().session {
 		return "session_connection"
 	}
-	if b.webhook {
+	if b.value().webhook {
 		return "webhook_registration"
 	}
 	return ""
 }
 
 func (b Binding) MatchesDeployment(posture, credential, signing string) bool {
-	return b.id != "" && posture == b.DeploymentPosture() &&
-		(credential != "") == b.credential &&
-		(signing == "" || b.signingCredential && signing != credential)
+	return b.value().id != "" && posture == b.DeploymentPosture() &&
+		(credential != "") == b.value().credential &&
+		(signing == "" || b.value().signingCredential && signing != credential)
 }
 
 func (b Binding) CanonicalAccount(account string) (string, error) {
-	if b.canonicalAccount == nil {
+	if b.value().canonicalAccount == nil {
 		return "", fmt.Errorf("provider must be whatsapp or telegram")
 	}
-	return b.canonicalAccount(account)
+	return b.value().canonicalAccount(account)
 }
 
 func (b Binding) ClaimInstructions(prompt ClaimPrompt) (string, error) {
-	if b.claimInstructions == nil {
+	if b.value().claimInstructions == nil {
 		return "", fmt.Errorf("provider must be whatsapp or telegram")
 	}
-	return b.claimInstructions(prompt)
+	return b.value().claimInstructions(prompt)
 }
 
 func ClaimDeadline(expires time.Time) string {
@@ -166,28 +162,23 @@ func ClaimDeadline(expires time.Time) string {
 }
 
 func (b Binding) PairingInstructions(expires time.Time, qr string) string {
-	if b.pairingPrompt == "" {
+	if b.value().pairingPrompt == "" {
 		return ""
 	}
-	return fmt.Sprintf(b.pairingPrompt, expires.UTC().Format(time.RFC3339), qr)
+	return fmt.Sprintf(b.value().pairingPrompt, expires.UTC().Format(time.RFC3339), qr)
 }
 
 func (b Binding) LanguageHelp(operation string) string {
-	if b.languageHelp == nil {
+	if b.value().languageHelp == nil {
 		return ""
 	}
-	return b.languageHelp(operation)
+	return b.value().languageHelp(operation)
 }
 
 func (b Binding) NativeRead(target string) bool {
-	return b.id != "" && b.nativeRead != "" && target == b.nativeRead
+	return b.value().id != "" && b.value().nativeRead != "" && target == b.value().nativeRead
 }
 
 func (b Binding) NativeWrite(target string) bool {
-	return b.id != "" && b.nativeWrite != "" && target == b.nativeWrite
-}
-
-func Session(provider string) bool {
-	binding, ok := Lookup(provider)
-	return ok && binding.Session()
+	return b.value().id != "" && b.value().nativeWrite != "" && target == b.value().nativeWrite
 }

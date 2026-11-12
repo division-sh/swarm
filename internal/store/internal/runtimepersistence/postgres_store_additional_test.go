@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -112,7 +114,7 @@ func seedSpecMemoryRun(t *testing.T, ctx context.Context, db *sql.DB) {
 
 func seedManagerRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func specMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
@@ -637,7 +639,7 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 
 func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID, flowInstance, slug, name, state string) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: specEntityStateRunID})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: specEntityStateRunID})
 	if strings.TrimSpace(flowInstance) == "" {
 		flowInstance = strings.TrimSpace(slug)
 	}
@@ -972,7 +974,7 @@ func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) 
 
 	failedRunID := uuid.NewString()
 	failedAt := time.Now().UTC().Round(time.Second)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: failedRunID, StartedAt: failedAt.Add(-time.Minute),
 	})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
@@ -1034,7 +1036,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 		"human", "", []byte(`{"directive":"x"}`), 0, runID,
 		parentID, events.EventEnvelope{}, time.Now().Add(-1*time.Minute))
 
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.ExistingRunRootIngress(parentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, runID, events.EventEnvelope{}, time.Now().Add(-3*time.Minute))); err != nil {
