@@ -258,7 +258,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 	callback, signing, _ := h.provider.Registration()
 	// A new ceremony is a new provider event, not reuse of the prior claim's
 	// immutable receipt under a different parent and challenge.
-	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, 901109+100*priorConfirmations, int64(userID), int64(chatID), chatType, "replacement_operator")
+	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, int64(901109+100*priorConfirmations), int64(userID), int64(chatID), chatType, "replacement_operator")
 	if claim.StatusCode != http.StatusOK || len(claim.EventIDs) != 0 || len(claim.EventNames) != 0 {
 		t.Fatalf("deployment connect claim escaped the deployment receiver: %+v", claim)
 	}

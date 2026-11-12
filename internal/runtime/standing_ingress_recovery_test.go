@@ -46,7 +46,9 @@ func (s *standingLearnedCredentialStore) ListCurrentConnectedChannelActivations(
 	return s.activations, s.err
 }
 
-func (s *standingLearnedCredentialStore) DeploymentChannelOperations() channelonboarding.OperationStore {
+type standingRegisteredCredentialStore struct{ standingLearnedCredentialStore }
+
+func (s *standingRegisteredCredentialStore) DeploymentChannelOperations() channelonboarding.OperationStore {
 	return s
 }
 
@@ -688,7 +690,7 @@ func TestRegisteredStandingAdmissionWithdrawsOnlyCompletedLogout(t *testing.T) {
 				oldKey:     {registered: &registeredStandingCredential{operation: previous}, credentialKeys: []string{"old"}},
 				siblingKey: {alias: "unrelated", enabled: true, credentialKeys: []string{"sibling"}},
 			}}
-			store := &standingLearnedCredentialStore{}
+			store := &standingRegisteredCredentialStore{}
 			sentinel := errors.New("native predecessor read unavailable")
 			switch scenario {
 			case "incomplete":
