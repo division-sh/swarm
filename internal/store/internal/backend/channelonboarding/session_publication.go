@@ -11,9 +11,9 @@ import (
 	identityowner "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 )
 
-// RequireSessionBusinessInputTx fences the original owners in the publication
+// requireSessionBusinessInputTx fences the original owners in the publication
 // transaction. It never performs root-store reads or provider I/O under SQL ownership.
-func RequireSessionBusinessInputTx(ctx context.Context, tx *sql.Tx, postgres bool, input nativeinput.Admission) error {
+func requireSessionBusinessInputTx(ctx context.Context, owner runner, tx *sql.Tx, postgres bool, input nativeinput.Admission) error {
 	if tx == nil || input.Scope() != domain.SessionInputBusiness || !input.LifetimeCurrent(ctx) {
 		return fmt.Errorf("current owned native business input is required")
 	}

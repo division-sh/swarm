@@ -13,7 +13,6 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
-	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 )
 
 func requireChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtimeeffects.Settlement, postgres bool) error {
@@ -29,14 +28,14 @@ func requireChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtime
 	}
 }
 
-func projectChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtimeeffects.Settlement, postgres bool) (bool, error) {
+func projectChannelSourceSettlementTx(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, s runtimeeffects.Settlement, postgres bool) (bool, error) {
 	switch s.Authority.Kind {
 	case runtimeeffects.AuthorityChannelDelivery:
 		return projectChannelDeliverySettlementTx(ctx, tx, s, postgres)
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return projectChannelNativeSettingSettlementTx(ctx, tx, s, postgres)
 	case runtimeeffects.AuthorityChannelLogout:
-		return channelonboarding.SettleLogoutEffectTx(ctx, tx, s, postgres)
+		return nativeChecks.SettleLogoutEffectTx(ctx, tx, s, postgres)
 	default:
 		return false, nil
 	}
@@ -177,7 +176,7 @@ func loadChannelRecoverySettlementTx(ctx context.Context, tx *sql.Tx, c external
 	return s, nil
 }
 
-func recoverChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, c externalEffectRecoveryCandidate,
+func recoverChannelSourceSettlementTx(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, c externalEffectRecoveryCandidate,
 	state runtimeeffects.State, failure []byte, now time.Time, postgres bool) (bool, bool, error) {
 	s, err := loadChannelRecoverySettlementTx(ctx, tx, c, state, failure, now, postgres)
 	if err != nil {
@@ -195,7 +194,7 @@ func recoverChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, c externa
 	if err != nil || !changed {
 		return changed, false, err
 	}
-	projectionChanged, err := projectChannelSourceSettlementTx(ctx, tx, s, postgres)
+	projectionChanged, err := projectChannelSourceSettlementTx(ctx, nativeChecks, tx, s, postgres)
 	return true, projectionChanged, err
 }
 
