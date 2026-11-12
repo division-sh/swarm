@@ -2,6 +2,7 @@ package construction_test
 
 import (
 	"context"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func TestSelectedForkApplicationSnapshotObserverDoesNotAcquireRuntimeAuthorityBo
 				if err != nil {
 					t.Fatal(err)
 				}
-				selected, err := construction.OpenSQLiteRuntimeReadOnly(writer.Path())
+				selected, err := construction.OpenSQLiteRuntimeReadOnly(writer.Path(), channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -49,7 +50,7 @@ func TestSelectedForkApplicationSnapshotObserverDoesNotAcquireRuntimeAuthorityBo
 					t.Fatalf("read-only observer changed or lost physical evidence: err=%v", err)
 				}
 			} else {
-				selected, err := construction.NewPostgres(testutil.StartPostgresDSN(t))
+				selected, err := construction.NewPostgres(testutil.StartPostgresDSN(t), channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}
