@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,7 +29,7 @@ func validatePreparedTargetConflictOwner(selected any, eventID, routeIdentity st
 }
 
 func SetPreparedTargetConflictForTest(ctx context.Context, selected any, eventID, originalIdentity string, conflicting events.DeliveryRoute) (int64, error) {
-	postgres, err := validatePreparedTargetConflictOwner(selected, eventID, originalIdentity)
+	_, err := validatePreparedTargetConflictOwner(selected, eventID, originalIdentity)
 	if err != nil {
 		return 0, err
 	}
@@ -42,31 +41,27 @@ func SetPreparedTargetConflictForTest(ctx context.Context, selected any, eventID
 	if err != nil {
 		return 0, err
 	}
-	var changed int64
-	err = runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		changed, err = delivery.SetPreparedTargetConflictTx(ctx, tx, postgres, eventID, originalIdentity, conflicting.Recipient.ID(), events.EncodeDeliveryRouteIdentity(identity), string(target))
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.SetPreparedTargetConflictForTest(ctx, eventID, originalIdentity, conflicting.Recipient.ID(), events.EncodeDeliveryRouteIdentity(identity), string(target))
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.SetPreparedTargetConflictForTest(ctx, eventID, originalIdentity, conflicting.Recipient.ID(), events.EncodeDeliveryRouteIdentity(identity), string(target))
+	default:
+		return 0, fmt.Errorf("prepared target conflict requires its original native owner")
 	}
-	return changed, nil
 }
 
 func ReadPreparedTargetConflictForTest(ctx context.Context, selected any, eventID, routeIdentity string) (PreparedTargetConflictStorage, error) {
-	postgres, err := validatePreparedTargetConflictOwner(selected, eventID, routeIdentity)
+	_, err := validatePreparedTargetConflictOwner(selected, eventID, routeIdentity)
 	if err != nil {
 		return PreparedTargetConflictStorage{}, err
 	}
-	var out PreparedTargetConflictStorage
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadPreparedTargetConflictTx(ctx, tx, postgres, eventID, routeIdentity)
-		return err
-	})
-	if err != nil {
-		return PreparedTargetConflictStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadPreparedTargetConflictForTest(ctx, eventID, routeIdentity)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadPreparedTargetConflictForTest(ctx, eventID, routeIdentity)
+	default:
+		return PreparedTargetConflictStorage{}, fmt.Errorf("prepared target conflict requires its original native owner")
 	}
-	return out, nil
 }

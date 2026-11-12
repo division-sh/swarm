@@ -7,6 +7,30 @@ import (
 	"strings"
 )
 
+func (s *PipelinePostgresOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) error {
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, true, runID, entityID)
+	})
+}
+
+func (s *PipelineSQLiteOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) error {
+	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
+		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, false, runID, entityID)
+	})
+}
+
+func (s *PipelinePostgresOwner) RemoveNodeRecoveryPoisonMutationForTest(ctx context.Context) error {
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return RemoveNodeRecoveryPoisonMutationTx(ctx, tx, true)
+	})
+}
+
+func (s *PipelineSQLiteOwner) RemoveNodeRecoveryPoisonMutationForTest(ctx context.Context) error {
+	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
+		return RemoveNodeRecoveryPoisonMutationTx(ctx, tx, false)
+	})
+}
+
 // The selected fixture owner validates canonical identities before this fixed
 // physical fault. It fails the real UPDATE, not the handler or its observer.
 func InstallNodeRecoveryPoisonMutationTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, entityID string) error {

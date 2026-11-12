@@ -2,13 +2,10 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 func InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, selected any, runID, entityID string) (func(context.Context) error, error) {
@@ -20,25 +17,31 @@ func InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, selected any,
 	if correlation.RunIDFromContext(ctx) != runID {
 		return nil, fmt.Errorf("node recovery poison fault requires its exact run context")
 	}
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return nil, err
 	}
-	postgres := dialect == authoractivityfixture.DialectPostgres
-	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return pipelinepersistence.InstallNodeRecoveryPoisonMutationTx(ctx, tx, postgres, runID, entityID)
-	}); err != nil {
+	var install func(context.Context) error
+	var remove func(context.Context) error
+	switch store := selected.(type) {
+	case *PostgresStore:
+		install = func(ctx context.Context) error {
+			return store.pipelinePostgresOwner.InstallNodeRecoveryPoisonMutationForTest(ctx, runID, entityID)
+		}
+		remove = store.pipelinePostgresOwner.RemoveNodeRecoveryPoisonMutationForTest
+	case *SQLiteRuntimeStore:
+		install = func(ctx context.Context) error {
+			return store.pipelineSQLiteOwner.InstallNodeRecoveryPoisonMutationForTest(ctx, runID, entityID)
+		}
+		remove = store.pipelineSQLiteOwner.RemoveNodeRecoveryPoisonMutationForTest
+	}
+	if err := install(ctx); err != nil {
 		return nil, err
 	}
 	var once sync.Once
 	var cleanupErr error
 	return func(ctx context.Context) error {
 		// A repeated cleanup cannot remove a later installation in this store.
-		once.Do(func() {
-			cleanupErr = runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-				return pipelinepersistence.RemoveNodeRecoveryPoisonMutationTx(ctx, tx, postgres)
-			})
-		})
+		once.Do(func() { cleanupErr = remove(ctx) })
 		return cleanupErr
 	}, nil
 }

@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -20,66 +19,56 @@ func CountWorkflowHeadersCreatedSinceForTest(ctx context.Context, selected any, 
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = pipelinepersistence.CountWorkflowHeadersCreatedSince(ctx, tx, since)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.CountWorkflowHeadersCreatedSinceForTest(ctx, since)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.CountWorkflowHeadersCreatedSinceForTest(ctx, since)
+	default:
+		return 0, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return count, nil
 }
 
 func CountWorkflowHeadersForPathCreatedSinceForTest(ctx context.Context, selected any, path string, since time.Time) (int, error) {
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = pipelinepersistence.CountWorkflowHeadersForPathCreatedSince(ctx, tx, path, since)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.CountWorkflowHeadersForPathCreatedSinceForTest(ctx, path, since)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.CountWorkflowHeadersForPathCreatedSinceForTest(ctx, path, since)
+	default:
+		return 0, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return count, nil
 }
 
 func ReadLatestWorkflowFieldsForPathForTest(ctx context.Context, selected any, path string) (json.RawMessage, bool, error) {
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return nil, false, err
 	}
-	var fields json.RawMessage
-	var found bool
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		fields, found, err = pipelinepersistence.ReadLatestWorkflowFieldsForPath(ctx, tx, path)
-		return err
-	})
-	if err != nil {
-		return nil, false, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadLatestWorkflowFieldsForPathForTest(ctx, path)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadLatestWorkflowFieldsForPathForTest(ctx, path)
+	default:
+		return nil, false, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return fields, found, nil
 }
 
 func ReadWorkflowStateObservationRowsForTest(ctx context.Context, selected any) ([]WorkflowStateObservationRow, error) {
-	postgres, err := workflowProjectionNativePostgres(selected)
-	if err != nil {
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return nil, err
 	}
-	var out []WorkflowStateObservationRow
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = pipelinepersistence.ReadWorkflowStateObservationRows(ctx, tx, postgres)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadWorkflowStateObservationRowsForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadWorkflowStateObservationRowsForTest(ctx)
+	default:
+		return nil, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func workflowProjectionObservationPostgres(selected any, run, entity string) (bool, error) {
@@ -110,20 +99,17 @@ func workflowProjectionNativePostgres(selected any) (bool, error) {
 }
 
 func ReadWorkflowControlProjectionStorageForTest(ctx context.Context, selected any, run, entity string) (WorkflowControlProjectionStorage, error) {
-	postgres, err := workflowProjectionObservationPostgres(selected, run, entity)
-	if err != nil {
+	if _, err := workflowProjectionObservationPostgres(selected, run, entity); err != nil {
 		return WorkflowControlProjectionStorage{}, err
 	}
-	var out WorkflowControlProjectionStorage
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = pipelinepersistence.ReadWorkflowControlProjectionStorageForTest(ctx, tx, postgres, run, entity)
-		return err
-	})
-	if err != nil {
-		return WorkflowControlProjectionStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadWorkflowControlProjectionStorageForTest(ctx, run, entity)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadWorkflowControlProjectionStorageForTest(ctx, run, entity)
+	default:
+		return WorkflowControlProjectionStorage{}, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadWorkflowTransitionEvidenceWireForTest(ctx context.Context, selected any, run, path string) (json.RawMessage, error) {
@@ -133,63 +119,54 @@ func ReadWorkflowTransitionEvidenceWireForTest(ctx context.Context, selected any
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return nil, err
 	}
-	var wire json.RawMessage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		wire, err = pipelinepersistence.ReadWorkflowTransitionEvidenceWireForTest(ctx, tx, run, path)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadWorkflowTransitionEvidenceWireForTest(ctx, run, path)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadWorkflowTransitionEvidenceWireForTest(ctx, run, path)
+	default:
+		return nil, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return wire, nil
 }
 
 func ReadWorkflowDuplicateProjectionStorageForTest(ctx context.Context, selected any, run, entity string) (WorkflowDuplicateProjectionStorage, error) {
-	postgres, err := workflowProjectionObservationPostgres(selected, run, entity)
-	if err != nil {
+	if _, err := workflowProjectionObservationPostgres(selected, run, entity); err != nil {
 		return WorkflowDuplicateProjectionStorage{}, err
 	}
-	var out WorkflowDuplicateProjectionStorage
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = pipelinepersistence.ReadWorkflowDuplicateProjectionStorageForTest(ctx, tx, postgres, run, entity)
-		return err
-	})
-	if err != nil {
-		return WorkflowDuplicateProjectionStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadWorkflowDuplicateProjectionStorageForTest(ctx, run, entity)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadWorkflowDuplicateProjectionStorageForTest(ctx, run, entity)
+	default:
+		return WorkflowDuplicateProjectionStorage{}, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func CountWorkflowInstanceHeadersForTest(ctx context.Context, selected any) (int64, error) {
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return 0, err
 	}
-	var count int64
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = pipelinepersistence.CountWorkflowInstanceHeadersForTest(ctx, tx)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.CountWorkflowInstanceHeadersForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.CountWorkflowInstanceHeadersForTest(ctx)
+	default:
+		return 0, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return count, nil
 }
 
 func ReadWorkflowEnginePhysicalCountsForTest(ctx context.Context, selected any) (WorkflowEnginePhysicalCounts, error) {
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {
 		return WorkflowEnginePhysicalCounts{}, err
 	}
-	var out WorkflowEnginePhysicalCounts
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = pipelinepersistence.ReadWorkflowEnginePhysicalCountsForTest(ctx, tx)
-		return err
-	})
-	if err != nil {
-		return WorkflowEnginePhysicalCounts{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadWorkflowEnginePhysicalCountsForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadWorkflowEnginePhysicalCountsForTest(ctx)
+	default:
+		return WorkflowEnginePhysicalCounts{}, fmt.Errorf("projection observation requires the original native owner")
 	}
-	return out, nil
 }
