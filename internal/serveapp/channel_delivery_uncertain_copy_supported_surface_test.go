@@ -156,12 +156,20 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 		chat, user, update int
 		command            string
 	}{{1001, 7000, 901110, oldCommand}, {1002, 7000 + confirmationIndex, 901111, command}} {
-		postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
+		status := http.StatusOK
+		if entry.chat == 1001 {
+			// The retired audience is no longer the deployment's operator.
+			// Its holder-routed intent must still settle entry_rejected below.
+			status = http.StatusAccepted
+		}
+		if names := postChannelTelegramUpdateStatus(t, callback, signing, map[string]any{
 			"update_id": entry.update, "message": map[string]any{
 				"message_id": entry.update, "from": map[string]any{"id": entry.user},
 				"chat": map[string]any{"id": entry.chat, "type": "private"}, "text": "/" + entry.command,
 			},
-		})
+		}, status); len(names) != 0 {
+			t.Fatalf("operator Inbox command escaped into business events: %v", names)
+		}
 	}
 	message := waitUncertainCopyDelivery(t, h, before, "Inbox\n")
 	output := h.provider.Delivery(message - 1)
