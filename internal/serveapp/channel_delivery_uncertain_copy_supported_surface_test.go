@@ -34,6 +34,9 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
 				withSummary := schedule == "applied_after_completion"
 				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
+				// The summary fixture connects after serve is ready; its native
+				// recovery entry must finish installation before driving recovery.
+				waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": bundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
 					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
@@ -107,13 +110,13 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				if oldEdits != 1 {
 					t.Fatalf("uncertain provider write was automatically retried/re-edited: %d", oldEdits)
 				}
-				assertUncertainCopyRebindFence(t, h, db, cardID, backend)
+				assertUncertainCopyLogoutConnectFence(t, h, db, cardID, backend)
 			})
 		}
 	}
 }
 
-func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string, backend servedparity.Backend) {
+func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string, backend servedparity.Backend) {
 	t.Helper()
 	oldCommand := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 	confirmationIndex := 0
@@ -163,7 +166,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	message := waitUncertainCopyDelivery(t, h, before, "Inbox\n")
 	output := h.provider.Delivery(message - 1)
 	if fmt.Sprint(output["chat_id"]) != "1002" || strings.Contains(fmt.Sprint(output["text"]), "Older copies may be outdated") || strings.Contains(fmt.Sprint(output["text"]), cardID[:8]) {
-		t.Fatalf("rebind exposed old-epoch uncertainty to another destination: %v", output)
+		t.Fatalf("logout/connect exposed old-epoch uncertainty to another destination: %v", output)
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
@@ -178,7 +181,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("old destination retained inbox readback authority after rebind")
+			t.Fatal("old destination retained inbox readback authority after logout/connect")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -188,7 +191,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 			break
 		}
 		if fmt.Sprint(output["chat_id"]) == "1001" {
-			t.Fatalf("rebound old audience received an authorized readback: %v", output)
+			t.Fatalf("logged-out audience received an authorized readback: %v", output)
 		}
 	}
 }
