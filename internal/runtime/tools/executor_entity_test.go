@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
@@ -1383,7 +1382,7 @@ status: text
 	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, sourceRunID), sourceFact), rooted.Admission())
 	constructEntityToolFixture(t, ctx, pg, newEntityToolPipeline(t, pg, source), source, "review", "review/inst-1", entityID, "queued",
 		map[string]any{"fixture_key": "inst-1", "status": "open"}, at)
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	storetest.InsertCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
@@ -1399,7 +1398,7 @@ status: text
 		t.Fatalf("seed mutations: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+	storetest.InsertCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
