@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -957,7 +958,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		t.Fatal(err)
 	}
 	if rollback {
-		proveDeploymentCallbackRollback(t, servedTestProcessRuntime(t, process).Bus.Store(), provider, callbackURL, signing, update, requestBody)
+		rt := servedTestProcessRuntime(t, process)
+		proveDeploymentCallbackRollback(t, worklifetime.WithProcess(t.Context(), rt.Options.ProcessWorkOwner), rt.Bus.Store(), provider, callbackURL, signing, update, requestBody)
 	}
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, callbackURL, strings.NewReader(string(requestBody)))
 	if err != nil {
@@ -1142,12 +1144,12 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 }
 
-func proveDeploymentCallbackRollback(t *testing.T, selected any, provider *telegramapi.Double, callback, signing string, update map[string]any, body []byte) {
+func proveDeploymentCallbackRollback(t *testing.T, ctx context.Context, selected any, provider *telegramapi.Double, callback, signing string, update map[string]any, body []byte) {
 	t.Helper()
 	id := channelFixtureProviderEventID(t, fmt.Sprint(update["update_id"]))
 	// Inject only an abort after the genuine owner inserts this occurrence.
 	// Neither the authenticated input nor its authority is manufactured.
-	fault, err := storetest.OpenChannelCallbackRollbackFault(selected, id)
+	fault, err := storetest.OpenChannelCallbackRollbackFault(ctx, selected, id)
 	if err != nil {
 		t.Fatal(err)
 	}
