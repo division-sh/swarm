@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -87,7 +88,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
-	channelOnboarding, err := storechannelonboarding.NewPostgres(backend, store.requireCurrentSchema)
+	channelOnboarding, err := storechannelonboarding.NewPostgres(backend, store.requireCurrentSchema, channelprovider.Lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +435,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
-	channelOnboarding, err := storechannelonboarding.NewSQLite(backend, store.requireCurrentSchema)
+	channelOnboarding, err := storechannelonboarding.NewSQLite(backend, store.requireCurrentSchema, channelprovider.Lookup)
 	if err != nil {
 		return nil, err
 	}
