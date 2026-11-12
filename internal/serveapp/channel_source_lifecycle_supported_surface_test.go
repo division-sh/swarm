@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
 )
@@ -568,6 +570,26 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		}
 	case "retained_reset", "source_reset":
 		clear := operation == "source_reset"
+		var originalLandings []runlifecycle.LandingRun
+		originalCards := map[string]bool{card: true}
+		landingReader, ok := servedTestProcessRuntime(t, h.process).Bus.Store().(runlifecycle.LandingRunReader)
+		if !ok {
+			t.Fatal("registered reset lacks its native landing reader")
+		}
+		if !clear {
+			scopes, err := servedTestProcessRuntime(t, h.process).PlanLiveFlowScopes()
+			if err != nil || len(scopes) == 0 {
+				t.Fatalf("reset lacks its planned flow scopes: %v", err)
+			}
+			for _, scope := range scopes {
+				landing, found, err := landingReader.LoadLandingRun(t.Context(), scope)
+				if err != nil || !found || landing.Scope != scope || landing.Source.BundleHash() != hash || landing.State != runlifecycle.StateLive {
+					t.Fatalf("reset predecessor differs from its planned scope/source: %+v found=%t err=%v", landing, found, err)
+				}
+				originalLandings = append(originalLandings, landing)
+				originalCards[waitChannelPublicCard(t, h, landing.RunID, decisioncard.AnchorKindStageGate, "chat")] = true
+			}
+		}
 		callback, signing, _ := h.provider.Registration()
 		postChannelTelegramOperatorUpdate(t, callback, signing, map[string]any{
 			"update_id": 978001, "message": map[string]any{"message_id": 978001, "from": map[string]any{"id": 7000},
@@ -594,7 +616,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		if readChannelNativeHistory(t, db) != nativeHistory || len(h.provider.CommandWrites()) != writes {
 			t.Fatal("runtime reset changed deployment-owned native identity or replayed installation")
 		}
-		successorPlan := ""
+		var successorPlans []string
 		if !clear {
 			callback, _, _ := h.provider.Registration()
 			// Reset changes startup authority; its existing public probe renewal
@@ -614,28 +636,38 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			var successorRun string
-			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&successorRun); err != nil {
-				t.Fatal(err)
+			for _, original := range originalLandings {
+				successor, found, err := landingReader.LoadLandingRun(t.Context(), original.Scope)
+				if err != nil || !found || successor.Scope != original.Scope || !successor.Source.Matches(original.Source) || successor.State != runlifecycle.StateLive || successor.RunID == original.RunID || successor.RunID == seed.RunID {
+					t.Fatalf("reset successor differs from its exact fresh scope/source: %+v found=%t err=%v", successor, found, err)
+				}
+				fresh := waitChannelPublicCard(t, h, successor.RunID, decisioncard.AnchorKindStageGate, "chat")
+				if originalCards[fresh] {
+					t.Fatal("retained reset reused a predecessor card identity")
+				}
+				waitChannelAnchorReceipt(t, db, fresh)
+				var plan string
+				if err := db.QueryRow(`SELECT p.delivery_id FROM channel_delivery_plans p
+					JOIN channel_delivery_receipts r ON r.effect_operation_id=p.current_receipt_operation_id
+					WHERE p.source_kind='card' AND p.source_id=$1 AND p.resend_generation=0
+					AND r.state='sent' AND r.delivery_id=p.delivery_id AND r.render_id=p.current_render_id`, fresh).Scan(&plan); err != nil {
+					t.Fatal(err)
+				}
+				if slices.Contains(successorPlans, plan) {
+					t.Fatal("distinct fresh cards reused a successor delivery plan")
+				}
+				successorPlans = append(successorPlans, plan)
 			}
-			fresh := waitChannelPublicCard(t, h, successorRun, decisioncard.AnchorKindStageGate, "chat")
-			if successorRun == seed.RunID || fresh == card {
-				t.Fatal("retained reset reused predecessor run/card identity")
-			}
-			waitChannelAnchorReceipt(t, db, fresh)
 			waitChannelDeliverySendsSettled(t, db, backend)
-			if err := db.QueryRow(`SELECT delivery_id FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1 AND resend_generation=0`, fresh).Scan(&successorPlan); err != nil {
-				t.Fatal(err)
-			}
 		}
-		requireChannelPreservedHistory(t, db, preserved, successorPlan)
+		requireChannelPreservedHistory(t, db, preserved, successorPlans...)
 		if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil {
 			t.Fatal(replay.Error)
 		}
 		if readChannelNativeHistory(t, db) != nativeHistory || len(h.provider.CommandWrites()) != writes {
 			t.Fatal("reset replay changed deployment-owned native authority")
 		}
-		requireChannelPreservedHistory(t, db, preserved, successorPlan)
+		requireChannelPreservedHistory(t, db, preserved, successorPlans...)
 		status := postChannelSourceControl(t, callback, signing, card, token, messageID)
 		t.Logf("registered reset old callback backend=%s operation=%s HTTP=%d", backend, operation, status)
 		if status == http.StatusAccepted {
@@ -748,12 +780,15 @@ func waitRegisteredSourceQualification(t *testing.T, h *channelOnboardingE2EHarn
 	}
 }
 
-func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory, successorPlan string) {
+func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory string, successorPlans ...string) {
 	t.Helper()
-	afterHistory := readChannelPreservedHistory(t, db, successorPlan)
-	afterHistory, err := channelHistoryWithoutSuccessorPlan(afterHistory, successorPlan)
-	if err != nil {
-		t.Fatal(err)
+	afterHistory := readChannelPreservedHistory(t, db, successorPlans...)
+	for _, plan := range successorPlans {
+		var err error
+		afterHistory, err = channelHistoryWithoutSuccessorPlan(afterHistory, plan)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	if afterHistory == beforeHistory {
 		return
@@ -768,36 +803,6 @@ func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory, suc
 	for index, row := range before {
 		if !bytes.Equal(row, after[index]) {
 			t.Errorf("reset altered preserved history table index %d: byte length %d -> %d", index, len(row), len(after[index]))
-			var oldRows, newRows [][]json.RawMessage
-			if json.Unmarshal(row, &oldRows) != nil || json.Unmarshal(after[index], &newRows) != nil {
-				continue
-			}
-			oldByID := make(map[string][]json.RawMessage, len(oldRows))
-			for _, values := range oldRows {
-				if len(values) > 0 {
-					oldByID[string(values[0])] = values
-				}
-			}
-			for _, values := range newRows {
-				if len(values) == 0 {
-					continue
-				}
-				id := string(values[0])
-				prior, found := oldByID[id]
-				if !found {
-					t.Logf("history diff table=%d added_identity=%s", index, id)
-					continue
-				}
-				delete(oldByID, id)
-				for column, value := range values {
-					if column >= len(prior) || !bytes.Equal(prior[column], value) {
-						t.Logf("history diff table=%d changed_identity=%s column=%d", index, id, column)
-					}
-				}
-			}
-			for id := range oldByID {
-				t.Logf("history diff table=%d deleted_identity=%s", index, id)
-			}
 		}
 	}
 	t.FailNow()
@@ -882,6 +887,41 @@ func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
 			}
 		})
 	}
+	for _, mutation := range []string{"none", "changed", "deleted", "unrelated", "duplicate", "missing_successor", "other_table"} {
+		t.Run("multiple_"+mutation, func(t *testing.T) {
+			after := append([]any(nil), before...)
+			plans := [][]string{{"old-plan", "card", "old-card", "frozen"}, {"successor-a", "card", "fresh-a", "new-a"}, {"successor-b", "card", "fresh-b", "new-b"}}
+			switch mutation {
+			case "changed":
+				plans[0][3] = "altered"
+			case "deleted":
+				plans = plans[1:]
+			case "unrelated":
+				plans = append(plans, []string{"other", "card", "other-card"})
+			case "duplicate":
+				plans = append(plans, plans[1])
+			case "missing_successor":
+				plans = plans[:2]
+			case "other_table":
+				after[8] = [][]string{{"altered-receipt"}}
+			}
+			after[6] = plans
+			body, err := json.Marshal(after)
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained := string(body)
+			for _, id := range []string{"successor-a", "successor-b"} {
+				retained, err = channelHistoryWithoutSuccessorPlan(retained, id)
+				if err != nil {
+					break
+				}
+			}
+			if matches := err == nil && retained == string(want); matches != (mutation == "none") {
+				t.Fatalf("multiple successor exception accepted %s=%t: %v", mutation, matches, err)
+			}
+		})
+	}
 }
 
 func readChannelNativeHistory(t *testing.T, db *sql.DB) [8]string {
@@ -931,12 +971,16 @@ func readChannelPreservedHistory(t *testing.T, db *sql.DB, successor ...string) 
 				14: `a.operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`,
 			}[index]
 			if predicate != "" {
+				var predicates []string
+				for i, id := range successor {
+					predicates = append(predicates, strings.ReplaceAll(predicate, "$1", fmt.Sprintf("$%d", i+1)))
+					args = append(args, id)
+				}
 				join := " WHERE "
 				if index >= 13 {
 					join = " AND "
 				}
-				query = strings.Replace(query, " ORDER BY", join+predicate+" ORDER BY", 1)
-				args = []any{successor[0]}
+				query = strings.Replace(query, " ORDER BY", join+strings.Join(predicates, " AND ")+" ORDER BY", 1)
 			}
 		}
 		rows, err := db.Query(query, args...)
