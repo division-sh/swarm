@@ -73,7 +73,7 @@ func (s *EffectPostgresOwner) RecoverCompletionContinuation(ctx context.Context,
 			if err := requireCompletionContinuationRequest(req); err != nil {
 				return err
 			}
-			if err := requireExternalEffectAuthorityPostgres(txctx, tx, req.Authority, false); err != nil {
+			if err := requireExternalEffectAuthorityPostgres(txctx, s.channelChecks, tx, req.Authority, false); err != nil {
 				return err
 			}
 			if s.delivery == nil {
@@ -122,7 +122,7 @@ func (s *EffectSQLiteOwner) RecoverCompletionContinuation(ctx context.Context, r
 			if err := requireCompletionContinuationRequest(req); err != nil {
 				return err
 			}
-			if err := requireExternalEffectAuthoritySQLite(txctx, tx, req.Authority, false); err != nil {
+			if err := requireExternalEffectAuthoritySQLite(txctx, s.channelChecks, tx, req.Authority, false); err != nil {
 				return err
 			}
 			if s.delivery == nil {
@@ -665,7 +665,7 @@ func requireMatchingCompletionSuccessor(raw string, successor *agentframe.ToolCo
 }
 
 func (s *EffectPostgresOwner) lockCompletionContinuationPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (lockedCompletionContinuation, error) {
-	if err := requireExternalEffectAuthorityPostgres(ctx, tx, attempt.Authority, false); err != nil {
+	if err := requireExternalEffectAuthorityPostgres(ctx, s.channelChecks, tx, attempt.Authority, false); err != nil {
 		return lockedCompletionContinuation{}, err
 	}
 	if s.delivery == nil {
@@ -695,7 +695,7 @@ func (s *EffectPostgresOwner) lockCompletionContinuationPostgres(ctx context.Con
 }
 
 func (s *EffectSQLiteOwner) lockCompletionContinuationSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (lockedCompletionContinuation, error) {
-	if err := requireExternalEffectAuthoritySQLite(ctx, tx, attempt.Authority, false); err != nil {
+	if err := requireExternalEffectAuthoritySQLite(ctx, s.channelChecks, tx, attempt.Authority, false); err != nil {
 		return lockedCompletionContinuation{}, err
 	}
 	if s.delivery == nil {

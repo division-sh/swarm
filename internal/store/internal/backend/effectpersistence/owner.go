@@ -33,6 +33,19 @@ type schemaQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// This is the original check/settlement surface, not a provider lookup.
+type nativeChannelChecks interface {
+	RegisteredConfirmationCurrent(context.Context, interface {
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	}, effects.Authority, bool, bool) (bool, error)
+	LogoutEffectAuthorityCurrent(context.Context, interface {
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	}, effects.Authority, bool, bool) (bool, error)
+	SettleLogoutEffectTx(context.Context, *sql.Tx, effects.Settlement, bool) (bool, error)
+}
+
 type providerDrainDeliveryOwner interface {
 	ProviderOriginSnapshotTx(context.Context, *sql.Tx, runtimedelivery.Claim) (runtimedelivery.Snapshot, error)
 	ValidateSelectedProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimeagentidentity.Identity, runtimedelivery.ExecutionAuthority) error
@@ -71,6 +84,7 @@ type canceledTurnPublicationOwner interface {
 }
 
 type EffectPostgresOwner struct {
+	channelChecks     nativeChannelChecks
 	processOperations preparedProcessOwner
 	channelChanges    *render.ReconcileSignal
 	backend           *postgresbackend.Backend
@@ -84,6 +98,7 @@ type EffectPostgresOwner struct {
 }
 
 type EffectSQLiteOwner struct {
+	channelChecks     nativeChannelChecks
 	processOperations preparedProcessOwner
 	channelChanges    *render.ReconcileSignal
 	backend           *sqlitebackend.Backend
@@ -200,18 +215,18 @@ func (s *EffectSQLiteOwner) BindProviderDrainDelivery(owner providerDrainDeliver
 	return nil
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle mutationprotocol.CandidateWriter, candidates *storerunhandoff.CandidateCoordinator, llm *storellm.LLMPostgresOwner) (*EffectPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || llm == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle mutationprotocol.CandidateWriter, candidates *storerunhandoff.CandidateCoordinator, llm *storellm.LLMPostgresOwner, channelChecks nativeChannelChecks) (*EffectPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || llm == nil || channelChecks == nil {
 		return nil, errors.New("external-effect PostgreSQL owner dependencies are required")
 	}
-	return &EffectPostgresOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, candidates: candidates, llm: llm}, nil
+	return &EffectPostgresOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, candidates: candidates, llm: llm, channelChecks: channelChecks}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, lifecycle mutationprotocol.CandidateWriter, candidates *storerunhandoff.CandidateCoordinator, llm *storellm.LLMSQLiteOwner) (*EffectSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || llm == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, lifecycle mutationprotocol.CandidateWriter, candidates *storerunhandoff.CandidateCoordinator, llm *storellm.LLMSQLiteOwner, channelChecks nativeChannelChecks) (*EffectSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || llm == nil || channelChecks == nil {
 		return nil, errors.New("external-effect SQLite owner dependencies are required")
 	}
-	return &EffectSQLiteOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, candidates: candidates, llm: llm}, nil
+	return &EffectSQLiteOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, candidates: candidates, llm: llm, channelChecks: channelChecks}, nil
 }
 
 const runLifecycleActiveStateSQLValues = storerunstate.ActiveStateSQLValues

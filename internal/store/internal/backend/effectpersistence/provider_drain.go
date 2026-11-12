@@ -55,15 +55,15 @@ type completionSettlementPermit struct {
 	Drain providerDrainPermit
 }
 
-func resolveCompletionSettlementPermitPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (completionSettlementPermit, error) {
-	return resolveCompletionSettlementPermit(ctx, tx, attempt, false)
+func resolveCompletionSettlementPermitPostgres(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, attempt runtimeeffects.Attempt) (completionSettlementPermit, error) {
+	return resolveCompletionSettlementPermit(ctx, nativeChecks, tx, attempt, false)
 }
 
-func resolveCompletionSettlementPermitSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (completionSettlementPermit, error) {
-	return resolveCompletionSettlementPermit(ctx, tx, attempt, true)
+func resolveCompletionSettlementPermitSQLite(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, attempt runtimeeffects.Attempt) (completionSettlementPermit, error) {
+	return resolveCompletionSettlementPermit(ctx, nativeChecks, tx, attempt, true)
 }
 
-func resolveCompletionSettlementPermit(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, sqlite bool) (completionSettlementPermit, error) {
+func resolveCompletionSettlementPermit(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, attempt runtimeeffects.Attempt, sqlite bool) (completionSettlementPermit, error) {
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
 		settlement := runtimeeffects.Settlement{
 			AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
@@ -80,9 +80,9 @@ func resolveCompletionSettlementPermit(ctx context.Context, tx *sql.Tx, attempt 
 				break
 			}
 			if sqlite {
-				err = requireExternalEffectAuthoritySQLite(ctx, tx, attempt.Authority, false)
+				err = requireExternalEffectAuthoritySQLite(ctx, nativeChecks, tx, attempt.Authority, false)
 			} else {
-				err = requireExternalEffectAuthorityPostgres(ctx, tx, attempt.Authority, false)
+				err = requireExternalEffectAuthorityPostgres(ctx, nativeChecks, tx, attempt.Authority, false)
 			}
 		}
 		if err != nil {
