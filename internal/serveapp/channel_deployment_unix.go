@@ -365,10 +365,10 @@ func OpenChannelRegistration(ctx context.Context, opts cliapp.ChannelRegistratio
 		return nil, channelonboarding.ErrInvalidRequest
 	}
 	if binding.PollsClaim() {
-		return &telegramDeploymentSession{opts: opts}, nil
+		return openTelegramChannelRegistration(ctx, opts)
 	}
 	if binding.Session() {
-		return &deploymentChannelSession{opts: opts}, nil
+		return openWhatsAppChannelRegistration(ctx, opts)
 	}
 	return nil, channelonboarding.ErrInvalidRequest
 }
@@ -380,7 +380,7 @@ func (c *deploymentChannelSession) BootstrapSession(ctx context.Context, op chan
 	if c.connection != nil {
 		return c.connection.CheckBootstrap(ctx)
 	}
-	connection, err := sessionprovider.OpenDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
+	connection, err := openWhatsAppDeploymentConnection(ctx, sessionprovider.DeploymentConnectionOptions{Directory: c.opts.Directory,
 		OperationID: op.OperationID, Principal: c.opts.Principal, Process: c.opts.Process, Operations: c.opts.Operations,
 		Store: c.opts.Store, Credentials: c.opts.Credentials, Plan: c.opts.Plan, Trigger: c.opts.Trigger, RegisteredBusiness: c.business,
 		OperatorAccount: c.opts.OperatorAccount, OperatorBinding: c.opts.OperatorBinding})
