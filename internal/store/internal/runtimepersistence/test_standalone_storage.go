@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -22,17 +21,14 @@ func ReadExactAgentDeliveryStatusForTest(ctx context.Context, selected any, even
 	if agentID == "" || strings.TrimSpace(agentID) != agentID {
 		return "", fmt.Errorf("delivery status evidence requires an exact agent identity")
 	}
-	_, postgres := selected.(*PostgresStore)
-	var status string
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		status, err = delivery.ReadExactAgentDeliveryStatusTx(ctx, tx, postgres, eventID, agentID)
-		return err
-	})
-	if err != nil {
-		return "", err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadExactAgentDeliveryStatusForTest(ctx, eventID, agentID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadExactAgentDeliveryStatusForTest(ctx, eventID, agentID)
+	default:
+		return "", fmt.Errorf("standalone evidence requires the original native owner")
 	}
-	return status, nil
 }
 
 func validateStandaloneStorageEvent(selected any, eventID string) error {
@@ -50,16 +46,14 @@ func ReadStandaloneRunStorageForTest(ctx context.Context, selected any, eventID 
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return StandaloneRunStorage{}, err
 	}
-	var out StandaloneRunStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = runlifecycle.ReadStandaloneRunStorageTx(ctx, tx, eventID)
-		return err
-	})
-	if err != nil {
-		return StandaloneRunStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runLifecyclePostgresOwner.ReadStandaloneRunStorageForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.runLifecycleSQLiteOwner.ReadStandaloneRunStorageForTest(ctx, eventID)
+	default:
+		return StandaloneRunStorage{}, fmt.Errorf("standalone evidence requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadStandaloneAgentDeliveryStorageForTest(ctx context.Context, selected any, eventID, agentID string) (StandaloneAgentDeliveryStorage, error) {
@@ -69,31 +63,26 @@ func ReadStandaloneAgentDeliveryStorageForTest(ctx context.Context, selected any
 	if agentID == "" || strings.TrimSpace(agentID) != agentID {
 		return StandaloneAgentDeliveryStorage{}, fmt.Errorf("standalone evidence requires an exact agent identity")
 	}
-	var out StandaloneAgentDeliveryStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadStandaloneAgentDeliveryStorageTx(ctx, tx, eventID, agentID)
-		return err
-	})
-	if err != nil {
-		return StandaloneAgentDeliveryStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadStandaloneAgentDeliveryStorageForTest(ctx, eventID, agentID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadStandaloneAgentDeliveryStorageForTest(ctx, eventID, agentID)
+	default:
+		return StandaloneAgentDeliveryStorage{}, fmt.Errorf("standalone evidence requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadStandaloneCompletionCandidateForTest(ctx context.Context, selected any, eventID string) (runtimerunlifecycle.Candidate, error) {
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return runtimerunlifecycle.Candidate{}, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var out runtimerunlifecycle.Candidate
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = runlifecycle.ReadStandaloneCompletionCandidateTx(ctx, tx, postgres, eventID)
-		return err
-	})
-	if err != nil {
-		return runtimerunlifecycle.Candidate{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runLifecyclePostgresOwner.ReadStandaloneCompletionCandidateForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.runLifecycleSQLiteOwner.ReadStandaloneCompletionCandidateForTest(ctx, eventID)
+	default:
+		return runtimerunlifecycle.Candidate{}, fmt.Errorf("standalone evidence requires the original native owner")
 	}
-	return out, nil
 }

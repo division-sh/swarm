@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -26,27 +25,11 @@ func SeedEventKeyCardinalityObservationForTest(ctx context.Context, selected any
 		}
 		seen[eventID] = true
 	}
-	write := func(ctx context.Context, tx *sql.Tx) error {
-		for index, eventID := range eventIDs {
-			value := key
-			if index == 2 {
-				value = " " + key + " "
-			}
-			result, err := tx.ExecContext(ctx, `UPDATE events SET idempotency_key=$1 WHERE event_id=$2`, value, eventID)
-			if err != nil {
-				return err
-			}
-			if count, err := result.RowsAffected(); err != nil || count != 1 {
-				return fmt.Errorf("event-key fixture requires its existing exact event: rows=%d err=%v", count, err)
-			}
-		}
-		return nil
-	}
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		return owner.backend.RunTransaction(ctx, write)
+		return owner.eventPostgresOwner.SeedEventKeyCardinalityObservationForTest(ctx, eventIDs, key)
 	case *SQLiteRuntimeStore:
-		return owner.backend.RunTransaction(ctx, "event-key cardinality observation fixture", write)
+		return owner.eventSQLiteOwner.SeedEventKeyCardinalityObservationForTest(ctx, eventIDs, key)
 	default:
 		return fmt.Errorf("event-key fixture requires an original native owner")
 	}

@@ -2,7 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	replycontextstore "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
@@ -15,63 +15,54 @@ func ReadReplyContextRecordsForTest(ctx context.Context, selected any, run strin
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var out []replycontext.Record
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = replycontextstore.ReadReplyContextRecords(ctx, tx, run, postgres)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.replyPostgresOwner.ReadReplyContextRecordsForTest(ctx, run)
+	case *SQLiteRuntimeStore:
+		return store.replySQLiteOwner.ReadReplyContextRecordsForTest(ctx, run)
+	default:
+		return nil, fmt.Errorf("reply context observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadReplyContextRequestIDsForTest(ctx context.Context, selected any, run string) ([]string, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []string
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = replycontextstore.ReadReplyContextRequestIDs(ctx, tx, run)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.replyPostgresOwner.ReadReplyContextRequestIDsForTest(ctx, run)
+	case *SQLiteRuntimeStore:
+		return store.replySQLiteOwner.ReadReplyContextRequestIDsForTest(ctx, run)
+	default:
+		return nil, fmt.Errorf("reply context observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadFirstReplyContextStorageForTest(ctx context.Context, selected any, run string) (FirstReplyContextStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return FirstReplyContextStorage{}, err
 	}
-	var out FirstReplyContextStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = replycontextstore.ReadFirstReplyContextStorage(ctx, tx, run)
-		return err
-	})
-	if err != nil {
-		return FirstReplyContextStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.replyPostgresOwner.ReadFirstReplyContextStorageForTest(ctx, run)
+	case *SQLiteRuntimeStore:
+		return store.replySQLiteOwner.ReadFirstReplyContextStorageForTest(ctx, run)
+	default:
+		return FirstReplyContextStorage{}, fmt.Errorf("reply context observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadReplyContextStorageCountsForTest(ctx context.Context, selected any, run string) (ReplyContextStorageCounts, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return ReplyContextStorageCounts{}, err
 	}
-	var out ReplyContextStorageCounts
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = replycontextstore.ReadReplyContextStorageCounts(ctx, tx, run)
-		return err
-	})
-	if err != nil {
-		return ReplyContextStorageCounts{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.replyPostgresOwner.ReadReplyContextStorageCountsForTest(ctx, run)
+	case *SQLiteRuntimeStore:
+		return store.replySQLiteOwner.ReadReplyContextStorageCountsForTest(ctx, run)
+	default:
+		return ReplyContextStorageCounts{}, fmt.Errorf("reply context observation requires the original native owner")
 	}
-	return out, nil
 }
