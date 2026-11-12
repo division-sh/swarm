@@ -24,7 +24,7 @@ func pipelineObservationConsumerIsClosed(path, declaration string) bool {
 	case "internal/store/storetest/activity_result_readback.go":
 		return declaration == "ReadActivityAttemptStorage"
 	case "internal/store/storetest/activity_fork_history_fixture.go":
-		return declaration == "SeedHistoricalActivityForkLoop" || declaration == "SeedHistoricalActivityForkAttempt"
+		return declaration == "SeedHistoricalActivityForkAttempt"
 	case "internal/store/storetest/run_fork.go":
 		return declaration == "CaptureSelectedRunForkRevision"
 	case "internal/runtime/runforkexecution/activity_fork_execution_test.go":
@@ -75,7 +75,6 @@ func TestPipelineObservationGuardRejectsRawAndCallbackAuthority(t *testing.T) {
 		{"internal/store/storetest/handler_selection_storage.go", "ReadHandlerSelectionStorage"},
 		{"internal/store/storetest/connector_credential_storage.go", "ReadConnectorCredentialLeakStorage"},
 		{"internal/store/storetest/activity_result_readback.go", "ReadActivityAttemptStorage"},
-		{"internal/store/storetest/activity_fork_history_fixture.go", "SeedHistoricalActivityForkLoop"},
 		{"internal/store/storetest/activity_fork_history_fixture.go", "SeedHistoricalActivityForkAttempt"},
 		{"internal/store/storetest/run_fork.go", "CaptureSelectedRunForkRevision"},
 		{"internal/runtime/runforkexecution/activity_fork_execution_test.go", "seedSelectedContractActivitySource"},
