@@ -685,7 +685,12 @@ func standingBusinessReceiver(t *testing.T, peer *serveNativeProtocolPeer, endpo
 						Scope      decisioncard.Scope `json:"scope"`
 					} `json:"decision_card"`
 				}
-				response := requestServedJSONRPCWithTimeout(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, time.Until(deadline))
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					t.Error("operator validation exhausted the original response budget")
+					return message, false
+				}
+				response := requestServedJSONRPCWithTimeout(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, remaining)
 				if response.Error != nil || json.Unmarshal(response.Result, &view) != nil || view.Card.CardID != cardID || view.Card.RunID != runID ||
 					view.Card.Status != decisioncard.StatusPending || view.Card.Decision != "retire_service" || view.Card.AnchorKind != string(decisioncard.AnchorKindStageGate) ||
 					view.Card.Scope.Kind != decisioncard.ScopeEntity || view.Card.Scope.FlowInstance == "" || view.Card.Scope.EntityID == "" {
