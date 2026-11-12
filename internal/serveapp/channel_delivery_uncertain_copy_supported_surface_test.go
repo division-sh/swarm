@@ -119,10 +119,6 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string, backend servedparity.Backend) {
 	t.Helper()
 	oldCommand := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
-	confirmationIndex := 0
-	for h.provider.Confirmation(confirmationIndex) != nil {
-		confirmationIndex++
-	}
 	indexQuery := `SELECT sql FROM sqlite_master WHERE name='idx_deployment_channel_account'`
 	if backend == servedparity.BackendExplicitPostgres {
 		indexQuery = `SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='idx_deployment_channel_account'`
@@ -133,7 +129,7 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 	}
 	priorParent := h.registration.OperationID
 	logoutDeploymentChannelFixtureAccount(t, h)
-	h.registration = connectDeploymentChannelFixtureOperator(t, h, "uncertain-copy-token", 1002, 7000+confirmationIndex, "private")
+	h.registration = connectDeploymentChannelFixtureOperator(t, h, "uncertain-copy-token", 901209, 1002, 7002, "private")
 	var parents, confirmed, retired int
 	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN account_confirmed AND phase<>'retired' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN phase='retired' AND logout_completed THEN 1 ELSE 0 END)
@@ -155,7 +151,7 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 	for _, entry := range []struct {
 		chat, user, update int
 		command            string
-	}{{1001, 7000, 901110, oldCommand}, {1002, 7000 + confirmationIndex, 901111, command}} {
+	}{{1001, 7000, 901110, oldCommand}, {1002, 7002, 901111, command}} {
 		status := http.StatusOK
 		if entry.chat == 1001 {
 			// The retired audience is no longer the deployment's operator.
@@ -225,9 +221,8 @@ func logoutDeploymentChannelFixtureAccount(t *testing.T, h *channelOnboardingE2E
 	t.Log("public deployment logout completed; channel list has zero current accounts")
 }
 
-func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE2EHarness, credential string, chatID, userID int, chatType string, beforeClaim ...func()) channelonboarding.Operation {
+func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE2EHarness, credential string, claimUpdateID int64, chatID, userID int, chatType string, beforeClaim ...func()) channelonboarding.Operation {
 	t.Helper()
-	_, priorConfirmations := h.provider.OnboardingCounts()
 	restore := installChannelOnboardingCLIInput(t, credential+"\n")
 	defer restore()
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
@@ -258,7 +253,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 	callback, signing, _ := h.provider.Registration()
 	// A new ceremony is a new provider event, not reuse of the prior claim's
 	// immutable receipt under a different parent and challenge.
-	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, int64(901109+100*priorConfirmations), int64(userID), int64(chatID), chatType, "replacement_operator")
+	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, claimUpdateID, int64(userID), int64(chatID), chatType, "replacement_operator")
 	if claim.StatusCode != http.StatusOK || len(claim.EventIDs) != 0 || len(claim.EventNames) != 0 {
 		t.Fatalf("deployment connect claim escaped the deployment receiver: %+v", claim)
 	}

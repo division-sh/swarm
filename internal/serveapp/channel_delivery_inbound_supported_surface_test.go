@@ -597,7 +597,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if scenario == "shared_audience" {
 			chat, kind = -1001, "group"
 		}
-		registered = connectDeploymentChannelFixtureOperator(t, h, "bot-token", chat, 7000, kind)
+		registered = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 901109, chat, 7000, kind)
 	}
 	if registered.DeploymentRegistration && scenario != "inbox" && !deploymentTransport {
 		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
@@ -696,7 +696,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		h := &channelOnboardingE2EHarness{registration: registered, opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		logoutDeploymentChannelFixtureAccount(t, h)
 		var delayedParent channelnative.TransportParent
-		h.registration = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 1002, 7002, "private", func() {
+		h.registration = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 901209, 1002, 7002, "private", func() {
 			var out, errOut lockedBuffer
 			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
 				t.Fatalf("read pending successor exit=%d err=%s", code, errOut.String())
