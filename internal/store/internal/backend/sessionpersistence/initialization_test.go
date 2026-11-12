@@ -3,6 +3,7 @@ package sessionpersistence
 import (
 	"context"
 	"errors"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"path/filepath"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestCaptureSchemaInitializationRollsBackRefusedSecondTable(t *testing.T) {
 	if _, err := owner.db.ExecContext(ctx, `CREATE VIEW whatsapp_callback_failures AS SELECT 1`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.Captures(ctx, "334d3c37-e7aa-4d12-aa88-4a72386b6d6a"); err == nil {
+	if _, err := owner.Captures(ctx, "334d3c37-e7aa-4d12-aa88-4a72386b6d6a", channelfixture.For("whatsapp")); err == nil {
 		t.Fatal("contradictory callback schema was accepted")
 	}
 	var tables int
@@ -110,7 +111,7 @@ func TestCaptureSchemaInitializationCanceledCreatesNothing(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := owner.Captures(ctx, "334d3c37-e7aa-4d12-aa88-4a72386b6d6a"); !errors.Is(err, context.Canceled) {
+	if _, err := owner.Captures(ctx, "334d3c37-e7aa-4d12-aa88-4a72386b6d6a", channelfixture.For("whatsapp")); !errors.Is(err, context.Canceled) {
 		t.Fatal("canceled capture initialization acquired authority", err)
 	}
 	var tables int
