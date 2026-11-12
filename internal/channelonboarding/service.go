@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -180,26 +181,29 @@ const (
 type TestLifecycleBarrier func(TestLifecycleBoundary, string) error
 
 type ServiceOptions struct {
-	Deployment      bool
-	OperatorAccount *AccountReference
-	Operations      OperationStore
-	SourceArtifacts sourceartifact.Reader
-	Store           Store
-	Identities      IdentityLifecycle
-	Credentials     *CredentialWriter
-	Catalog         CatalogProvider
-	Activations     ActivationRefresher
-	Confirmation    ConfirmationDispatcher
-	Readiness       ReadinessProjector
-	LandingRuns     runlifecycle.LandingRunReader
-	TargetEnabled   TargetEnablementReader
-	Sessions        SessionBootstrapOwner
-	Now             func() time.Time
-	Secret          func() (string, error)
-	TestBarrier     TestLifecycleBarrier
+	ProviderFacts        channelprovider.Binding
+	OperatorAccountFacts channelprovider.Binding
+	Deployment           bool
+	OperatorAccount      *AccountReference
+	Operations           OperationStore
+	SourceArtifacts      sourceartifact.Reader
+	Store                Store
+	Identities           IdentityLifecycle
+	Credentials          *CredentialWriter
+	Catalog              CatalogProvider
+	Activations          ActivationRefresher
+	Confirmation         ConfirmationDispatcher
+	Readiness            ReadinessProjector
+	LandingRuns          runlifecycle.LandingRunReader
+	TargetEnabled        TargetEnablementReader
+	Sessions             SessionBootstrapOwner
+	Now                  func() time.Time
+	Secret               func() (string, error)
+	TestBarrier          TestLifecycleBarrier
 }
 
 type Service struct {
+	providerFacts   channelprovider.Binding
 	deployment      bool
 	operatorAccount AccountReference
 	sourceArtifacts sourceartifact.Reader
@@ -269,6 +273,15 @@ type Result struct {
 	Logout            *SessionLogoutReadback     `json:"logout,omitempty"`
 }
 
+func (r Result) WithProviderFacts(facts channelprovider.Binding) Result {
+	r.Operation = r.Operation.WithProviderFacts(facts)
+	if r.Candidate != nil {
+		candidate := r.Candidate.WithProviderFacts(facts)
+		r.Candidate = &candidate
+	}
+	return r
+}
+
 type SessionConnectionReadback struct {
 	ClaimCodeNotice     *ClaimCodeNotice `json:"claim_code_notice,omitempty"`
 	Unclaimed           *int64           `json:"account_unclaimed,omitempty"`
@@ -303,7 +316,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	}
 	var operatorAccount AccountReference
 	if opts.Deployment && opts.OperatorAccount != nil {
-		if err := opts.OperatorAccount.Validate(); err != nil {
+		if err := opts.OperatorAccount.Validate(opts.OperatorAccountFacts); err != nil {
 			return nil, ErrInvalidRequest
 		}
 		operatorAccount = *opts.OperatorAccount
@@ -312,7 +325,8 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		opts.Store = deploymentStore{RuntimeStore: opts.Store, OperationStore: opts.Operations}
 	}
 	return &Service{
-		deployment: opts.Deployment, operatorAccount: operatorAccount,
+		providerFacts: opts.ProviderFacts,
+		deployment:    opts.Deployment, operatorAccount: operatorAccount,
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, landingRuns: opts.LandingRuns, targetEnabled: opts.TargetEnabled, now: opts.Now, secret: opts.Secret,
@@ -972,7 +986,7 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 					step = 5
 				}
 			case PhaseAwaitingOperatorConfirmation, PhasePublishingActivation:
-				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection() && op.IdentityOperationID == "" {
+				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection(op.ProviderFacts()) && op.IdentityOperationID == "" {
 					admitted, err := s.targetAdmissionEnabled(ctx, candidate)
 					if err != nil {
 						return err
@@ -1113,7 +1127,7 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		// execute the retained declaration's historical business generation.
 		return nil
 	}
-	accountTargetPending := op.AccountConnection() && op.IdentityOperationID == "" && op.Phase == PhaseAwaitingOperatorConfirmation
+	accountTargetPending := op.AccountConnection(op.ProviderFacts()) && op.IdentityOperationID == "" && op.Phase == PhaseAwaitingOperatorConfirmation
 	if !accountTargetPending && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget(op.Posture)) {
 		admitted, err := s.targetAdmissionEnabled(ctx, candidate)
 		if err != nil {
@@ -1344,7 +1358,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			if op.DeploymentRegistration {
 				operatorRequired = s.operatorAccount == (AccountReference{Provider: op.Provider, Account: op.AccountReference})
 			}
-			if (op.AccountConnection() || op.DeploymentRegistration) && !operatorRequired && op.IdentityOperationID == "" {
+			if (op.AccountConnection(op.ProviderFacts()) || op.DeploymentRegistration) && !operatorRequired && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseAwaitingOperatorConfirmation, Now: s.now().UTC()})
 				if err != nil {
@@ -1542,7 +1556,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseDeliveringConfirmation:
-			if op.AccountConnection() {
+			if op.AccountConnection(op.ProviderFacts()) {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseSucceeded, Now: s.now().UTC()})
 				if err != nil {
@@ -1593,7 +1607,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			if op.DeploymentRegistration {
 				return s.result(readback, op, &candidate)
 			}
-			if candidate.OperatorRequired && op.AccountConnection() && op.IdentityOperationID == "" {
+			if candidate.OperatorRequired && op.AccountConnection(op.ProviderFacts()) && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseAwaitingExternalIdentity, BeginOperatorEnrollment: true, Now: s.now().UTC()})
 				if err != nil {
@@ -1611,7 +1625,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 }
 
 func (s *Service) admitConfirmedTarget(ctx context.Context, op Operation, candidate Candidate) (Operation, Candidate, error) {
-	if op.Posture == ActivationSessionConnection && (op.Phase != PhaseAwaitingOperatorConfirmation || !op.AccountConnection() && op.BindingRevision < 1 || op.ValidateSessionAccount() != nil) {
+	if op.Posture == ActivationSessionConnection && (op.Phase != PhaseAwaitingOperatorConfirmation || !op.AccountConnection(op.ProviderFacts()) && op.BindingRevision < 1 || op.ValidateSessionAccount(op.ProviderFacts()) != nil) {
 		return op, candidate, fmt.Errorf("%w: native target requires checkpointed operator confirmation", ErrRevisionConflict)
 	}
 	promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
@@ -2141,7 +2155,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 
 func providerIdentityAuthority(op Operation, candidate Candidate) (operatorchannel.ProviderAuthority, error) {
 	if op.Posture == ActivationSessionConnection {
-		if err := op.ValidateSessionAccount(); err != nil {
+		if err := op.ValidateSessionAccount(op.ProviderFacts()); err != nil {
 			return operatorchannel.ProviderAuthority{}, err
 		}
 		provider := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}
@@ -2290,7 +2304,7 @@ type confirmedBindingDecision struct {
 
 func (s *Service) reconcileConfirmedBinding(ctx context.Context, op Operation) (confirmedBindingDecision, error) {
 	decision := confirmedBindingDecision{operation: op}
-	if op.AccountConnection() && op.IdentityOperationID == "" {
+	if op.AccountConnection(op.ProviderFacts()) && op.IdentityOperationID == "" {
 		return decision, nil
 	}
 	var identityOp operatorchannel.Operation
@@ -2426,7 +2440,7 @@ func (s *Service) currentCandidate(op Operation) (Candidate, error) {
 		if err != nil {
 			return Candidate{}, err
 		}
-		if principal.ID != op.PrincipalID || op.ValidateSessionAccount() != nil {
+		if principal.ID != op.PrincipalID || op.ValidateSessionAccount(op.ProviderFacts()) != nil {
 			return Candidate{}, ErrRevisionConflict
 		}
 		candidate, err := catalog.Resolve(CandidateSelection{Provider: op.Provider, InterfaceSelector: op.Interface.Selector})

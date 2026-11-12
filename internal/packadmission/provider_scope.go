@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packartifact"
 	platformcontract "github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -132,6 +133,15 @@ type ProviderScope struct {
 
 func (s ProviderScope) FlowPath() string { return s.flowPath }
 
+func (s ProviderScope) ProviderFacts(provider string) channelprovider.Binding {
+	for _, definition := range s.Providers() {
+		if plan, present := definition.ChannelPlan(); present && plan.Provider() == provider {
+			return plan.ProviderFacts()
+		}
+	}
+	return channelprovider.Binding{}
+}
+
 func (s ProviderScope) Providers() []ProviderDefinition {
 	out := make([]ProviderDefinition, 0, len(s.directories))
 	for _, directory := range s.directories {
@@ -192,7 +202,7 @@ func (s ProviderScope) ConnectionAccount(bundle *runtimecontracts.WorkflowContra
 			account, err := bundle.ResolveFlowOperatorAccount(s.flowPath)
 			if err == nil && account.FromPolicy {
 				plan, _ := selected.ChannelPlan()
-				canonical, canonicalErr := channelonboarding.CanonicalAccount(plan.Provider(), account.Policy)
+				canonical, canonicalErr := channelonboarding.CanonicalAccount(plan.ProviderFacts(), account.Policy)
 				if canonicalErr != nil {
 					return selected, account, fmt.Errorf("flow %s policy.yaml operator_account: %w", s.flowPath, canonicalErr)
 				}

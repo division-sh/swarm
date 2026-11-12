@@ -1,6 +1,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"path/filepath"
@@ -54,7 +56,7 @@ func TestWhatsAppCaptureRedeliveryAfterRetirementUsesHistoricalEvidence(t *testi
 			t.Fatal("historical duplicate remained stranded", err)
 		}
 	}
-	original, err := publicationCaptureProvenance(reader.record.Request)
+	original, err := publicationCaptureProvenance(reader.record.Request, channelfixture.For("whatsapp"))
 	if err != nil || !original.SameCapture(event) {
 		t.Fatal("historical reconciliation overwrote original provenance", err)
 	}

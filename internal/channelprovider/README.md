@@ -1,10 +1,12 @@
 # Compiled Channel Provider Boundary
 
-This is the R130(a) boundary, not a plugin API. `installed` is the one new
-compile-time installation seat. Bindings contain declaration/codec/presentation
-facts, grant no authority, expose no constructor or mutator, and are returned by
-value. Packs cannot install Go callbacks. The existing platform assembly consumes
-these facts through its registration and owned-connection roles.
+This is the R130(a) boundary, not a plugin API. The one compile-time installation
+table is `serveapp.installedChannelProviders`: immutable facts plus registration,
+deployment-connection and runtime-connection factories. This lower package has
+only value definitions and codecs, no installed rows or registration API.
+Bindings grant no authority and expose no constructor or mutator. Packs cannot
+install Go callbacks. CLI and serve use the same composition through the existing
+injected registration role; cliapp does not import serveapp.
 
 ## Ownership
 
@@ -26,6 +28,13 @@ comes from the original retained reader, not an independently supplied store;
 native execution must use the exact state associated with its account issuer.
 WhatsApp's `whatsapp_capture` key, fingerprint, private schema and selected-receipt
 reconciliation stay unchanged, including private SQLite backing with PostgreSQL.
+
+Known-provider validation receives one selected fact value, including config
+validation before factory construction. The one native constructor that decodes
+providers from retained rows receives a non-enumerating facts-only lookup. That
+owner uses the same lookup on reads and writes and never forwards it. Missing,
+unknown or mismatched facts cannot acquire registration authority. Private
+readback values are not serialized or persisted and cannot replace native checks.
 
 Custody is unchanged: restrictive exclusively owned per-connection directories,
 ownership/symlink refusals and provider-only decoding; no encryption, copy,
@@ -49,14 +58,18 @@ The IDs below refer to E's 58-locus source inventory in issue #2338 comment
 | P02-P07 | Concrete WhatsApp QR, private SDK construction, plan qualification and send implementation; exact finite native-target refusals remain necessary. |
 | P08-P09, D01-D03 | Concrete authenticated Telegram polling/webhook protocol, credential seal and exact receipt-before-ACK. |
 | D04 | Original admitted provider selects the capture codec/provenance key, not a caller-selected alternate backing. |
-| D05-D08 | Existing finite native operation/category/effect catalog; its provider projection consumes exact installed target facts, never an arbitrary executable string. |
+| D05-D08 | Existing finite native operation/category/effect catalog; its provider projection is in that catalog and execution compares the selected binding's exact target, never an arbitrary executable string. |
 
 ## Third Provider / Discord Paper Check
 
 A third adapter must still supply its packs/embedded inventory, one compiled
 installation entry, its tests/docs/private persistence adapter as needed, and
 finite native catalog entries if it introduces new operations/category/effects.
-Protocol implementation belongs behind the existing private roles. No routine
+Protocol implementation belongs behind the existing private roles in the sealed
+native subtree. A session adapter's implementation files can reuse the private
+account/input issuers and executor there; no issuer is exported to create a new
+standalone plugin package. The executor consumes a prepared protocol send while
+retaining currentness, destination, journal launch and settlement. No routine
 edit to common identity, binding, journal or selected-store algorithms is allowed;
 an additional installation table or common authority method is a design return.
 
@@ -69,3 +82,12 @@ The existing seven-bit vector suffices: card rendering, reply references, text
 actions and inbox listing true; buttons, edit and acknowledgment false for this
 minimal mapping, not a claim those features are absent from Discord. No public
 interface field, operation, spelling, default or limit is added.
+
+Paper construction: the installation entry supplies the new adapter's existing
+registration/deployment/runtime role factories and plan qualifier. Its adapter
+files supply the real account/occurrence reader, retained capture reader and
+prepared send/activity projection; exact state identity still joins the account
+issuer to execution. Its pack and embedded inventory supply the existing vector
+and declarations; any new operation touches the finite native catalog. Tests,
+docs and provider-private backing remain the fourth touch class. No common
+identity, input-seal, journal or selected-store method needs a provider branch.

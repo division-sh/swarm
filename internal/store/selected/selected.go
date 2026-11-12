@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -44,6 +45,7 @@ import (
 // RuntimeRequest contains construction inputs only. Backend identity is
 // consumed by OpenRuntime and never survives in a runtime projection.
 type RuntimeRequest struct {
+	ProviderFacts  channelprovider.FactsLookup
 	Selection      storebackend.Selection
 	PostgresDSN    string
 	SessionLockTTL time.Duration
@@ -308,9 +310,9 @@ func OpenRuntime(ctx context.Context, req RuntimeRequest) (*Owner, error) {
 	var err error
 	switch req.Selection.Backend {
 	case storebackend.BackendPostgres:
-		owner, err = openPostgresRuntime(ctx, req.PostgresDSN, req.SessionLockTTL)
+		owner, err = openPostgresRuntime(ctx, req.PostgresDSN, req.SessionLockTTL, req.ProviderFacts)
 	case storebackend.BackendSQLite:
-		owner, err = openSQLiteRuntime(ctx, req.Selection.SQLitePath, req.SessionLockTTL)
+		owner, err = openSQLiteRuntime(ctx, req.Selection.SQLitePath, req.SessionLockTTL, req.ProviderFacts)
 	default:
 		return nil, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
@@ -327,8 +329,8 @@ func validateOpenedRuntime(ctx context.Context, owner *Owner) (*Owner, error) {
 	return owner, nil
 }
 
-func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn)
+func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration, providerFacts channelprovider.FactsLookup) (*Owner, error) {
+	selected, _, err := storeconstruction.OpenPostgresRuntime(ctx, dsn, providerFacts)
 	if err != nil {
 		return nil, err
 	}
@@ -340,8 +342,8 @@ func openPostgresRuntime(ctx context.Context, dsn string, ttl time.Duration) (*O
 	return owner, nil
 }
 
-func openSQLiteRuntime(ctx context.Context, path string, ttl time.Duration) (*Owner, error) {
-	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(ctx, path)
+func openSQLiteRuntime(ctx context.Context, path string, ttl time.Duration, providerFacts channelprovider.FactsLookup) (*Owner, error) {
+	selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(ctx, path, providerFacts)
 	if err != nil {
 		return nil, err
 	}

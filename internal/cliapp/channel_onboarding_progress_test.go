@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 type channelCredentialInput struct {
@@ -78,6 +79,11 @@ func runChannelProgressCLI(t *testing.T, server *httptest.Server, in io.Reader, 
 	t.Helper()
 	setCLIAPITestToken(t, operatorChannelCLIToken)
 	opts := testRootCommandOptions(server)
+	provider := "whatsapp"
+	if len(args) > 2 && args[2] == "telegram" {
+		provider = "telegram"
+	}
+	opts.channelReadbackFact = channelfixture.For(provider)
 	opts.input = in
 	opts.stdinIsTerminal = func() bool { return false }
 	var out, errOut bytes.Buffer
@@ -172,6 +178,7 @@ func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
 			if err := json.Unmarshal(body, &result); err != nil {
 				t.Fatal(err)
 			}
+			result = result.WithProviderFacts(channelfixture.For(provider))
 			var out, errOut bytes.Buffer
 			if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered "+provider+" account "+account+".\nTo use it, set operator_account in a flow's policy.yaml. Telegram and WhatsApp receive live when a flow holds the account.\nNext: swarm channel list\n" {
 				t.Fatal("registration invented runtime readiness", out.String(), errOut.String(), err)

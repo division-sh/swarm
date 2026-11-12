@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -41,7 +43,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				var configPath, sqlitePath string
 				if backend == "postgres" {
 					_, database, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-					db, artifacts = database, storetest.NewPostgresStoreForTest(database)
+					db, artifacts = database, storetest.NewPostgresStoreForTest(database, channelfixture.Facts)
 					configPath = writeServeRuntimeTestConfig(t)
 				} else {
 					isolateCLIAPIConfigEnv(t)
@@ -61,7 +63,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 							}
 						}
 					}
-					selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
+					selected, err := store.NewSQLiteRuntimeStore(sqlitePath, channelfixture.Facts)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -204,7 +206,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					t.Fatalf("reproducible store inspection lost its configuration:\n%s", out.String())
 				}
 				if backend == "sqlite" {
-					selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
+					selected, err := store.NewSQLiteRuntimeStore(sqlitePath, channelfixture.Facts)
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -347,13 +349,13 @@ func TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothS
 					var reconstructed runtimegenericschedule.Store
 					switch store.(type) {
 					case *SQLiteRuntimeStore:
-						restarted := NewSQLiteRuntimeStoreForTest(db)
+						restarted := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 						if err := restarted.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 							t.Fatalf("bootstrap reconstructed SQLite store: %v", err)
 						}
 						reconstructed = restarted
 					case *PostgresStore:
-						restarted := NewPostgresStoreForTest(db)
+						restarted := NewPostgresStoreForTest(db, channelfixture.Facts)
 						if err := restarted.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 							t.Fatalf("bootstrap reconstructed PostgreSQL store: %v", err)
 						}

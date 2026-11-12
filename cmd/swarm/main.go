@@ -35,7 +35,7 @@ func main() {
 		Commit:  binaryCommit,
 		Date:    binaryDate,
 	})
-	os.Exit(cliapp.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr, runServingProcess, serveapp.RunTestSession, serveapp.OpenChannelRegistration))
+	os.Exit(cliapp.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr, runServingProcess, serveapp.RunTestSession, serveapp.ChannelRegistrations()))
 }
 
 func runServingProcess(ctx context.Context, root cliapp.InvocationRoot, opts cliapp.ServeOptions) int {

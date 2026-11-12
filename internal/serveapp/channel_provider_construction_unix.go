@@ -5,16 +5,13 @@ package serveapp
 import (
 	"context"
 
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
-type installedChannelBinding struct {
-	facts        channelprovider.Binding
-	registration cliapp.ChannelRegistrationFactory
-	deployment   func(context.Context, sessionprovider.DeploymentConnectionOptions) (serveSessionConnection, error)
-	runtime      func(context.Context, sessionprovider.RuntimeConnectionOptions, bool) (serveSessionConnection, error)
+func qualifyWhatsAppPlan(plan packs.SatisfactionPlan) error {
+	return sessionprovider.QualifyBootstrapPlan(plan)
 }
 
 func openTelegramChannelRegistration(_ context.Context, opts cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {

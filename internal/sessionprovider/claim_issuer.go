@@ -47,6 +47,7 @@ func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger 
 	if err := json.Unmarshal(admitted.OriginalCapture(), &event); err != nil {
 		return absent, err
 	}
+	event = event.WithProviderFacts(admitted.ProviderFacts())
 	if event.Scope.Kind != channelonboarding.SessionInputOnboarding || admitted.Scope() != channelonboarding.SessionInputOnboarding ||
 		event.Scope.DeploymentRegistration != admitted.Responsibility().DeploymentRegistration ||
 		(!event.Scope.DeploymentRegistration && !event.Source.Coordinate.MatchesDeclaration(admitted.Coordinate())) ||

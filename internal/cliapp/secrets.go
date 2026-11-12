@@ -55,7 +55,7 @@ type secretsCheckResult struct {
 	Missing []secretRecord `json:"missing"`
 }
 
-func newSecretsCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
+func newSecretsCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	repo := root.Path()
 	cmd := &cobra.Command{
 		Use:   "secrets",
@@ -68,8 +68,8 @@ func newSecretsCommand(ctx context.Context, root InvocationRoot) *cobra.Command 
 	}
 	cmd.AddCommand(
 		newSecretsSetCommand(ctx, repo),
-		newSecretsListCommand(ctx, repo),
-		newSecretsCheckCommand(ctx, repo),
+		newSecretsListCommand(ctx, repo, rootOpts),
+		newSecretsCheckCommand(ctx, repo, rootOpts),
 		newSecretsRemoveCommand(ctx, repo),
 	)
 	return cmd
@@ -117,7 +117,7 @@ func newSecretsSetCommand(ctx context.Context, repo string) *cobra.Command {
 	return cmd
 }
 
-func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
+func newSecretsListCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := secretsListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -133,7 +133,7 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
 			}
 			configPath, _ := rootConfigFlag(cmd)
-			providerRequirements, err := loadSecretsProviderRequirements(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
+			providerRequirements, err := loadSecretsProviderRequirements(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath, ChannelRegistration: rootOpts.channelRegistration})
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -160,7 +160,7 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 	return cmd
 }
 
-func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
+func newSecretsCheckCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := secretsCheckOptions{}
 	cmd := &cobra.Command{
 		Use:   "check",
@@ -172,7 +172,7 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
 			}
 			configPath, _ := rootConfigFlag(cmd)
-			providerRequirements, err := loadSecretsProviderRequirements(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
+			providerRequirements, err := loadSecretsProviderRequirements(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath, ChannelRegistration: rootOpts.channelRegistration})
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
