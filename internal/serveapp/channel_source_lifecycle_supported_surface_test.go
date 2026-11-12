@@ -86,7 +86,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				})
 				card := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 				messageID := waitChannelAnchorReceipt(t, db, card)
-				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
+				token, ok := telegramCallbackToken(h.provider.Delivery(messageID-1), "Approve")
 				if !ok {
 					t.Fatal("source-lifecycle card lacks frozen control")
 				}
@@ -370,7 +370,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal("fork reused parent card/run identity")
 					}
 					childMessage := waitChannelAnchorReceipt(t, db, child)
-					childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "approve")
+					childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "Approve")
 					if !found || childToken == token {
 						t.Fatal("fork delivery reused parent control identity")
 					}
@@ -412,7 +412,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					})
 					ordinaryCard := waitChannelAnchorCard(t, db, ordinary.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 					ordinaryMessage := waitChannelAnchorReceipt(t, db, ordinaryCard)
-					ordinaryToken, ok := telegramCallbackToken(h.provider.Delivery(ordinaryMessage-1), "approve")
+					ordinaryToken, ok := telegramCallbackToken(h.provider.Delivery(ordinaryMessage-1), "Approve")
 					if !ok {
 						t.Fatal("normal run lost decision control")
 					}
@@ -457,7 +457,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 	})
 	card := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "chat/reviews")
 	messageID := waitChannelAnchorReceipt(t, db, card)
-	token, found := telegramCallbackToken(h.provider.Delivery(messageID-1), "approve")
+	token, found := telegramCallbackToken(h.provider.Delivery(messageID-1), "Approve")
 	if !found {
 		t.Fatal("registered lifecycle lacks its frozen channel control")
 	}
@@ -634,7 +634,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			t.Fatal("selected fork reused predecessor identity")
 		}
 		childMessage := waitChannelAnchorReceipt(t, db, child)
-		childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "approve")
+		childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "Approve")
 		if !found || childToken == token {
 			t.Fatal("selected fork reused the parent's channel control")
 		}
