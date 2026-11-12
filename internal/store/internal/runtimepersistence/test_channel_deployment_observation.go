@@ -203,27 +203,24 @@ func ReadChannelPreservedHistoryForTest(ctx context.Context, selected any, succe
 		`SELECT * FROM runtime_external_effect_operations WHERE effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY operation_id`,
 		`SELECT a.* FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY a.attempt_id`,
 	}
+	filters := map[int]struct{ prefix, predicate string }{
+		7:  {" WHERE ", `delivery_id<>$1`},
+		8:  {" WHERE ", `delivery_id<>$1`},
+		9:  {" WHERE ", `render_id NOT IN (SELECT render_id FROM channel_delivery_renders WHERE delivery_id=$1)`},
+		13: {" AND ", `operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`},
+		14: {" AND ", `a.operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`},
+	}
 	var snapshots [][][]any
 	for index, query := range queries {
 		var args []any
-		if len(successors) != 0 && successors[0] != "" {
-			predicate := map[int]string{7: `delivery_id<>$1`, 8: `delivery_id<>$1`,
-				9:  `render_id NOT IN (SELECT render_id FROM channel_delivery_renders WHERE delivery_id=$1)`,
-				13: `operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`,
-				14: `a.operation_id NOT IN (SELECT effect_operation_id FROM channel_delivery_receipts WHERE delivery_id=$1)`,
-			}[index]
-			if predicate != "" {
-				var predicates []string
-				for i, id := range successors {
-					predicates = append(predicates, strings.ReplaceAll(predicate, "$1", fmt.Sprintf("$%d", i+1)))
-					args = append(args, id)
-				}
-				join := " WHERE "
-				if index >= 13 {
-					join = " AND "
-				}
-				query = strings.Replace(query, " ORDER BY", join+strings.Join(predicates, " AND ")+" ORDER BY", 1)
+		filter := filters[index]
+		if len(successors) != 0 && successors[0] != "" && filter.predicate != "" {
+			var predicates []string
+			for i, id := range successors {
+				predicates = append(predicates, strings.ReplaceAll(filter.predicate, "$1", fmt.Sprintf("$%d", i+1)))
+				args = append(args, id)
 			}
+			query = strings.Replace(query, " ORDER BY", filter.prefix+strings.Join(predicates, " AND ")+" ORDER BY", 1)
 		}
 		var snapshot [][]any
 		// Each original query retains its own read cut; this is not one batch snapshot.
