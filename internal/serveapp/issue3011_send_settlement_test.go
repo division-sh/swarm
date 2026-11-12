@@ -369,7 +369,7 @@ func issue3011RegisteredStatus(t *testing.T, opts cliapp.ServeOptions, endpoint 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	var out, errOut bytes.Buffer
-	code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"), "--json"}, &out, &errOut, nil, nil)
+	code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"), "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
 	t.Logf("registration-status readback exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	if code != 0 {
 		t.Fatal("public registered readback failed", code, errOut.String())
