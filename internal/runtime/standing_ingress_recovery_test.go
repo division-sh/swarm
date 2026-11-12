@@ -46,6 +46,10 @@ func (s *standingLearnedCredentialStore) ListCurrentConnectedChannelActivations(
 	return s.activations, s.err
 }
 
+func (s *standingLearnedCredentialStore) DeploymentChannelOperations() channelonboarding.OperationStore {
+	return s
+}
+
 type standingRoleObservationErrorStore struct {
 	*runtimecredentials.FileStore
 	key string
@@ -626,6 +630,132 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 			}
 			if rt.standingCredentialAdmission != frozen {
 				t.Fatal("refused admission replaced the frozen sibling projection")
+			}
+		})
+	}
+}
+
+func TestRegisteredStandingAdmissionWithdrawsOnlyCompletedLogout(t *testing.T) {
+	catalog, source := runtimeAdmissionTestCatalog(t, "registered-logout", t.TempDir())
+	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+	if err != nil || len(declarations) != 1 || len(declarations[0].Ingress) != 1 {
+		t.Fatalf("captured credential declaration: %+v, %v", declarations, err)
+	}
+	declaration, plan := declarations[0], declarations[0].Ingress[0].AdmissionPlan
+	for _, scenario := range []string{"completed", "incomplete", "not_retired", "missing", "read_error", "identity", "principal", "provider", "account", "interface", "revision", "admissions", "unrelated_stale", "selected_seal"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := t.Context()
+			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"old", "sibling"} {
+				if err := file.Set(ctx, key, "original-"+key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			owner, err := runtimecredentials.NewSnapshotOwner(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection := owner.BeginSecretBindingProjection()
+			for _, key := range []string{"old", "sibling"} {
+				if _, err := projection.ObserveActivationCredential(ctx, key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := file.AdmitWithReceipt(ctx, "new", "new-value", "new-receipt"); err != nil {
+				t.Fatal(err)
+			}
+			value, err := owner.SealCurrentValue(ctx, "new")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sealed := standingLearnedCredentials{signingRole: "signing", admissions: []channelonboarding.CredentialAdmission{{
+				Role: "signing", StoreKey: "new", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "new-receipt", ValueSeal: value.Seal,
+			}}}
+			previous := channelonboarding.Operation{OperationID: "old-parent", PrincipalID: "principal", Provider: "telegram", AccountReference: "420079",
+				DeploymentRegistration: true, AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded, Revision: 10}
+			retired := previous
+			retired.Phase, retired.LogoutCompleted, retired.Revision = channelonboarding.PhaseRetired, true, 12
+			selected := previous
+			selected.OperationID, selected.Revision = "new-parent", 1
+			sibling := previous
+			sibling.OperationID, sibling.AccountReference = "unrelated-parent", "other-account"
+			selector := "ingress:acme-flow:acme"
+			oldKey, newKey := registeredStandingSelector(selector, previous.OperationID), registeredStandingSelector(selector, selected.OperationID)
+			siblingKey := registeredStandingSelector(selector, sibling.OperationID)
+			frozen := &standingCredentialAdmission{projection: projection, bindings: map[string]standingBindingCredentials{
+				selector:   {alias: declaration.Alias, plan: plan},
+				oldKey:     {registered: &registeredStandingCredential{operation: previous}, credentialKeys: []string{"old"}},
+				siblingKey: {registered: &registeredStandingCredential{operation: sibling}, credentialKeys: []string{"sibling"}},
+			}}
+			store := &standingLearnedCredentialStore{}
+			sentinel := errors.New("native predecessor read unavailable")
+			switch scenario {
+			case "incomplete":
+				retired.LogoutCompleted = false
+			case "not_retired":
+				retired.Phase = channelonboarding.PhaseSucceeded
+			case "identity":
+				retired.SlotKey = "another-slot"
+			case "principal":
+				retired.PrincipalID = "another-principal"
+			case "provider":
+				retired.Provider = "another-provider"
+			case "account":
+				retired.AccountReference = "another-account"
+			case "interface":
+				retired.Interface = operatorchannel.InterfaceIdentity{Service: "another-service"}
+			case "revision":
+				retired.Revision = previous.Revision
+			case "admissions":
+				retired.CredentialAdmissions = sealed.admissions
+			case "read_error":
+				store.err = sentinel
+			case "unrelated_stale":
+				if err := file.Set(ctx, "sibling", "rotated-sibling"); err != nil {
+					t.Fatal(err)
+				}
+			case "selected_seal":
+				if err := file.Set(ctx, "new", "unadmitted-new-value"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario != "missing" {
+				store.operations = []channelonboarding.Operation{retired}
+			}
+			if err := file.Delete(ctx, "old"); err != nil {
+				t.Fatal(err)
+			}
+			rt := &Runtime{Options: RuntimeOptions{ProviderCredentials: file, ChannelOnboardingStore: store}, standingCredentialAdmission: frozen}
+			candidate := channelonboarding.Candidate{Target: channelonboarding.CandidateTarget{Selector: selector, Alias: declaration.Alias, AdmissionGeneration: plan.Generation()}}
+			err = rt.freezeRegisteredStandingCredential(ctx, candidate, sealed, registeredStandingCredential{operation: selected})
+			if _, present := frozen.bindings[oldKey]; !present || len(frozen.bindings) != 3 {
+				t.Fatal("admission mutated the original frozen map")
+			}
+			if scenario != "completed" {
+				if err == nil || rt.standingCredentialAdmission != frozen {
+					t.Fatalf("refused admission partially replaced frozen authority: %v", err)
+				}
+				if scenario == "read_error" && !errors.Is(err, sentinel) {
+					t.Fatalf("native read error lost: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			next := rt.standingCredentialAdmission
+			if _, present := next.bindings[oldKey]; present || len(next.bindings) != 3 || next.bindings[newKey].registered == nil ||
+				next.bindings[siblingKey].registered != frozen.bindings[siblingKey].registered {
+				t.Fatal("completed logout did not withdraw only its exact predecessor")
+			}
+			if err := next.projection.ValidateCurrent(ctx); err != nil {
+				t.Fatalf("new projection did not preserve current sibling and selected keys: %v", err)
+			}
+			if _, err := next.projection.FrozenSecretBinding("old"); err == nil {
+				t.Fatal("completed logout's deleted key was resealed")
 			}
 		})
 	}
