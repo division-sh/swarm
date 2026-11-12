@@ -379,10 +379,6 @@ func runForkReplayResumeBlockerFromError(err error) (runfork.RunForkUnsupportedB
 	return blockerErr.blocker, blockerErr.fact, true
 }
 
-func RunForkReplayResumeBlockerFromError(err error) (runfork.RunForkUnsupportedBlocker, string, bool) {
-	return runForkReplayResumeBlockerFromError(err)
-}
-
 func runForkReplayResumeBlocker(code string) runfork.RunForkUnsupportedBlocker {
 	switch strings.TrimSpace(code) {
 	case runfork.RunForkBlockerDeliveryHistoryUnproven:

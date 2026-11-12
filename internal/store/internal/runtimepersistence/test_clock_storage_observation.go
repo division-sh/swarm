@@ -2,17 +2,14 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
-type ClockStorageObservation struct {
-	Rows                  int
-	Status, ImmutableHash string
-}
+type ClockStorageObservation = pipelinepersistence.ClockStorageObservation
 
 // Catalog observations use PostgreSQL's transaction clock, not an application
 // timestamp. SQLite keeps its separately defined application-clock boundary.
@@ -24,14 +21,7 @@ func ReadPostgresObservationTimeForTest(ctx context.Context, selected any) (time
 	if err := validateChannelObservationOwner(owner); err != nil {
 		return time.Time{}, err
 	}
-	var out time.Time
-	err := readServedDeliveryObservation(ctx, owner, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT NOW()`).Scan(&out)
-	})
-	if err != nil {
-		return time.Time{}, err
-	}
-	return out.UTC(), nil
+	return owner.pipelinePostgresOwner.ReadPostgresObservationTimeForTest(ctx)
 }
 
 // Counts every instance clock, including terminal rows. An empty active list
@@ -40,14 +30,14 @@ func CountInstanceClockActivationsForTest(ctx context.Context, selected any) (in
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE owner_kind='instance'`).Scan(&count)
-	})
-	if err != nil {
-		return 0, err
+	switch native := selected.(type) {
+	case *PostgresStore:
+		return native.pipelinePostgresOwner.CountInstanceClockActivationsForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return native.pipelineSQLiteOwner.CountInstanceClockActivationsForTest(ctx)
+	default:
+		return 0, fmt.Errorf("clock observation requires its original native owner")
 	}
-	return count, nil
 }
 
 func validateClockStorageCoordinate(runID, activationID string) error {
@@ -68,22 +58,11 @@ func CorruptClockImmutableHashForTest(ctx context.Context, selected any, runID, 
 	if err := validateClockStorageCoordinate(runID, activationID); err != nil {
 		return err
 	}
-	write := func(ctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE timers SET immutable_hash='corrupt' WHERE run_id=$1 AND timer_id=$2 AND owner_kind='instance'`, runID, activationID)
-		if err != nil {
-			return err
-		}
-		count, err := result.RowsAffected()
-		if err != nil || count != 1 {
-			return fmt.Errorf("clock fault requires one exact existing instance clock: rows=%d error=%v", count, err)
-		}
-		return nil
-	}
 	switch native := selected.(type) {
 	case *PostgresStore:
-		return native.backend.RunTransaction(ctx, write)
+		return native.pipelinePostgresOwner.CorruptClockImmutableHashForTest(ctx, runID, activationID)
 	case *SQLiteRuntimeStore:
-		return native.backend.RunTransaction(ctx, "clock immutable hash fault", write)
+		return native.pipelineSQLiteOwner.CorruptClockImmutableHashForTest(ctx, runID, activationID)
 	default:
 		return fmt.Errorf("clock storage fault requires its original native owner")
 	}
@@ -96,15 +75,12 @@ func ReadClockStorageForTest(ctx context.Context, selected any, runID, activatio
 	if err := validateClockStorageCoordinate(runID, activationID); err != nil {
 		return ClockStorageObservation{}, err
 	}
-	var out ClockStorageObservation
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT status,immutable_hash FROM timers WHERE run_id=$1 AND timer_id=$2`, runID, activationID).Scan(&out.Status, &out.ImmutableHash); err != nil {
-			return err
-		}
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers`).Scan(&out.Rows)
-	})
-	if err != nil {
-		return ClockStorageObservation{}, err
+	switch native := selected.(type) {
+	case *PostgresStore:
+		return native.pipelinePostgresOwner.ReadClockStorageForTest(ctx, runID, activationID)
+	case *SQLiteRuntimeStore:
+		return native.pipelineSQLiteOwner.ReadClockStorageForTest(ctx, runID, activationID)
+	default:
+		return ClockStorageObservation{}, fmt.Errorf("clock observation requires its original native owner")
 	}
-	return out, nil
 }

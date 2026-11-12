@@ -96,22 +96,6 @@ func RequireRunningRun(
 	})
 }
 
-func RequirePausedRun(
-	t testing.TB,
-	ctx context.Context,
-	runner RunFixtureStore,
-	runID string,
-	startedAt time.Time,
-) {
-	t.Helper()
-	RequireRun(t, ctx, runner, RunFixture{
-		RunID:     runID,
-		State:     runtimerunlifecycle.StatePaused,
-		Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
-		StartedAt: startedAt,
-	})
-}
-
 func MaterializeRun(
 	ctx context.Context,
 	runner RunFixtureStore,
