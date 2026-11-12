@@ -15,6 +15,13 @@ type AccountReference struct {
 
 func CanonicalAccount(provider, account string) (AccountReference, error) {
 	binding, _ := channelprovider.Lookup(provider)
+	return canonicalAccountWithFacts(provider, account, binding)
+}
+
+func canonicalAccountWithFacts(provider, account string, binding channelprovider.Binding) (AccountReference, error) {
+	if !binding.MatchesProvider(provider) {
+		binding = channelprovider.Binding{}
+	}
 	canonical, err := binding.CanonicalAccount(account)
 	if err != nil {
 		return AccountReference{}, err
@@ -23,7 +30,12 @@ func CanonicalAccount(provider, account string) (AccountReference, error) {
 }
 
 func (r AccountReference) Validate() error {
-	canonical, err := CanonicalAccount(r.Provider, r.Account)
+	binding, _ := channelprovider.Lookup(r.Provider)
+	return r.ValidateWithFacts(binding)
+}
+
+func (r AccountReference) ValidateWithFacts(binding channelprovider.Binding) error {
+	canonical, err := canonicalAccountWithFacts(r.Provider, r.Account, binding)
 	if err == nil && canonical != r {
 		return fmt.Errorf("account reference must use its canonical provider/account")
 	}

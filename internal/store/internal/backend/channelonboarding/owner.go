@@ -13,6 +13,7 @@ import (
 	"time"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -28,12 +29,14 @@ import (
 type schemaRequirement func() error
 
 type PostgresOwner struct {
+	providerFacts  func(string) (channelprovider.Binding, bool)
 	backend        *postgresbackend.Backend
 	requireCurrent schemaRequirement
 	channelChanges *render.ReconcileSignal
 }
 
 type SQLiteOwner struct {
+	providerFacts  func(string) (channelprovider.Binding, bool)
 	backend        *sqlitebackend.Backend
 	requireCurrent schemaRequirement
 	channelChanges *render.ReconcileSignal
@@ -55,18 +58,41 @@ func (s *SQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) 
 	return nil
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent schemaRequirement) (*PostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent schemaRequirement, providerFacts func(string) (channelprovider.Binding, bool)) (*PostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || providerFacts == nil {
 		return nil, fmt.Errorf("postgres channel onboarding owner requires backend and schema owner")
 	}
-	return &PostgresOwner{backend: backend, requireCurrent: requireCurrent}, nil
+	return &PostgresOwner{backend: backend, requireCurrent: requireCurrent, providerFacts: providerFacts}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent schemaRequirement) (*SQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent schemaRequirement, providerFacts func(string) (channelprovider.Binding, bool)) (*SQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || providerFacts == nil {
 		return nil, fmt.Errorf("sqlite channel onboarding owner requires backend and schema owner")
 	}
-	return &SQLiteOwner{backend: backend, requireCurrent: requireCurrent}, nil
+	return &SQLiteOwner{backend: backend, requireCurrent: requireCurrent, providerFacts: providerFacts}, nil
+}
+
+func (s *PostgresOwner) providerFact(provider string) channelprovider.Binding {
+	if s == nil || s.providerFacts == nil {
+		return channelprovider.Binding{}
+	}
+	facts, found := s.providerFacts(provider)
+	return exactProviderFact(provider, facts, found)
+}
+
+func (s *SQLiteOwner) providerFact(provider string) channelprovider.Binding {
+	if s == nil || s.providerFacts == nil {
+		return channelprovider.Binding{}
+	}
+	facts, found := s.providerFacts(provider)
+	return exactProviderFact(provider, facts, found)
+}
+
+func exactProviderFact(provider string, facts channelprovider.Binding, found bool) channelprovider.Binding {
+	if !found || !facts.MatchesProvider(provider) {
+		return channelprovider.Binding{}
+	}
+	return facts
 }
 
 type dialect uint8
@@ -99,8 +125,14 @@ type queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// This private projection stays inside the owner; validators get fact values.
+type providerFactReader interface {
+	providerFact(string) channelprovider.Binding
+}
+
 type runner interface {
 	deployment() bool
+	providerFact(string) channelprovider.Binding
 	require() error
 	mutate(context.Context, string, func(context.Context, *sql.Tx) error) error
 	mutateOutcome(context.Context, string, func(context.Context, *sql.Tx) error) (bool, error)
@@ -112,6 +144,9 @@ type runner interface {
 type postgresRunner struct{ owner *PostgresOwner }
 
 func (r postgresRunner) deployment() bool { return false }
+func (r postgresRunner) providerFact(provider string) channelprovider.Binding {
+	return r.owner.providerFact(provider)
+}
 
 func (r postgresRunner) require() error   { return r.owner.requireCurrent() }
 func (r postgresRunner) query() queryer   { return r.owner.backend }
@@ -131,6 +166,9 @@ func (r postgresRunner) publishChannelChange(acknowledged bool, demand render.Re
 type sqliteRunner struct{ owner *SQLiteOwner }
 
 func (r sqliteRunner) deployment() bool { return false }
+func (r sqliteRunner) providerFact(provider string) channelprovider.Binding {
+	return r.owner.providerFact(provider)
+}
 
 func (r sqliteRunner) require() error   { return r.owner.requireCurrent() }
 func (r sqliteRunner) query() queryer   { return r.owner.backend }
@@ -158,7 +196,7 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 	if err := r.require(); err != nil {
 		return domain.Operation{}, err
 	}
-	if err := req.Validate(); err != nil {
+	if err := req.ValidateWithFacts(r.providerFact(req.Provider)); err != nil {
 		return domain.Operation{}, err
 	}
 	if req.DeploymentRegistration != r.deployment() {
@@ -170,7 +208,7 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 	req.RequestedAt = canonicalTime(req.RequestedAt)
 	var out domain.Operation
 	err := r.mutate(ctx, "reserve channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
-		existing, found, err := loadOperationByRequestKey(txctx, tx, r.dialect(), req.RequestKeyHash, true, r.deployment())
+		existing, found, err := loadOperationByRequestKey(r, txctx, tx, r.dialect(), req.RequestKeyHash, true, r.deployment())
 		if err != nil {
 			return err
 		}
@@ -219,7 +257,7 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 				return err
 			}
 		}
-		out, _, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, false, r.deployment())
+		out, _, err = loadOperation(r, txctx, tx, r.dialect(), req.OperationID, false, r.deployment())
 		return err
 	})
 	return out, err
@@ -250,7 +288,7 @@ func listOperations(ctx context.Context, r runner) ([]domain.Operation, error) {
 	defer rows.Close()
 	out := []domain.Operation{}
 	for rows.Next() {
-		op, err := scanOperation(rows)
+		op, err := scanOperation(r, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -263,7 +301,7 @@ func getOperation(ctx context.Context, r runner, operationID string) (domain.Ope
 	if err := r.require(); err != nil {
 		return domain.Operation{}, err
 	}
-	op, found, err := loadOperation(ctx, r.query(), r.dialect(), operationID, false, r.deployment())
+	op, found, err := loadOperation(r, ctx, r.query(), r.dialect(), operationID, false, r.deployment())
 	if err != nil {
 		return domain.Operation{}, err
 	}
@@ -314,7 +352,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 	var changed render.ReconcileDemand
 	acknowledged, err := r.mutateOutcome(ctx, "advance channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
 		changed = 0
-		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true, r.deployment())
+		op, found, err := loadOperation(r, txctx, tx, r.dialect(), req.OperationID, true, r.deployment())
 		if err != nil {
 			return err
 		}
@@ -324,11 +362,11 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if op.Revision != req.ExpectedRevision {
 			return domain.ErrRevisionConflict
 		}
-		if !validTransition(op, req) {
+		if !validTransition(r, op, req) {
 			return domain.ErrConflict
 		}
 		if req.SourceRollover != nil {
-			if err := rollSessionSourceTx(txctx, tx, r.dialect(), &op, req); err != nil {
+			if err := rollSessionSourceTx(r, txctx, tx, r.dialect(), &op, req); err != nil {
 				return err
 			}
 			changed = render.ReconcileOrdinary | render.ReconcileNative
@@ -367,7 +405,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if req.AccountReference != "" {
 			ref := domain.AccountReference{Provider: op.Provider, Account: req.AccountReference}
 			if !op.DeploymentRegistration || op.Phase != domain.PhaseActivatingProvider || req.Phase != domain.PhaseAwaitingExternalIdentity ||
-				ref.Validate() != nil || op.AccountReference != "" && op.AccountReference != ref.Account ||
+				ref.ValidateWithFacts(r.providerFact(op.Provider)) != nil || op.AccountReference != "" && op.AccountReference != ref.Account ||
 				op.ExpectedAccount != "" && op.ExpectedAccount != ref.Account {
 				return domain.ErrConflict
 			}
@@ -422,14 +460,14 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		completed := op.Phase != domain.PhaseSucceeded && req.Phase == domain.PhaseSucceeded
 		op.Phase, op.Revision, op.UpdatedAt = req.Phase, op.Revision+1, canonicalTime(req.Now)
-		if err := op.ValidateSessionAccount(); err != nil {
+		if err := op.ValidateSessionAccountWithFacts(r.providerFact(op.Provider)); err != nil {
 			return err
 		}
 		if op.Phase.Terminal() && !wasTerminal {
 			op.CompletedAt = op.UpdatedAt
 		}
 		op.FailureCode, op.FailureMessage = strings.TrimSpace(req.FailureCode), strings.TrimSpace(req.FailureMessage)
-		if err := updateOperation(txctx, tx, r.dialect(), op); err != nil {
+		if err := updateOperation(r, txctx, tx, r.dialect(), op); err != nil {
 			return err
 		}
 		if reboundActivation != nil {
@@ -462,7 +500,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 	return out, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }
 
-func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
+func validTransition(nativeOwner providerFactReader, op domain.Operation, req domain.AdvanceRequest) bool {
 	if op.DeploymentRegistration {
 		return validDeploymentTransition(op, req)
 	}
@@ -470,7 +508,7 @@ func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
 		return true // The source-rollover transaction validates its exact admission.
 	}
 	if req.BeginOperatorEnrollment {
-		return op.Phase == domain.PhaseSucceeded && op.AccountConnection() && op.IdentityOperationID == "" &&
+		return op.Phase == domain.PhaseSucceeded && op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) && op.IdentityOperationID == "" &&
 			op.ActivationRevision > 0 && req.Phase == domain.PhaseAwaitingExternalIdentity && req.RebindCoordinate == nil
 	}
 	from, to := op.Phase, req.Phase
@@ -553,7 +591,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 	var changed render.ReconcileDemand
 	acknowledged, err := r.mutateOutcome(ctx, "publish connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
 		changed = 0
-		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
+		op, found, err := loadOperation(r, txctx, tx, r.dialect(), req.OperationID, true)
 		if err != nil {
 			return err
 		}
@@ -564,7 +602,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			return domain.ErrRevisionConflict
 		case op.Phase != domain.PhasePublishingActivation:
 			return domain.ErrConflict
-		case op.AccountConnection() != (req.BindingRevision == 0):
+		case op.AccountConnectionWithFacts(r.providerFact(op.Provider)) != (req.BindingRevision == 0):
 			return domain.ErrInvalidRequest
 		}
 		// Keep binding confirmation's parent-before-principal order, then use
@@ -612,7 +650,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 		}
 		op.BindingRevision, op.ActivationRevision = req.BindingRevision, activationRevision
 		op.Phase, op.Revision, op.UpdatedAt = domain.PhasePublishingProcessActivation, op.Revision+1, now
-		if err := updateOperation(txctx, tx, r.dialect(), op); err != nil {
+		if err := updateOperation(r, txctx, tx, r.dialect(), op); err != nil {
 			return err
 		}
 		outOp = op
@@ -727,14 +765,18 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 	if err := r.require(); err != nil {
 		return domain.TeardownOperation{}, err
 	}
-	if err := req.Validate(); err != nil {
+	var facts channelprovider.Binding
+	if req.Logout != nil {
+		facts = r.providerFact(req.Logout.Account.Provider)
+	}
+	if err := req.ValidateWithFacts(facts); err != nil {
 		return domain.TeardownOperation{}, err
 	}
 	req.Scope = req.Scope.Normalized()
 	req.RequestedAt = canonicalTime(req.RequestedAt)
 	var out domain.TeardownOperation
 	err := r.mutate(ctx, "reserve channel teardown", func(txctx context.Context, tx *sql.Tx) error {
-		prepared, err := prepareTeardownReservationTx(txctx, tx, r.dialect(), req)
+		prepared, err := prepareTeardownReservationTx(r, txctx, tx, r.dialect(), req)
 		if err != nil {
 			return err
 		}
@@ -750,7 +792,7 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 				return err
 			}
 			logoutConnection, logoutTarget = req.Logout.Account.ConnectionID, string(encoded)
-			retiredOperations, retiredActivations, err = fenceLogoutConnectionTx(txctx, tx, r.dialect(), prepared.logout, req.RequestedAt)
+			retiredOperations, retiredActivations, err = fenceLogoutConnectionTx(r, txctx, tx, r.dialect(), prepared.logout, req.RequestedAt)
 			if err != nil {
 				return err
 			}
@@ -780,7 +822,7 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 		if err != nil {
 			return fmt.Errorf("insert channel teardown: %w", err)
 		}
-		out, _, err = loadTeardown(txctx, tx, r.dialect(), req.TeardownID, false)
+		out, _, err = loadTeardown(r, txctx, tx, r.dialect(), req.TeardownID, false)
 		return err
 	})
 	return out, err
@@ -797,7 +839,7 @@ func getTeardown(ctx context.Context, r runner, teardownID string) (domain.Teard
 	if err := r.require(); err != nil {
 		return domain.TeardownOperation{}, err
 	}
-	op, found, err := loadTeardown(ctx, r.query(), r.dialect(), strings.TrimSpace(teardownID), false)
+	op, found, err := loadTeardown(r, ctx, r.query(), r.dialect(), strings.TrimSpace(teardownID), false)
 	if err != nil {
 		return domain.TeardownOperation{}, err
 	}
@@ -825,7 +867,7 @@ func listTeardowns(ctx context.Context, r runner) ([]domain.TeardownOperation, e
 	defer rows.Close()
 	var out []domain.TeardownOperation
 	for rows.Next() {
-		op, found, err := scanTeardownRow(rows, r.dialect())
+		op, found, err := scanTeardownRow(r, rows, r.dialect())
 		if err != nil {
 			return nil, err
 		}
@@ -854,7 +896,7 @@ func retireTeardownAuthority(ctx context.Context, r runner, req domain.RetireTea
 	var changed render.ReconcileDemand
 	acknowledged, err := r.mutateOutcome(ctx, "retire channel teardown authority", func(txctx context.Context, tx *sql.Tx) error {
 		changed = 0
-		op, found, err := loadTeardown(txctx, tx, r.dialect(), req.TeardownID, true)
+		op, found, err := loadTeardown(r, txctx, tx, r.dialect(), req.TeardownID, true)
 		if err != nil {
 			return err
 		}
@@ -896,7 +938,7 @@ func retireTeardownAuthority(ctx context.Context, r runner, req domain.RetireTea
 		if err != nil {
 			return err
 		}
-		out, _, err = loadTeardown(txctx, tx, r.dialect(), op.TeardownID, false)
+		out, _, err = loadTeardown(r, txctx, tx, r.dialect(), op.TeardownID, false)
 		if err == nil && (retiredOperations > 0 || retiredActivations > 0) {
 			changed = render.ReconcileOrdinary | render.ReconcileNative
 		}
@@ -921,7 +963,7 @@ func completeTeardown(ctx context.Context, r runner, req domain.CompleteTeardown
 	}
 	var out domain.TeardownOperation
 	err := r.mutate(ctx, "complete channel teardown", func(txctx context.Context, tx *sql.Tx) error {
-		op, found, err := loadTeardown(txctx, tx, r.dialect(), req.TeardownID, true)
+		op, found, err := loadTeardown(r, txctx, tx, r.dialect(), req.TeardownID, true)
 		if err != nil {
 			return err
 		}
@@ -947,7 +989,7 @@ func completeTeardown(ctx context.Context, r runner, req domain.CompleteTeardown
 		if err != nil {
 			return err
 		}
-		out, _, err = loadTeardown(txctx, tx, r.dialect(), op.TeardownID, false)
+		out, _, err = loadTeardown(r, txctx, tx, r.dialect(), op.TeardownID, false)
 		return err
 	})
 	return out, err
@@ -959,23 +1001,23 @@ const teardownSelect = `SELECT teardown_id,request_key_hash,request_hash,kind,pr
 	retired_operations,retired_activations,failure_code,failure_message,requested_at,updated_at,completed_at,logout_connection_id,logout_target
 	FROM channel_onboarding_teardowns`
 
-func loadTeardownByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.TeardownOperation, bool, error) {
+func loadTeardownByRequestKey(nativeOwner providerFactReader, ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.TeardownOperation, bool, error) {
 	query := teardownSelect + ` WHERE request_key_hash=?`
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
-	return scanTeardownRow(q.QueryRowContext(ctx, d.bind(query), key), d)
+	return scanTeardownRow(nativeOwner, q.QueryRowContext(ctx, d.bind(query), key), d)
 }
 
-func loadTeardown(ctx context.Context, q queryer, d dialect, id string, lock bool) (domain.TeardownOperation, bool, error) {
+func loadTeardown(nativeOwner providerFactReader, ctx context.Context, q queryer, d dialect, id string, lock bool) (domain.TeardownOperation, bool, error) {
 	query := teardownSelect + ` WHERE teardown_id=?`
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
-	return scanTeardownRow(q.QueryRowContext(ctx, d.bind(query), id), d)
+	return scanTeardownRow(nativeOwner, q.QueryRowContext(ctx, d.bind(query), id), d)
 }
 
-func scanTeardownRow(row rowScanner, d dialect) (domain.TeardownOperation, bool, error) {
+func scanTeardownRow(nativeOwner providerFactReader, row rowScanner, d dialect) (domain.TeardownOperation, bool, error) {
 	var op domain.TeardownOperation
 	var kind, phase string
 	var interfaceRef, packID, packVersion, manifestHash, semanticGeneration sql.NullString
@@ -994,7 +1036,7 @@ func scanTeardownRow(row rowScanner, d dialect) (domain.TeardownOperation, bool,
 		return domain.TeardownOperation{}, false, err
 	}
 	op.Kind, op.Phase = domain.TeardownKind(kind), domain.TeardownPhase(phase)
-	if op.Logout, err = decodeLogoutTarget(op.Kind, logoutConnection, logoutTarget, d); err != nil {
+	if op.Logout, err = decodeLogoutTarget(nativeOwner, op.Kind, logoutConnection, logoutTarget, d); err != nil {
 		return domain.TeardownOperation{}, false, err
 	}
 	op.Scope = domain.TeardownScope{
@@ -1030,24 +1072,24 @@ const operationSelect = `SELECT operation_id,request_key_hash,request_hash,slot_
 	credential_reservations,credential_admissions,session_connection_id,session_account_admission,identity_operation_id,binding_revision,connect_fence_revision,activation_revision,confirmation_operation_id,
 	failure_code,failure_message,requested_at,updated_at,completed_at,FALSE,'','',FALSE,FALSE FROM channel_onboarding_operations`
 
-func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
+func loadOperationByRequestKey(nativeOwner providerFactReader, ctx context.Context, q queryer, d dialect, key string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
 	query := operationQuery(len(deployment) == 1 && deployment[0]) + ` WHERE request_key_hash=?`
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
-	return scanOperationRow(q.QueryRowContext(ctx, d.bind(query), key))
+	return scanOperationRow(nativeOwner, q.QueryRowContext(ctx, d.bind(query), key))
 }
 
-func loadOperation(ctx context.Context, q queryer, d dialect, operationID string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
+func loadOperation(nativeOwner providerFactReader, ctx context.Context, q queryer, d dialect, operationID string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
 	query := operationQuery(len(deployment) == 1 && deployment[0]) + ` WHERE operation_id=?`
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
-	return scanOperationRow(q.QueryRowContext(ctx, d.bind(query), operationID))
+	return scanOperationRow(nativeOwner, q.QueryRowContext(ctx, d.bind(query), operationID))
 }
 
-func scanOperation(scanner interface{ Scan(...any) error }) (domain.Operation, error) {
-	op, found, err := scanOperationRow(scanner)
+func scanOperation(nativeOwner providerFactReader, scanner interface{ Scan(...any) error }) (domain.Operation, error) {
+	op, found, err := scanOperationRow(nativeOwner, scanner)
 	if err != nil {
 		return domain.Operation{}, err
 	}
@@ -1059,7 +1101,7 @@ func scanOperation(scanner interface{ Scan(...any) error }) (domain.Operation, e
 
 type rowScanner interface{ Scan(...any) error }
 
-func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
+func scanOperationRow(nativeOwner providerFactReader, row rowScanner) (domain.Operation, bool, error) {
 	var op domain.Operation
 	var verb, posture, ceremony, phase string
 	var planGeneration string
@@ -1105,7 +1147,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		return domain.Operation{}, false, err
 	}
 	op.SessionConnectionID = connection.String
-	if err := op.ValidateSessionAccount(); err != nil {
+	if err := op.ValidateSessionAccountWithFacts(nativeOwner.providerFact(op.Provider)); err != nil {
 		return domain.Operation{}, false, err
 	}
 	op.IdentityOperationID, op.ConfirmationOperationID = identityOp.String, confirmationOp.String
@@ -1124,8 +1166,8 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	return op, true, nil
 }
 
-func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
-	if err := op.ValidateSessionAccount(); err != nil {
+func updateOperation(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
+	if err := op.ValidateSessionAccountWithFacts(nativeOwner.providerFact(op.Provider)); err != nil {
 		return err
 	}
 	admissions, err := marshalCredentialAdmissions(op.CredentialAdmissions)
@@ -1150,14 +1192,14 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 }
 
 // Source rollover is explicit fresh admission, never a durable-identity match.
-func rollSessionSourceTx(ctx context.Context, tx *sql.Tx, d dialect, op *domain.Operation, req domain.AdvanceRequest) error {
+func rollSessionSourceTx(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, op *domain.Operation, req domain.AdvanceRequest) error {
 	source, admitted := correlation.SourceArtifactFactFromContext(ctx)
 	coordinate := req.SourceRollover.Normalized()
 	if req.RebindCoordinate != nil || req.BeginOperatorEnrollment || coordinate.ValidateContext() != nil {
 		return domain.ErrInvalidRequest
 	}
 	if !admitted || source.Validate() != nil || source.BundleHash() != coordinate.BundleHash ||
-		op.Phase != domain.PhaseSucceeded || !op.AccountConnection() || op.IdentityOperationID != "" ||
+		op.Phase != domain.PhaseSucceeded || !op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) || op.IdentityOperationID != "" ||
 		op.Coordinate.BundleHash == coordinate.BundleHash || req.Phase != domain.PhaseAwaitingOperatorConfirmation {
 		return domain.ErrRevisionConflict
 	}
@@ -1180,7 +1222,7 @@ func rollSessionSourceTx(ctx context.Context, tx *sql.Tx, d dialect, op *domain.
 	expected := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
 		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-	if !found || !expected.MatchesAccountBusiness(*op, activation) {
+	if !found || !expected.MatchesAccountBusinessWithFacts(*op, activation, nativeOwner.providerFact((*op).Provider)) {
 		return domain.ErrRevisionConflict
 	}
 	if _, err := tx.ExecContext(ctx, d.bind(`UPDATE connected_channel_activations SET status='retired',
