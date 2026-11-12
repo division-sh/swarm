@@ -8,10 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +19,11 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	"go.mau.fi/whatsmeow/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,10 +49,12 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	opts.StoreMode, opts.StoreModeSet = backend, true
+	location := filepath.Join(t.TempDir(), "diagnostic.sqlite")
 	if backend == "sqlite" {
-		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, filepath.Join(t.TempDir(), "diagnostic.sqlite"), channelOnboardingHostWorkspaceFields())
+		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, location, channelOnboardingHostWorkspaceFields())
 	} else {
-		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
+		location = testutil.StartEmptyPostgresDSN(t)
+		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, location)
 	}
 	config, err := os.ReadFile(opts.ConfigPath)
 	if err != nil {
@@ -67,26 +73,18 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary, err := os.Open(self)
+	binary, err := os.ReadFile(self)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := sha256.New()
-	_, readErr := io.Copy(hash, binary)
-	closeErr := binary.Close()
-	if readErr != nil || closeErr != nil {
-		t.Fatal(readErr, closeErr)
-	}
-	record["test_binary_sha256"] = fmt.Sprintf("%x", hash.Sum(nil))
+	record["test_binary_sha256"] = fmt.Sprintf("%x", sha256.Sum256(binary))
 	for _, file := range []string{"schema.yaml", "nodes.yaml", "policy.yaml", "events.yaml"} {
 		raw, err := os.ReadFile(filepath.Join(opts.SourceRoot, file))
 		if err != nil {
 			t.Fatal(err)
 		}
 		record[file+"_sha256"] = fmt.Sprintf("%x", sha256.Sum256(raw))
-		if err := os.WriteFile(filepath.Join(root, file), raw, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		writeStandingCandidateFile(t, filepath.Join(root, file), string(raw))
 	}
 	var process *channelOnboardingCrashServeProcess
 	var logs []string
@@ -114,9 +112,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 		if err != nil {
 			t.Error(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "serve.log"), []byte(strings.Join(logs, "\n--- owned process boundary ---\n")), 0o600); err != nil {
-			t.Error(err)
-		}
+		writeStandingCandidateFile(t, filepath.Join(root, "serve.log"), strings.Join(logs, "\n--- owned process boundary ---\n"))
 		t.Logf("backend=%s stage=%s complete=%v", backend, record["stage"], record["complete"])
 	}()
 
@@ -140,6 +136,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 
 	record["stage"] = "public CLI registration"
 	op := issue3011RegisterForSend(t, opts, peer)
+	peer.senderFrom(types.NewJID("15557654321", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
 	record["operation_id"], record["account"] = op.OperationID, op.AccountReference
 	process = startServedNativeSDKProcess(t, opts, peer)
 	endpoint = process.endpoint(t) + "/v1/rpc"
@@ -169,10 +166,23 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	record["peer_after_cut"] = map[string]int{"accepts": peer.connections, "closed": peer.disconnected, "post_logins": peer.postLogins}
 	peer.mu.Unlock()
 	record["stage"] = "down-link public-input settlement"
+	exhausted := issue3011PublishAndSettle(t, endpoint, "exhaust", record)
+	terminal := exhausted.Deliveries[0]
+	if terminal.ReasonCode != "retry_exhausted" || terminal.RetryCount != 3 || terminal.Failure.Class != failures.ClassRetryExhausted || terminal.Failure.Detail.Code != "delivery_retry_exhausted" {
+		t.Fatal("existing authored retry budget did not produce typed exhaustion", terminal)
+	}
+	if err := failures.ValidateEnvelope(*terminal.Failure); err != nil {
+		t.Fatal("invalid exhaustion/history", err)
+	}
+	for _, prior := range terminal.Failure.Detail.Attributes["retry_history"].([]any) {
+		if prior.(map[string]any)["failure"].(map[string]any)["class"] != string(failures.ClassDependencyUnavailable) {
+			t.Fatal("exhaustion contains a different underlying failure", prior)
+		}
+	}
 	settled := issue3011PublishAndSettle(t, endpoint, "down", record)
 	record["down_input"] = settled
-	if len(settled.Deliveries) != 1 || settled.Deliveries[0].Failure == nil || settled.Deliveries[0].Failure.Detail.Code != "unclassified_runtime_error" {
-		t.Fatal("down-link input reached a different cut than the untyped pre-activity failure")
+	if settled.Deliveries[0].Failure.Class != failures.ClassDependencyUnavailable || settled.Deliveries[0].Failure.Detail.Code != "dependency_unavailable" || !settled.Deliveries[0].Failure.Retryable {
+		t.Fatal("down-link admission did not reach typed existing retry settlement")
 	}
 	if t.Failed() {
 		return
@@ -181,6 +191,32 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if t.Failed() {
 		return
 	}
+	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := inspection.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	reader := inspection.(interface {
+		Snapshot(context.Context, string) (deliverylifecycle.Snapshot, error)
+		Outcomes(context.Context, string) ([]deliverylifecycle.Outcome, error)
+	})
+	snapshot, err := reader.Snapshot(t.Context(), settled.Deliveries[0].DeliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes, err := reader.Outcomes(t.Context(), snapshot.DeliveryID)
+	if err != nil || len(outcomes) == 0 {
+		t.Fatal("retry has no committed outcome", err)
+	}
+	last := outcomes[len(outcomes)-1]
+	if snapshot.EventID != settled.EventID || snapshot.RunID != settled.RunID || !snapshot.RetryScheduled || last.Outcome != "retry_scheduled" || last.DeliveryID != snapshot.DeliveryID || last.ClaimVersion != snapshot.ClaimVersion || last.RetryEligibleAt == nil || !snapshot.NextEligibleAt.Equal(*last.RetryEligibleAt) || !snapshot.NextEligibleAt.After(last.SettledAt) {
+		t.Fatal("retry lost exact committed eligibility/outcome", snapshot, outcomes)
+	}
+	record["retry_due"], record["retry_outcomes"] = snapshot.NextEligibleAt, outcomes
 	record["stage"] = "explicit existing startup restore"
 	process = startServedNativeSDKProcess(t, opts, peer)
 	endpoint = process.endpoint(t) + "/v1/rpc"
@@ -190,13 +226,36 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if restored.Status.State != "live" || restored.Status.Health != "connected" || len(restored.Status.Holders) != 1 {
 		t.Fatal("existing startup path did not restore the exact registered account")
 	}
+	select {
+	case sent := <-peer.sent:
+		record["restored_send"] = map[string]any{"id": sent.ID, "to": sent.To.String(), "text": sent.Body.GetConversation()}
+		requireServedNativeActivityResult(t, endpoint, sent.ID, "15557654321@s.whatsapp.net", "synthetic diagnostic notice", false)
+	case <-time.After(10 * time.Second):
+		t.Fatal("eligible retry did not send after explicit restoration")
+	}
+	var requests operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": settled.RunID, "event_name": "platform.activity_requested"}, "limit": 100}, &requests)
+	record["restored_activity_requests"] = requests
+	if len(requests.Events) != 1 || requests.Events[0].Payload["source_event_id"] != settled.EventID || requests.Events[0].CreatedAt.Before(snapshot.NextEligibleAt) {
+		t.Fatal("activity ran before committed due or lost original input", requests)
+	}
+	waitServedRunDeliveryQuiescence(t, servedInspectionDeliveryReader(t, inspection), settled.RunID)
 	var after operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": settled.EventID}, &after)
 	record["down_input_after_restore"] = after
-	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != settled.Deliveries[0].DeliveryID || after.Deliveries[0].Status != settled.Deliveries[0].Status {
-		t.Fatal("terminal input changed during explicit restoration")
+	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != settled.Deliveries[0].DeliveryID || after.Deliveries[0].Status != "delivered" {
+		t.Fatal("retried original delivery did not succeed", after)
 	}
-	issue3011NoActivity(t, endpoint, settled.RunID, record, "after_restore_activity_requests")
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": exhausted.EventID}, &after)
+	record["exhausted_after_restore"] = after
+	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != terminal.DeliveryID || after.Deliveries[0].Status != terminal.Status || after.Deliveries[0].Failure == nil || after.Deliveries[0].Failure.Detail.Code != terminal.Failure.Detail.Code {
+		t.Fatal("restoration revived exhausted work", after)
+	}
+	select {
+	case extra := <-peer.sent:
+		t.Fatal("duplicate or unrelated application send", extra.ID)
+	default:
+	}
 	peer.mu.Lock()
 	record["peer_after_restore"] = map[string]int{"accepts": peer.connections, "closed": peer.disconnected, "post_logins": peer.postLogins}
 	peer.mu.Unlock()
@@ -269,17 +328,17 @@ func issue3011PublishAndSettle(t *testing.T, endpoint, key string, record map[st
 		t.Fatal("public input has no exact committed event/run identity")
 	}
 	var event operatorread.OperatorEventFull
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": publication.EventID}, &event)
 		record[key+"_last_event"] = event
-		if len(event.Deliveries) == 1 && event.Deliveries[0].Terminal && event.Deliveries[0].Failure != nil {
+		if len(event.Deliveries) == 1 && event.Deliveries[0].Failure != nil && ((key == "down" && event.Deliveries[0].RetryScheduled) || (key != "down" && event.Deliveries[0].Terminal)) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if event.EventID != publication.EventID || event.RunID != run.RunID || event.EventName != "notice.requested" || len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberType != "node" || event.Deliveries[0].SubscriberID != node.Key() || !event.Deliveries[0].Terminal || event.Deliveries[0].Failure == nil {
-		t.Fatal("public input did not reach the exact existing terminal node settlement")
+	if event.EventID != publication.EventID || event.RunID != run.RunID || event.EventName != "notice.requested" || len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberType != "node" || event.Deliveries[0].SubscriberID != node.Key() || event.Deliveries[0].Failure == nil || (key == "down" && (!event.Deliveries[0].RetryScheduled || event.Deliveries[0].Terminal)) || (key != "down" && !event.Deliveries[0].Terminal) {
+		t.Fatal("public input did not reach the exact existing node settlement")
 	}
 	issue3011NoActivity(t, endpoint, run.RunID, record, key+"_activity_requests")
 	return event
@@ -297,7 +356,7 @@ func issue3011NoActivity(t *testing.T, endpoint, run string, record map[string]a
 
 func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer) channelonboarding.Operation {
 	t.Helper()
-	qr := make(chan channelonboarding.Result, 1)
+	var paired sync.Once
 	factory := func(ctx context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
 		session, err := OpenChannelRegistration(ctx, options)
 		if err != nil {
@@ -305,47 +364,18 @@ func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serv
 		}
 		return firstConnectPairingObserver{ChannelRegistrationSession: session, principal: options.Principal, observe: func(result channelonboarding.Result, _ bool) {
 			if result.Pairing != nil && result.Pairing.Code != "" {
-				select {
-				case qr <- result:
-				default:
+				if !result.Operation.DeploymentRegistration || result.Operation.AccountConfirmed {
+					t.Fatal("not a fresh deployment pairing")
 				}
+				paired.Do(func() { peer.pair(result.Pairing.Code) })
 			}
 		}}, nil
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	out, errOut := &lockedBuffer{}, &lockedBuffer{}
-	done := make(chan int, 1)
-	joined := false
-	defer func() {
-		cancel()
-		if !joined {
-			<-done
-		}
-	}()
-	go func() {
-		done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, out, errOut, nil, nil, factory)
-	}()
-	select {
-	case result := <-qr:
-		if !result.Operation.DeploymentRegistration || result.Operation.AccountConfirmed {
-			t.Fatal("not a fresh deployment pairing")
-		}
-		peer.pair(result.Pairing.Code)
-	case code := <-done:
-		joined = true
-		t.Fatalf("registration exited before pairing: %d %s", code, errOut.String())
-	case <-ctx.Done():
-		t.Fatal("registration pairing timeout")
-	}
-	select {
-	case code := <-done:
-		joined = true
-		if code != 0 {
-			t.Fatalf("registration failed: %d %s", code, errOut.String())
-		}
-	case <-ctx.Done():
-		t.Fatal("registration completion timeout")
+	var out, errOut bytes.Buffer
+	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, &out, &errOut, nil, nil, factory); code != 0 {
+		t.Fatalf("registration failed: %d %s", code, errOut.String())
 	}
 	var outList, errList bytes.Buffer
 	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &outList, &errList, nil, nil, factory); code != 0 {

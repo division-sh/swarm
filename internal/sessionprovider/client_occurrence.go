@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -45,6 +46,8 @@ type clientOccurrence struct {
 	connectOnce    sync.Once
 	loginReconnect bool
 	revoked        *events.LoggedOut
+
+	transientDisconnect bool
 }
 
 func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
@@ -82,6 +85,11 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		case *events.Connected:
 			o.connectOnce.Do(func() { close(o.connected) })
 		case *events.Disconnected:
+			o.mu.Lock()
+			if !o.fenced {
+				o.transientDisconnect = true
+			}
+			o.mu.Unlock()
 			reason, observedDisconnect = "network unreachable", true
 		case *events.LoggedOut:
 			if observed != nil && observed.Reason.IsLoggedOut() {
@@ -377,6 +385,9 @@ func (o *clientOccurrence) fence() {
 
 func (o *clientOccurrence) fenceAfterDisconnect(observed bool, reason string) {
 	o.mu.Lock()
+	if !observed {
+		o.transientDisconnect = false
+	}
 	// Generic cleanup/disconnect cannot erase a more specific SDK event.
 	if reason != "" && (o.failureReason == "" || !observed) {
 		o.failureReason = reason
@@ -404,6 +415,16 @@ func (o *clientOccurrence) fenceAfterDisconnect(observed bool, reason string) {
 			close(o.stopDone)
 		}()
 	})
+}
+
+func (o *clientOccurrence) transientAdmissionRefusal(err error) bool {
+	if _, typed := failures.As(err); typed || !failures.OnlyBranches(err, func(branch error) bool { return branch == errClientOccurrenceFenced }) {
+		return false
+	}
+	o.mu.Lock()
+	transient, callbacks := o.transientDisconnect && o.fenced && !o.logoutReserved && o.revoked == nil, o.callbacks
+	o.mu.Unlock()
+	return transient && (callbacks == nil || callbacks.currentFailure() == nil)
 }
 
 // A successful join does not close the provider database or release possession.

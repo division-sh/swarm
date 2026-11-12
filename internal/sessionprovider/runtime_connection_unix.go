@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	effects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sessionprovider/execution"
@@ -454,6 +455,19 @@ func (c *RuntimeConnection) AdmitSessionAccount(ctx context.Context, expected op
 		return authority.Admission{}, err
 	}
 	return owner.AdmitSessionAccount(ctx, expected)
+}
+
+// Only pre-activity admission can retry a positively observed transport refusal.
+func (c *RuntimeConnection) AdmitActivityAccount(ctx context.Context, expected operatorchannel.SessionAccountAdmission) (authority.Admission, error) {
+	admission, err := c.AdmitSessionAccount(ctx, expected)
+	if err == nil || ctx == nil || ctx.Err() != nil || c == nil || c.ctx == nil || c.ctx.Err() != nil || c.state == nil {
+		return admission, err
+	}
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil || !occurrence.transientAdmissionRefusal(err) {
+		return admission, err
+	}
+	return authority.Admission{}, failures.Wrap(failures.ClassDependencyUnavailable, "dependency_unavailable", "whatsapp", "admit_activity", nil, err)
 }
 
 func (c *RuntimeConnection) ChannelExecution(ctx context.Context) (execution.Channel, error) {

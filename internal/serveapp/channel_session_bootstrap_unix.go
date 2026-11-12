@@ -641,11 +641,11 @@ func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account
 	if selected == nil {
 		return authority.Admission{}, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
 	}
-	connection, err := selected.current(ctx)
+	connection, err := selected.finishedConnection(ctx)
 	if err != nil {
 		return authority.Admission{}, err
 	}
-	return connection.AdmitSessionAccount(ctx, account)
+	return connection.AdmitActivityAccount(ctx, account)
 }
 
 func (s *serveSessionBootstrap) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
