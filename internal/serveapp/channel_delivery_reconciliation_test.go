@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
@@ -31,8 +32,8 @@ func (s *channelWorkerControlStore) CurrentChannelCardChangeCursor(context.Conte
 	return 0, false, nil
 }
 
-func (s *channelWorkerControlStore) CurrentChannelDeliveryActivationID(context.Context) (string, bool, error) {
-	return "", false, nil
+func (s *channelWorkerControlStore) CurrentChannelDeliveryParent(context.Context) (channelnative.TransportParent, bool, error) {
+	return channelnative.TransportParent{}, false, nil
 }
 
 func (s *channelWorkerControlStore) ListPendingChannelTexts(context.Context, string, int) ([]render.PendingText, error) {
