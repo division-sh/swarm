@@ -434,7 +434,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 		requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{
 			"run_id": notice.RunID, "idempotency_key": "uncertainty-summary-pause",
 		})
-		h.registration = connectDeploymentChannelFixtureOperator(t, h, token, 1001, 7000, "private")
+		h.registration = connectDeploymentChannelFixtureOperator(t, h, token, 901109, 1001, 7000, "private")
 	}
 	if !h.registration.DeploymentRegistration {
 		runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
