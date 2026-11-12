@@ -636,7 +636,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 }
 
 func TestRegisteredStandingAdmissionWithdrawsOnlyCompletedLogout(t *testing.T) {
-	catalog, source := runtimeAdmissionTestCatalog(t, "registered-logout", t.TempDir())
+	catalog, source := runtimeAdmissionTestCatalog(t, "registered-logout", "registered-logout")
 	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
 	if err != nil || len(declarations) != 1 || len(declarations[0].Ingress) != 1 {
 		t.Fatalf("captured credential declaration: %+v, %v", declarations, err)
