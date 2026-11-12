@@ -95,6 +95,7 @@ func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
 					})
 					request := sessionReservation(t, f, time.Now().UTC())
 					request.Provider, request.DeploymentRegistration = provider, true
+					request.Interface.ChannelPackID = "provider." + provider + ".hitl_channel"
 					request.Coordinate, request.TargetSelector = domain.ChannelRuntimeContextCoordinate{}, ""
 					request.Ceremony = domain.CeremonyAccountLink
 					if !matched.Session() {
