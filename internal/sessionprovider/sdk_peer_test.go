@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ type sdkPeer struct {
 	paired   bool
 	ready    chan *sdkPeerSocket
 	devices  map[types.JID]uint16
+	dropPing atomic.Bool
 }
 
 type sdkPeerSocket struct {
@@ -156,6 +158,9 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 				p.fail(err)
 			}
 			return // Test-owned disconnects deliberately interrupt pending effects.
+		}
+		if node.Tag == "iq" && node.AttrGetter().OptionalString("xmlns") == "w:p" && p.dropPing.Load() {
+			continue
 		}
 		if node.Tag == "message" || node.Tag == "iq" && node.AttrGetter().OptionalString("xmlns") == "md" {
 			select {

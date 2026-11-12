@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider/execution"
 	"github.com/division-sh/swarm/internal/sessionprovider/internal/executionfact"
 	"github.com/google/uuid"
+	"go.mau.fi/whatsmeow/types"
 )
 
 var errRuntimeConnection = errors.New("WhatsApp connection requires its retained operation and live runtime source")
@@ -492,6 +493,41 @@ func (c *RuntimeConnection) ChannelExecution(ctx context.Context) (execution.Cha
 	}
 	defer admitted.Close()
 	return executionfact.SealOwnedChannel(c.operation.OperationID, c), nil
+}
+
+func (c *RuntimeConnection) SessionDiagnostic(ctx context.Context) (fact SessionDiagnostic, account string, err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return fact, "", err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	op, err := c.currentOperation(work.Context())
+	if err != nil {
+		return fact, "", err
+	}
+	if occurrence := c.state.currentOccurrence(); occurrence != nil {
+		fact = occurrence.diagnosticSnapshot()
+		if fact.ConnectionID != op.SessionConnectionID || uuid.Validate(fact.OccurrenceID) != nil {
+			return SessionDiagnostic{}, "", errRuntimeConnection
+		}
+		if fact.Down || fact.Socket != "" || fact.Lifecycle != "" {
+			// A captured fact describes its original owner, not a still-present SDK device.
+			jid, parseErr := types.ParseJID(op.SessionAccount.AccountRef)
+			if parseErr != nil || jid.User == "" || jid.Server != types.DefaultUserServer || jid.ToNonAD().String() != op.SessionAccount.AccountRef {
+				return SessionDiagnostic{}, "", errSessionAccount
+			}
+			return fact, "+" + jid.User, errors.Join(context.Cause(work.Context()), context.Cause(c.ctx))
+		}
+	}
+	device, err := c.state.device(work.Context())
+	if err != nil {
+		return fact, "", err
+	}
+	if device.ID == nil || op.SessionAccount.AccountRef != device.ID.ToNonAD().String() {
+		return fact, "", errSessionAccount
+	}
+	account = "+" + device.ID.User
+	return fact, account, nil
 }
 
 func (c *RuntimeConnection) UnclaimedCount(ctx context.Context) (count int64, err error) {
