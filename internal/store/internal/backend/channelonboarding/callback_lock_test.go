@@ -13,6 +13,7 @@ import (
 	"time"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
@@ -707,17 +708,23 @@ type callbackSelectedOwners struct {
 	callbackIdentityStore
 }
 type callbackLockFixture struct {
-	ctx       context.Context
-	selected  callbackSelected
-	run       func(context.Context, func(context.Context, *sql.Tx) error) error
-	settle    func(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
-	postgres  bool
-	principal string
-	probe     *callbackLockProbe
-	logout    *logoutProcessFixture
+	ctx        context.Context
+	selected   callbackSelected
+	deployment domain.OperationStore
+	run        func(context.Context, func(context.Context, *sql.Tx) error) error
+	settle     func(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+	postgres   bool
+	principal  string
+	probe      *callbackLockProbe
+	logout     *logoutProcessFixture
 }
 
 func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
+	t.Helper()
+	return newCallbackLockFixtureWithFacts(t, backend, channelprovider.Lookup)
+}
+
+func newCallbackLockFixtureWithFacts(t *testing.T, backend string, providerFacts func(string) (channelprovider.Binding, bool)) callbackLockFixture {
 	t.Helper()
 	var original *sql.DB
 	var dsn string
@@ -746,7 +753,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		bootstrapCallbackSchema(t, schema)
-		onboarding, err := onboardingowner.NewPostgres(b, schema.RequireCurrent)
+		onboarding, err := onboardingowner.NewPostgres(b, schema.RequireCurrent, providerFacts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -755,6 +762,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		f.selected, f.run, f.settle = callbackSelectedOwners{onboarding, identity}, b.RunTransaction, identity.SettleInboundClaimTx
+		f.deployment = onboarding.DeploymentOperations()
 	} else {
 		b, err := sqlitebackend.New(db)
 		if err != nil {
@@ -765,7 +773,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		bootstrapCallbackSchema(t, schema)
-		onboarding, err := onboardingowner.NewSQLite(b, schema.RequireCurrent)
+		onboarding, err := onboardingowner.NewSQLite(b, schema.RequireCurrent, providerFacts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -774,6 +782,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		f.selected, f.settle = callbackSelectedOwners{onboarding, identity}, identity.SettleInboundClaimTx
+		f.deployment = onboarding.DeploymentOperations()
 		f.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 			return b.RunTransaction(ctx, "callback publication proof", fn)
 		}

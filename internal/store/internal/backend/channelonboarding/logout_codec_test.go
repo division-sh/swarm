@@ -7,11 +7,18 @@ import (
 	"testing"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 )
+
+type logoutCodecProviderFacts struct{ binding channelprovider.Binding }
+
+func (f logoutCodecProviderFacts) providerFact(provider string) channelprovider.Binding {
+	return exactProviderFact(provider, f.binding, true)
+}
 
 func logoutCodecFixture(t *testing.T, d dialect) domain.SessionLogoutTarget {
 	t.Helper()
@@ -42,8 +49,9 @@ func TestLogoutTargetCodecRejectsMissingOrContradictoryOriginalStamp(t *testing.
 		}
 		t.Run(name, func(t *testing.T) {
 			target := logoutCodecFixture(t, d)
+			binding, _ := channelprovider.Lookup(target.Account.Provider)
 			decode := func(raw []byte) (*domain.SessionLogoutTarget, error) {
-				return decodeLogoutTarget(domain.TeardownLogout, sql.NullString{String: target.Account.ConnectionID, Valid: true}, sql.NullString{String: string(raw), Valid: true}, d)
+				return decodeLogoutTarget(logoutCodecProviderFacts{binding}, domain.TeardownLogout, sql.NullString{String: target.Account.ConnectionID, Valid: true}, sql.NullString{String: string(raw), Valid: true}, d)
 			}
 			raw, err := json.Marshal(target)
 			if err != nil {

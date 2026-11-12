@@ -15,7 +15,7 @@ import (
 // logoutEffectAuthorityCurrent consumes the existing strict teardown codec.
 // Retired business admission cannot authorize a message, but the frozen logout
 // responsibility can still admit its one original unlink.
-func logoutEffectAuthorityCurrent(ctx context.Context, owner runner, q interface {
+func logoutEffectAuthorityCurrent(ctx context.Context, owner providerFactReader, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, a effects.Authority, postgres, lock bool) (bool, error) {
@@ -32,17 +32,17 @@ func logoutEffectAuthorityCurrent(ctx context.Context, owner runner, q interface
 			return false, err
 		}
 	}
-	op, found, err := loadTeardown(ctx, q, d, a.ChannelLogout.TeardownID, lock)
+	op, found, err := loadTeardown(owner, ctx, q, d, a.ChannelLogout.TeardownID, lock)
 	if err != nil || !found {
 		return false, err
 	}
-	if !logoutEffectMatches(op, a) || op.Phase != domain.TeardownAuthorityRetired || op.Revision != a.ChannelLogout.TeardownRevision {
+	if !logoutEffectMatches(owner, op, a) || op.Phase != domain.TeardownAuthorityRetired || op.Revision != a.ChannelLogout.TeardownRevision {
 		return false, nil
 	}
 	if current, err := generationauthority.ProcessAuthorityCurrent(ctx, q, op.Logout.ProcessStamp, !postgres, lock); err != nil || !current {
 		return false, err
 	}
-	retained, found, err := loadOperation(ctx, q, d, op.Logout.OperationID, false)
+	retained, found, err := loadOperation(owner, ctx, q, d, op.Logout.OperationID, false)
 	if err != nil || !found {
 		return false, err
 	}
@@ -71,8 +71,8 @@ func logoutDialect(postgres bool) dialect {
 	return dialectSQLite
 }
 
-func logoutEffectMatches(op domain.TeardownOperation, a effects.Authority) bool {
-	if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.Validate() != nil {
+func logoutEffectMatches(nativeOwner providerFactReader, op domain.TeardownOperation, a effects.Authority) bool {
+	if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.ValidateWithFacts(nativeOwner.providerFact(op.Logout.Account.Provider)) != nil {
 		return false
 	}
 	raw, err := json.Marshal(op.Logout)
@@ -86,17 +86,17 @@ func logoutEffectMatches(op domain.TeardownOperation, a effects.Authority) bool 
 // settleLogoutEffectTx is called only inside the existing effect settlement
 // transaction, after exact journal evidence has been checked. Ordinary teardown
 // completion intentionally cannot project this result.
-func settleLogoutEffectTx(ctx context.Context, owner runner, tx *sql.Tx, s effects.Settlement, postgres bool) (bool, error) {
+func settleLogoutEffectTx(ctx context.Context, owner providerFactReader, tx *sql.Tx, s effects.Settlement, postgres bool) (bool, error) {
 	if !s.Authority.Valid() || s.Authority.Kind != effects.AuthorityChannelLogout ||
 		s.OperationID != s.Authority.ChannelLogout.EffectOperationID || s.Now.IsZero() {
 		return false, fmt.Errorf("%w: invalid logout effect settlement", domain.ErrConflict)
 	}
 	d := logoutDialect(postgres)
-	op, found, err := loadTeardown(ctx, tx, d, s.Authority.ChannelLogout.TeardownID, true)
+	op, found, err := loadTeardown(owner, ctx, tx, d, s.Authority.ChannelLogout.TeardownID, true)
 	if err != nil {
 		return false, err
 	}
-	if !found || !logoutEffectMatches(op, s.Authority) {
+	if !found || !logoutEffectMatches(owner, op, s.Authority) {
 		return false, domain.ErrConflict
 	}
 	phase, code, message, err := logoutEffectResult(s)

@@ -25,8 +25,13 @@ type SessionLogoutPreparation struct {
 }
 
 func (t SessionLogoutPreparation) Validate() error {
+	binding, _ := channelprovider.Lookup(t.Account.Provider)
+	return t.ValidateWithFacts(binding)
+}
+
+func (t SessionLogoutPreparation) ValidateWithFacts(binding channelprovider.Binding) error {
 	if uuid.Validate(t.OperationID) != nil || uuid.Validate(t.OccurrenceID) != nil || t.OperationRevision < 1 || strings.TrimSpace(t.TargetSelector) == "" ||
-		!channelprovider.Session(t.Account.Provider) || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil ||
+		!binding.MatchesProvider(t.Account.Provider) || !binding.Session() || t.Account.Validate() != nil || t.Coordinate.ValidateContext() != nil ||
 		t.ProcessBinding.Validate() != nil || t.ProcessBinding.BundleHash != t.Coordinate.BundleHash ||
 		t.ProcessBinding.RuntimeInstanceID != t.Coordinate.RuntimeInstanceID {
 		return fmt.Errorf("%w: logout requires exact paired session, operation revision, source and SDK occurrence", ErrInvalidRequest)
@@ -35,7 +40,12 @@ func (t SessionLogoutPreparation) Validate() error {
 }
 
 func (t SessionLogoutPreparation) MatchesOperation(op Operation) bool {
-	return t.Validate() == nil && op.Posture == ActivationSessionConnection &&
+	binding, _ := channelprovider.Lookup(t.Account.Provider)
+	return t.MatchesOperationWithFacts(op, binding)
+}
+
+func (t SessionLogoutPreparation) MatchesOperationWithFacts(op Operation, binding channelprovider.Binding) bool {
+	return t.ValidateWithFacts(binding) == nil && op.Posture == ActivationSessionConnection &&
 		op.Provider == t.Account.Provider && op.OperationID == t.OperationID && op.Revision == t.OperationRevision &&
 		op.SessionConnectionID == t.Account.ConnectionID && op.SessionAccount == t.Account && op.Coordinate == t.Coordinate && op.TargetSelector == t.TargetSelector
 }
@@ -46,7 +56,12 @@ type SessionLogoutTarget struct {
 }
 
 func (t SessionLogoutTarget) Validate() error {
-	if err := t.SessionLogoutPreparation.Validate(); err != nil {
+	binding, _ := channelprovider.Lookup(t.Account.Provider)
+	return t.ValidateWithFacts(binding)
+}
+
+func (t SessionLogoutTarget) ValidateWithFacts(binding channelprovider.Binding) error {
+	if err := t.SessionLogoutPreparation.ValidateWithFacts(binding); err != nil {
 		return err
 	}
 	if t.ProcessStamp.Validate() != nil || t.ProcessStamp.RuntimeInstanceID != t.Coordinate.RuntimeInstanceID ||
