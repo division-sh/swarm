@@ -1160,10 +1160,13 @@ func requireDeploymentLocaleRevisionRPC(t *testing.T, process *serveRuntimeTestP
 		return map[string]any{"scope": "deployment", "holder": holder, "provider": "telegram", "operation_id": registered.OperationID,
 			"client_language": language, "expected_locale_revision": revision}
 	}
-	for _, invalid := range []any{-1, 1.5, true, "1", 1e30} {
-		response := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", params("fr", invalid))
-		if response.Error == nil || response.Error.Code != -32602 {
-			t.Fatal("served deployment accepted an invalid locale revision", invalid, response.Error)
+	for _, invalid := range []struct {
+		value any
+		code  int
+	}{{-1, -32602}, {1.5, -32602}, {true, -32602}, {"1", -32602}, {1e30, -32600}} {
+		response := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", params("fr", invalid.value))
+		if response.Error == nil || response.Error.Code != invalid.code {
+			t.Fatal("served deployment accepted an invalid locale revision", invalid.value, response.Error)
 		}
 	}
 	var french, english channelonboarding.Result

@@ -169,10 +169,13 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	if locale.Error != nil || deploymentCalls != 1 || lifecycle.retry.ExpectedLocaleRevision != 3 || lifecycle.retry.ClientLanguage != "fr" {
 		t.Fatal("served deployment locale lost its JSON-number revision", locale, lifecycle.retry)
 	}
-	for _, revision := range []string{"-1", "1.5", "true", `"3"`, "1e30"} {
-		invalid := localeRequest(revision)
-		if invalid.Error == nil || invalid.Error.Code != -32602 || deploymentCalls != 1 {
-			t.Fatal("invalid deployment locale revision reached its owner", revision, invalid)
+	for _, test := range []struct {
+		revision string
+		code     int
+	}{{"-1", -32602}, {"1.5", -32602}, {"true", -32602}, {`"3"`, -32602}, {"1e30", -32600}} {
+		invalid := localeRequest(test.revision)
+		if invalid.Error == nil || invalid.Error.Code != test.code || deploymentCalls != 1 {
+			t.Fatal("invalid deployment locale revision reached its owner", test.revision, invalid)
 		}
 	}
 	lifecycle.retryErr = channelonboarding.ErrRevisionConflict
