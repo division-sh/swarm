@@ -128,8 +128,12 @@ func (rt *Runtime) freezeRegisteredStandingCredential(ctx context.Context, candi
 		}
 		return frozen.projection.ValidateCurrentKeys(ctx, existing.credentialKeys)
 	}
+	bindings := maps.Clone(frozen.bindings)
+	if err := rt.withdrawLoggedOutRegisteredStandingCredentials(ctx, bindings, evidence.operation); err != nil {
+		return err
+	}
 	var siblings []string
-	for sibling, binding := range frozen.bindings {
+	for sibling, binding := range bindings {
 		if sibling != selector {
 			siblings = append(siblings, binding.credentialKeys...)
 		}
@@ -137,10 +141,9 @@ func (rt *Runtime) freezeRegisteredStandingCredential(ctx context.Context, candi
 	if err := frozen.projection.ValidateCurrentKeys(ctx, siblings); err != nil {
 		return err
 	}
-	if err := rt.validateStandingSessionBindings(ctx, frozen.bindings, selector); err != nil {
+	if err := rt.validateStandingSessionBindings(ctx, bindings, selector); err != nil {
 		return err
 	}
-	bindings := maps.Clone(frozen.bindings)
 	child := standingBindingCredentials{alias: base.alias, plan: base.plan, enabled: true,
 		operationID: evidence.operation.OperationID, recoveryCommand: evidence.operation.CredentialRecoveryCommand(),
 		admissions: slices.Clone(sealed.admissions), registered: &evidence}
@@ -167,6 +170,42 @@ func (rt *Runtime) freezeRegisteredStandingCredential(ctx context.Context, candi
 		return err
 	}
 	rt.standingCredentialAdmission = &standingCredentialAdmission{declarations: frozen.declarations, bindings: bindings, projection: projection}
+	return nil
+}
+
+// Logout removes operation-owned secrets. Only its exact completed native
+// predecessor may leave the next admission's cloned credential projection.
+func (rt *Runtime) withdrawLoggedOutRegisteredStandingCredentials(ctx context.Context, bindings map[string]standingBindingCredentials, selected channelonboarding.Operation) error {
+	for key, binding := range bindings {
+		if binding.registered == nil {
+			continue
+		}
+		previous := binding.registered.operation
+		if previous.OperationID == selected.OperationID || previous.PrincipalID != selected.PrincipalID ||
+			previous.Provider != selected.Provider || previous.AccountReference != selected.AccountReference {
+			continue
+		}
+		store, ok := rt.Options.ChannelOnboardingStore.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		})
+		if !ok || store.DeploymentChannelOperations() == nil {
+			return channelonboarding.ErrInvalidRequest
+		}
+		retired, err := store.DeploymentChannelOperations().GetChannelOnboarding(ctx, previous.OperationID)
+		if err != nil {
+			return err
+		}
+		if previous.OperationID == "" || previous.Revision <= 0 || !previous.DeploymentRegistration || !previous.AccountConfirmed ||
+			!retired.DeploymentRegistration || !retired.AccountConfirmed || retired.OperationID != previous.OperationID ||
+			retired.PrincipalID != previous.PrincipalID || retired.Provider != previous.Provider || retired.AccountReference != previous.AccountReference ||
+			retired.Interface.Normalized() != previous.Interface.Normalized() || retired.SlotKey != previous.SlotKey ||
+			retired.TargetSelector != previous.TargetSelector || retired.Coordinate.Normalized() != previous.Coordinate.Normalized() ||
+			retired.Posture != previous.Posture || retired.Ceremony != previous.Ceremony || !slices.Equal(retired.CredentialAdmissions, previous.CredentialAdmissions) ||
+			retired.Revision <= previous.Revision || retired.Phase != channelonboarding.PhaseRetired || !retired.LogoutCompleted {
+			return channelonboarding.ErrRevisionConflict
+		}
+		delete(bindings, key)
+	}
 	return nil
 }
 

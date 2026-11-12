@@ -694,7 +694,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal("native setting write did not launch")
 		}
 		h := &channelOnboardingE2EHarness{registration: registered, opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
-		connectDeploymentChannelFixtureOperator(t, h, "bot-token", 1001, 7000, "private", func() {
+		logoutDeploymentChannelFixtureAccount(t, h)
+		h.registration = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 1002, 7002, "private", func() {
 			var out, errOut lockedBuffer
 			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
 				t.Fatalf("read pending successor exit=%d err=%s", code, errOut.String())
@@ -709,7 +710,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				t.Fatalf("deployment successor did not require its own ceremony: %s", out.String())
 			}
 			if writes := provider.CommandWrites(); len(writes) != 0 {
-				t.Fatalf("successor wrote over launched predecessor: %v", writes)
+				t.Fatalf("replacement wrote before delayed predecessor release: %v", writes)
 			}
 			db, err := sql.Open(backend, observerDSN)
 			if err != nil {
@@ -726,28 +727,61 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 			qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
 			if err != nil || qualification.State == channelnative.QualificationQualified {
-				t.Fatalf("launched native setting became usable before settlement: %+v err=%v", qualification, err)
+				t.Fatalf("retired predecessor became usable before settlement: %+v err=%v", qualification, err)
 			}
 			releaseCommandApply()
 		})
 		deadline := time.Now().Add(15 * time.Second)
 		for {
 			writes := provider.CommandWrites()
+			byChat := map[string]int{}
+			for _, write := range writes {
+				scope, _ := write["scope"].(map[string]any)
+				if scope["type"] != "chat" {
+					t.Fatalf("replacement used a non-chat command scope: %v", writes)
+				}
+				byChat[fmt.Sprint(scope["chat_id"])]++
+			}
 			cardDelivered := false
 			for index := 0; ; index++ {
 				delivery := provider.Delivery(index)
 				if delivery == nil {
 					break
 				}
-				cardDelivered = cardDelivered || strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service")
+				if strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service") {
+					if fmt.Sprint(delivery["chat_id"]) != "1002" {
+						t.Fatalf("retired operator received a decision card: %v", delivery)
+					}
+					cardDelivered = true
+				}
 			}
-			if len(writes) == 1 && cardDelivered {
+			// Logout ends the predecessor's authority; the new destination must
+			// qualify its own installation rather than inherit a cumulative write.
+			if len(writes) == 2 && byChat["1001"] == 1 && byChat["1002"] == 1 && cardDelivered {
+				t.Logf("delayed native writes by physical scope: %v; card delivered only to new operator", byChat)
 				break
 			}
 			if time.Now().After(deadline) {
 				t.Fatalf("delayed predecessor did not converge: writes=%v card=%v", writes, cardDelivered)
 			}
 			time.Sleep(20 * time.Millisecond)
+		}
+		db, err := sql.Open(backend, observerDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var evidence []byte
+		if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, h.registration.OperationID).Scan(&evidence); err != nil {
+			t.Fatal(err)
+		}
+		parent, err := channelnative.DecodeTransportParent(evidence)
+		if err != nil || parent.ID != h.registration.OperationID || parent.Revision != h.registration.Revision {
+			t.Fatalf("fresh installation lost its own parent: %+v err=%v", parent, err)
+		}
+		qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
+		if err != nil || qualification.State != channelnative.QualificationQualified {
+			t.Fatalf("fresh installation was not independently qualified: %+v err=%v", qualification, err)
 		}
 		return
 	}

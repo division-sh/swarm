@@ -246,16 +246,16 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 	callback, signing, _ := h.provider.Registration()
 	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, 901109, int64(userID), int64(chatID), chatType, "replacement_operator")
 	if claim.StatusCode != http.StatusOK || len(claim.EventIDs) != 0 || len(claim.EventNames) != 0 {
-		t.Fatalf("deployment rebind claim escaped the deployment receiver: %+v", claim)
+		t.Fatalf("deployment connect claim escaped the deployment receiver: %+v", claim)
 	}
 	select {
 	case code := <-done:
 		joined = true
 		if code != 0 {
-			t.Fatalf("deployment rebind exit=%d out=%s err=%s", code, out.String(), errOut.String())
+			t.Fatalf("deployment connect exit=%d out=%s err=%s", code, out.String(), errOut.String())
 		}
 	case <-ctx.Done():
-		t.Fatalf("deployment rebind did not complete: out=%s err=%s", out.String(), errOut.String())
+		t.Fatalf("deployment connect did not complete: out=%s err=%s", out.String(), errOut.String())
 	}
 	if chatType != "private" && !strings.Contains(out.String(), "Future notices") && !strings.Contains(out.String(), "future notices, decision cards, and their updates") {
 		t.Fatalf("deployment operator claim omitted shared audience disclosure: %s", out.String())
@@ -267,8 +267,9 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil, nil, OpenChannelRegistration)
 	if code != 0 || json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 ||
 		listing.Accounts[0].Binding == nil || listing.Accounts[0].Binding.ConversationRef != fmt.Sprint(chatID) ||
-		!listing.Accounts[0].Operation.DeploymentRegistration {
-		t.Fatalf("deployment rebind lost its current binding: exit=%d out=%s err=%s", code, listed.String(), listErr.String())
+		!listing.Accounts[0].Operation.DeploymentRegistration || !listing.Accounts[0].Operation.AccountConfirmed ||
+		listing.Accounts[0].Operation.Phase != channelonboarding.PhaseSucceeded {
+		t.Fatalf("deployment connect lost its confirmed current binding: exit=%d out=%s err=%s", code, listed.String(), listErr.String())
 	}
 	return listing.Accounts[0].Operation
 }
