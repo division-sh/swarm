@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -108,7 +110,7 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 			)
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
-				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db))
+				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 				postgresStore.acceptCurrentSchemaForTest()
 				owner = postgresStore
 				postgres = true
@@ -857,7 +859,7 @@ func TestFanOutDiagnosticsAndTestQuiescenceUseDurableOwnerOnBothStores(t *testin
 			)
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
-				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db))
+				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 				postgresStore.acceptCurrentSchemaForTest()
 				owner = postgresStore
 				postgres = true
@@ -1117,10 +1119,10 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				storeBackend := mustPostgresBackend(db)
-				first := newPostgresStoreWithBackend(storeBackend)
+				first := newPostgresStoreWithBackend(storeBackend, channelfixture.Facts)
 				first.acceptCurrentSchemaForTest()
 				firstOwner = first
-				second := newPostgresStoreWithBackend(storeBackend)
+				second := newPostgresStoreWithBackend(storeBackend, channelfixture.Facts)
 				second.acceptCurrentSchemaForTest()
 				registerTestAuthorActivityCatalog(t, second)
 				secondOwner = second
@@ -1129,7 +1131,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.backend.ConstructionHandle()
 				firstOwner = store
-				second := NewSQLiteRuntimeStoreForTest(db)
+				second := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 				second.schema.AcceptCurrentForTest()
 				registerTestAuthorActivityCatalog(t, second)
 				secondOwner = second
@@ -1301,7 +1303,7 @@ func TestFanOutRetryableReleaseHalvesWithoutSemanticProgressOnBothStores(t *test
 			)
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
-				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db))
+				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 				postgresStore.acceptCurrentSchemaForTest()
 				owner = postgresStore
 				postgres = true
@@ -1350,7 +1352,7 @@ func TestFanOutClaimIsScopedToExactAdmittedBundleOnBothStores(t *testing.T) {
 			)
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
-				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db))
+				postgresStore := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 				postgresStore.acceptCurrentSchemaForTest()
 				owner = postgresStore
 				postgres = true
@@ -2226,16 +2228,16 @@ func newFanOutOwnerPairForTest(t *testing.T, backend string) (selectedFanOutOwne
 	if backend == "postgres" {
 		_, db, _ := testutil.StartPostgres(t)
 		storeBackend := mustPostgresBackend(db)
-		first := newPostgresStoreWithBackend(storeBackend)
+		first := newPostgresStoreWithBackend(storeBackend, channelfixture.Facts)
 		first.acceptCurrentSchemaForTest()
-		second := newPostgresStoreWithBackend(storeBackend)
+		second := newPostgresStoreWithBackend(storeBackend, channelfixture.Facts)
 		second.acceptCurrentSchemaForTest()
 		registerTestAuthorActivityCatalog(t, second)
 		return first, second, db, true
 	}
 	first := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	db := first.backend.ConstructionHandle()
-	second := NewSQLiteRuntimeStoreForTest(db)
+	second := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 	second.schema.AcceptCurrentForTest()
 	registerTestAuthorActivityCatalog(t, second)
 	return first, second, db, false

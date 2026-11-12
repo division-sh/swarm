@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -128,7 +130,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		var runtimePG *store.PostgresStore
 		openStore := func() {
 			var openErr error
-			runtimePG, openErr = store.NewPostgresStore(dsn)
+			runtimePG, openErr = store.NewPostgresStore(dsn, channelfixture.Facts)
 			if openErr != nil {
 				t.Fatalf("NewPostgresStore: %v", openErr)
 			}

@@ -72,7 +72,7 @@ func logoutDialect(postgres bool) dialect {
 }
 
 func logoutEffectMatches(nativeOwner providerFactReader, op domain.TeardownOperation, a effects.Authority) bool {
-	if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.ValidateWithFacts(nativeOwner.providerFact(op.Logout.Account.Provider)) != nil {
+	if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.Validate(nativeOwner.providerFact(op.Logout.Account.Provider)) != nil {
 		return false
 	}
 	raw, err := json.Marshal(op.Logout)

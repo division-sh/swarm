@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -17,8 +18,9 @@ import (
 )
 
 type storeAuthorityOptions struct {
-	configPath string
-	storeMode  string
+	channelRegistration ChannelRegistrationFactory
+	configPath          string
+	storeMode           string
 }
 
 type authorityInspectionStore interface {
@@ -27,8 +29,8 @@ type authorityInspectionStore interface {
 	Close() error
 }
 
-func newStoreAuthorityCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
-	opts := storeAuthorityOptions{storeMode: storebackend.ActiveDefaultBackend().String()}
+func newStoreAuthorityCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
+	opts := storeAuthorityOptions{storeMode: storebackend.ActiveDefaultBackend().String(), channelRegistration: rootOpts.channelRegistration}
 	cmd := &cobra.Command{Use: "store", Short: "Inspect the selected-store process lease.", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
@@ -54,7 +56,7 @@ func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath, ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
@@ -73,11 +75,11 @@ func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd
 			return runtimestartupownership.AuthorityInspection{}, fmt.Errorf("inspect selected SQLite store: %w", statErr)
 		}
 	}
-	return InspectSelectedStoreStartup(ctx, selection, cfgResult.Config)
+	return InspectSelectedStoreStartup(ctx, selection, cfgResult.Config, nativeChannelFacts(opts.channelRegistration))
 }
 
-func InspectSelectedStoreStartup(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (_ runtimestartupownership.AuthorityInspection, resultErr error) {
-	selected, err := constructAuthorityInspectionStore(ctx, selection, cfg)
+func InspectSelectedStoreStartup(ctx context.Context, selection storebackend.Selection, cfg *config.Config, facts channelprovider.FactsLookup) (_ runtimestartupownership.AuthorityInspection, resultErr error) {
+	selected, err := constructAuthorityInspectionStore(ctx, selection, cfg, facts)
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
@@ -127,8 +129,8 @@ func LastAdmittedServeLine(inspection runtimestartupownership.AuthorityInspectio
 	return line
 }
 
-func constructAuthorityInspectionStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityInspectionStore, error) {
-	request, err := selectedAuthorityRequest(ctx, selection, cfg)
+func constructAuthorityInspectionStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config, facts channelprovider.FactsLookup) (authorityInspectionStore, error) {
+	request, err := selectedAuthorityRequest(ctx, selection, cfg, facts)
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +155,8 @@ func resolveAuthorityStoreSelection(root InvocationRoot, cmd *cobra.Command, adm
 	return resolveRuntimeStoreSelectionWithDefault(repo, storeMode, storeModeSet, admitted.Config, defaultPath, defaultSource)
 }
 
-func selectedAuthorityRequest(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeselected.AuthorityRequest, error) {
-	request := storeselected.AuthorityRequest{Selection: selection}
+func selectedAuthorityRequest(ctx context.Context, selection storebackend.Selection, cfg *config.Config, facts channelprovider.FactsLookup) (storeselected.AuthorityRequest, error) {
+	request := storeselected.AuthorityRequest{Selection: selection, ProviderFacts: facts}
 	if selection.Backend != storebackend.BackendPostgres {
 		return request, nil
 	}

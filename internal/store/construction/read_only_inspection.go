@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -18,19 +19,19 @@ type ReadOnlyInspection interface {
 	Close() error
 }
 
-func OpenReadOnlyInspection(backend, location string) (ReadOnlyInspection, error) {
+func OpenReadOnlyInspection(backend, location string, facts channelprovider.FactsLookup) (ReadOnlyInspection, error) {
 	if location == "" {
 		return nil, fmt.Errorf("read-only inspection requires the original nonempty location")
 	}
 	switch backend {
 	case "sqlite":
-		selected, err := OpenSQLiteRuntimeReadOnly(location)
+		selected, err := OpenSQLiteRuntimeReadOnly(location, facts)
 		if err != nil {
 			return nil, err
 		}
 		return selected, nil
 	case "postgres":
-		selected, err := OpenPostgresReadOnly(location)
+		selected, err := OpenPostgresReadOnly(location, facts)
 		if err != nil {
 			return nil, err
 		}

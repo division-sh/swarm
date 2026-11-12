@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -26,7 +28,7 @@ func TestB16IndependentPostgresParentStopRetainedGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = otherDB.Close() })
-	other := newPostgresStoreWithBackend(mustPostgresBackend(otherDB))
+	other := newPostgresStoreWithBackend(mustPostgresBackend(otherDB), channelfixture.Facts)
 	other.acceptCurrentSchemaForTest()
 	registerTestAuthorActivityCatalogForContext(t, other, ctx)
 	primary := raw.(*PostgresStore)

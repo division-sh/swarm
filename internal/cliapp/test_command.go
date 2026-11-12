@@ -205,7 +205,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
 		configPath = opts.apiOptions.rootFlags.configPath
 	}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot, ExplicitPath: configPath})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot, ExplicitPath: configPath, ChannelRegistration: opts.apiOptions.channelRegistration})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load runtime config: %w", err))
 	}
@@ -229,7 +229,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load platform pack base: %w", err))
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, sourceRoot, platformSpec, runtimecontracts.WorkflowContractLoadOptions{
-		PlatformPackBase: platformPackBase, AdmitPackInventory: packadmission.AdmitInventory,
+		PlatformPackBase: platformPackBase, AdmitPackInventory: configResult.AdmitPackInventory,
 	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load contract bundle: %w", err))

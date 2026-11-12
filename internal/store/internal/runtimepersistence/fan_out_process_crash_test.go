@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -93,7 +95,7 @@ func openFanOutCrashStore(t *testing.T, backend, location string) authorActivity
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := newSQLiteStoreComposition(schema, b, nil)
+	store, err := newSQLiteStoreComposition(schema, b, nil, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

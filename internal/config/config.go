@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
@@ -242,11 +243,15 @@ func (c *Config) LLMBackendProfile() (llmselection.Profile, error) {
 	return llmselection.ResolveLiveBackend(c.LLM.Backend)
 }
 
-func (c *Config) Validate() error {
-	return c.validate("")
+func (c *Config) Validate(providerFacts ...channelprovider.Binding) error {
+	var facts channelprovider.Binding
+	if len(providerFacts) == 1 {
+		facts = providerFacts[0]
+	}
+	return c.validate("", facts)
 }
 
-func (c *Config) validate(backendOverride string) error {
+func (c *Config) validate(backendOverride string, facts channelprovider.Binding) error {
 	if err := c.validateDecisionCardCadence(); err != nil {
 		return err
 	}
@@ -259,7 +264,7 @@ func (c *Config) validate(backendOverride string) error {
 	if err := c.validatePlatformPacks(); err != nil {
 		return err
 	}
-	if err := c.validateChannels(); err != nil {
+	if err := c.validateChannels(facts); err != nil {
 		return err
 	}
 	if err := llmselection.ValidateModelAliases(c.LLM.Models); err != nil {
@@ -364,12 +369,12 @@ func validatePlatformPackDirs(dirs []string) error {
 	return nil
 }
 
-func (c *Config) validateChannels() error {
+func (c *Config) validateChannels(facts channelprovider.Binding) error {
 	if c == nil {
 		return nil
 	}
 	if c.Channels.HITL != nil {
-		account, err := channelonboarding.CanonicalAccount(c.Channels.HITL.Provider, c.Channels.HITL.Account)
+		account, err := channelonboarding.CanonicalAccount(facts.ForProvider(c.Channels.HITL.Provider), c.Channels.HITL.Account)
 		if err != nil {
 			return fmt.Errorf("channels.hitl: %w", err)
 		}

@@ -148,10 +148,10 @@ Use default 'swarm verify' to observe admission for an explicitly configured dep
 	addToGroup(commandGroupStart,
 		newArchetypeCommand(root),
 		newDoctorCommand(ctx, root, opts),
-		newStoreAuthorityCommand(ctx, root),
-		newWorkspaceCommand(ctx, root),
+		newStoreAuthorityCommand(ctx, root, opts),
+		newWorkspaceCommand(ctx, root, opts),
 		newContextCommand(ctx, opts),
-		newServeCommand(ctx, root, opts.runServe),
+		newServeCommand(ctx, root, opts.runServe, opts.channelRegistration),
 		newVersionCommand(opts),
 	)
 	addToGroup(commandGroupAuthor,
@@ -160,7 +160,7 @@ Use default 'swarm verify' to observe admission for an explicitly configured dep
 		newDescribeCommand(ctx, root, opts),
 		newPacksCommand(ctx, root, opts),
 		newImportPackCommand(root, opts),
-		newSecretsCommand(ctx, root),
+		newSecretsCommand(ctx, root, opts),
 		newConnectionsCommand(ctx, root),
 	)
 	addToGroup(commandGroupOperate,
@@ -270,8 +270,9 @@ func effectiveCommandConfigPath(cmd *cobra.Command, localPath string, localSet b
 	return "", false, nil
 }
 
-func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRunner) *cobra.Command {
+func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRunner, registration ChannelRegistrationFactory) *cobra.Command {
 	opts := DefaultServeOptions()
+	opts.ChannelRegistration = registration
 	cmd := &cobra.Command{
 		Use:     "serve [directory]",
 		Short:   "Start the Swarm runtime (server): engine, API, health, and MCP.",
@@ -307,6 +308,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 				return fmt.Errorf("--shutdown-grace must be a positive duration")
 			}
 			apiListenAddr, mcpListenAddr, mcpSource, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{
+				ChannelRegistration:  registration,
 				APIListenAddr:        opts.APIListenAddr,
 				MCPListenAddr:        opts.MCPListenAddr,
 				APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
@@ -370,6 +372,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 
 func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultVerifyCommandOptions()
+	opts.channelRegistration = rootOpts.channelRegistration
 	cmd := &cobra.Command{
 		Use:     "verify [directory]",
 		Short:   "Validate contract files or compare a run's state with its history.",

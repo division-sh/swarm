@@ -32,7 +32,7 @@ func (s *Service) RollSessionSources(ctx context.Context) error {
 		return err
 	}
 	for _, op := range operations {
-		if op.PrincipalID != principal.ID || op.Phase != PhaseSucceeded || !op.AccountConnection() || op.IdentityOperationID != "" {
+		if op.PrincipalID != principal.ID || op.Phase != PhaseSucceeded || !op.AccountConnection(op.ProviderFacts()) || op.IdentityOperationID != "" {
 			continue
 		}
 		if _, current := catalog.FindDurableSuccessor(op.Provider, op.Interface, op.Coordinate, op.TargetSelector, op.Posture, op.Ceremony); current {

@@ -45,7 +45,7 @@ type Scope struct {
 	RegisteredBusiness     bool `json:",omitempty"`
 }
 
-func (s Scope) Validate() error {
+func (s Scope) Validate(binding channelprovider.Binding) error {
 	if err := s.Session.Validate(); err != nil {
 		return err
 	}
@@ -67,8 +67,7 @@ func (s Scope) Validate() error {
 	default:
 		return fmt.Errorf("WhatsApp capture requires explicit onboarding or business scope")
 	}
-	binding, installed := channelprovider.Lookup(s.Session.Provider)
-	if !installed || binding.CaptureProvenanceKey() == "" || uuid.Validate(s.OnboardingOperation) != nil ||
+	if !binding.MatchesProvider(s.Session.Provider) || binding.CaptureProvenanceKey() == "" || uuid.Validate(s.OnboardingOperation) != nil ||
 		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 || s.OperationRevision < 1 || !s.DeploymentRegistration && s.TargetSelector == "" {
 		return fmt.Errorf("WhatsApp capture requires its exact existing onboarding/principal/source scope")
 	}
@@ -95,14 +94,27 @@ func (s Scope) validateRegistrationScope() error {
 }
 
 type Event struct {
-	Scope        Scope
-	OccurrenceID string
-	Conversation string
-	EventID      string
-	Kind         string
-	Body         []byte
-	ReceivedAt   time.Time
-	Source       Source
+	providerFacts channelprovider.Binding
+	Scope         Scope
+	OccurrenceID  string
+	Conversation  string
+	EventID       string
+	Kind          string
+	Body          []byte
+	ReceivedAt    time.Time
+	Source        Source
+}
+
+func (e Event) WithProviderFacts(facts channelprovider.Binding) Event {
+	e.providerFacts = facts
+	return e
+}
+
+func (e Event) ProviderFacts() channelprovider.Binding {
+	if !e.providerFacts.MatchesProvider(e.Scope.Session.Provider) {
+		return channelprovider.Binding{}
+	}
+	return e.providerFacts
 }
 
 type Source struct {
@@ -113,7 +125,7 @@ type Source struct {
 }
 
 func (e Event) Validate() error {
-	if err := e.Scope.Validate(); err != nil {
+	if err := e.Scope.Validate(e.ProviderFacts()); err != nil {
 		return err
 	}
 	if !e.Source.CatalogGeneration.Valid() || e.Scope.DeploymentRegistration != e.Source.DeploymentRegistration ||
@@ -124,7 +136,7 @@ func (e Event) Validate() error {
 	if e.Scope.Kind == channelonboarding.SessionInputBusiness && e.Source.Coordinate.ValidateContext() != nil {
 		return fmt.Errorf("WhatsApp business capture requires its exact source context")
 	}
-	binding, _ := channelprovider.Lookup(e.Scope.Session.Provider)
+	binding := e.ProviderFacts()
 	if uuid.Validate(e.OccurrenceID) != nil || e.Conversation == "" || e.EventID == "" || !binding.AcceptsCaptureKind(e.Kind) {
 		return fmt.Errorf("WhatsApp capture requires exact occurrence/conversation/event and supported kind")
 	}
@@ -139,7 +151,7 @@ func (e Event) Validate() error {
 }
 
 func (e Event) RequireOriginalScope(current Scope) error {
-	if err := current.Validate(); err != nil {
+	if err := current.Validate(e.ProviderFacts()); err != nil {
 		return err
 	}
 	if e.Scope != current {
@@ -148,7 +160,7 @@ func (e Event) RequireOriginalScope(current Scope) error {
 	return nil
 }
 
-func DecodeCapture(raw, digest []byte) (Event, error) {
+func DecodeCapture(raw, digest []byte, facts channelprovider.Binding) (Event, error) {
 	var event Event
 	if got := sha256.Sum256(raw); !bytes.Equal(got[:], digest) {
 		return event, fmt.Errorf("WhatsApp incoming capture digest mismatch")
@@ -161,6 +173,7 @@ func DecodeCapture(raw, digest []byte) (Event, error) {
 	if err := decoder.Decode(&event); err != nil {
 		return event, err
 	}
+	event = event.WithProviderFacts(facts)
 	return event, event.Validate()
 }
 
@@ -262,7 +275,7 @@ func WithCaptureProvenance(event Event, request runtimeinbound.Request) (runtime
 	if err := json.Unmarshal(metadata, &fields); err != nil || fields == nil {
 		return runtimeinbound.Request{}, fmt.Errorf("WhatsApp publication requires object transport metadata")
 	}
-	binding, _ := channelprovider.Lookup(event.Scope.Session.Provider)
+	binding := event.ProviderFacts()
 	key := binding.CaptureProvenanceKey()
 	if _, exists := fields[key]; exists {
 		return runtimeinbound.Request{}, runtimeinbound.ErrRequestIdentityConflict
@@ -276,7 +289,7 @@ func WithCaptureProvenance(event Event, request runtimeinbound.Request) (runtime
 	return request, err
 }
 
-func PublicationCaptureProvenance(request runtimeinbound.Request) (Event, error) {
+func PublicationCaptureProvenance(request runtimeinbound.Request, binding channelprovider.Binding) (Event, error) {
 	var event Event
 	if _, err := canonicaljson.Decode(request.OriginalTransportMetadata); err != nil {
 		return event, err
@@ -285,9 +298,8 @@ func PublicationCaptureProvenance(request runtimeinbound.Request) (Event, error)
 	if err := json.Unmarshal(request.OriginalTransportMetadata, &fields); err != nil {
 		return event, err
 	}
-	binding, installed := channelprovider.Lookup(request.Provider)
 	raw, ok := fields[binding.CaptureProvenanceKey()]
-	if !installed || !ok {
+	if !binding.MatchesProvider(request.Provider) || !ok {
 		return event, fmt.Errorf("WhatsApp publication has no original capture evidence")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -295,6 +307,7 @@ func PublicationCaptureProvenance(request runtimeinbound.Request) (Event, error)
 	if err := decoder.Decode(&event); err != nil {
 		return event, err
 	}
+	event = event.WithProviderFacts(binding)
 	return event, event.Validate()
 }
 
@@ -328,7 +341,7 @@ func ValidateCapturePublication(event Event, request runtimeinbound.Request) err
 		request.PublicationID != publicationID || request.MarkerEventID != markerID || !request.OriginalReceivedAt.Equal(event.ReceivedAt) {
 		return runtimeinbound.ErrRequestIdentityConflict
 	}
-	original, err := PublicationCaptureProvenance(request)
+	original, err := PublicationCaptureProvenance(request, event.ProviderFacts())
 	if err != nil {
 		return fmt.Errorf("%w: %w", runtimeinbound.ErrRequestIdentityConflict, err)
 	}
@@ -370,7 +383,7 @@ func VerifyHistoricalCapture(event Event, record runtimeinbound.Record) ([]byte,
 	if record.State != "committed" || record.CommittedAt.IsZero() {
 		return nil, ErrCapturePublicationPending
 	}
-	original, err := PublicationCaptureProvenance(record.Request)
+	original, err := PublicationCaptureProvenance(record.Request, event.ProviderFacts())
 	if err != nil {
 		return nil, err
 	}

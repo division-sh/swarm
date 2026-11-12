@@ -8,6 +8,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type swarmWorkflowModule struct {
@@ -20,13 +21,17 @@ func NewSwarmWorkflowModule(RepoRoot, sourceRoot string) (runtimepipeline.Workfl
 	return NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot, nil)
 }
 
-func NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+func NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot string, base *packartifact.PlatformPackInventory, admission ...func(sourceartifact.RootedSource, *packartifact.EffectivePackInventory, runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error)) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 	platformSpecPath, err := EmbeddedPlatformSpecPath()
 	if err != nil {
 		return nil, nil, err
 	}
+	admit := packadmission.AdmitInventory
+	if len(admission) == 1 && admission[0] != nil {
+		admit = admission[0]
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, sourceRoot, platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
-		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
+		PlatformPackBase: base, AdmitPackInventory: admit,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -43,11 +48,11 @@ func NewSwarmWorkflowModuleWithRuntimeConfig(repoRoot, sourceRoot string, cfgRes
 	if err != nil {
 		return nil, nil, err
 	}
-	return NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, base)
+	return NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, base, cfgResult.AdmitPackInventory)
 }
 
 func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePathOptions) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePaths, error) {
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath})
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath, ChannelRegistration: opts.ChannelRegistration})
 	if err != nil {
 		return nil, nil, CLISourcePaths{}, err
 	}
@@ -67,7 +72,7 @@ func loadCLIWorkflowModuleWithRuntimeConfig(repoRoot string, opts CLISourcePathO
 	if err != nil {
 		return nil, nil, CLISourcePaths{}, err
 	}
-	module, bundle, err := NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, base)
+	module, bundle, err := NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, base, cfgResult.AdmitPackInventory)
 	if err != nil {
 		return nil, nil, CLISourcePaths{}, err
 	}

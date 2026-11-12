@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/spf13/cobra"
@@ -138,9 +139,10 @@ type doctorTargetCommandClass struct {
 
 func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions) error {
 	runtimeCfgResult, loadErr := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{
-		RepoRoot:        repo,
-		ExplicitPath:    opts.configPath,
-		BackendOverride: opts.backend,
+		ChannelRegistration: opts.apiOptions.channelRegistration,
+		RepoRoot:            repo,
+		ExplicitPath:        opts.configPath,
+		BackendOverride:     opts.backend,
 	})
 	envReport := doctorTargetEnvReport(doctorSwarmEnvFindings(runtimeCfgResult))
 	configReport := LocalPreflightReport{Owner: unifiedConfigOwner, Mode: "doctor_target"}
@@ -207,7 +209,7 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
-	projectOwner := doctorTargetProjectOwner(ctx, store, selection, runtimeCfg)
+	projectOwner := doctorTargetProjectOwner(ctx, store, selection, runtimeCfg, nativeChannelFacts(opts.apiOptions.channelRegistration))
 	data := resolveDoctorTargetData(repo, opts, localStateProject, runtimeCfg)
 	runtimeIdentity := doctorTargetRuntimeIdentityFact(registryReport)
 	return doctorTargetReport{
@@ -235,7 +237,7 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 	}, nil
 }
 
-func doctorTargetProjectOwner(ctx context.Context, selectedPath doctorTargetPath, selection storebackend.Selection, cfg *config.Config) doctorTargetPendingFact {
+func doctorTargetProjectOwner(ctx context.Context, selectedPath doctorTargetPath, selection storebackend.Selection, cfg *config.Config, facts channelprovider.FactsLookup) doctorTargetPendingFact {
 	if selectedPath.Status == "legacy_conflict" {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store conflicts with a retired path."}
 	}
@@ -248,7 +250,7 @@ func doctorTargetProjectOwner(ctx context.Context, selectedPath doctorTargetPath
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	selected, err := constructAuthorityInspectionStore(inspectCtx, selection, cfg)
+	selected, err := constructAuthorityInspectionStore(inspectCtx, selection, cfg, facts)
 	if err != nil {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
 	}
