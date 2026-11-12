@@ -48,6 +48,8 @@ type clientOccurrence struct {
 	revoked        *events.LoggedOut
 
 	transientDisconnect bool
+
+	diagnostic SessionDiagnostic
 }
 
 func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
@@ -64,7 +66,10 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 	o := &clientOccurrence{connectionID: connectionID, occurrenceID: occurrenceID,
 		ctx: ownedCtx, cancel: cancel, stores: stores,
 		drained: make(chan struct{}), stopDone: make(chan struct{}), connected: make(chan struct{})}
-	client := whatsmeow.NewClient(device, log)
+	if log == nil {
+		log = waLog.Noop
+	}
+	client := whatsmeow.NewClient(device, sdkDiagnosticLog{Logger: log, owner: o})
 	o.client = client
 	client.BackgroundEventCtx = ownedCtx
 	client.EnableAutoReconnect = false
@@ -84,6 +89,12 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		switch observed := event.(type) {
 		case *events.Connected:
 			o.connectOnce.Do(func() { close(o.connected) })
+		case *events.KeepAliveTimeout, *events.KeepAliveRestored:
+			_, timeout := event.(*events.KeepAliveTimeout)
+			o.mu.Lock()
+			o.diagnostic.KeepAliveTimeout = o.diagnostic.KeepAliveTimeout || timeout
+			o.diagnostic.KeepAliveRestored = o.diagnostic.KeepAliveRestored || !timeout
+			o.mu.Unlock()
 		case *events.Disconnected:
 			o.mu.Lock()
 			if !o.fenced {
@@ -129,6 +140,11 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 			reason = "connection must be re-established"
 		}
 		if reason != "" {
+			if _, generic := event.(*events.StreamError); !generic && !observedDisconnect && reason != "connection must be re-established" {
+				o.mu.Lock()
+				o.diagnostic.Lifecycle = reason
+				o.mu.Unlock()
+			}
 			o.fenceAfterDisconnect(observedDisconnect, reason)
 		}
 		// This handler owns lifetime events only, not message capture success.

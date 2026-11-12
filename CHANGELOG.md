@@ -16,6 +16,18 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- A configured WhatsApp HITL/operator link going down prints one normal
+  `ERROR WhatsApp disconnected: <short cause>` line, including registered
+  accounts. Other accounts do not receive this new normal-output line.
+  Only fixed, positively observed causes are reported; otherwise it says
+  `cause unknown`. Existing learned-account journey messages remain. (#3011)
+  `--verbose` adds sanitized socket/lifecycle facts on the error-output sink,
+  without forwarding raw SDK errors, identifiers, message bodies or keys.
+  SDK keepalive timeout/restoration observations are verbose-only, not health
+  changes or evidence of a disconnect cause. This adds no reconnect behavior.
+  Output is written by the existing joined worker, not SDK cleanup callbacks;
+  a blocked writer can therefore hold that worker and its shutdown join.
+
 - Telegram deployment connect names the authenticated bot and supplies a
   prefilled send-code link, confirms the authenticated claimant without another
   yes/no prompt, and prints the operator-ready next commands. A newly committed

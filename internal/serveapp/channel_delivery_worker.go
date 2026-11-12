@@ -532,6 +532,8 @@ type channelDeliveryWorkerOptions struct {
 	cadence runtimechanneldelivery.ReconcileCadence
 	passed  func(runtimechanneldelivery.ReconcilePass)
 	started func(runtimechanneldelivery.Store, func() (runtimechanneldelivery.ReconcileMark, bool))
+
+	diagnostics func(context.Context) error
 }
 
 func (options channelDeliveryWorkerOptions) observePass(ctx context.Context, scope runtimechanneldelivery.ReconcileDemand, start runtimechanneldelivery.ReconcileMark, err error) {
@@ -585,7 +587,11 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 				return
 			}
 			if nativeDue || demand.Includes(runtimechanneldelivery.ReconcileNative) {
-				err := dispatcher.reconcileNativeInboxSettings(workCtx)
+				var diagnosticErr error
+				if options.diagnostics != nil {
+					diagnosticErr = options.diagnostics(workCtx)
+				}
+				err := errors.Join(diagnosticErr, dispatcher.reconcileNativeInboxSettings(workCtx))
 				if err != nil && workCtx.Err() == nil {
 					log.Printf("native inbox setting reconciliation: %v", err)
 				}

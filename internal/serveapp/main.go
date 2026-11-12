@@ -2113,7 +2113,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
-	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted}); err != nil {
+	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose)}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)
 		return 1
 	}

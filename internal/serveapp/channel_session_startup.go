@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -90,4 +91,51 @@ func restoreServeChannelStartup(ctx context.Context, manager *runtime.RuntimeCon
 	}
 	_, bindings, err := identities.Bootstrap(ctx, now)
 	return bindings, err
+}
+
+type serveSessionDiagnostic struct {
+	Operation channelonboarding.Operation
+	Fact      sessionprovider.SessionDiagnostic
+	Account   string
+}
+
+func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelonboarding.AccountReference, out, errOut io.Writer, verbose bool) func(context.Context) error {
+	owner, ok := sessions.(interface {
+		sessionDiagnostics(context.Context) ([]serveSessionDiagnostic, error)
+	})
+	if !ok || hitl == nil && !verbose {
+		return nil
+	}
+	previous := map[[2]string]sessionprovider.SessionDiagnostic{}
+	return func(ctx context.Context) error {
+		items, err := owner.sessionDiagnostics(ctx)
+		if err != nil {
+			return err
+		}
+		next := map[[2]string]sessionprovider.SessionDiagnostic{}
+		for _, item := range items {
+			fact := item.Fact
+			if fact.OccurrenceID == "" {
+				continue
+			}
+			key := [2]string{fact.ConnectionID, fact.OccurrenceID}
+			old := previous[key]
+			next[key] = fact
+			previous[key] = fact // One owner can appear in both learned and registered views.
+			if fact.Down && !old.Down && hitl != nil && hitl.Provider == item.Operation.Provider && hitl.Account == item.Account {
+				fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
+			}
+			if verbose && fact != old && (fact.Down || fact.Socket != "") {
+				fmt.Fprintf(errOut, "ERROR whatsapp occurrence=%s socket=%s errno=%d close_status=%d lifecycle=%q\n", fact.OccurrenceID, fact.Socket, fact.Errno, fact.CloseStatus, fact.Lifecycle)
+			}
+			if verbose && fact.KeepAliveTimeout && !old.KeepAliveTimeout {
+				fmt.Fprintln(errOut, "OBSERVATION WhatsApp: SDK KeepAliveTimeout observed")
+			}
+			if verbose && fact.KeepAliveRestored && !old.KeepAliveRestored {
+				fmt.Fprintln(errOut, "OBSERVATION WhatsApp: SDK KeepAliveRestored observed")
+			}
+		}
+		previous = next
+		return nil
+	}
 }
