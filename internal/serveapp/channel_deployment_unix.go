@@ -69,7 +69,17 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			return deploymentTransportControl(ctx, op, root, config, directory, stores, process, factory, clients, &mu)
 		}
 		runtimeOptions.deployment.registrations = func(ctx context.Context) ([]serveDeploymentRegistration, error) {
-			op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), runtimeOptions.deployment.account)
+			if rootErr != nil {
+				return nil, rootErr
+			}
+			loaded, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: config})
+			if err != nil {
+				return nil, err
+			}
+			if loaded.Config.Channels.HITL == nil {
+				return nil, nil
+			}
+			op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), *loaded.Config.Channels.HITL)
 			if errors.Is(err, channelonboarding.ErrNotFound) {
 				return nil, nil
 			}
