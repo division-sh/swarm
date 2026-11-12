@@ -64,6 +64,7 @@ type serveNativeProtocolPeer struct {
 	nextLogin           *servedNativeLoginGate
 	rejectNextLogin     bool
 	pairSuccessGate     *servedPairSuccessGate
+	closeReason         string
 }
 
 type servedPairSuccessGate struct {
@@ -147,8 +148,15 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 		mu.Lock()
 		owned := append([]*websocket.Conn(nil), sockets...)
 		mu.Unlock()
+		peer.mu.Lock()
+		reason := peer.closeReason
+		peer.mu.Unlock()
 		for _, conn := range owned {
-			_ = conn.CloseNow()
+			if reason == "" {
+				_ = conn.CloseNow()
+			} else {
+				_ = conn.Close(websocket.StatusNormalClosure, reason)
+			}
 		}
 	}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
