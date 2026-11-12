@@ -7,6 +7,42 @@ import (
 	"time"
 )
 
+// Definition is immutable provider data supplied by the executable composition.
+// It grants no registration, identity, storage or execution authority.
+type Definition struct {
+	ID                           string
+	DisplayName                  string
+	Session                      bool
+	Webhook                      bool
+	PollClaims                   bool
+	Credential                   bool
+	SigningCredential            bool
+	CanonicalAccount             func(string) (string, error)
+	ClaimInstructions            func(ClaimPrompt) (string, error)
+	ReadyTeaching                string
+	RegistrationTeaching         string
+	OmitBoundRegistrationReceipt bool
+	NotLinked                    string
+	PairingPrompt                string
+	LanguageHelp                 func(string) string
+	NativeRead                   string
+	NativeWrite                  string
+	CaptureKey                   string
+}
+
+func Define(definition Definition) Binding {
+	return Binding{
+		id: definition.ID, displayName: definition.DisplayName,
+		session: definition.Session, webhook: definition.Webhook, pollClaims: definition.PollClaims,
+		credential: definition.Credential, signingCredential: definition.SigningCredential,
+		canonicalAccount: definition.CanonicalAccount, claimInstructions: definition.ClaimInstructions,
+		readyTeaching: definition.ReadyTeaching, registrationTeaching: definition.RegistrationTeaching,
+		omitBoundRegistrationReceipt: definition.OmitBoundRegistrationReceipt,
+		notLinked:                    definition.NotLinked, pairingPrompt: definition.PairingPrompt, languageHelp: definition.LanguageHelp,
+		nativeRead: definition.NativeRead, nativeWrite: definition.NativeWrite, captureKey: definition.CaptureKey,
+	}
+}
+
 type Binding struct {
 	id                           string
 	displayName                  string

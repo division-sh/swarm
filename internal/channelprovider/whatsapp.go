@@ -8,8 +8,8 @@ import (
 )
 
 var whatsapp = Binding{
-	id: "whatsapp", displayName: "WhatsApp", session: true, canonicalAccount: whatsappAccount,
-	claimInstructions: whatsappClaimInstructions,
+	id: "whatsapp", displayName: "WhatsApp", session: true, canonicalAccount: WhatsAppAccount,
+	claimInstructions: WhatsAppClaimInstructions,
 	nativeRead:        "whatsapp.read_account", nativeWrite: "whatsapp.send_text",
 	captureKey:    "whatsapp_capture",
 	readyTeaching: "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.",
@@ -17,12 +17,12 @@ var whatsapp = Binding{
 	pairingPrompt: "Open WhatsApp > Linked Devices > Link a device, then scan (expires %s):\n%s\n",
 }
 
-func whatsappClaimInstructions(prompt ClaimPrompt) (string, error) {
+func WhatsAppClaimInstructions(prompt ClaimPrompt) (string, error) {
 	account := prompt.Account
 	if account == "" && prompt.Connection != nil {
 		account = prompt.Connection.Account
 	}
-	destination, err := whatsappAccount(account)
+	destination, err := WhatsAppAccount(account)
 	if err != nil || prompt.ExpiresAt.IsZero() {
 		return "", fmt.Errorf("operator code requires its exact WhatsApp destination and expiry")
 	}
@@ -32,7 +32,7 @@ func whatsappClaimInstructions(prompt ClaimPrompt) (string, error) {
 
 var e164Account = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 
-func whatsappAccount(account string) (string, error) {
+func WhatsAppAccount(account string) (string, error) {
 	account = strings.NewReplacer(" ", "", "-", "", "(", "", ")", "", ".", "").Replace(strings.TrimSpace(account))
 	if !e164Account.MatchString(account) {
 		return "", fmt.Errorf("account must be an international E.164 number beginning with +")
