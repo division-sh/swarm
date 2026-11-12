@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
@@ -89,6 +90,14 @@ type ReserveTeardownRequest struct {
 }
 
 func (r ReserveTeardownRequest) Validate() error {
+	var binding channelprovider.Binding
+	if r.Logout != nil {
+		binding, _ = channelprovider.Lookup(r.Logout.Account.Provider)
+	}
+	return r.ValidateWithFacts(binding)
+}
+
+func (r ReserveTeardownRequest) ValidateWithFacts(binding channelprovider.Binding) error {
 	if _, err := uuid.Parse(strings.TrimSpace(r.TeardownID)); err != nil || strings.TrimSpace(r.RequestKeyHash) == "" || strings.TrimSpace(r.RequestHash) == "" || strings.TrimSpace(r.PrincipalID) == "" || !r.Kind.Valid() || r.RequestedAt.IsZero() {
 		return fmt.Errorf("%w: teardown identity, request identity, principal, kind, and time are required", ErrInvalidRequest)
 	}
@@ -115,7 +124,7 @@ func (r ReserveTeardownRequest) Validate() error {
 		if r.ExpectedBindingRevision != 0 || r.ExpectedProofRevision != 0 || r.Logout == nil || r.Scope.BundleHash != "" || r.Scope.ContextPublicationGeneration != 0 {
 			return fmt.Errorf("%w: logout requires one exact session target, not binding or proof revisions", ErrInvalidRequest)
 		}
-		if err := r.Logout.Validate(); err != nil {
+		if err := r.Logout.ValidateWithFacts(binding); err != nil {
 			return err
 		}
 	}

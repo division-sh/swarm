@@ -32,14 +32,14 @@ func recoverUnlaunchedLogout(ctx context.Context, r runner, id string, revision 
 		if err := generationauthority.FenceMutation(txctx, tx, r.dialect() == dialectSQLite); err != nil {
 			return err
 		}
-		op, found, err := loadTeardown(txctx, tx, r.dialect(), id, true)
+		op, found, err := loadTeardown(r, txctx, tx, r.dialect(), id, true)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return domain.ErrNotFound
 		}
-		if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.Validate() != nil {
+		if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.ValidateWithFacts(r.providerFact(op.Logout.Account.Provider)) != nil {
 			return domain.ErrConflict
 		}
 		out = op
@@ -63,7 +63,7 @@ func recoverUnlaunchedLogout(ctx context.Context, r runner, id string, revision 
 		if err := settleLogoutResultTx(txctx, tx, r.dialect(), op, phase, code, message, now); err != nil {
 			return err
 		}
-		out, _, err = loadTeardown(txctx, tx, r.dialect(), id, false)
+		out, _, err = loadTeardown(r, txctx, tx, r.dialect(), id, false)
 		return err
 	})
 	return out, err

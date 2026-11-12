@@ -13,7 +13,7 @@ import (
 
 // requireSessionBusinessInputTx fences the original owners in the publication
 // transaction. It never performs root-store reads or provider I/O under SQL ownership.
-func requireSessionBusinessInputTx(ctx context.Context, owner runner, tx *sql.Tx, postgres bool, input nativeinput.Admission) error {
+func requireSessionBusinessInputTx(ctx context.Context, owner providerFactReader, tx *sql.Tx, postgres bool, input nativeinput.Admission) error {
 	if tx == nil || input.Scope() != domain.SessionInputBusiness || !input.LifetimeCurrent(ctx) {
 		return fmt.Errorf("current owned native business input is required")
 	}
@@ -22,11 +22,11 @@ func requireSessionBusinessInputTx(ctx context.Context, owner runner, tx *sql.Tx
 		d = dialectPostgres
 	}
 	expected := input.Responsibility()
-	op, found, err := loadOperation(ctx, tx, d, expected.OperationID, true, expected.DeploymentRegistration)
+	op, found, err := loadOperation(owner, ctx, tx, d, expected.OperationID, true, expected.DeploymentRegistration)
 	if err != nil {
 		return err
 	}
-	if !found || !expected.MatchesOperation(op) {
+	if !found || !expected.MatchesOperationWithFacts(op, owner.providerFact(op.Provider)) {
 		return domain.ErrRevisionConflict
 	}
 	// Preserve confirmation's parent-before-principal order and the shared
@@ -40,12 +40,12 @@ func requireSessionBusinessInputTx(ctx context.Context, owner runner, tx *sql.Tx
 		}
 		return nil // The enclosing publication transaction fences the exact run/source.
 	}
-	if op.AccountConnection() {
+	if op.AccountConnectionWithFacts(owner.providerFact(op.Provider)) {
 		activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)
 		if err != nil {
 			return err
 		}
-		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountBusiness(op, activation) || !input.LifetimeCurrent(ctx) {
+		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountBusinessWithFacts(op, activation, owner.providerFact(op.Provider)) || !input.LifetimeCurrent(ctx) {
 			return domain.ErrRevisionConflict
 		}
 		return nil
@@ -61,7 +61,7 @@ func requireSessionBusinessInputTx(ctx context.Context, owner runner, tx *sql.Tx
 	if err != nil {
 		return err
 	}
-	if !found || !expected.MatchesBusinessBinding(op, activation, binding, input.BindingRevision()) || !input.LifetimeCurrent(ctx) {
+	if !found || !expected.MatchesBusinessBindingWithFacts(op, activation, binding, input.BindingRevision(), owner.providerFact(op.Provider)) || !input.LifetimeCurrent(ctx) {
 		return domain.ErrRevisionConflict
 	}
 	return nil

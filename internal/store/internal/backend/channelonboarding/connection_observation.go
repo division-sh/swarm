@@ -16,7 +16,7 @@ func (s *PostgresOwner) ReadSessionConnectionForTest(ctx context.Context, operat
 	}
 	var connection string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		op, found, err := loadOperation(ctx, tx, dialectPostgres, operationID, false)
+		op, found, err := loadOperation(s, ctx, tx, dialectPostgres, operationID, false)
 		if err != nil {
 			return err
 		}
@@ -38,7 +38,7 @@ func (s *SQLiteOwner) ReadSessionConnectionForTest(ctx context.Context, operatio
 	}
 	var connection string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		op, found, err := loadOperation(ctx, tx, dialectSQLite, operationID, false)
+		op, found, err := loadOperation(s, ctx, tx, dialectSQLite, operationID, false)
 		if err != nil {
 			return err
 		}

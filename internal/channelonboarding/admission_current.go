@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
@@ -109,6 +110,11 @@ func AdmissionResponsibilityCurrent(ctx context.Context, store Store, expected A
 // The root-store reader and transaction-local admission use the same semantic
 // projection; neither can adopt a newer responsibility from a lookup.
 func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
+	binding, _ := channelprovider.Lookup(op.Provider)
+	return expected.MatchesOperationWithFacts(op, binding)
+}
+
+func (expected AdmissionResponsibility) MatchesOperationWithFacts(op Operation, binding channelprovider.Binding) bool {
 	if expected.DeploymentRegistration != op.DeploymentRegistration {
 		return false
 	}
@@ -122,7 +128,7 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 		return false
 	}
 	if expected.RegisteredBusiness {
-		return expected.matchesRegisteredBusiness(op)
+		return expected.matchesRegisteredBusiness(op, binding)
 	}
 	coordinateCurrent := op.Coordinate.Matches(expected.Coordinate)
 	if op.DeploymentRegistration {
@@ -135,9 +141,9 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 	return expected.OperationID != "" && coordinateCurrent && op.TargetSelector == expected.TargetSelector
 }
 
-func (expected AdmissionResponsibility) matchesRegisteredBusiness(op Operation) bool {
+func (expected AdmissionResponsibility) matchesRegisteredBusiness(op Operation, binding channelprovider.Binding) bool {
 	return expected.DeploymentRegistration && op.AccountConfirmed && !op.LogoutCompleted &&
-		op.ValidateSessionAccount() == nil && op.Coordinate == (ChannelRuntimeContextCoordinate{}) && op.TargetSelector == "" &&
+		op.ValidateSessionAccountWithFacts(binding) == nil && op.Coordinate == (ChannelRuntimeContextCoordinate{}) && op.TargetSelector == "" &&
 		expected.Coordinate.Validate() == nil && expected.TargetSelector != "" && expected.ActivationRevision == 0 &&
 		op.Phase.SupportsAccountBusiness()
 }
@@ -166,9 +172,14 @@ func RetainedConfirmedAccounts(operations []Operation, provider string) []Operat
 }
 
 func (expected AdmissionResponsibility) MatchesActivation(op Operation, activation ConnectedChannelActivation) bool {
-	activeAccount := op.AccountConnection() && op.ActivationRevision > 0 &&
+	binding, _ := channelprovider.Lookup(op.Provider)
+	return expected.MatchesActivationWithFacts(op, activation, binding)
+}
+
+func (expected AdmissionResponsibility) MatchesActivationWithFacts(op Operation, activation ConnectedChannelActivation, binding channelprovider.Binding) bool {
+	activeAccount := op.AccountConnectionWithFacts(binding) && op.ActivationRevision > 0 &&
 		(op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation)
-	return expected.MatchesOperation(op) && expected.ActivationRevision > 0 && (op.Phase.RequiresExecutableTarget(op.Posture) || activeAccount) &&
+	return expected.MatchesOperationWithFacts(op, binding) && expected.ActivationRevision > 0 && (op.Phase.RequiresExecutableTarget(op.Posture) || activeAccount) &&
 		activation.Status == ActivationCurrent && activation.OperationID == expected.OperationID &&
 		activation.Revision == expected.ActivationRevision && activation.OperationRevision == expected.OperationRevision &&
 		activation.Coordinate.Matches(expected.Coordinate) && activation.TargetSelector == expected.TargetSelector &&
@@ -176,7 +187,12 @@ func (expected AdmissionResponsibility) MatchesActivation(op Operation, activati
 }
 
 func (expected AdmissionResponsibility) MatchesBusinessBinding(op Operation, activation ConnectedChannelActivation, binding operatorchannel.Binding, revision int64) bool {
-	return expected.MatchesActivation(op, activation) && revision > 0 && op.BindingRevision == revision && activation.BindingRevision == revision &&
+	facts, _ := channelprovider.Lookup(op.Provider)
+	return expected.MatchesBusinessBindingWithFacts(op, activation, binding, revision, facts)
+}
+
+func (expected AdmissionResponsibility) MatchesBusinessBindingWithFacts(op Operation, activation ConnectedChannelActivation, binding operatorchannel.Binding, revision int64, facts channelprovider.Binding) bool {
+	return expected.MatchesActivationWithFacts(op, activation, facts) && revision > 0 && op.BindingRevision == revision && activation.BindingRevision == revision &&
 		binding.Interface.Key() == op.Interface.Key() && binding.PrincipalID == op.PrincipalID && binding.Status == operatorchannel.BindingCurrent &&
 		binding.Revision == revision && binding.ConversationRef == activation.ConversationRef && binding.ProofID == activation.ProofID &&
 		binding.ProofRevision == activation.ProofRevision && binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession &&
@@ -184,12 +200,22 @@ func (expected AdmissionResponsibility) MatchesBusinessBinding(op Operation, act
 }
 
 func (expected AdmissionResponsibility) MatchesAccountConnection(op Operation, activation ConnectedChannelActivation) bool {
-	return op.AccountConnection() && expected.MatchesActivation(op, activation) && activation.BindingRevision == 0 &&
+	binding, _ := channelprovider.Lookup(op.Provider)
+	return expected.MatchesAccountConnectionWithFacts(op, activation, binding)
+}
+
+func (expected AdmissionResponsibility) MatchesAccountConnectionWithFacts(op Operation, activation ConnectedChannelActivation, binding channelprovider.Binding) bool {
+	return op.AccountConnectionWithFacts(binding) && expected.MatchesActivationWithFacts(op, activation, binding) && activation.BindingRevision == 0 &&
 		activation.ConversationRef == "" && activation.ProofID == "" && activation.ProofRevision == 0
 }
 
 func (expected AdmissionResponsibility) MatchesAccountBusiness(op Operation, activation ConnectedChannelActivation) bool {
-	return op.Phase.SupportsAccountBusiness() && expected.MatchesAccountConnection(op, activation)
+	binding, _ := channelprovider.Lookup(op.Provider)
+	return expected.MatchesAccountBusinessWithFacts(op, activation, binding)
+}
+
+func (expected AdmissionResponsibility) MatchesAccountBusinessWithFacts(op Operation, activation ConnectedChannelActivation, binding channelprovider.Binding) bool {
+	return op.Phase.SupportsAccountBusiness() && expected.MatchesAccountConnectionWithFacts(op, activation, binding)
 }
 
 // ResumeSessionBusiness projects only an existing activation's process-coordinate
