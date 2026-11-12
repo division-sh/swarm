@@ -1677,7 +1677,10 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 1
 	}
 	var deploymentRegistration *runtimepublicingress.ProviderRegistrationController
-	deploymentTransport := &serveDeploymentTransport{}
+	var deploymentTransport *serveDeploymentTransport
+	if cfg.Channels.HITL != nil {
+		deploymentTransport = &serveDeploymentTransport{account: *cfg.Channels.HITL}
+	}
 	deploymentChannels, deploymentClaims, restoreDeploymentChannels, closeDeploymentChannels := deploymentChannelHandlers(repo, cfgResult.Path, swarmDir.Path, stores, processWorkOwner, processCapability, func(ctx context.Context, callback, account string) bool {
 		return deploymentRegistration != nil && deploymentRegistration.OwnsAccountCallback(ctx, callback, account)
 	}, deploymentRuntimeOptions{manager: runtimeContextManager, sessions: sessionBootstrap, refresh: channelActivationRefresher.refreshRegisteredAccount, ingress: ready, deployment: deploymentTransport})

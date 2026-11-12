@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
 
 type ChannelControlCounts struct{ Total, Nonmutating, OriginalRefused int }
@@ -144,13 +145,15 @@ func CountChannelObservedEventsForTest(ctx context.Context, selected any, run, e
 }
 
 func ReadChannelRegistrationIndexForTest(ctx context.Context, selected any) (string, error) {
-	query := `SELECT sql FROM sqlite_master WHERE name='idx_deployment_channel_account'`
+	dialect := schemastore.SchemaDialectSQLite
 	if _, postgres := selected.(*PostgresStore); postgres {
-		query = `SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='idx_deployment_channel_account'`
+		dialect = schemastore.SchemaDialectPostgres
 	}
 	var definition string
 	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, query).Scan(&definition)
+		var err error
+		definition, err = schemastore.DeploymentChannelAccountIndexForTest(ctx, tx, dialect)
+		return err
 	})
 	return definition, err
 }

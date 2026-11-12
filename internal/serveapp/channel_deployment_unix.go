@@ -62,27 +62,41 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 	var mu sync.Mutex
 	clients := map[string]*cliapp.DeploymentChannelControl{}
 	if runtimeOptions.deployment != nil {
-		runtimeOptions.deployment.registrations = func(ctx context.Context) ([]serveDeploymentRegistration, error) {
+		control := func(ctx context.Context, op channelonboarding.Operation) (*cliapp.DeploymentChannelControl, error) {
 			if rootErr != nil {
 				return nil, rootErr
 			}
-			return readDeploymentTransportRegistrations(ctx, root, config, directory, stores, process, factory, clients, &mu)
+			return deploymentTransportControl(ctx, op, root, config, directory, stores, process, factory, clients, &mu)
+		}
+		runtimeOptions.deployment.registrations = func(ctx context.Context) ([]serveDeploymentRegistration, error) {
+			op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), runtimeOptions.deployment.account)
+			if errors.Is(err, channelonboarding.ErrNotFound) {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			client, err := control(ctx, op)
+			if err != nil {
+				return nil, err
+			}
+			result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
+			if errors.Is(err, channelonboarding.ErrNotFound) {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			return []serveDeploymentRegistration{{result: result, plan: plan, trigger: client.DeploymentTrigger()}}, nil
 		}
 		runtimeOptions.deployment.read = func(ctx context.Context, parent channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error) {
 			op, err := stores.DeploymentChannels().GetChannelOnboarding(ctx, parent.ID)
-			if err != nil || rootErr != nil {
-				return channelonboarding.Result{}, packs.OutboundBindingPlan{}, errors.Join(err, rootErr)
+			if err != nil {
+				return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
 			}
-			key := op.Provider + ":" + op.OperationID
-			mu.Lock()
-			client := clients[key]
-			mu.Unlock()
-			if client == nil {
-				client, err = cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
-				if err != nil {
-					return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
-				}
-				defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
+			client, err := control(ctx, op)
+			if err != nil {
+				return channelonboarding.Result{}, packs.OutboundBindingPlan{}, err
 			}
 			return client.DeploymentTransport(ctx, parent)
 		}
@@ -171,61 +185,31 @@ func confirmedDeploymentControlParent(ctx context.Context, stores *selected.Owne
 	return parent, nil
 }
 
-func readDeploymentTransportRegistrations(ctx context.Context, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) ([]serveDeploymentRegistration, error) {
-	var selected []serveDeploymentRegistration
-	for _, provider := range []string{"telegram", "whatsapp"} {
-		client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, provider, stores, process, factory)
-		if err != nil {
-			return nil, err
-		}
-		registration, found, err := readDeploymentTransportRegistration(ctx, provider, client, stores, clients, mu)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			selected = append(selected, registration)
-		}
+func deploymentTransportControl(ctx context.Context, op channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (*cliapp.DeploymentChannelControl, error) {
+	key := op.Provider + ":" + op.OperationID
+	mu.Lock()
+	client := clients[key]
+	mu.Unlock()
+	if client != nil {
+		return client, nil
 	}
-	return selected, nil
-}
-
-func readDeploymentTransportRegistration(ctx context.Context, provider string, client *cliapp.DeploymentChannelControl, stores *selected.Owner, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (serveDeploymentRegistration, bool, error) {
-	var absent serveDeploymentRegistration
-	if account := client.DeploymentOperatorAccount(); provider == "whatsapp" && account.Provider == provider {
-		op, readErr := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
-		if readErr != nil && !errors.Is(readErr, channelonboarding.ErrNotFound) {
-			return absent, false, errors.Join(readErr, client.Close(context.WithoutCancel(ctx)))
-		}
-		if readErr == nil {
-			mu.Lock()
-			owned := clients[provider+":"+op.OperationID]
-			mu.Unlock()
-			if err := client.Close(context.WithoutCancel(ctx)); err != nil {
-				return absent, false, err
-			}
-			if owned == nil {
-				return absent, false, fmt.Errorf("deployment operator connection has no exact restored control")
-			}
-			result, plan, err := owned.DeploymentTransport(ctx, channelnative.TransportParent{})
-			if errors.Is(err, channelonboarding.ErrNotFound) {
-				return absent, false, nil
-			}
-			if err != nil {
-				return absent, false, err
-			}
-			return serveDeploymentRegistration{result: result, plan: plan, trigger: owned.DeploymentTrigger()}, true, nil
-		}
+	if op.Provider == "whatsapp" {
+		return nil, fmt.Errorf("deployment operator connection has no exact restored control")
 	}
-	result, plan, err := client.DeploymentTransport(ctx, channelnative.TransportParent{})
-	trigger := client.DeploymentTrigger()
-	closeErr := client.Close(context.WithoutCancel(ctx))
-	if errors.Is(err, channelonboarding.ErrNotFound) && closeErr == nil {
-		return absent, false, nil
+	client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
+	if err != nil {
+		return nil, err
 	}
-	if err != nil || closeErr != nil {
-		return absent, false, errors.Join(err, closeErr)
+	mu.Lock()
+	owned := clients[key]
+	if owned == nil {
+		clients[key] = client
 	}
-	return serveDeploymentRegistration{result: result, plan: plan, trigger: trigger}, true, nil
+	mu.Unlock()
+	if owned != nil {
+		return owned, client.Close(context.WithoutCancel(ctx))
+	}
+	return client, nil
 }
 
 func deploymentPendingClaimHandler(root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions) publicingress.PendingDeploymentClaim {

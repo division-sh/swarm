@@ -15,6 +15,7 @@ import (
 // This is access to the existing deployment controls, not another connection
 // registry. Each use rechecks the configured account and current parent.
 type serveDeploymentTransport struct {
+	account       channelonboarding.AccountReference
 	read          func(context.Context, channelnative.TransportParent) (channelonboarding.Result, packs.OutboundBindingPlan, error)
 	registrations func(context.Context) ([]serveDeploymentRegistration, error)
 }

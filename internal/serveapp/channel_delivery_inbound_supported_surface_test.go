@@ -651,6 +651,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		connectedOperationID = connected.Operation.OperationID
 	}
 	var preRestartDeliveries int
+	if scenario == "inbox_restart" && deploymentTransport {
+		out, errOut := &lockedBuffer{}, &lockedBuffer{}
+		code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "resume", registered.OperationID,
+			"--yes", "--client-language", "en", "--api-server", endpoint}, out, errOut, nil)
+		if code != 0 {
+			t.Fatalf("served deployment locale declaration exit=%d out=%s err=%s", code, out.String(), errOut.String())
+		}
+	}
 	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(1) == nil {

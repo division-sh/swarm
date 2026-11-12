@@ -17,16 +17,15 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 		for _, presentation := range []string{"cli", "channel"} {
 			for _, cut := range []string{"launched", "settled"} {
 				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
-					h, db, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
+					h, db := prepareChannelAnchorJourney(t, backend, "delivery-crash-token")
 					if presentation == "cli" {
-						runRegisteredCLIProcessRestart(t, h, hash, cut)
+						runRegisteredCLIProcessRestart(t, h, cut)
 						return
 					}
-					waitChannelDeliverySendsSettled(t, db, backend)
-					h.stop(t)
 					t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 					first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 					h.endpoint = first.endpoint(t)
+					hash := channelAnchorBundleHash(t, h.rpcEndpoint())
 					var standingRun string
 					if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&standingRun); err != nil {
 						t.Fatal(err)

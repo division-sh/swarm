@@ -25,17 +25,16 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 			}
 			for _, cut := range cuts {
 				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
-					h, db, hash := startChannelAnchorJourney(t, backend, "ack-crash-token", false)
+					h, db := prepareChannelAnchorJourney(t, backend, "ack-crash-token")
 					observation := openChannelFixtureObservation(t, string(backend), h.storeDSN)
 					if presentation == "cli" {
-						runRegisteredCLIProcessRestart(t, h, hash, cut)
+						runRegisteredCLIProcessRestart(t, h, cut)
 						return
 					}
-					waitChannelDeliverySendsSettled(t, db, backend)
-					h.stop(t)
 					t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 					first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 					h.endpoint = first.endpoint(t)
+					hash := channelAnchorBundleHash(t, h.rpcEndpoint())
 					waitChannelDeliverySendsSettled(t, db, backend)
 					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},

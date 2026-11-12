@@ -359,8 +359,19 @@ func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token
 func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
 	h, hash := startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
+	return h, openChannelAnchorDatabase(t, h), hash
+}
+
+func prepareChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string) (*channelOnboardingE2EHarness, *sql.DB) {
+	t.Helper()
+	h := prepareChannelAnchorPublicJourney(t, backend, token, false, 0, nil)
+	return h, openChannelAnchorDatabase(t, h)
+}
+
+func openChannelAnchorDatabase(t *testing.T, h *channelOnboardingE2EHarness) *sql.DB {
+	t.Helper()
 	driver := "sqlite"
-	if backend == servedparity.BackendExplicitPostgres {
+	if h.backend == servedparity.BackendExplicitPostgres {
 		driver = "postgres"
 	}
 	db, err := sql.Open(driver, h.storeDSN)
@@ -368,10 +379,10 @@ func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Ba
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return h, db, hash
+	return db
 }
 
-func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, string) {
+func prepareChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) *channelOnboardingE2EHarness {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	writeChannelAnchorJourneySource(t, h.opts.SourceRoot, withSummary)
@@ -418,16 +429,28 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	} else {
 		h.registration = registerChannelFixtureAccount(t, h.opts.ConfigPath, token, "420079", h.provider)
 	}
-	h.start(t)
-	t.Cleanup(func() { h.stop(t) })
+	return h
+}
+
+func channelAnchorBundleHash(t *testing.T, endpoint string) string {
+	t.Helper()
 	var identity apiv1.RuntimeIdentityResult
-	requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+	requireServedJSONRPCResult(t, endpoint, "runtime.identity", map[string]any{}, &identity)
 	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("anchor journey requires one admitted source: %+v", identity)
 	}
+	return identity.SourceArtifacts[0].BundleHash
+}
+
+func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, string) {
+	t.Helper()
+	h := prepareChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, configure)
+	h.start(t)
+	t.Cleanup(func() { h.stop(t) })
+	hash := channelAnchorBundleHash(t, h.rpcEndpoint())
 	if withSummary {
 		notice := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-			"event_name": "notice.requested", "bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": seedServedPublicationRun(t, h.runtime),
+			"event_name": "notice.requested", "bundle_hash": hash, "run_id": seedServedPublicationRun(t, h.runtime),
 			"payload": map[string]any{"seed": true}, "idempotency_key": "uncertainty-summary-notice",
 		})
 		onlyPublicChannelNoticeID(t, h.rpcEndpoint(), "")
@@ -439,7 +462,7 @@ func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend,
 	if !h.registration.DeploymentRegistration {
 		runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
 	}
-	return h, identity.SourceArtifacts[0].BundleHash
+	return h, hash
 }
 
 func nestChannelAnchorJourneyHolder(t *testing.T, sourceRoot string, withNotice bool) string {
