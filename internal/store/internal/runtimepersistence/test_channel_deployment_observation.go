@@ -113,6 +113,12 @@ func CountChannelEntryIntentsForTest(ctx context.Context, selected any) (int, er
 }
 
 func CountChannelObservedEventsForTest(ctx context.Context, selected any, run, event string) (int, error) {
+	if err := validateSelectedForkStorageIdentity(run); err != nil {
+		return 0, err
+	}
+	if event == "" {
+		return 0, fmt.Errorf("lifecycle event cardinality requires an exact event name")
+	}
 	var count int
 	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, run, event).Scan(&count)
