@@ -598,12 +598,7 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 	// is launched here; a live explicit request or startup owner must connect it.
 	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, InvocationState: s.invocationState, OperationID: op.OperationID,
 		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming, ProcessBinding: processBinding}
-	var connection *sessionprovider.RuntimeConnection
-	if bootstrap {
-		connection, err = sessionprovider.OpenRuntimeBootstrap(owned, options)
-	} else {
-		connection, err = sessionprovider.OpenRuntimeConnection(owned, options)
-	}
+	connection, err := openWhatsAppRuntimeConnection(owned, options, bootstrap)
 	s.mu.Lock()
 	if connection != nil {
 		attempt.connection = connection
