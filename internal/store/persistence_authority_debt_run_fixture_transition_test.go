@@ -31,6 +31,7 @@ const debtPortableRuntimeRoleCollectorTo = "e48fdea1e811e0b54f246422b22c9b4344a7
 const debtPortableGlobalRoleCollectorTo = "19b3a4ce5b9c7baa7cbb66980ae2b66ab522d5c3d44aedcfcd2e40fa47f2b025"
 const debtPortableAgentFixtureCollectorTo = "90e301f3d5080732c31703c1a9cfa7377cc9175e86e185aec924003858ab93b9"
 const debtW2DeliveryEvidenceCollectorTo = "0f8b0b73cf2634a5d0d3780795bd73a8e059731621746baa1a852402552c251d"
+const debtChannelCrashPreparationCollectorTo = "3acef74e89c4bf99f03cc63649c398e3706fb3b833240ecbfe21b40655dbb041"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -49,6 +50,47 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("channel-crash-preparation-signatures", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := debtChannelCrashPreparationSignatureTransitions()
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+			if pair[0].Kind != pair[1].Kind || pair[0].File != pair[1].File || pair[0].Declaration != pair[1].Declaration ||
+				pair[0].Operation != pair[1].Operation || pair[0].Family != pair[1].Family ||
+				pair[0].Replacement != pair[1].Replacement || pair[0].Multiplicity != 1 || pair[1].Multiplicity != 1 {
+				t.Fatal("channel preparation correspondence changed existing identity, debt or ownership")
+			}
+		}
+		if len(before) != 9 || len(after) != 9 || authorityDebtCount(before) != 9 || authorityDebtCount(after) != 9 {
+			t.Fatal("channel preparation correspondence must retain nine identities and nine occurrences")
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse channel preparation correspondence admitted")
+		}
+		if failures := authorityDebtRatchet(after, after, before, debtControlSet()); len(failures) == 0 {
+			t.Fatal("channel preparation correspondence admitted without its exact source")
+		}
+		for _, pair := range pairs {
+			for _, landed := range []bool{false, true} {
+				name := "predecessor/" + pair[0].Declaration
+				if landed {
+					name = "landed/" + pair[0].Declaration
+				}
+				t.Run(name, func(t *testing.T) { debtRunFixtureSignatureHostileControls(t, pair, before, after, landed) })
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("channel preparation correspondence mutated trusted maps")
+		}
+	})
 	t.Run("w2-delivery-evidence-signatures", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		pairs := debtW2DeliveryEvidenceSignatureTransitions()
@@ -619,6 +661,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			{debtPortableRuntimeRoleCollectorTo, debtPortableGlobalRoleCollectorTo},
 			{debtPortableGlobalRoleCollectorTo, debtPortableAgentFixtureCollectorTo},
 			{debtPortableAgentFixtureCollectorTo, debtW2DeliveryEvidenceCollectorTo},
+			{debtW2DeliveryEvidenceCollectorTo, debtChannelCrashPreparationCollectorTo},
 		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {

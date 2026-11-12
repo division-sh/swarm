@@ -326,6 +326,41 @@ func debtW2DeliveryEvidenceSignatureTransitions() [6][2]authorityDebtSite {
 	return pairs
 }
 
+// #3015/6837884761: nine existing count-one calls keep the original SQL owner.
+// Only their explicit fixture preparation-mode signature and arguments changed.
+func debtChannelCrashPreparationSignatureTransitions() [9][2]authorityDebtSite {
+	const before = "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, token string, withSummary bool) (*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=bool|results=(*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness,*database/sql.DB,string)"
+	const after = "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, token string, withSummary bool, prepareOnly ...bool) (*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=bool|results=(*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness,*database/sql.DB,string)"
+	const prepared = "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, token string, withSummary bool, prepareOnly ...bool) (*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=bool|arg=bool|results=(*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness,*database/sql.DB,string)"
+	const ttlBefore = "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=bool|arg=time.Duration|results=(*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness,*database/sql.DB,string)"
+	const ttlAfter = "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, prepareOnly ...bool) (*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=bool|arg=time.Duration|results=(*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness,*database/sql.DB,string)"
+	const ttlForwarded = "func=func(t *testing.T, backend github.com/division-sh/swarm/internal/servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, prepareOnly ...bool) (*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness, *database/sql.DB, string)|recv=<nil>|arg=*testing.T|arg=github.com/division-sh/swarm/internal/servedparity.Backend|arg=string|arg=bool|arg=time.Duration|arg=[]bool|results=(*github.com/division-sh/swarm/internal/serveapp.channelOnboardingE2EHarness,*database/sql.DB,string)"
+	var pairs [9][2]authorityDebtSite
+	for index, call := range [9]struct {
+		file, declaration, operation, before, after string
+	}{
+		{"channel_ack_process_supported_surface_test.go", "TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney", "startChannelAnchorJourney", before, prepared},
+		{"channel_delivery_anchor_supported_surface_test.go", "startChannelAnchorJourney", "startChannelAnchorJourneyWithDraftTTL", ttlBefore, ttlForwarded},
+		{"channel_delivery_draft_temporal_supported_surface_test.go", "TestChannelDraftTerminalRestartPublicJourney", "startChannelAnchorJourneyWithDraftTTL", ttlBefore, ttlAfter},
+		{"channel_delivery_process_supported_surface_test.go", "TestChannelDeliveryAbruptProcessDeathPublicJourney", "startChannelAnchorJourney", before, prepared},
+		{"channel_delivery_scan_isolation_supported_surface_test.go", "TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates", "startChannelAnchorJourney", before, after},
+		{"channel_delivery_settlement_diagnostic_test.go", "TestChannelDeliverySettlementDiagnosticBothStores", "startChannelAnchorJourney", before, after},
+		{"channel_delivery_temporal_supported_surface_test.go", "TestChannelDeliveryHumanTemporalReceiptPublicJourney", "startChannelAnchorJourney", before, after},
+		{"channel_delivery_uncertain_copy_supported_surface_test.go", "TestChannelDeliveryUncertainCopyAuthorityPublicJourney", "startChannelAnchorJourney", before, after},
+		{"channel_source_lifecycle_supported_surface_test.go", "TestChannelSourceLifecyclePublicJourney", "startChannelAnchorJourney", before, after},
+	} {
+		old := authorityDebtSite{
+			Kind: "raw-operation", File: "internal/serveapp/" + call.file, Declaration: call.declaration,
+			Operation: "call:github.com/division-sh/swarm/internal/serveapp." + call.operation, Resolved: call.before,
+			Family: "channel", Replacement: "selected channel/delivery owner and named channel fault/readback", Multiplicity: 1,
+		}
+		current := old
+		current.Resolved = call.after
+		pairs[index] = [2]authorityDebtSite{old, current}
+	}
+	return pairs
+}
+
 func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	runFixtures, selectedFixtures := debtRunFixtureSignatureTransitions(), debtSelectedFixtureSignatureTransitions()
 	w1Fixtures := debtW1RunObservationSignatureTransitions()
@@ -341,6 +376,8 @@ func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]au
 	pairs = append(pairs, globalFixtures[:]...)
 	w2Evidence := debtW2DeliveryEvidenceSignatureTransitions()
 	pairs = append(pairs, w2Evidence[:]...)
+	channelPreparation := debtChannelCrashPreparationSignatureTransitions()
+	pairs = append(pairs, channelPreparation[:]...)
 	for index, pair := range pairs {
 		old, current := pair[0], pair[1]
 		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
@@ -2488,6 +2525,11 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if base == debtW2DeliveryEvidenceCollectorTo && trusted.Collector == base &&
+		current == debtChannelCrashPreparationCollectorTo && reviewedTransition == current && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #3015/6837884761: nine exact count-one signature successors; baseline sites unchanged.
 	}
 	if base == debtPortableAgentFixtureCollectorTo && trusted.Collector == base &&
 		current == debtW2DeliveryEvidenceCollectorTo && reviewedTransition == current && head.Collector == current &&
