@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
-	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -126,7 +125,6 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 		t.Fatal(err)
 	}
 	priorParent := h.registration.OperationID
-	priorInterface := h.registration.Interface.Key()
 	logoutDeploymentChannelFixtureAccount(t, h)
 	h.registration = connectDeploymentChannelFixtureOperator(t, h, "uncertain-copy-token", 901209, 1002, 7002, "private")
 	parents, confirmed, retired, err := observer.RegistrationCounts(t.Context())
@@ -173,12 +171,11 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 	for {
 		// Independent SHA-256 of ["telegram","420079","901110"], not an
 		// identifier learned from the incoming receipt being checked.
-		intent, found, err := observer.ObserveChannelIntent(t.Context(), render.IntentObservationQuery{Kind: render.IntentText,
-			Provider: "telegram", InterfaceKey: priorInterface, ProviderEventID: "788f337676ac8e8813e269fe48d0dfa5327d81c5893120d287a2f8864e97644b"})
+		rejected, err := observer.RejectedEntryCount(t.Context(), "788f337676ac8e8813e269fe48d0dfa5327d81c5893120d287a2f8864e97644b")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if found && intent.State == "settled" && intent.Disposition == "entry_rejected" {
+		if rejected == 1 {
 			break
 		}
 		if time.Now().After(deadline) {

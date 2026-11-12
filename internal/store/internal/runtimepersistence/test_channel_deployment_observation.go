@@ -112,6 +112,23 @@ func CountChannelEntryIntentsForTest(ctx context.Context, selected any) (int, er
 	return count, err
 }
 
+func CountChannelRejectedEntriesForTest(ctx context.Context, selected any, event string) (int, error) {
+	var count int
+	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id=$1 AND state='settled' AND disposition='entry_rejected'`, event).Scan(&count)
+	})
+	return count, err
+}
+
+func ReadChannelProviderActionForTest(ctx context.Context, selected any, event string) (int, string, string, error) {
+	var count int
+	var state, disposition string
+	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(state),''),COALESCE(MIN(disposition),'') FROM operator_channel_action_intents WHERE provider_event_id=$1`, event).Scan(&count, &state, &disposition)
+	})
+	return count, state, disposition, err
+}
+
 func CountChannelObservedEventsForTest(ctx context.Context, selected any, run, event string) (int, error) {
 	if err := validateSelectedForkStorageIdentity(run); err != nil {
 		return 0, err
