@@ -2,6 +2,7 @@ package pipelinepersistence_test
 
 import (
 	"context"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -21,9 +22,9 @@ func prepareStatementProcess(t testing.TB, location string, postgres bool, reque
 	}
 	var err error
 	if postgres {
-		selected, err = construction.NewPostgres(location)
+		selected, err = construction.NewPostgres(location, channelfixture.Facts)
 	} else {
-		selected, err = construction.NewSQLiteRuntime(location)
+		selected, err = construction.NewSQLiteRuntime(location, channelfixture.Facts)
 	}
 	if err != nil {
 		t.Fatal(err)
