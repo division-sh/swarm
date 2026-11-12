@@ -1177,7 +1177,7 @@ func requireDeploymentLocaleRevisionRPC(t *testing.T, process *serveRuntimeTestP
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", params("en", french.Operation.ClientLocaleRevision), &english)
 	stale := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", params("fr", registered.ClientLocaleRevision))
 	body, err := json.Marshal(stale.Error)
-	if stale.Error == nil || err != nil || !strings.Contains(string(body), apiv1.ChannelBindingConflictCode) {
+	if stale.Error == nil || err != nil || !strings.Contains(string(body), apiv1.ChannelRevisionConflictCode) {
 		t.Fatal("served deployment did not retain the exact stale-locale refusal", stale.Error)
 	}
 	var unchanged channelonboarding.Result
