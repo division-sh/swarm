@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -598,6 +599,7 @@ type SatisfactionPlan struct {
 	trigger           PackIdentity
 	connector         PackIdentity
 	provider          channelPlanIdentity
+	providerFacts     channelprovider.Binding
 	triggerGeneration triggergeneration.Generation
 	schemas           map[string]runtimecontracts.ToolInputSchema
 	opaqueTypes       map[string]runtimecontracts.ToolInputSchema
@@ -743,6 +745,20 @@ func (p SatisfactionPlan) MatchesCapturedHolder(flowPath string) bool {
 
 func (p SatisfactionPlan) Provider() string {
 	return p.provider.String()
+}
+
+// WithProviderFacts carries one executable definition, not an installed lookup.
+// It is not an authored input to this plan's semantic generation.
+func (p SatisfactionPlan) WithProviderFacts(facts channelprovider.Binding) SatisfactionPlan {
+	p.providerFacts = facts
+	return p
+}
+
+func (p SatisfactionPlan) ProviderFacts() channelprovider.Binding {
+	if !p.providerFacts.MatchesProvider(p.Provider()) {
+		return channelprovider.Binding{}
+	}
+	return p.providerFacts
 }
 
 func (p SatisfactionPlan) Capabilities() CompiledChannelCapabilities { return p.capabilities }
