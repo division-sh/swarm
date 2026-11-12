@@ -101,7 +101,17 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 			Target: channelonboarding.CandidateTarget{Selector: "ingress:support/telegram:telegram", FlowPath: "support/telegram", Alias: "telegram", Provider: "telegram", AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog"))},
 		},
 	}}
-	handlers := ChannelOnboardingHandlers(ChannelOnboardingHandlerOptions{Onboarding: lifecycle, Channels: channels})
+	deploymentCalls := 0
+	handlers := ChannelOnboardingHandlers(ChannelOnboardingHandlerOptions{Onboarding: lifecycle, Channels: channels,
+		Deployment: func(ctx context.Context, req Request) (any, error) {
+			deploymentCalls++
+			revision, ok := req.Params["expected_locale_revision"].(int64)
+			if !ok {
+				return nil, fmt.Errorf("locale revision was not normalized")
+			}
+			return lifecycle.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID,
+				ClientLanguage: req.Params["client_language"].(string), ExpectedLocaleRevision: revision})
+		}})
 	for _, method := range []string{"channel.onboarding_select", "channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry"} {
 		if handlers[method] == nil {
 			t.Fatalf("channel onboarding handler %s is missing", method)
@@ -152,6 +162,26 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	if lifecycle.retry.ApproveAccount {
 		t.Fatal("absent account answer became approval")
 	}
+	localeRequest := func(revision string) rpcResponse {
+		return rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"deployment-locale","method":"channel.onboarding_retry","params":{"scope":"deployment","operation_id":%q,"client_language":"fr","expected_locale_revision":%s}}`, operationID, revision))
+	}
+	locale := localeRequest("3")
+	if locale.Error != nil || deploymentCalls != 1 || lifecycle.retry.ExpectedLocaleRevision != 3 || lifecycle.retry.ClientLanguage != "fr" {
+		t.Fatal("served deployment locale lost its JSON-number revision", locale, lifecycle.retry)
+	}
+	for _, revision := range []string{"-1", "1.5", "true", `"3"`, "1e30"} {
+		invalid := localeRequest(revision)
+		if invalid.Error == nil || invalid.Error.Code != -32602 || deploymentCalls != 1 {
+			t.Fatal("invalid deployment locale revision reached its owner", revision, invalid)
+		}
+	}
+	lifecycle.retryErr = channelonboarding.ErrRevisionConflict
+	staleLocale := localeRequest("2")
+	requireOperatorChannelAPIErrorCode(t, staleLocale, ChannelBindingConflictCode)
+	if lifecycle.retry.ExpectedLocaleRevision != 2 || deploymentCalls != 2 {
+		t.Fatal("deployment locale changed its stale revision before owner refusal")
+	}
+	lifecycle.retryErr = nil
 	for _, answer := range []bool{false, true} {
 		response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"answer","method":"channel.onboarding_retry","params":{"operation_id":%q,"approve_account":%t}}`, operationID, answer))
 		if response.Error != nil || lifecycle.retry.ApproveAccount != answer {

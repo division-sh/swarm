@@ -13,6 +13,20 @@ import (
 	"github.com/division-sh/swarm/internal/store/platformschema"
 )
 
+func DeploymentChannelAccountIndexForTest(ctx context.Context, q schemaQueryer, dialect SchemaDialect) (string, error) {
+	query := `SELECT sql FROM sqlite_master WHERE name='idx_deployment_channel_account'`
+	switch dialect {
+	case SchemaDialectSQLite:
+	case SchemaDialectPostgres:
+		query = `SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='idx_deployment_channel_account'`
+	default:
+		return "", fmt.Errorf("unsupported channel account index dialect %q", dialect)
+	}
+	var definition string
+	err := q.QueryRowContext(ctx, query).Scan(&definition)
+	return definition, err
+}
+
 func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) (err error) {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite store is required for schema bootstrap")

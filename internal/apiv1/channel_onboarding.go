@@ -154,12 +154,14 @@ func deploymentChannelRequest(ctx context.Context, req Request, scope any, chann
 			return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "deployment registration has no flow target"})
 		}
 	}
-	if _, exists := req.Params["expected_revision"]; exists {
-		revision, err := channelRevisionParam(req.Params, "expected_revision", false)
-		if err != nil {
-			return nil, err
+	for _, field := range []string{"expected_revision", "expected_locale_revision"} {
+		if _, exists := req.Params[field]; exists {
+			revision, err := channelRevisionParam(req.Params, field, false)
+			if err != nil {
+				return nil, err
+			}
+			req.Params[field] = revision
 		}
-		req.Params["expected_revision"] = revision
 	}
 	result, err := deployment(ctx, req)
 	if err != nil {

@@ -92,12 +92,12 @@ func decideRegisteredAnchorCLI(t *testing.T, h *channelOnboardingE2EHarness, car
 	}
 }
 
-func runRegisteredCLIProcessRestart(t *testing.T, h *channelOnboardingE2EHarness, hash, cut string) {
+func runRegisteredCLIProcessRestart(t *testing.T, h *channelOnboardingE2EHarness, cut string) {
 	t.Helper()
-	h.stop(t)
 	t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 	first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 	h.endpoint = first.endpoint(t)
+	hash := channelAnchorBundleHash(t, h.rpcEndpoint())
 	seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 		"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "cli-crash-seed",
 	})
