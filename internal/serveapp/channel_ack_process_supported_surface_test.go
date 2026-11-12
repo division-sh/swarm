@@ -10,8 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T) {
@@ -24,6 +26,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 			for _, cut := range cuts {
 				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
 					h, db, hash := startChannelAnchorJourney(t, backend, "ack-crash-token", false)
+					observation := openChannelFixtureObservation(t, string(backend), h.storeDSN)
 					if presentation == "cli" {
 						runRegisteredCLIProcessRestart(t, h, hash, cut)
 						return
@@ -77,7 +80,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 						waitChannelAnchorDecision(t, db, card)
 					}
 					if cut == "logout_while_launched" {
-						proveDeploymentLogoutDuringAcknowledgment(t, h, db, first, card, seed.RunID, token, intentQuery, release)
+						proveDeploymentLogoutDuringAcknowledgment(t, h, observation, first, card, seed.RunID, messageID, release)
 						return
 					}
 					operation := waitChannelAcknowledgmentAttempt(t, db, cut)
@@ -121,8 +124,8 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 	}
 }
 
-func proveDeploymentLogoutDuringAcknowledgment(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB,
-	first *channelOnboardingCrashServeProcess, card, runID, token, intentQuery string, release func()) {
+func proveDeploymentLogoutDuringAcknowledgment(t *testing.T, h *channelOnboardingE2EHarness, observation storetest.ChannelObservation,
+	first *channelOnboardingCrashServeProcess, card, runID string, messageID int, release func()) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -154,33 +157,34 @@ func proveDeploymentLogoutDuringAcknowledgment(t *testing.T, h *channelOnboardin
 	release()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var state, disposition string
-		if err := db.QueryRow(intentQuery, token).Scan(&state, &disposition); err != nil {
+		intent, found, err := observation.ObserveChannelIntent(t.Context(), render.IntentObservationQuery{Kind: render.IntentAction,
+			Provider: "telegram", InterfaceKey: h.registration.Interface.Key(), ProviderEventID: channelFixtureProviderEventID(t, fmt.Sprint(976000+messageID))})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if state == "settled" && disposition == "rejected" {
+		if found && intent.State == "settled" && intent.Disposition == "rejected" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("retired parent left action executable: %s/%s", state, disposition)
+			t.Fatalf("retired parent left action executable: %s/%s", intent.State, intent.Disposition)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	assertUnchanged := func() {
 		t.Helper()
-		var state string
-		var decisions int
-		if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, card).Scan(&state); err != nil || state != "pending" {
-			t.Fatalf("retired ACK acquired card authority: %s %v", state, err)
+		state := readRegisteredChannelCard(t, h, card)
+		if state.Status != decisioncard.StatusPending {
+			t.Fatalf("retired ACK acquired card authority: %s", state.Status)
 		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, runID).Scan(&decisions); err != nil || decisions != 0 {
+		decisions, err := observation.EventCardinality(t.Context(), runID, "mailbox.card_decided")
+		if err != nil || decisions != 0 {
 			t.Fatalf("retired ACK emitted a decision: %d %v", decisions, err)
 		}
 		if got := len(h.provider.Acknowledgments()); got != 1 {
 			t.Fatal("retired ACK was retried", got)
 		}
-		var stateDefault string
-		if err := db.QueryRow(`SELECT state FROM channel_delivery_defaults WHERE singleton_id=1`).Scan(&stateDefault); err != nil || stateDefault != "retired" {
+		stateDefault, err := observation.DeliveryDefaultState(t.Context())
+		if err != nil || stateDefault != "retired" {
 			t.Fatalf("logout retained the deployment delivery default: %s %v", stateDefault, err)
 		}
 	}
