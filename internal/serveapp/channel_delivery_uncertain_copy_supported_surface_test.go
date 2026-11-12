@@ -227,6 +227,7 @@ func logoutDeploymentChannelFixtureAccount(t *testing.T, h *channelOnboardingE2E
 
 func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE2EHarness, credential string, chatID, userID int, chatType string, beforeClaim ...func()) channelonboarding.Operation {
 	t.Helper()
+	_, priorConfirmations := h.provider.OnboardingCounts()
 	restore := installChannelOnboardingCLIInput(t, credential+"\n")
 	defer restore()
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
@@ -255,7 +256,9 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 		beforeClaim[0]()
 	}
 	callback, signing, _ := h.provider.Registration()
-	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, 901109, int64(userID), int64(chatID), chatType, "replacement_operator")
+	// A new ceremony is a new provider event, not reuse of the prior claim's
+	// immutable receipt under a different parent and challenge.
+	claim := submitChannelOnboardingClaimWithChatType(t, callback, signing, challenge, 901109+100*priorConfirmations, int64(userID), int64(chatID), chatType, "replacement_operator")
 	if claim.StatusCode != http.StatusOK || len(claim.EventIDs) != 0 || len(claim.EventNames) != 0 {
 		t.Fatalf("deployment connect claim escaped the deployment receiver: %+v", claim)
 	}
