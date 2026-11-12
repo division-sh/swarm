@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -652,12 +653,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	var preRestartDeliveries int
 	if scenario == "inbox_restart" && deploymentTransport {
-		out, errOut := &lockedBuffer{}, &lockedBuffer{}
-		code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "resume", registered.OperationID,
-			"--yes", "--client-language", "en", "--api-server", endpoint}, out, errOut, nil)
-		if code != 0 {
-			t.Fatalf("served deployment locale declaration exit=%d out=%s err=%s", code, out.String(), errOut.String())
-		}
+		requireDeploymentLocaleRevisionRPC(t, process, endpoint+"/v1/rpc", registered)
 	}
 	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {
 		deadline := time.Now().Add(15 * time.Second)
@@ -1149,6 +1145,43 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatalf("%s flow did not answer %q; deliveries=%v acknowledgments=%v edits=%v", scenario, inputText, provider.Delivery(1), provider.Acknowledgments(), provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func requireDeploymentLocaleRevisionRPC(t *testing.T, process *serveRuntimeTestProcess, endpoint string, registered channelonboarding.Operation) {
+	t.Helper()
+	rt := servedTestProcessRuntime(t, process)
+	stamp, found := rt.Options.ProcessWorkOwner.OriginalProcess()
+	if !found {
+		t.Fatal("locale fixture lost the actual serve's original process evidence")
+	}
+	holder := startupownership.AuthorityFromLease(stamp)
+	params := func(language string, revision any) map[string]any {
+		return map[string]any{"scope": "deployment", "holder": holder, "provider": "telegram", "operation_id": registered.OperationID,
+			"client_language": language, "expected_locale_revision": revision}
+	}
+	for _, invalid := range []any{-1, 1.5, true, "1", 1e30} {
+		response := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", params("fr", invalid))
+		if response.Error == nil || response.Error.Code != -32602 {
+			t.Fatal("served deployment accepted an invalid locale revision", invalid, response.Error)
+		}
+	}
+	var french, english channelonboarding.Result
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", params("fr", registered.ClientLocaleRevision), &french)
+	if french.Operation.ClientLanguage != "fr" || french.Operation.ClientLocaleRevision != registered.ClientLocaleRevision+1 || french.Operation.Revision != registered.Revision {
+		t.Fatal("served JSON-number locale update changed its operation or lost its revision", french.Operation)
+	}
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", params("en", french.Operation.ClientLocaleRevision), &english)
+	stale := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", params("fr", registered.ClientLocaleRevision))
+	body, err := json.Marshal(stale.Error)
+	if stale.Error == nil || err != nil || !strings.Contains(string(body), apiv1.ChannelBindingConflictCode) {
+		t.Fatal("served deployment did not retain the exact stale-locale refusal", stale.Error)
+	}
+	var unchanged channelonboarding.Result
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"scope": "deployment", "holder": holder,
+		"provider": "telegram", "operation_id": registered.OperationID}, &unchanged)
+	if unchanged.Operation.ClientLanguage != "en" || unchanged.Operation.ClientLocaleRevision != english.Operation.ClientLocaleRevision || unchanged.Operation.Revision != registered.Revision {
+		t.Fatal("stale locale revision changed current deployment state", unchanged.Operation)
 	}
 }
 
