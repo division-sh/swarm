@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"io"
 	"net/http"
 	"net/url"
@@ -68,7 +69,8 @@ func formatCLIResponseBudget(budget int) string {
 }
 
 type rootCommandOptions struct {
-	apiServer string
+	channelReadbackFact channelprovider.Binding
+	apiServer           string
 	// apiRPCEndpointOverride is for test injection and run-owned connection URLs after
 	// those paths have already resolved their own API endpoint semantics.
 	apiRPCEndpointOverride string
@@ -127,9 +129,9 @@ func (opts rootCommandOptions) swarmDirResolutionOptions() cliSwarmDirOptions {
 
 func (opts rootCommandOptions) unifiedConfigLoadOptions() unifiedConfigLoadOptions {
 	if opts.rootFlags != nil && opts.rootFlags.configPathSet {
-		return unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ExplicitPath: opts.rootFlags.configPath}
+		return unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ExplicitPath: opts.rootFlags.configPath, ChannelRegistration: opts.channelRegistration}
 	}
-	return unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path()}
+	return unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ChannelRegistration: opts.channelRegistration}
 }
 
 func processStdinIsTerminal() bool {
@@ -138,12 +140,14 @@ func processStdinIsTerminal() bool {
 }
 
 type cliAPIClient struct {
-	endpoint   string
-	token      string
-	tokenFile  string
-	configPath string
-	target     cliAPITargetResolution
-	httpClient *http.Client
+	channelRegistration ChannelRegistrationFactory
+	channelReadbackFact channelprovider.Binding
+	endpoint            string
+	token               string
+	tokenFile           string
+	configPath          string
+	target              cliAPITargetResolution
+	httpClient          *http.Client
 }
 
 func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
@@ -155,7 +159,7 @@ func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, tokenFile: settings.tokenFile, configPath: settings.configPath, target: settings.target, httpClient: client}, nil
+	return &cliAPIClient{channelRegistration: opts.channelRegistration, channelReadbackFact: opts.channelReadbackFact, endpoint: settings.rpcEndpoint, token: settings.token, tokenFile: settings.tokenFile, configPath: settings.configPath, target: settings.target, httpClient: client}, nil
 }
 
 type cliAPISettings struct {
@@ -268,6 +272,7 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliCommandConfig, rpcEndpoi
 }
 
 type cliServeListenerAddressOptions struct {
+	ChannelRegistration  ChannelRegistrationFactory
 	APIListenAddr        string
 	MCPListenAddr        string
 	APIListenAddrFlagSet bool
@@ -286,7 +291,7 @@ func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (stri
 	if apiResolved && mcpResolved {
 		return apiAddr, mcpAddr, mcpSource, nil
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.ConfigPath, ChannelRegistration: opts.ChannelRegistration})
 	if err != nil {
 		return "", "", "", err
 	}
@@ -328,7 +333,7 @@ func ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthToke
 	if opts.APITokenFileFlagSet || strings.TrimSpace(opts.APITokenFile) != "" {
 		return resolveServeAPIAuthFromConfig(root, opts, cliCommandConfig{})
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath, ChannelRegistration: opts.ChannelRegistration})
 	if err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
@@ -787,6 +792,7 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 	if err := canonicaljson.DecodeInto(envelope.Result, result); err != nil {
 		return fmt.Errorf("decode JSON-RPC result: %w", err)
 	}
+	bindChannelReadbackFacts(result, c.channelRegistration, c.channelReadbackFact)
 	return nil
 }
 

@@ -88,9 +88,10 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		return runDoctorTargetCommand(repo, cmd, opts)
 	}
 	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{
-		RepoRoot:        repo,
-		ExplicitPath:    opts.configPath,
-		BackendOverride: opts.backend,
+		ChannelRegistration: opts.apiOptions.channelRegistration,
+		RepoRoot:            repo,
+		ExplicitPath:        opts.configPath,
+		BackendOverride:     opts.backend,
 	})
 	envFindings := doctorSwarmEnvFindings(cfgResult)
 	newReport := func() LocalPreflightReport {

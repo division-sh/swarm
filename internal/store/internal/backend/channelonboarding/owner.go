@@ -196,7 +196,7 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 	if err := r.require(); err != nil {
 		return domain.Operation{}, err
 	}
-	if err := req.ValidateWithFacts(r.providerFact(req.Provider)); err != nil {
+	if err := req.Validate(r.providerFact(req.Provider)); err != nil {
 		return domain.Operation{}, err
 	}
 	if req.DeploymentRegistration != r.deployment() {
@@ -405,7 +405,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if req.AccountReference != "" {
 			ref := domain.AccountReference{Provider: op.Provider, Account: req.AccountReference}
 			if !op.DeploymentRegistration || op.Phase != domain.PhaseActivatingProvider || req.Phase != domain.PhaseAwaitingExternalIdentity ||
-				ref.ValidateWithFacts(r.providerFact(op.Provider)) != nil || op.AccountReference != "" && op.AccountReference != ref.Account ||
+				ref.Validate(r.providerFact(op.Provider)) != nil || op.AccountReference != "" && op.AccountReference != ref.Account ||
 				op.ExpectedAccount != "" && op.ExpectedAccount != ref.Account {
 				return domain.ErrConflict
 			}
@@ -460,7 +460,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		completed := op.Phase != domain.PhaseSucceeded && req.Phase == domain.PhaseSucceeded
 		op.Phase, op.Revision, op.UpdatedAt = req.Phase, op.Revision+1, canonicalTime(req.Now)
-		if err := op.ValidateSessionAccountWithFacts(r.providerFact(op.Provider)); err != nil {
+		if err := op.ValidateSessionAccount(r.providerFact(op.Provider)); err != nil {
 			return err
 		}
 		if op.Phase.Terminal() && !wasTerminal {
@@ -508,7 +508,7 @@ func validTransition(nativeOwner providerFactReader, op domain.Operation, req do
 		return true // The source-rollover transaction validates its exact admission.
 	}
 	if req.BeginOperatorEnrollment {
-		return op.Phase == domain.PhaseSucceeded && op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) && op.IdentityOperationID == "" &&
+		return op.Phase == domain.PhaseSucceeded && op.AccountConnection(nativeOwner.providerFact(op.Provider)) && op.IdentityOperationID == "" &&
 			op.ActivationRevision > 0 && req.Phase == domain.PhaseAwaitingExternalIdentity && req.RebindCoordinate == nil
 	}
 	from, to := op.Phase, req.Phase
@@ -602,7 +602,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			return domain.ErrRevisionConflict
 		case op.Phase != domain.PhasePublishingActivation:
 			return domain.ErrConflict
-		case op.AccountConnectionWithFacts(r.providerFact(op.Provider)) != (req.BindingRevision == 0):
+		case op.AccountConnection(r.providerFact(op.Provider)) != (req.BindingRevision == 0):
 			return domain.ErrInvalidRequest
 		}
 		// Keep binding confirmation's parent-before-principal order, then use
@@ -769,7 +769,7 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 	if req.Logout != nil {
 		facts = r.providerFact(req.Logout.Account.Provider)
 	}
-	if err := req.ValidateWithFacts(facts); err != nil {
+	if err := req.Validate(facts); err != nil {
 		return domain.TeardownOperation{}, err
 	}
 	req.Scope = req.Scope.Normalized()
@@ -1039,6 +1039,9 @@ func scanTeardownRow(nativeOwner providerFactReader, row rowScanner, d dialect) 
 	if op.Logout, err = decodeLogoutTarget(nativeOwner, op.Kind, logoutConnection, logoutTarget, d); err != nil {
 		return domain.TeardownOperation{}, false, err
 	}
+	if op.Logout != nil {
+		op = op.WithProviderFacts(nativeOwner.providerFact(op.Logout.Account.Provider))
+	}
 	op.Scope = domain.TeardownScope{
 		Interface:  operatorInterface(interfaceRef.String, packID.String, packVersion.String, manifestHash.String, semanticGeneration.String),
 		BundleHash: bundleHash.String, ContextPublicationGeneration: uint64(publicationGeneration.Int64),
@@ -1147,7 +1150,8 @@ func scanOperationRow(nativeOwner providerFactReader, row rowScanner) (domain.Op
 		return domain.Operation{}, false, err
 	}
 	op.SessionConnectionID = connection.String
-	if err := op.ValidateSessionAccountWithFacts(nativeOwner.providerFact(op.Provider)); err != nil {
+	op = op.WithProviderFacts(nativeOwner.providerFact(op.Provider))
+	if err := op.ValidateSessionAccount(nativeOwner.providerFact(op.Provider)); err != nil {
 		return domain.Operation{}, false, err
 	}
 	op.IdentityOperationID, op.ConfirmationOperationID = identityOp.String, confirmationOp.String
@@ -1167,7 +1171,7 @@ func scanOperationRow(nativeOwner providerFactReader, row rowScanner) (domain.Op
 }
 
 func updateOperation(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
-	if err := op.ValidateSessionAccountWithFacts(nativeOwner.providerFact(op.Provider)); err != nil {
+	if err := op.ValidateSessionAccount(nativeOwner.providerFact(op.Provider)); err != nil {
 		return err
 	}
 	admissions, err := marshalCredentialAdmissions(op.CredentialAdmissions)
@@ -1199,7 +1203,7 @@ func rollSessionSourceTx(nativeOwner providerFactReader, ctx context.Context, tx
 		return domain.ErrInvalidRequest
 	}
 	if !admitted || source.Validate() != nil || source.BundleHash() != coordinate.BundleHash ||
-		op.Phase != domain.PhaseSucceeded || !op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) || op.IdentityOperationID != "" ||
+		op.Phase != domain.PhaseSucceeded || !op.AccountConnection(nativeOwner.providerFact(op.Provider)) || op.IdentityOperationID != "" ||
 		op.Coordinate.BundleHash == coordinate.BundleHash || req.Phase != domain.PhaseAwaitingOperatorConfirmation {
 		return domain.ErrRevisionConflict
 	}
@@ -1222,7 +1226,7 @@ func rollSessionSourceTx(nativeOwner providerFactReader, ctx context.Context, tx
 	expected := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
 		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-	if !found || !expected.MatchesAccountBusinessWithFacts(*op, activation, nativeOwner.providerFact((*op).Provider)) {
+	if !found || !expected.MatchesAccountBusiness(*op, activation, nativeOwner.providerFact((*op).Provider)) {
 		return domain.ErrRevisionConflict
 	}
 	if _, err := tx.ExecContext(ctx, d.bind(`UPDATE connected_channel_activations SET status='retired',

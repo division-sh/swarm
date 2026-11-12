@@ -1,6 +1,8 @@
 package providertriggers
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -152,15 +154,15 @@ func TestAuthenticatedPackProjectionRejectsPostAdmissionMutation(t *testing.T) {
 			if delivery, _, err := plan.ProjectPublication(admitted, bundleHash, "."); err != nil || len(delivery.Events) != 2 {
 				t.Fatalf("exact authenticated positive control: %+v, %v", delivery, err)
 			}
-			first, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof")
+			first, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof", channelfixture.For("telegram"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "456"}, "signed-proof")
+			second, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "456"}, "signed-proof", channelfixture.For("telegram"))
 			if err != nil || first.ProviderEventID() == second.ProviderEventID() {
 				t.Fatalf("bot-local delivery identity crossed accounts: %v", err)
 			}
-			replay, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof")
+			replay, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof", channelfixture.For("telegram"))
 			if err != nil || replay.ProviderEventID() != first.ProviderEventID() {
 				t.Fatalf("account delivery replay changed identity: %v", err)
 			}
@@ -168,13 +170,13 @@ func TestAuthenticatedPackProjectionRejectsPostAdmissionMutation(t *testing.T) {
 			if err != nil || bound.Events[1].Payload["operator_account"] != "123" {
 				t.Fatalf("authenticated account carrier: %+v %v", bound, err)
 			}
-			if _, err := plan.BindReceivingAccount(first, channelonboarding.AccountReference{Provider: "telegram", Account: "456"}, "signed-proof"); err == nil {
+			if _, err := plan.BindReceivingAccount(first, channelonboarding.AccountReference{Provider: "telegram", Account: "456"}, "signed-proof", channelfixture.For("telegram")); err == nil {
 				t.Fatal("an already-bound account was replaced")
 			}
-			if _, err := plan.BindReceivingAccount(AdmittedRequest{}, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof"); err == nil {
+			if _, err := plan.BindReceivingAccount(AdmittedRequest{}, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "signed-proof", channelfixture.For("telegram")); err == nil {
 				t.Fatal("unauthenticated request acquired a receiving account")
 			}
-			if _, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "foreign-key"); err == nil {
+			if _, err := plan.BindReceivingAccount(admitted, channelonboarding.AccountReference{Provider: "telegram", Account: "123"}, "foreign-key", channelfixture.For("telegram")); err == nil {
 				t.Fatal("a foreign registration credential acquired the receiving account")
 			}
 			switch mutation {

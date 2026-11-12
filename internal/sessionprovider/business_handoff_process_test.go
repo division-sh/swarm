@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -182,7 +184,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 				f.source.Coordinate = f.operation.Coordinate
 				acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 				f.state = sessionStateFixture(t, f.basePath, f.operation.SessionAccount.ConnectionID, f.operation.SessionAccount.AccountRef)
-				f.spool, err = newCaptureStore(f.ctx, f.state.database, event.Scope.Session.ConnectionID)
+				f.spool, err = newCaptureStore(f.ctx, f.state.database, event.Scope.Session.ConnectionID, channelfixture.For("whatsapp"))
 				if err != nil {
 					t.Fatal(err)
 				}

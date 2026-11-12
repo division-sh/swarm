@@ -27,7 +27,7 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 		return false, err
 	}
 	if expected.Posture != domain.ActivationSessionConnection || expected.OperationID == "" ||
-		expected.Revision < 1 || !expected.AccountConnectionWithFacts(r.providerFact(expected.Provider)) && expected.BindingRevision < 1 || expected.ValidateSessionAccountWithFacts(r.providerFact(expected.Provider)) != nil {
+		expected.Revision < 1 || !expected.AccountConnection(r.providerFact(expected.Provider)) && expected.BindingRevision < 1 || expected.ValidateSessionAccount(r.providerFact(expected.Provider)) != nil {
 		return false, nil
 	}
 	var current bool
@@ -42,7 +42,7 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 		if err := channeldelivery.LockPrincipalTx(ctx, tx, op.PrincipalID, r.dialect() == dialectPostgres); err != nil {
 			return err
 		}
-		if op.AccountConnectionWithFacts(r.providerFact(op.Provider)) {
+		if op.AccountConnection(r.providerFact(op.Provider)) {
 			current, err = sessionStandingActivationCurrent(r, ctx, tx, r.dialect(), op, operatorchannel.Binding{})
 			return err
 		}
@@ -74,7 +74,7 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 }
 
 func sessionStandingActivationCurrent(nativeOwner providerFactReader, ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, binding operatorchannel.Binding) (bool, error) {
-	activeAccount := op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) && op.ActivationRevision > 0
+	activeAccount := op.AccountConnection(nativeOwner.providerFact(op.Provider)) && op.ActivationRevision > 0
 	if !op.Phase.RequiresExecutableTarget(op.Posture) && !activeAccount || op.Phase == domain.PhasePublishingActivation {
 		return true, nil
 	}
@@ -85,19 +85,19 @@ func sessionStandingActivationCurrent(nativeOwner providerFactReader, ctx contex
 	responsibility := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
 		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-	if op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) {
-		return responsibility.MatchesAccountConnectionWithFacts(op, activation, nativeOwner.providerFact(op.Provider)), nil
+	if op.AccountConnection(nativeOwner.providerFact(op.Provider)) {
+		return responsibility.MatchesAccountConnection(op, activation, nativeOwner.providerFact(op.Provider)), nil
 	}
-	return responsibility.MatchesBusinessBindingWithFacts(op, activation, binding, op.BindingRevision, nativeOwner.providerFact(op.Provider)), nil
+	return responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision, nativeOwner.providerFact(op.Provider)), nil
 }
 
 func sessionStandingOperationMatches(nativeOwner providerFactReader, expected, op domain.Operation) bool {
-	activeAccount := expected.AccountConnectionWithFacts(nativeOwner.providerFact(expected.Provider)) && op.AccountConnectionWithFacts(nativeOwner.providerFact(op.Provider)) && op.ActivationRevision > 0
+	activeAccount := expected.AccountConnection(nativeOwner.providerFact(expected.Provider)) && op.AccountConnection(nativeOwner.providerFact(op.Provider)) && op.ActivationRevision > 0
 	if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired ||
 		op.Phase != domain.PhaseAwaitingOperatorConfirmation && !op.Phase.RequiresExecutableTarget(op.Posture) && !(activeAccount && op.Phase == domain.PhaseAwaitingExternalIdentity) {
 		return false
 	}
-	return op.Posture == domain.ActivationSessionConnection && op.ValidateSessionAccountWithFacts(nativeOwner.providerFact(op.Provider)) == nil && op.SlotKey == expected.SlotKey &&
+	return op.Posture == domain.ActivationSessionConnection && op.ValidateSessionAccount(nativeOwner.providerFact(op.Provider)) == nil && op.SlotKey == expected.SlotKey &&
 		op.Revision >= expected.Revision && op.PrincipalID == expected.PrincipalID && op.Provider == expected.Provider &&
 		op.Interface.Normalized() == expected.Interface.Normalized() && op.Coordinate.MatchesDurableIdentity(expected.Coordinate) &&
 		op.TargetSelector == expected.TargetSelector && op.Ceremony == expected.Ceremony && op.BindingRevision == expected.BindingRevision &&

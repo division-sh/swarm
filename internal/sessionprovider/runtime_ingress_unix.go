@@ -150,7 +150,7 @@ func (c *RuntimeConnection) captureIncomingMessage(ctx context.Context, incoming
 	if occurrence == nil {
 		return errClientOccurrenceFenced
 	}
-	event, err := captureSDKMessage(scope, source, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+	event, err := captureSDKMessage(scope, source, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond), c.plan.ProviderFacts())
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, inco
 	}
 	unclaimed, err := captureSDKMessage(captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
 		Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID},
-		captureSource{DeploymentRegistration: true, CatalogGeneration: incoming.handoff.trigger.Generation()}, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+		captureSource{DeploymentRegistration: true, CatalogGeneration: incoming.handoff.trigger.Generation()}, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond), c.plan.ProviderFacts())
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +277,7 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 				OnboardingOperation: op.OperationID, OperationRevision: op.Revision,
 				TargetSelector: binding.TargetSelector, PrincipalID: op.PrincipalID}
 			return scope, captureSource{DeploymentRegistration: true, Coordinate: binding.Coordinate,
-				CatalogGeneration: binding.Incoming.Trigger.Generation()}, scope.Validate()
+				CatalogGeneration: binding.Incoming.Trigger.Generation()}, scope.Validate(op.ProviderFacts())
 		}
 		claim, err := i.pendingOperatorClaim(ctx, op, message, false)
 		if err != nil {
@@ -292,7 +292,7 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 		}
 		scope := captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
 			Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID}
-		return scope, captureSource{DeploymentRegistration: true, CatalogGeneration: i.handoff.trigger.Generation()}, scope.Validate()
+		return scope, captureSource{DeploymentRegistration: true, CatalogGeneration: i.handoff.trigger.Generation()}, scope.Validate(op.ProviderFacts())
 	}
 	// Native account admission precedes this check. Pending execution is not
 	// a capture failure, and cannot acknowledge or publish the incoming input.
@@ -303,7 +303,7 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 		}
 	case channelonboarding.PhasePublishingActivation, channelonboarding.PhasePublishingProcessActivation,
 		channelonboarding.PhasePromotingRegistration, channelonboarding.PhaseRetiringPredecessor, channelonboarding.PhaseDeliveringConfirmation:
-		if op.AccountConnection() {
+		if op.AccountConnection(op.ProviderFacts()) {
 			return captureScope{}, captureSource{}, errIncomingAdmissionPending
 		}
 	}
@@ -322,7 +322,7 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 	scope := captureScope{Kind: channelonboarding.SessionInputOnboarding, Session: op.SessionAccount,
 		Source: op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID, OperationRevision: op.Revision,
 		TargetSelector: op.TargetSelector, PrincipalID: op.PrincipalID, BindingRevision: op.BindingRevision}
-	if err := scope.Validate(); err != nil {
+	if err := scope.Validate(op.ProviderFacts()); err != nil {
 		return captureScope{}, captureSource{}, err
 	}
 	if op.ActivationRevision == 0 {
@@ -397,11 +397,11 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 		return scope, source, err
 	}
 	matched := 0
-	if responsibility.MatchesAccountBusiness(op, activation) {
+	if responsibility.MatchesAccountBusiness(op, activation, op.ProviderFacts()) {
 		matched = 1
 	}
 	for _, binding := range bindings {
-		if responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision) {
+		if responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision, op.ProviderFacts()) {
 			matched++
 		}
 	}
@@ -426,14 +426,14 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 		return scope, source, errCaptureScopeChanged
 	}
 	scope = captureScope{Kind: channelonboarding.SessionInputBusiness, Session: op.SessionAccount,
-		AccountOnly:        op.AccountConnection(),
+		AccountOnly:        op.AccountConnection(op.ProviderFacts()),
 		PublicationBinding: inbound.BindingGeneration{RunID: landing.RunID},
 		Source:             op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID,
 		OperationRevision: responsibility.OperationRevision, ActivationID: activation.ActivationID,
 		ActivationRevision: responsibility.ActivationRevision, TargetSelector: op.TargetSelector,
 		PrincipalID: op.PrincipalID, BindingRevision: op.BindingRevision}
 	source = captureSource{Coordinate: op.Coordinate, CatalogGeneration: i.handoff.trigger.Generation()}
-	return scope, source, scope.Validate()
+	return scope, source, scope.Validate(op.ProviderFacts())
 }
 
 // ReconcileIncoming resumes only retained incoming work. It does not reconnect

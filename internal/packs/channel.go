@@ -761,6 +761,10 @@ func (p SatisfactionPlan) ProviderFacts() channelprovider.Binding {
 	return p.providerFacts
 }
 
+func (p OutboundBindingPlan) ProviderFacts() channelprovider.Binding {
+	return p.structural.ProviderFacts()
+}
+
 func (p SatisfactionPlan) Capabilities() CompiledChannelCapabilities { return p.capabilities }
 func (p SatisfactionPlan) Transport() ChannelTransport               { return p.transport }
 func (p OutboundBindingPlan) Transport() ChannelTransport            { return p.structural.Transport() }

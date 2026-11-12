@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -248,9 +250,9 @@ func restartedEventDeliveryRouteReadbackStore(t testing.TB, ctx context.Context,
 	}
 	switch fixture.dialect {
 	case authoractivityfixture.DialectSQLite:
-		restarted = NewSQLiteRuntimeStoreForTest(fixture.db)
+		restarted = NewSQLiteRuntimeStoreForTest(fixture.db, channelfixture.Facts)
 	case authoractivityfixture.DialectPostgres:
-		restarted = NewPostgresStoreForTest(fixture.db)
+		restarted = NewPostgresStoreForTest(fixture.db, channelfixture.Facts)
 	default:
 		t.Fatalf("unsupported event-record restart dialect %q", fixture.dialect)
 		return nil

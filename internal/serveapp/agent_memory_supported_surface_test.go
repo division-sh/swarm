@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -222,7 +224,7 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 	defer cancelConnect()
 	var connectOut, connectErr bytes.Buffer
 	if code := cliapp.Execute(connectCtx, []string{"--config", configPath,
-		"channel", "connect", "telegram", "--yes", "--json", "--api-server", firstURL}, &connectOut, &connectErr, nil, nil, OpenChannelRegistration); code != 0 {
+		"channel", "connect", "telegram", "--yes", "--json", "--api-server", firstURL}, &connectOut, &connectErr, nil, nil, ChannelRegistrations()); code != 0 {
 		t.Fatalf("fresh channel connect exit=%d\nstdout:\n%s\nstderr:\n%s", code, &connectOut, &connectErr)
 	}
 	var connected channelonboarding.Result
@@ -234,7 +236,7 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 	}
 	var listOut, listErr bytes.Buffer
 	if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", firstURL},
-		&listOut, &listErr, nil, nil, OpenChannelRegistration); code != 0 {
+		&listOut, &listErr, nil, nil, ChannelRegistrations()); code != 0 {
 		t.Fatalf("channel list exit=%d\nstdout:\n%s\nstderr:\n%s", code, &listOut, &listErr)
 	}
 	var listed struct {
@@ -415,7 +417,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		var runtimePG *store.PostgresStore
 		openStore := func() {
 			var openErr error
-			runtimePG, openErr = store.NewPostgresStore(dsn)
+			runtimePG, openErr = store.NewPostgresStore(dsn, channelfixture.Facts)
 			if openErr != nil {
 				t.Fatalf("NewPostgresStore: %v", openErr)
 			}

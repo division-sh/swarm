@@ -1,13 +1,15 @@
 package construction
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"testing"
 
 	"github.com/lib/pq"
 )
 
 func TestOpenPostgresUsesStockDriver(t *testing.T) {
-	store, db, err := OpenPostgres("host=127.0.0.1 port=1 sslmode=disable")
+	store, db, err := OpenPostgres("host=127.0.0.1 port=1 sslmode=disable", channelfixture.Facts)
 	if err != nil || store == nil || db == nil {
 		t.Fatalf("stock construction requires no transport policy: %v", err)
 	}

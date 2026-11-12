@@ -95,9 +95,10 @@ type SourceArtifactSelectedContractSourceStore interface {
 }
 
 type SourceArtifactSelectedContractSourceLoader struct {
-	RepoRoot          string
-	PlatformPackBases packartifact.PlatformPackBaseResolver
-	Store             SourceArtifactSelectedContractSourceStore
+	AdmitPackInventory func(sourceartifact.RootedSource, *packartifact.EffectivePackInventory, runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error)
+	RepoRoot           string
+	PlatformPackBases  packartifact.PlatformPackBaseResolver
+	Store              SourceArtifactSelectedContractSourceStore
 }
 
 func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
@@ -166,8 +167,12 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: compile DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
 	}
+	admit := l.AdmitPackInventory
+	if admit == nil {
+		admit = packadmission.AdmitInventory
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(strings.TrimSpace(l.RepoRoot), rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
-		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
+		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: admit,
 	})
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: compile DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)

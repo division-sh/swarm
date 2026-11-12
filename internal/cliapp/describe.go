@@ -16,11 +16,12 @@ import (
 )
 
 type describeCommandOptions struct {
-	sourceRoot string
-	configPath string
-	graph      bool
-	output     cliOutputOptions
-	logging    cliLoggingOptions
+	channelRegistration ChannelRegistrationFactory
+	sourceRoot          string
+	configPath          string
+	graph               bool
+	output              cliOutputOptions
+	logging             cliLoggingOptions
 }
 
 type describeCommandOutput struct {
@@ -30,10 +31,11 @@ type describeCommandOutput struct {
 }
 
 type describeRoutesCommandOptions struct {
-	sourceRoot string
-	configPath string
-	output     cliOutputOptions
-	logging    cliLoggingOptions
+	channelRegistration ChannelRegistrationFactory
+	sourceRoot          string
+	configPath          string
+	output              cliOutputOptions
+	logging             cliLoggingOptions
 }
 
 func defaultDescribeCommandOptions() describeCommandOptions {
@@ -44,6 +46,7 @@ func defaultDescribeCommandOptions() describeCommandOptions {
 
 func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultDescribeCommandOptions()
+	opts.channelRegistration = rootOpts.channelRegistration
 	cmd := &cobra.Command{
 		Use:   "describe [directory]",
 		Short: "Render the expanded authoring view for an admitted Swarm source tree.",
@@ -76,7 +79,7 @@ func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootC
 }
 
 func newDescribeRoutesCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
-	opts := describeRoutesCommandOptions{logging: defaultCLILoggingOptions()}
+	opts := describeRoutesCommandOptions{logging: defaultCLILoggingOptions(), channelRegistration: rootOpts.channelRegistration}
 	cmd := &cobra.Command{
 		Use:   "routes [directory]",
 		Short: "Render the frozen authored routing topology.",
@@ -109,7 +112,7 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
 		return 2
 	}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath, ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
@@ -180,7 +183,7 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		}
 		return 2
 	}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath, ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation

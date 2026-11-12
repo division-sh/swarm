@@ -7,8 +7,9 @@ import (
 )
 
 type CLISourcePathOptions struct {
-	SourceRoot string
-	ConfigPath string
+	ChannelRegistration ChannelRegistrationFactory
+	SourceRoot          string
+	ConfigPath          string
 }
 
 type CLISourcePaths struct {
@@ -21,7 +22,7 @@ func ResolveCLISourcePaths(invocationRootPath string, opts CLISourcePathOptions)
 	if err != nil {
 		return CLISourcePaths{}, err
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: invocationRootPath, ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: invocationRootPath, ExplicitPath: opts.ConfigPath, ChannelRegistration: opts.ChannelRegistration})
 	if err != nil {
 		return CLISourcePaths{}, err
 	}

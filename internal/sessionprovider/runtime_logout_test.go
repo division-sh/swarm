@@ -29,7 +29,7 @@ func TestWhatsAppRuntimeLogoutPreparationUsesOriginalSDKBothStores(t *testing.T)
 			connectRuntimeConnectionFixture(t, f, c)
 			original := c.state.currentOccurrence()
 			target, err := c.PrepareSessionLogout(f.ctx, f.operation)
-			if err != nil || !target.MatchesOperation(f.operation) || target.OccurrenceID != original.occurrenceID || target.Account != f.operation.SessionAccount {
+			if err != nil || !target.MatchesOperation(f.operation, f.operation.ProviderFacts()) || target.OccurrenceID != original.occurrenceID || target.Account != f.operation.SessionAccount {
 				t.Fatalf("original SDK preparation lost exact evidence: %+v, %v", target, err)
 			}
 			for _, mutation := range []struct {

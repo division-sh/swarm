@@ -550,12 +550,7 @@ func (r StartRequest) SlotKey() string {
 	return operatorchannel.Hash("channel-onboarding-slot-v1", r.Coordinate.BundleHash, r.Interface.Key(), r.TargetSelector, r.Provider)
 }
 
-func (r StartRequest) Validate() error {
-	binding, _ := channelprovider.Lookup(r.Provider)
-	return r.ValidateWithFacts(binding)
-}
-
-func (r StartRequest) ValidateWithFacts(binding channelprovider.Binding) error {
+func (r StartRequest) Validate(binding channelprovider.Binding) error {
 	if r.ConnectFenceRevision < 0 || r.Verb != VerbConnect && r.ConnectFenceRevision != 0 {
 		return fmt.Errorf("%w: only connect may retain a non-negative predecessor fence", ErrInvalidRequest)
 	}
@@ -565,7 +560,7 @@ func (r StartRequest) ValidateWithFacts(binding channelprovider.Binding) error {
 	if err := r.Interface.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
-	if err := validateRegistrationScopeWithFacts(r.DeploymentRegistration, r.Provider, r.ExpectedAccount, r.Coordinate, r.TargetSelector, binding); err != nil {
+	if err := validateRegistrationScope(r.DeploymentRegistration, r.Provider, r.ExpectedAccount, r.Coordinate, r.TargetSelector, binding); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
 	if !r.Posture.Valid() || !r.Ceremony.Valid() || r.Ceremony == CeremonyAccountLink && r.Posture != ActivationSessionConnection && !r.DeploymentRegistration {
@@ -591,6 +586,8 @@ func (r StartRequest) ValidateWithFacts(binding channelprovider.Binding) error {
 }
 
 type Operation struct {
+	// Selected by the native reader, never serialized or trusted by a writer.
+	providerFacts           channelprovider.Binding
 	DeploymentRegistration  bool                              `json:"deployment_registration,omitempty"`
 	AccountReference        string                            `json:"operator_account,omitempty"`
 	LogoutCompleted         bool                              `json:"logout_completed,omitempty"`
@@ -628,6 +625,18 @@ type Operation struct {
 
 	SessionConnectionID string                                  `json:"-"`
 	SessionAccount      operatorchannel.SessionAccountAdmission `json:"-"`
+}
+
+func (o Operation) WithProviderFacts(facts channelprovider.Binding) Operation {
+	o.providerFacts = facts
+	return o
+}
+
+func (o Operation) ProviderFacts() channelprovider.Binding {
+	if !o.providerFacts.MatchesProvider(o.Provider) {
+		return channelprovider.Binding{}
+	}
+	return o.providerFacts
 }
 
 type AdvanceRequest struct {
@@ -679,12 +688,7 @@ type PairingReadback struct {
 
 // ValidateDeploymentRegistration validates public scope/account evidence, not
 // private SDK material or executable flow authority.
-func (o Operation) ValidateDeploymentRegistration() error {
-	binding, _ := channelprovider.Lookup(o.Provider)
-	return o.ValidateDeploymentRegistrationWithFacts(binding)
-}
-
-func (o Operation) ValidateDeploymentRegistrationWithFacts(binding channelprovider.Binding) error {
+func (o Operation) ValidateDeploymentRegistration(binding channelprovider.Binding) error {
 	beforePairing := slices.Contains([]Phase{PhasePreparing, PhaseCredentialsAdmitted, PhaseActivatingProvider}, o.Phase)
 	accountOptional := beforePairing || slices.Contains([]Phase{PhaseFailed, PhaseRetired}, o.Phase)
 	if o.LogoutCompleted && (!o.DeploymentRegistration || o.Phase != PhaseRetired || o.FailureCode != "") {
@@ -694,14 +698,14 @@ func (o Operation) ValidateDeploymentRegistrationWithFacts(binding channelprovid
 		return fmt.Errorf("%w: account approval requires its deployment pairing checkpoint", ErrInvalidRequest)
 	}
 	if o.DeploymentRegistration {
-		if err := validateRegistrationScopeWithFacts(true, o.Provider, o.ExpectedAccount, o.Coordinate, o.TargetSelector, binding); err != nil {
+		if err := validateRegistrationScope(true, o.Provider, o.ExpectedAccount, o.Coordinate, o.TargetSelector, binding); err != nil {
 			return err
 		}
 		if binding.Session() != (o.Posture == ActivationSessionConnection) {
 			return fmt.Errorf("%w: registration transport does not match its provider", ErrInvalidRequest)
 		}
 		if o.AccountReference != "" {
-			if err := (AccountReference{Provider: o.Provider, Account: o.AccountReference}).ValidateWithFacts(binding); err != nil {
+			if err := (AccountReference{Provider: o.Provider, Account: o.AccountReference}).Validate(binding); err != nil {
 				return err
 			}
 			if o.ExpectedAccount != "" && o.ExpectedAccount != o.AccountReference {
@@ -716,13 +720,8 @@ func (o Operation) ValidateDeploymentRegistrationWithFacts(binding channelprovid
 }
 
 // ValidateSessionAccount checks retained provenance, not executable authority.
-func (o Operation) ValidateSessionAccount() error {
-	binding, _ := channelprovider.Lookup(o.Provider)
-	return o.ValidateSessionAccountWithFacts(binding)
-}
-
-func (o Operation) ValidateSessionAccountWithFacts(binding channelprovider.Binding) error {
-	if err := o.ValidateDeploymentRegistrationWithFacts(binding); err != nil {
+func (o Operation) ValidateSessionAccount(binding channelprovider.Binding) error {
+	if err := o.ValidateDeploymentRegistration(binding); err != nil {
 		return err
 	}
 	if o.Ceremony == CeremonyAccountLink && o.Posture != ActivationSessionConnection && !o.DeploymentRegistration {
@@ -747,12 +746,7 @@ func (o Operation) ValidateSessionAccountWithFacts(binding channelprovider.Bindi
 	return validateSessionAccount(o.Posture, o.Provider, o.SessionAccount, required)
 }
 
-func validateRegistrationScope(deployment bool, provider, expected string, coordinate ChannelRuntimeContextCoordinate, target string) error {
-	binding, _ := channelprovider.Lookup(provider)
-	return validateRegistrationScopeWithFacts(deployment, provider, expected, coordinate, target, binding)
-}
-
-func validateRegistrationScopeWithFacts(deployment bool, provider, expected string, coordinate ChannelRuntimeContextCoordinate, target string, binding channelprovider.Binding) error {
+func validateRegistrationScope(deployment bool, provider, expected string, coordinate ChannelRuntimeContextCoordinate, target string, binding channelprovider.Binding) error {
 	if !deployment {
 		if expected != "" {
 			return fmt.Errorf("%w: runtime target cannot carry deployment account selection", ErrInvalidRequest)
@@ -763,20 +757,15 @@ func validateRegistrationScopeWithFacts(deployment bool, provider, expected stri
 		return fmt.Errorf("%w: deployment registration must not carry runtime or flow authority", ErrInvalidRequest)
 	}
 	if expected != "" {
-		return (AccountReference{Provider: provider, Account: expected}).ValidateWithFacts(binding)
+		return (AccountReference{Provider: provider, Account: expected}).Validate(binding)
 	}
 	return nil
 }
 
 // Account linkage admits customer traffic independently of a pending operator claim.
-func (o Operation) AccountConnection() bool {
-	binding, _ := channelprovider.Lookup(o.Provider)
-	return o.AccountConnectionWithFacts(binding)
-}
-
-func (o Operation) AccountConnectionWithFacts(binding channelprovider.Binding) bool {
+func (o Operation) AccountConnection(binding channelprovider.Binding) bool {
 	return o.Posture == ActivationSessionConnection && o.Ceremony == CeremonyAccountLink &&
-		o.BindingRevision == 0 && o.SessionAccount.Validate() == nil && o.ValidateSessionAccountWithFacts(binding) == nil
+		o.BindingRevision == 0 && o.SessionAccount.Validate() == nil && o.ValidateSessionAccount(binding) == nil
 }
 
 func validateSessionAccount(posture ActivationPosture, provider string, account operatorchannel.SessionAccountAdmission, required bool) error {

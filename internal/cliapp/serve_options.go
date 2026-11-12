@@ -17,6 +17,7 @@ import (
 )
 
 type ServeOptions struct {
+	ChannelRegistration              ChannelRegistrationFactory
 	ConfigPath                       string
 	Backend                          string
 	SourceRoot                       string

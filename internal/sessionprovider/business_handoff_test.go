@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -105,7 +107,7 @@ func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	f.spool, err = newCaptureStore(f.ctx, f.state.database, f.operation.SessionAccount.ConnectionID)
+	f.spool, err = newCaptureStore(f.ctx, f.state.database, f.operation.SessionAccount.ConnectionID, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +141,7 @@ func requireNativeBusinessReceipt(t *testing.T, f *activeInputFixture, event cap
 	if err != nil || !found || record.OutputCount != 2 {
 		t.Fatalf("original native receipt: found=%t outputs=%d %v", found, record.OutputCount, err)
 	}
-	original, err := publicationCaptureProvenance(record.Request)
+	original, err := publicationCaptureProvenance(record.Request, channelfixture.For("whatsapp"))
 	if err != nil || !original.SameCapture(event) {
 		t.Fatal("resumption rewrote original capture authority or bytes", err)
 	}

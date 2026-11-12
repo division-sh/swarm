@@ -10,17 +10,19 @@ import (
 	"runtime/trace"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	capturedata "github.com/division-sh/swarm/internal/sessioncapture"
 
 	"github.com/google/uuid"
 )
 
 type CaptureStore struct {
-	connectionID string
-	db           *sql.DB
+	providerFacts channelprovider.Binding
+	connectionID  string
+	db            *sql.DB
 }
 
-func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*CaptureStore, error) {
+func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string, providerFacts channelprovider.Binding) (*CaptureStore, error) {
 	if db == nil || uuid.Validate(connectionID) != nil {
 		return nil, fmt.Errorf("WhatsApp incoming Capture requires its private database and stable connection")
 	}
@@ -94,10 +96,11 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 	if err != nil {
 		return nil, err
 	}
-	return &CaptureStore{connectionID: connectionID, db: db}, nil
+	return &CaptureStore{connectionID: connectionID, db: db, providerFacts: providerFacts}, nil
 }
 
 func (s *CaptureStore) Capture(ctx context.Context, event capturedEvent) error {
+	event = event.WithProviderFacts(s.providerFacts)
 	if err := event.Validate(); err != nil {
 		return err
 	}
@@ -206,7 +209,7 @@ func (s *CaptureStore) readAllRows(ctx context.Context, query captureRowQuery) (
 		if err := rows.Scan(&sequence, &raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind, &request, &requestDigest, &disposition, &dispositionDigest, &unclaimedDigest); err != nil {
 			return nil, err
 		}
-		event, err := capturedata.DecodeCapture(raw, digest)
+		event, err := capturedata.DecodeCapture(raw, digest, s.providerFacts)
 		if err != nil {
 			return nil, err
 		}

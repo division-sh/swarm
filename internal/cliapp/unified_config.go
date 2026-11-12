@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -23,9 +24,10 @@ const (
 )
 
 type unifiedConfigLoadOptions struct {
-	RepoRoot        string
-	ExplicitPath    string
-	BackendOverride string
+	ChannelRegistration ChannelRegistrationFactory
+	RepoRoot            string
+	ExplicitPath        string
+	BackendOverride     string
 }
 
 type unifiedConfigLoadResult struct {
@@ -117,7 +119,12 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	if err != nil {
 		return unifiedConfigLoadResult{}, err
 	}
-	return validateUnifiedConfig(prepared)
+	var facts channelprovider.Binding
+	if account := prepared.config.Channels.HITL; account != nil && opts.ChannelRegistration != nil {
+		selected, _ := opts.ChannelRegistration.Select(account.Provider)
+		facts = selected.Facts
+	}
+	return validateUnifiedConfig(prepared, facts)
 }
 
 func prepareUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigPreparation, error) {
@@ -150,11 +157,11 @@ func prepareUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigPreparati
 		document: document, diagnostics: diagnostics, config: cfg}, nil
 }
 
-func validateUnifiedConfig(prepared unifiedConfigPreparation) (unifiedConfigLoadResult, error) {
+func validateUnifiedConfig(prepared unifiedConfigPreparation, facts channelprovider.Binding) (unifiedConfigLoadResult, error) {
 	cfg, document := prepared.config, prepared.document
 	source, diagnostics := prepared.source, prepared.diagnostics
 	if len(unifiedConfigBlockers(diagnostics)) == 0 {
-		if err := cfg.Validate(); err != nil {
+		if err := cfg.Validate(facts); err != nil {
 			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, &document, "fix the referenced swarm.yaml key or command flag"))
 		}
 	}

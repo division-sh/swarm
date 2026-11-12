@@ -42,6 +42,7 @@ func (t CandidateTarget) ValidateDeclaration() error {
 }
 
 type Candidate struct {
+	providerFacts          channelprovider.Binding
 	DeploymentRegistration bool                              `json:"deployment_registration,omitempty"`
 	SourceLabel            string                            `json:"source_label,omitempty"`
 	Provider               string                            `json:"provider"`
@@ -56,6 +57,19 @@ type Candidate struct {
 	ConnectionHealth       string                            `json:"connection_health,omitempty"`
 	OperatorRequired       bool                              `json:"-"`
 	Plan                   packs.SatisfactionPlan            `json:"-"`
+}
+
+func (c Candidate) WithProviderFacts(facts channelprovider.Binding) Candidate {
+	c.providerFacts = facts
+	c.Plan = c.Plan.WithProviderFacts(facts)
+	return c
+}
+
+func (c Candidate) ProviderFacts() channelprovider.Binding {
+	if c.providerFacts.MatchesProvider(c.Provider) {
+		return c.providerFacts
+	}
+	return c.Plan.ProviderFacts()
 }
 
 func (c Candidate) MarshalJSON() ([]byte, error) {
@@ -104,12 +118,12 @@ func (c Candidate) ValidateDeclaration() error {
 		if err := c.Interface.Validate(); err != nil {
 			return err
 		}
-		binding, installed := channelprovider.Lookup(c.Provider)
+		binding := c.ProviderFacts()
 		if c.Target != (CandidateTarget{}) || c.Ceremony != CeremonyAccountLink ||
-			c.ConfirmationOperation != "" || !installed || !binding.MatchesDeployment(string(c.Posture), c.ProviderCredentialRole, c.SigningCredentialRole) {
+			c.ConfirmationOperation != "" || !binding.MatchesProvider(c.Provider) || !binding.MatchesDeployment(string(c.Posture), c.ProviderCredentialRole, c.SigningCredentialRole) {
 			return fmt.Errorf("%w: deployment registration has runtime activation or invalid provider inputs", ErrInvalidRequest)
 		}
-		return validateRegistrationScope(true, c.Provider, "", c.Coordinate, c.Target.Selector)
+		return validateRegistrationScope(true, c.Provider, "", c.Coordinate, c.Target.Selector, binding)
 	}
 	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.ConfirmationOperation) == "" {
 		return fmt.Errorf("channel onboarding candidate requires provider and confirmation operation")

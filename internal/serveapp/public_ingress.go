@@ -28,7 +28,7 @@ func serveRegistrationSelectionCurrent(ctx context.Context, manager *runtime.Run
 		if !ok || pair.Parent.Kind != channelnative.TransportDeploymentRegistration || pair.Parent.Validate() != nil {
 			return false, channelonboarding.ErrInvalidRequest
 		}
-		op, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount})
+		op, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{Provider: pair.Target.Provider, Account: pair.OperatorAccount}, pair.ProviderFacts)
 		if errors.Is(err, channelonboarding.ErrNotFound) {
 			return false, nil
 		}
@@ -48,7 +48,7 @@ func serveRegistrationSelectionCurrent(ctx context.Context, manager *runtime.Run
 		}
 		op, err := channelonboarding.RegisteredAccount(ctx, scoped.DeploymentChannelOperations(), channelonboarding.AccountReference{
 			Provider: pair.Target.Provider, Account: pair.OperatorAccount,
-		})
+		}, pair.ProviderFacts)
 		if err == channelonboarding.ErrNotFound {
 			return false, nil
 		}
@@ -61,7 +61,7 @@ func serveRegistrationSelectionCurrent(ctx context.Context, manager *runtime.Run
 		if !current {
 			return false, nil
 		}
-		holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+		holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}, op.ProviderFacts())
 		if err != nil || len(holders) != 1 || holders[0] != pair.AccountHolder {
 			return false, err
 		}
@@ -218,7 +218,7 @@ func deploymentRegistrationPair(selected serveDeploymentRegistration) (runtimepu
 	op := selected.result.Operation
 	keys := selected.plan.CredentialStoreKeys()
 	alias := "deployment_" + strings.ReplaceAll(parent.ID, "-", "")
-	return runtimepublicingress.RegistrationPair{Parent: parent, DeploymentAdmission: selected.trigger.Generation(),
+	return runtimepublicingress.RegistrationPair{Parent: parent, DeploymentAdmission: selected.trigger.Generation(), ProviderFacts: selected.plan.ProviderFacts(),
 		BindingID: op.OperationID, PlanGeneration: generation, OperatorAccount: op.AccountReference,
 		OnboardingOperationID: parent.ID, OnboardingRevision: parent.Revision,
 		Registration: definition, CredentialKeys: keys, CredentialAdmissions: op.CredentialAdmissions,
@@ -259,7 +259,7 @@ func resolveServeActivationRegistrationPair(ctx context.Context, manager *runtim
 	var holder channelonboarding.AccountHolder
 	registeredOperationID := ""
 	if activation.Source == channelonboarding.ActivationSourceRegistered {
-		holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: registration.Provider(), Account: activation.OperatorAccount})
+		holders, err := manager.AccountHolders(ctx, channelonboarding.AccountReference{Provider: registration.Provider(), Account: activation.OperatorAccount}, binding.ProviderFacts())
 		if err != nil {
 			return absent, false, err
 		}
@@ -297,7 +297,8 @@ func resolveServeActivationRegistrationPair(ctx context.Context, manager *runtim
 		return absent, false, fmt.Errorf("channels.bindings.%s.register signing credential role %q has no admitted store key", binding.BindingID(), registration.SigningCredential())
 	}
 	return runtimepublicingress.RegistrationPair{
-		BindingID: binding.BindingID(), PlanGeneration: planGeneration, ActivationSource: activation.Source,
+		ProviderFacts: binding.ProviderFacts(),
+		BindingID:     binding.BindingID(), PlanGeneration: planGeneration, ActivationSource: activation.Source,
 		OperatorAccount: activation.OperatorAccount, AccountHolder: holder, OnboardingOperationID: activation.OnboardingOperationID,
 		OnboardingRevision: activation.OnboardingRevision, ActivationRevision: activation.ActivationRevision,
 		OnboardingCoordinate: activation.Coordinate, ChannelActivationGeneration: generation,
@@ -329,7 +330,8 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 	}
 	target := intent.Candidate.Target
 	return runtimepublicingress.RegistrationPair{
-		BindingID: channelonboarding.LearnedBindingID(intent.Operation.SlotKey), PlanGeneration: generation,
+		ProviderFacts: intent.Candidate.ProviderFacts(),
+		BindingID:     channelonboarding.LearnedBindingID(intent.Operation.SlotKey), PlanGeneration: generation,
 		OnboardingOperationID: intent.Operation.OperationID, PrebindingOperationID: intent.Operation.OperationID,
 		OnboardingRevision: intent.Operation.Revision, OnboardingCoordinate: intent.Operation.Coordinate,
 		Registration: registration, CredentialKeys: credentials,

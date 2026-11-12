@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"path/filepath"
@@ -43,7 +45,7 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
 				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-					pg, err := store.NewPostgresStore(dsn)
+					pg, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 					if err != nil {
 						return nil, err
 					}

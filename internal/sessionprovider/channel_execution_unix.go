@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/sessionprovider/execution"
 	"github.com/division-sh/swarm/internal/sessionprovider/internal/executionfact"
 	"go.mau.fi/whatsmeow"
@@ -25,9 +26,28 @@ import (
 
 type sessionChannelExecutor struct {
 	owner      *sessionAuthorityOwner
-	state      *sessionState
+	state      retainedChannelWriteState
 	plan       packs.SatisfactionPlan
 	deployment func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
+}
+
+type retainedChannelWriteState interface {
+	retainedSessionAccountReader
+	prepareChannelSend(map[string]any) (preparedChannelSend, error)
+	prepareChannelActivity(channelonboarding.Operation, semanticvalue.Value) (preparedChannelSend, error)
+	channelWriteTargetError() error
+}
+
+type preparedChannelSend interface {
+	destination() string
+	current(context.Context) bool
+	send(context.Context, func(context.Context) error, *runtimeeffects.Handle, string) (channelSendReceipt, bool, error, error)
+	sendActivity(context.Context, string) (channelSendReceipt, error)
+}
+
+type channelSendReceipt struct {
+	output, evidence map[string]any
+	validationErr    error
 }
 
 func (e sessionChannelExecutor) channelExecution() execution.Channel {
@@ -88,8 +108,11 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 		return registration.DeliveryResult{}, err
 	}
 	target, native := tool.InProcess()
-	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText || !e.ownsSessionState() {
-		return registration.DeliveryResult{}, fmt.Errorf("native channel write requires its owned WhatsApp send target")
+	if !native || !e.plan.ProviderFacts().NativeWrite(target.String()) || !e.ownsSessionState() {
+		if e.state == nil {
+			return registration.DeliveryResult{}, fmt.Errorf("native channel write requires its owned WhatsApp send target")
+		}
+		return registration.DeliveryResult{}, e.state.channelWriteTargetError()
 	}
 	if kind == runtimeeffects.AuthorityChannelDelivery {
 		if _, compiled := tool.CompiledResultExecution(); !compiled {
@@ -100,12 +123,7 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 	if err != nil {
 		return registration.DeliveryResult{}, err
 	}
-	destination, destinationOK := input["destination"].(string)
-	text, textOK := input["text"].(string)
-	if !destinationOK || !textOK || len(input) != 2 {
-		return registration.DeliveryResult{}, errOutboundTarget
-	}
-	to, message, err := encodeOutboundText(destination, text, nil)
+	prepared, err := e.state.prepareChannelSend(input)
 	if err != nil {
 		return registration.DeliveryResult{}, err
 	}
@@ -113,7 +131,6 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 	if !ok || selected.Kind != kind || !selected.Valid() {
 		return registration.DeliveryResult{}, fmt.Errorf("native channel write requires its exact selected effect authority")
 	}
-	occurrence := e.state.currentOccurrence()
 	account, err := e.owner.AdmitSessionAccount(ctx, e.owner.operation.SessionAccount)
 	if err != nil {
 		return registration.DeliveryResult{}, err
@@ -123,10 +140,10 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 		if err := account.Validate(ctx, e.owner.operation.SessionAccount); err != nil {
 			return err
 		}
-		if !e.state.ownsConnectedOccurrence(ctx, occurrence) {
+		if !prepared.current(ctx) {
 			return errClientOccurrenceFenced
 		}
-		return e.requireChannelDestination(ctx, selected, destination)
+		return e.requireChannelDestination(ctx, selected, prepared.destination())
 	}
 	if err := preflight(ctx); err != nil {
 		return registration.DeliveryResult{}, err
@@ -142,17 +159,15 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 	}
 	// The journal, not the SDK's retry cache, owns this exact first send.
 	id := strings.ReplaceAll(handle.Attempt().OperationID, "-", "")
-	response, launched, launchErr, err := executeChannelSend(ctx, occurrence, preflight, handle, to, message, id)
+	receipt, launched, launchErr, err := prepared.send(ctx, preflight, handle, id)
 	if err != nil {
 		return registration.FailChannelWrite(ctx, handle, toolID, launched, launchErr, err)
 	}
-	output := map[string]any{"id": string(response.ID)}
-	raw, err := canonicaljson.Bytes(output)
-	if err == nil && (response.ID != id || response.Timestamp.IsZero()) {
-		err = fmt.Errorf("native send acknowledgment contradicts the launched message")
+	raw, err := canonicaljson.Bytes(receipt.output)
+	if err == nil {
+		err = receipt.validationErr
 	}
-	return registration.CompleteChannelWrite(ctx, handle, toolID, tool, output,
-		map[string]any{"provider": "whatsapp", "message_id": string(response.ID)}, raw, launchErr, err)
+	return registration.CompleteChannelWrite(ctx, handle, toolID, tool, receipt.output, receipt.evidence, raw, launchErr, err)
 }
 
 func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, selected runtimeeffects.Authority, destination string) error {
@@ -174,8 +189,8 @@ func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, s
 	expected := channelonboarding.AdmissionResponsibility{OperationID: e.owner.operation.OperationID,
 		OperationRevision: activation.OperationRevision, ActivationRevision: activation.Revision,
 		Coordinate: e.owner.operation.Coordinate, TargetSelector: e.owner.operation.TargetSelector,
-		Provider: "whatsapp", SessionAccount: e.owner.operation.SessionAccount}
-	if !expected.MatchesActivation(op, activation) || destination != activation.ConversationRef {
+		Provider: e.owner.operation.Provider, SessionAccount: e.owner.operation.SessionAccount}
+	if !expected.MatchesActivation(op, activation, op.ProviderFacts()) || destination != activation.ConversationRef {
 		return errCaptureScopeChanged
 	}
 	principal, bindingRevision := "", int64(0)
@@ -219,7 +234,7 @@ func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, s
 	}
 	matched := 0
 	for _, binding := range rows {
-		if expected.MatchesBusinessBinding(op, activation, binding, bindingRevision) {
+		if expected.MatchesBusinessBinding(op, activation, binding, bindingRevision, op.ProviderFacts()) {
 			if selected.Kind == runtimeeffects.AuthorityChannelDelivery && selected.ChannelDelivery.ExternalAccountRef != binding.ExternalAccountRef {
 				return errCaptureScopeChanged
 			}
@@ -259,6 +274,53 @@ func (e sessionChannelExecutor) requireDeploymentDestination(ctx context.Context
 		return errCaptureScopeChanged
 	}
 	return nil
+}
+
+type whatsAppChannelSend struct {
+	state      *sessionState
+	occurrence *clientOccurrence
+	to         types.JID
+	message    *waE2E.Message
+	account    string
+}
+
+func (*sessionState) channelWriteTargetError() error {
+	return fmt.Errorf("native channel write requires its owned WhatsApp send target")
+}
+
+func (s *sessionState) prepareChannelSend(input map[string]any) (preparedChannelSend, error) {
+	destination, destinationOK := input["destination"].(string)
+	text, textOK := input["text"].(string)
+	if !destinationOK || !textOK || len(input) != 2 {
+		return nil, errOutboundTarget
+	}
+	to, message, err := encodeOutboundText(destination, text, nil)
+	if err != nil {
+		return nil, err
+	}
+	return whatsAppChannelSend{state: s, occurrence: s.currentOccurrence(), to: to, message: message, account: destination}, nil
+}
+
+func (s whatsAppChannelSend) destination() string { return s.account }
+func (s whatsAppChannelSend) current(ctx context.Context) bool {
+	return s.state.ownsConnectedOccurrence(ctx, s.occurrence)
+}
+func (s whatsAppChannelSend) send(ctx context.Context, preflight func(context.Context) error, handle *runtimeeffects.Handle, id string) (channelSendReceipt, bool, error, error) {
+	response, launched, launchErr, err := executeChannelSend(ctx, s.occurrence, preflight, handle, s.to, s.message, id)
+	return whatsAppSendReceipt(response, id), launched, launchErr, err
+}
+
+func (s whatsAppChannelSend) sendActivity(ctx context.Context, id string) (channelSendReceipt, error) {
+	response, err := s.occurrence.send(ctx, s.to, s.message, id)
+	return whatsAppSendReceipt(response, id), err
+}
+
+func whatsAppSendReceipt(response whatsmeow.SendResponse, id string) channelSendReceipt {
+	var invalid error
+	if response.ID != id || response.Timestamp.IsZero() {
+		invalid = fmt.Errorf("native send acknowledgment contradicts the launched message")
+	}
+	return channelSendReceipt{output: map[string]any{"id": string(response.ID)}, evidence: map[string]any{"provider": "whatsapp", "message_id": string(response.ID)}, validationErr: invalid}
 }
 
 func executeChannelSend(ctx context.Context, occurrence *clientOccurrence, preflight func(context.Context) error, handle *runtimeeffects.Handle,

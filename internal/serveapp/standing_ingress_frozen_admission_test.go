@@ -288,7 +288,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			}
 			var out, errOut bytes.Buffer
 			code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "status", "telegram", "420079", "--json", "--api-server", endpoint},
-				&out, &errOut, nil, nil, OpenChannelRegistration)
+				&out, &errOut, nil, nil, ChannelRegistrations())
 			var status channelonboarding.AccountStatus
 			if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || status.Provider != "telegram" || status.Account != "420079" || !status.Linked || len(status.Holders) != 1 {
 				t.Fatalf("public account status lost exact registration: exit=%d status=%+v error=%s", code, status, errOut.String())

@@ -3,6 +3,7 @@ package channelonboarding
 import (
 	"database/sql"
 	"encoding/json"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestLogoutTargetCodecRejectsMissingOrContradictoryOriginalStamp(t *testing.
 		}
 		t.Run(name, func(t *testing.T) {
 			target := logoutCodecFixture(t, d)
-			binding, _ := channelprovider.Lookup(target.Account.Provider)
+			binding, _ := channelfixture.Facts(target.Account.Provider)
 			decode := func(raw []byte) (*domain.SessionLogoutTarget, error) {
 				return decodeLogoutTarget(logoutCodecProviderFacts{binding}, domain.TeardownLogout, sql.NullString{String: target.Account.ConnectionID, Valid: true}, sql.NullString{String: string(raw), Valid: true}, d)
 			}

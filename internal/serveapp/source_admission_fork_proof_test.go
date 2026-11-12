@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -185,7 +187,7 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 				}
 				var sourcesAfter int
 				if backend == "sqlite" {
-					reader, err := store.NewSQLiteRuntimeStore(cfg.Config.Store.SQLite.Path)
+					reader, err := store.NewSQLiteRuntimeStore(cfg.Config.Store.SQLite.Path, channelfixture.Facts)
 					if err != nil {
 						t.Fatal(err)
 					}

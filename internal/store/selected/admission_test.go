@@ -1,6 +1,8 @@
 package selected
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -71,7 +73,7 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			var db *sql.DB
 			if backend == storebackend.BackendSQLite {
 				selection.Selection.SQLitePath = filepath.Join(t.TempDir(), "store.db")
-				selected, handle, err := storeconstruction.OpenSQLiteRuntime(selection.Selection.SQLitePath)
+				selected, handle, err := storeconstruction.OpenSQLiteRuntime(selection.Selection.SQLitePath, channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -79,7 +81,7 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				bootstrap, db = selected, handle
 			} else {
 				selection.PostgresDSN, _, _ = testutil.StartEmptyPostgres(t)
-				selected, handle, err := storeconstruction.OpenPostgres(selection.PostgresDSN)
+				selected, handle, err := storeconstruction.OpenPostgres(selection.PostgresDSN, channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}

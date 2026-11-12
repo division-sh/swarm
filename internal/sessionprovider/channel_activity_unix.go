@@ -12,6 +12,7 @@ import (
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 // The existing activity journal owns this send, not operator delivery's journal.
@@ -26,24 +27,7 @@ func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, oper
 	if err := permit.ValidateConnector(ctx, operation, toolID, tool); err != nil {
 		return nil, err
 	}
-	values, object := permit.Input().ObjectMap()
-	destination, destinationOK := values["destination"].String()
-	text, textOK := values["text"].String()
-	expectedFields := 2
-	accountValue, supplied := values["account"]
-	if e.owner.operation.DeploymentRegistration || supplied {
-		account, valid := accountValue.String()
-		ref := channelonboarding.AccountReference{Provider: "whatsapp", Account: account}
-		if !valid || ref.Validate() != nil || strings.TrimPrefix(account, "+")+"@s.whatsapp.net" != e.owner.operation.SessionAccount.AccountRef ||
-			e.owner.operation.DeploymentRegistration && account != e.owner.operation.AccountReference {
-			return nil, errOutboundTarget
-		}
-		expectedFields = 3
-	}
-	if !object || !destinationOK || !textOK || len(values) != expectedFields {
-		return nil, errOutboundTarget
-	}
-	to, message, err := encodeOutboundText(destination, text, nil)
+	prepared, err := e.state.prepareChannelActivity(e.owner.operation, permit.Input())
 	if err != nil {
 		return nil, err
 	}
@@ -52,14 +36,13 @@ func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, oper
 		return nil, err
 	}
 	defer account.Close()
-	occurrence := e.state.currentOccurrence()
 	if err := permit.Validate(ctx); err != nil {
 		return nil, err
 	}
 	if err := account.Validate(ctx, e.owner.operation.SessionAccount); err != nil {
 		return nil, err
 	}
-	if !e.state.ownsConnectedOccurrence(ctx, occurrence) {
+	if !prepared.current(ctx) {
 		return nil, errClientOccurrenceFenced
 	}
 	if err := e.requireNativeActivityBinding(ctx, permit); err != nil {
@@ -71,18 +54,42 @@ func (e sessionChannelExecutor) ExecuteChannelActivity(ctx context.Context, oper
 	if err := permit.Validate(ctx); err != nil {
 		return nil, err
 	}
-	response, err := occurrence.send(ctx, to, message, permit.MessageID())
+	receipt, err := prepared.sendActivity(ctx, permit.MessageID())
 	if err != nil {
 		return nil, failures.Wrap(failures.ClassOutcomeUncertain, "native_activity_send_uncertain", "activity-runtime", "dispatch_native_channel", nil, err)
 	}
-	if string(response.ID) != permit.MessageID() || response.Timestamp.IsZero() {
+	if receipt.validationErr != nil {
 		return nil, failures.New(failures.ClassOutcomeUncertain, "native_activity_acknowledgment_invalid", "activity-runtime", "dispatch_native_channel", nil)
 	}
-	output := map[string]any{"id": string(response.ID)}
-	if err := tool.OutputSchema().Validate(output); err != nil {
+	if err := tool.OutputSchema().Validate(receipt.output); err != nil {
 		return nil, failures.Wrap(failures.ClassOutcomeUncertain, "native_activity_output_invalid", "activity-runtime", "dispatch_native_channel", nil, err)
 	}
-	return output, nil
+	return receipt.output, nil
+}
+
+func (s *sessionState) prepareChannelActivity(op channelonboarding.Operation, input semanticvalue.Value) (preparedChannelSend, error) {
+	values, object := input.ObjectMap()
+	destination, destinationOK := values["destination"].String()
+	text, textOK := values["text"].String()
+	expectedFields := 2
+	accountValue, supplied := values["account"]
+	if op.DeploymentRegistration || supplied {
+		account, valid := accountValue.String()
+		ref := channelonboarding.AccountReference{Provider: "whatsapp", Account: account}
+		if !valid || ref.Validate(op.ProviderFacts()) != nil || strings.TrimPrefix(account, "+")+"@s.whatsapp.net" != op.SessionAccount.AccountRef ||
+			op.DeploymentRegistration && account != op.AccountReference {
+			return nil, errOutboundTarget
+		}
+		expectedFields = 3
+	}
+	if !object || !destinationOK || !textOK || len(values) != expectedFields {
+		return nil, errOutboundTarget
+	}
+	to, message, err := encodeOutboundText(destination, text, nil)
+	if err != nil {
+		return nil, err
+	}
+	return whatsAppChannelSend{state: s, occurrence: s.currentOccurrence(), to: to, message: message, account: destination}, nil
 }
 
 func (e sessionChannelExecutor) requireNativeActivityBinding(ctx context.Context, permit pipeline.NativeChannelActivityPermit) error {
@@ -97,7 +104,7 @@ func (e sessionChannelExecutor) requireNativeActivityBinding(ctx context.Context
 	if err != nil {
 		return err
 	}
-	if op.AccountConnection() {
+	if op.AccountConnection(op.ProviderFacts()) {
 		return permit.ValidateBusinessTarget(ctx, op, activation, operatorchannel.Binding{})
 	}
 	bindings, ok := e.owner.store.(interface {

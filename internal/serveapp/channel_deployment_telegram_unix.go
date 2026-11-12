@@ -50,7 +50,7 @@ func (c *telegramDeploymentSession) CheckpointSessionPairing(ctx context.Context
 	if err != nil {
 		return op, false, err
 	}
-	ref, err := channelonboarding.CanonicalAccount(op.Provider, identity)
+	ref, err := channelonboarding.CanonicalAccount(c.opts.Plan.ProviderFacts(), identity)
 	if err != nil || op.ExpectedAccount != "" && op.ExpectedAccount != ref.Account {
 		return op, false, errors.Join(channelonboarding.ErrConflict, err)
 	}

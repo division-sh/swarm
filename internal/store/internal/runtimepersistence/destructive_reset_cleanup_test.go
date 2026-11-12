@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -599,7 +601,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 	lateRun := uuid.NewString()
 	lateEvent := uuid.NewString()
-	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
+	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle()), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: lateRun})
 	lateSemanticEvent := eventtest.PersistedProjectionForProducer(
 		lateEvent, events.EventType("late.event"), eventtest.Producer(events.EventProducerExternal, "cleanup-late-ingress"), "",
 		[]byte(`{}`), 0, lateRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
@@ -714,7 +716,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if err != nil {
 		t.Fatalf("agent identity fields: %v", err)
 	}
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle()), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	ctx = originalStoreFixtureContext(t, ctx, pg)
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: preservedRunID, State: storerunlifecycle.StateCompleted,
@@ -987,7 +989,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 	t.Cleanup(func() { _ = pg.backend.Close() })
 	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle()), channelfixture.Facts), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := pg.backend.ExecContext(ctx, `
 		CREATE TABLE cleanup_unknown_fk_probe (
 			probe_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

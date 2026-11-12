@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
@@ -17,7 +18,7 @@ import (
 	"github.com/lib/pq"
 )
 
-func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
+func OpenPostgres(dsn string, providerFacts channelprovider.FactsLookup) (*private.PostgresStore, *sql.DB, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
@@ -36,7 +37,7 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 		_ = db.Close()
 		return nil, nil, err
 	}
-	store, err := private.ComposePostgresStore(backend)
+	store, err := private.ComposePostgresStore(backend, providerFacts)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err
@@ -44,8 +45,8 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 	return store, db, nil
 }
 
-func OpenPostgresRuntime(ctx context.Context, dsn string) (*private.PostgresStore, *sql.DB, error) {
-	selected, handle, err := OpenPostgres(dsn)
+func OpenPostgresRuntime(ctx context.Context, dsn string, providerFacts channelprovider.FactsLookup) (*private.PostgresStore, *sql.DB, error) {
+	selected, handle, err := OpenPostgres(dsn, providerFacts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -55,12 +56,12 @@ func OpenPostgresRuntime(ctx context.Context, dsn string) (*private.PostgresStor
 	return selected, handle, nil
 }
 
-func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+func OpenSQLiteRuntime(path string, providerFacts channelprovider.FactsLookup) (*private.SQLiteRuntimeStore, *sql.DB, error) {
 	schema, backend, err := storeschema.OpenSQLiteForConstruction(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := private.ComposeSQLiteRuntimeStore(schema, backend)
+	store, err := private.ComposeSQLiteRuntimeStore(schema, backend, providerFacts)
 	if err != nil {
 		_ = schema.Close()
 		return nil, nil, err
@@ -68,15 +69,15 @@ func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error
 	return store, backend.ConstructionHandle(), nil
 }
 
-func OpenSQLiteRuntimeForServing(ctx context.Context, path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+func OpenSQLiteRuntimeForServing(ctx context.Context, path string, providerFacts channelprovider.FactsLookup) (*private.SQLiteRuntimeStore, *sql.DB, error) {
 	constructionGuard, err := storestartupownership.WaitSQLiteConstructionGuard(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}
-	return openSQLiteUnderPossession(ctx, path, constructionGuard)
+	return openSQLiteUnderPossession(ctx, path, constructionGuard, providerFacts)
 }
 
-func openSQLiteUnderPossession(ctx context.Context, path string, constructionGuard *storestartupownership.SQLiteConstructionGuard) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+func openSQLiteUnderPossession(ctx context.Context, path string, constructionGuard *storestartupownership.SQLiteConstructionGuard, providerFacts channelprovider.FactsLookup) (*private.SQLiteRuntimeStore, *sql.DB, error) {
 	schema, backend, err := storeschema.OpenSQLiteForConstruction(path)
 	if err != nil {
 		return nil, nil, errors.Join(err, constructionGuard.Release())
@@ -85,14 +86,14 @@ func openSQLiteUnderPossession(ctx context.Context, path string, constructionGua
 	if err != nil {
 		return nil, nil, errors.Join(err, schema.Close(), constructionGuard.Release())
 	}
-	store, err := private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity)
+	store, err := private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity, providerFacts)
 	if err != nil {
 		return nil, nil, errors.Join(err, identity.ReleaseConstructionPossession(), schema.Close(), constructionGuard.Release())
 	}
 	return store, backend.ConstructionHandle(), nil
 }
 
-func OpenSQLiteRuntimeReadOnly(path string) (*private.SQLiteRuntimeStore, error) {
+func OpenSQLiteRuntimeReadOnly(path string, providerFacts channelprovider.FactsLookup) (*private.SQLiteRuntimeStore, error) {
 	identity, err := storestartupownership.CaptureSQLiteInspectionIdentity(path)
 	if err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func OpenSQLiteRuntimeReadOnly(path string) (*private.SQLiteRuntimeStore, error)
 	if err != nil {
 		return nil, err
 	}
-	store, err := private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity)
+	store, err := private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity, providerFacts)
 	if err != nil {
 		_ = schema.Close()
 		return nil, err
@@ -113,7 +114,7 @@ func ObserveSQLiteInspectionAbsence(ctx context.Context, path string) (bool, err
 	return storestartupownership.ObserveSQLiteInspectionAbsence(ctx, path)
 }
 
-func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
+func OpenPostgresReadOnly(dsn string, providerFacts channelprovider.FactsLookup) (*private.PostgresStore, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL inspection: %w", err)
@@ -122,19 +123,19 @@ func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := private.ComposePostgresStore(backend)
+	store, err := private.ComposePostgresStore(backend, providerFacts)
 	if err != nil {
 		return nil, errors.Join(err, backend.Close())
 	}
 	return store, nil
 }
 
-func NewPostgres(dsn string) (*private.PostgresStore, error) {
-	store, _, err := OpenPostgres(dsn)
+func NewPostgres(dsn string, providerFacts channelprovider.FactsLookup) (*private.PostgresStore, error) {
+	store, _, err := OpenPostgres(dsn, providerFacts)
 	return store, err
 }
 
-func NewSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, error) {
-	store, _, err := OpenSQLiteRuntime(path)
+func NewSQLiteRuntime(path string, providerFacts channelprovider.FactsLookup) (*private.SQLiteRuntimeStore, error) {
+	store, _, err := OpenSQLiteRuntime(path, providerFacts)
 	return store, err
 }

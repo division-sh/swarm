@@ -37,7 +37,7 @@ func (r Result) ProviderCredentialRequirement() (string, error) {
 	sameScope := c != nil && c.Coordinate.MatchesDeclaration(o.Coordinate)
 	if c != nil && (c.DeploymentRegistration || o.DeploymentRegistration) {
 		sameScope = c.DeploymentRegistration && o.DeploymentRegistration && c.Coordinate == o.Coordinate &&
-			validateRegistrationScope(true, o.Provider, o.ExpectedAccount, o.Coordinate, o.TargetSelector) == nil
+			validateRegistrationScope(true, o.Provider, o.ExpectedAccount, o.Coordinate, o.TargetSelector, c.ProviderFacts()) == nil
 	}
 	if c == nil || c.ValidateDeclaration() != nil || o.OperationID == "" || o.Revision < 1 ||
 		!o.Phase.Valid() || c.Provider != o.Provider || c.Interface != o.Interface ||

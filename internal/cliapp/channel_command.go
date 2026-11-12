@@ -26,11 +26,13 @@ type channelControlClient interface {
 }
 
 type channelListResult struct {
+	facts       []channelprovider.Binding
 	PrincipalID string                  `json:"principal_id"`
 	Channels    []channelReadbackResult `json:"channels"`
 }
 
-func (r channelListResult) linkedSessionOperation(provider string) (string, error) {
+func (r channelListResult) linkedSessionOperation(binding channelprovider.Binding) (string, error) {
+	provider := binding.Provider()
 	operationID, best, matches := "", -1, 0
 	for _, row := range r.Channels {
 		if row.Operation == nil || row.Operation.Provider != provider || row.Connection == nil || !row.Connection.Linked ||
@@ -51,11 +53,9 @@ func (r channelListResult) linkedSessionOperation(provider string) (string, erro
 		}
 	}
 	if matches > 1 {
-		binding, _ := channelprovider.Lookup(provider)
 		return "", fmt.Errorf("more than one %s connection is linked", binding.DisplayName())
 	}
 	if operationID == "" {
-		binding, _ := channelprovider.Lookup(provider)
 		return "", errors.New(binding.NotLinked())
 	}
 	return operationID, nil
@@ -148,12 +148,12 @@ func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, i
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if binding, installed := channelprovider.Lookup(operationID); installed && binding.Session() {
+	if binding := selectedChannelFacts(opts.channelRegistration, operationID); binding.Session() {
 		list, err := fetchChannelList(ctx, client)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
-		operationID, err = list.linkedSessionOperation(binding.Provider())
+		operationID, err = list.linkedSessionOperation(binding)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -542,7 +542,7 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 		fmt.Fprintln(out, qualification.Reason)
 	}
 	if result.Operation.ClientLanguage == "" {
-		binding, _ := channelprovider.Lookup(result.Operation.Provider)
+		binding := result.Operation.ProviderFacts()
 		fmt.Fprint(out, binding.LanguageHelp(result.Operation.OperationID))
 	}
 }
@@ -638,7 +638,7 @@ func presentAndWaitForChannelClaim(ctx context.Context, client channelControlCli
 }
 
 func writeChannelClaimInstructions(out io.Writer, result channelOnboardingResult) error {
-	binding, _ := channelprovider.Lookup(result.Operation.Provider)
+	binding := result.Operation.ProviderFacts()
 	if result.IdentityOperation == nil {
 		return fmt.Errorf("operator code requires its exact %s destination and expiry", binding.DisplayName())
 	}
@@ -1145,10 +1145,13 @@ func writeChannelList(out io.Writer, result channelListResult) {
 	rows := make([][]string, 0, len(result.Channels))
 	footers := []string{}
 	wroteSession := false
-	for _, row := range result.Channels {
-		binding, _ := channelprovider.Lookup(row.Identity.Interface.ChannelPackID)
+	for i, row := range result.Channels {
+		var binding channelprovider.Binding
+		if i < len(result.facts) {
+			binding = result.facts[i]
+		}
 		if row.Operation != nil {
-			if current, _ := channelprovider.Lookup(row.Operation.Provider); current.ReadyTeaching() != "" {
+			if current := row.Operation.ProviderFacts(); current.ReadyTeaching() != "" {
 				binding = current
 			}
 		}

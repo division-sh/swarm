@@ -236,7 +236,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 		if h.registration.IdentityOperationID == "" {
 			args = append(args, "420079")
 		}
-		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
+		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, ChannelRegistrations())
 		done <- code
 		progress <- code
 	}()
@@ -267,7 +267,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
 	var listed, listErr lockedBuffer
-	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil, nil, OpenChannelRegistration)
+	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil, nil, ChannelRegistrations())
 	if code != 0 || json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 ||
 		listing.Accounts[0].Binding == nil || listing.Accounts[0].Binding.ConversationRef != fmt.Sprint(chatID) ||
 		!listing.Accounts[0].Operation.DeploymentRegistration || !listing.Accounts[0].Operation.AccountConfirmed ||

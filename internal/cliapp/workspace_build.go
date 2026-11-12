@@ -24,25 +24,26 @@ import (
 const workspaceBuildClaudeCommand = "claude"
 
 type workspaceBuildOptions struct {
-	backend      string
-	configPath   string
-	RepoRoot     string
-	image        string
-	dockerBin    string
-	workerBinary string
+	channelRegistration ChannelRegistrationFactory
+	backend             string
+	configPath          string
+	RepoRoot            string
+	image               string
+	dockerBin           string
+	workerBinary        string
 }
 
-func newWorkspaceCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
+func newWorkspaceCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workspace",
 		Short: "Manage local workspace setup.",
 	}
-	cmd.AddCommand(newWorkspaceBuildCommand(ctx, root.Path()))
+	cmd.AddCommand(newWorkspaceBuildCommand(ctx, root.Path(), rootOpts))
 	return cmd
 }
 
-func newWorkspaceBuildCommand(ctx context.Context, RepoRoot string) *cobra.Command {
-	opts := workspaceBuildOptions{RepoRoot: strings.TrimSpace(RepoRoot)}
+func newWorkspaceBuildCommand(ctx context.Context, RepoRoot string, rootOpts rootCommandOptions) *cobra.Command {
+	opts := workspaceBuildOptions{RepoRoot: strings.TrimSpace(RepoRoot), channelRegistration: rootOpts.channelRegistration}
 	cmd := &cobra.Command{
 		Use:   "build --backend claude_cli [--image <tag>]",
 		Short: "Build and validate a local workspace image.",
@@ -137,7 +138,7 @@ func validateWorkspaceBuildClaudeCLI(ctx context.Context, dockerBin, tempImage, 
 }
 
 func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspaceBuildOptions) error {
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.configPath})
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.configPath, ChannelRegistration: opts.channelRegistration})
 	if err != nil {
 		return fmt.Errorf("workspace image build failed: load config: %w", err)
 	}
