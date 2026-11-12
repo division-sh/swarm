@@ -21,6 +21,8 @@ type ChannelObservation interface {
 	ControlCounts(context.Context, string) (ChannelControlCounts, error)
 	CountSourceCards(context.Context, string, string) (int, error)
 	CountEntryIntents(context.Context) (int, error)
+	RejectedEntryCount(context.Context, string) (int, error)
+	ProviderActionDisposition(context.Context, string) (int, string, string, error)
 	RegistrationIndex(context.Context) (string, error)
 	RegistrationCounts(context.Context) (int, int, int, error)
 	DeliveryDefaultState(context.Context) (string, error)
@@ -57,6 +59,12 @@ func (o channelObservation) CountSourceCards(ctx context.Context, run, source st
 }
 func (o channelObservation) CountEntryIntents(ctx context.Context) (int, error) {
 	return private.CountChannelEntryIntentsForTest(ctx, o.selected)
+}
+func (o channelObservation) RejectedEntryCount(ctx context.Context, event string) (int, error) {
+	return private.CountChannelRejectedEntriesForTest(ctx, o.selected, event)
+}
+func (o channelObservation) ProviderActionDisposition(ctx context.Context, event string) (int, string, string, error) {
+	return private.ReadChannelProviderActionForTest(ctx, o.selected, event)
 }
 func (o channelObservation) RegistrationIndex(ctx context.Context) (string, error) {
 	return private.ReadChannelRegistrationIndexForTest(ctx, o.selected)

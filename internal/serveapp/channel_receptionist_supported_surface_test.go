@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -307,16 +306,16 @@ func waitReceptionistActionRejection(t *testing.T, h *channelOnboardingE2EHarnes
 	observer := openChannelFixtureObservation(t, string(h.backend), h.storeDSN)
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		intent, found, err := observer.ObserveChannelIntent(t.Context(), render.IntentObservationQuery{Kind: render.IntentAction,
-			Provider: "telegram", ProviderEventID: providerID, InterfaceKey: h.registration.Interface.Key()})
+		count, state, disposition, err := observer.ProviderActionDisposition(t.Context(), providerID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The existing observer refuses duplicate identities rather than
-		// selecting one, preserving the original count <= 1 assertion.
-		if found && intent.State == "settled" {
-			if intent.Disposition != "rejected" {
-				t.Fatalf("foreign action disposition=%q", intent.Disposition)
+		if count > 1 {
+			t.Fatalf("duplicate foreign action intents=%d, want one", count)
+		}
+		if state == "settled" {
+			if disposition != "rejected" {
+				t.Fatalf("foreign action disposition=%q", disposition)
 			}
 			return
 		}
