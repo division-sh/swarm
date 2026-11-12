@@ -695,6 +695,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		h := &channelOnboardingE2EHarness{registration: registered, opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		logoutDeploymentChannelFixtureAccount(t, h)
+		var delayedParent channelnative.TransportParent
 		h.registration = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 1002, 7002, "private", func() {
 			var out, errOut lockedBuffer
 			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
@@ -725,6 +726,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			if err != nil || qualificationReader == nil || parent.ID != registered.OperationID || parent.Revision != registered.Revision {
 				t.Fatalf("launched predecessor lost exact parent evidence: %+v err=%v", parent, err)
 			}
+			delayedParent = parent
 			qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
 			if err != nil || qualification.State == channelnative.QualificationQualified {
 				t.Fatalf("retired predecessor became usable before settlement: %+v err=%v", qualification, err)
@@ -782,6 +784,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
 		if err != nil || qualification.State != channelnative.QualificationQualified {
 			t.Fatalf("fresh installation was not independently qualified: %+v err=%v", qualification, err)
+		}
+		retiredQualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), delayedParent)
+		if err != nil || retiredQualification.State == channelnative.QualificationQualified {
+			t.Fatalf("late physical apply revived the retired parent's qualification: %+v err=%v", retiredQualification, err)
 		}
 		return
 	}
