@@ -216,10 +216,10 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 	if err != nil {
 		return nil, false, err
 	}
-	if !lookup.Loaded() {
+	if lookup.State == runtime.RuntimeContextStateUnloaded {
 		return nil, false, errChannelCardSourceUnloaded
 	}
-	if use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
+	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
 		return nil, false, fmt.Errorf("channel card runtime source is unavailable")
 	}
 	defer use.Done()
