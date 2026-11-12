@@ -71,13 +71,7 @@ func (o channelObservation) CountUnsettledResponsibilities(ctx context.Context) 
 	return private.CountUnsettledChannelResponsibilitiesForTest(ctx, o.selected)
 }
 func (o channelObservation) EventCardinality(ctx context.Context, run, event string) (int, error) {
-	var count int
-	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
-		var err error
-		count, err = private.ReadLifecycleEventCardinalityForTest(ctx, o.selected, run, event)
-		return err
-	})
-	return count, err
+	return private.CountChannelObservedEventsForTest(ctx, o.selected, run, event)
 }
 
 func ReadServedChannelConnection(ctx context.Context, selected ReleaseProcessReadOnlyInspection, operationID string) (string, error) {
