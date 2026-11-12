@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
 
@@ -198,6 +199,7 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 		if h.opts.StoreMode == "postgres" {
 			location = "postgres:" + location
 		}
+		waitRegisteredSourceQualification(t, h, openChannelFixtureObservation(t, h.opts.StoreMode, h.storeDSN), servedTestProcessRuntime(t, h.process).Options.ChannelOnboardingStore.(channelnative.Store).ReadNativeInboxQualificationParent)
 		waitForStandingDeliveryQuiescence(t, location)
 		h.stop(t)
 		h.start(t)
@@ -261,6 +263,7 @@ func runRegisteredChannelCLIInbox(t *testing.T, h *channelOnboardingE2EHarness, 
 		if h.opts.StoreMode == "postgres" {
 			location = "postgres:" + location
 		}
+		waitRegisteredSourceQualification(t, h, openChannelFixtureObservation(t, h.opts.StoreMode, h.storeDSN), servedTestProcessRuntime(t, h.process).Options.ChannelOnboardingStore.(channelnative.Store).ReadNativeInboxQualificationParent)
 		waitForStandingDeliveryQuiescence(t, location)
 		h.stop(t)
 		h.start(t)

@@ -602,7 +602,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		registered = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 901109, chat, 7000, kind)
 	}
 	if registered.DeploymentRegistration && scenario != "inbox" && !deploymentTransport {
-		h := &channelOnboardingE2EHarness{opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
+		h := &channelOnboardingE2EHarness{registration: registered, opts: opts, provider: provider, endpoint: endpoint, process: process, storeDSN: observerDSN}
 		runRegisteredChannelCLIInbox(t, h, scenario, retainedInteraction)
 		process = h.process
 		return
