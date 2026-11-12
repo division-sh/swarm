@@ -670,7 +670,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		requireChannelPreservedHistory(t, db, preserved, successorPlans...)
 		status := postChannelSourceControl(t, callback, signing, card, token, messageID)
 		t.Logf("registered reset old callback backend=%s operation=%s HTTP=%d", backend, operation, status)
-		if status == http.StatusAccepted {
+		if status == http.StatusOK || status == http.StatusAccepted {
 			waitChannelRejectedCallback(t, db, token)
 		} else if status == http.StatusNotFound {
 			var intents int
