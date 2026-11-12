@@ -495,7 +495,18 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				t.Fatal(err)
 			}
 			standingCard := waitChannelPublicCard(t, h, standingRun, decisioncard.AnchorKindStageGate, "chat")
-			decideRegisteredAnchorCLI(t, h, standingCard, false)
+			standingBefore := readRegisteredChannelCard(t, h, standingCard)
+			registeredChannelMailboxCLI(t, h, true, "view", standingCard)
+			args := []string{"decide", standingCard, "retire", "--idempotency-key", "cli-" + standingCard}
+			registeredChannelMailboxCLI(t, h, true, args...)
+			decided := readRegisteredChannelCard(t, h, standingCard)
+			if decided.Status != decisioncard.StatusDecided || decided.Verdict != "retire" || decided.DecisionEventID == "" || !bytes.Equal(decided.Snapshot, standingBefore.Snapshot) {
+				t.Fatalf("CLI changed the frozen standing gate or failed its authored retirement: %+v", decided)
+			}
+			registeredChannelMailboxCLI(t, h, true, args...)
+			if replay := readRegisteredChannelCard(t, h, standingCard); replay.DecisionEventID != decided.DecisionEventID {
+				t.Fatal("replayed standing retirement emitted a different completion")
+			}
 		} else {
 			h.stop(t)
 			h.start(t)
@@ -547,6 +558,24 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		}
 		successorPlan := ""
 		if !clear {
+			callback, _, _ := h.provider.Registration()
+			// Reset changes startup authority; its existing public probe renewal
+			// must become current before a delivery or business callback is admitted.
+			deadline := time.Now().Add(runtimepublicingress.RenewalInterval + 15*time.Second)
+			for {
+				response, err := http.Get(callback)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = response.Body.Close()
+				if response.StatusCode == http.StatusMethodNotAllowed {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("policy-backed holder callback did not become current after reset: HTTP %d", response.StatusCode)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			var successorRun string
 			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&successorRun); err != nil {
 				t.Fatal(err)
@@ -584,23 +613,6 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		}
 		if !clear {
 			callback, signing, _ := h.provider.Registration()
-			// Reset changes startup authority; its existing public probe renewal
-			// must become current before a business callback can be admitted.
-			deadline := time.Now().Add(runtimepublicingress.RenewalInterval + 15*time.Second)
-			for {
-				response, err := http.Get(callback)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_ = response.Body.Close()
-				if response.StatusCode == http.StatusMethodNotAllowed {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("policy-backed holder callback did not become current after reset: HTTP %d", response.StatusCode)
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
 			if names := postChannelTelegramUpdate(t, callback, signing, map[string]any{
 				"update_id": 978101, "message": map[string]any{"message_id": 978101, "from": map[string]any{"id": 2001},
 					"chat": map[string]any{"id": 2001, "type": "private"}, "text": "customer after retained reset"},
