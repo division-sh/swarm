@@ -7,6 +7,7 @@ import (
 	"time"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
@@ -84,6 +85,60 @@ func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
 			if err != nil || readback.SessionConnectionID != op.SessionConnectionID ||
 				readback.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || readback.ActivationRevision != 0 {
 				t.Fatal("reservation manufactured account or executable authority", err)
+			}
+			for _, provider := range []string{"telegram", "whatsapp"} {
+				t.Run(provider+"_facts", func(t *testing.T) {
+					matched, _ := channelprovider.Lookup(provider)
+					selected, found := matched, true
+					f := newCallbackLockFixtureWithFacts(t, backend, func(requested string) (channelprovider.Binding, bool) {
+						return selected, found && requested == provider
+					})
+					request := sessionReservation(t, f, time.Now().UTC())
+					request.Provider, request.DeploymentRegistration = provider, true
+					request.Coordinate, request.TargetSelector = domain.ChannelRuntimeContextCoordinate{}, ""
+					request.Ceremony = domain.CeremonyAccountLink
+					if !matched.Session() {
+						request.Posture = domain.ActivationWebhookRegistration
+						request.CredentialReservations = []domain.CredentialReservation{{Role: "bot_token", StoreKey: "fixture.bot_token"}}
+					}
+					op, err := f.deployment.ReserveChannelOnboarding(f.ctx, request)
+					if err != nil {
+						t.Fatal("matching provider facts refused reservation", err)
+					}
+					other := "telegram"
+					if provider == other {
+						other = "whatsapp"
+					}
+					mismatched, _ := channelprovider.Lookup(other)
+					for _, cell := range []struct {
+						name  string
+						facts channelprovider.Binding
+						found bool
+					}{
+						{"unknown", channelprovider.Binding{}, false},
+						{"mismatched", mismatched, true},
+					} {
+						t.Run(cell.name, func(t *testing.T) {
+							selected, found = cell.facts, cell.found
+							_, readErr := f.deployment.GetChannelOnboarding(f.ctx, op.OperationID)
+							_, listErr := f.deployment.ListChannelOnboardingOperations(f.ctx)
+							_, reserveErr := f.deployment.ReserveChannelOnboarding(f.ctx, request)
+							_, advanceErr := f.deployment.AdvanceChannelOnboarding(f.ctx, domain.AdvanceRequest{
+								OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: domain.PhaseCredentialsAdmitted, Now: request.RequestedAt,
+							})
+							for _, err := range []error{readErr, listErr, reserveErr, advanceErr} {
+								if !errors.Is(err, domain.ErrInvalidRequest) || !strings.Contains(err.Error(), "deployment registration must not carry runtime or flow authority") {
+									t.Fatalf("provider-facts refusal changed: %v", err)
+								}
+							}
+						})
+					}
+					selected, found = matched, true
+					after, err := f.deployment.GetChannelOnboarding(f.ctx, op.OperationID)
+					if err != nil || after.Revision != op.Revision || after.Phase != op.Phase {
+						t.Fatal("refused provider facts changed the retained operation", err)
+					}
+				})
 			}
 		})
 	}

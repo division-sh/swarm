@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReadSessionConnectionForTest projects one retained coordinate from the same
+// readSessionConnectionForTest projects one retained coordinate from the same
 // operation decoder, under the original read-only inspection transaction.
-func ReadSessionConnectionForTest(ctx context.Context, tx *sql.Tx, postgres bool, operationID string) (string, error) {
+func readSessionConnectionForTest(ctx context.Context, owner providerFactReader, tx *sql.Tx, postgres bool, operationID string) (string, error) {
 	if tx == nil || uuid.Validate(operationID) != nil {
 		return "", fmt.Errorf("session connection observation requires its original transaction and exact operation")
 	}
@@ -19,7 +19,7 @@ func ReadSessionConnectionForTest(ctx context.Context, tx *sql.Tx, postgres bool
 	if postgres {
 		d = dialectPostgres
 	}
-	op, found, err := loadOperation(ctx, tx, d, operationID, false)
+	op, found, err := loadOperation(owner, ctx, tx, d, operationID, false)
 	if err != nil {
 		return "", err
 	}
