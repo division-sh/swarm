@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -488,13 +489,9 @@ service-probe:
 	if published.EventID == "" {
 		t.Fatal("service mock initial send has no authored input receipt")
 	}
-	var sent servedNativeMessage
-	select {
-	case sent = <-peer.sent:
-		if sent.To.ToNonAD() != customer && sent.To.ToNonAD() != customerLID || sent.Body.GetConversation() != outgoing || sent.ID == "" {
-			t.Fatalf("service mock did not receive the exact first send: to=%s text=%q id=%s", sent.To, sent.Body.GetConversation(), sent.ID)
-		}
-	case <-time.After(5 * time.Second):
+	receive := standingBusinessReceiver(t, peer, endpoint, runID, registered.IdentityOperationID != "")
+	sent, received := receive(customer, customerLID, outgoing)
+	if !received {
 		t.Fatal("service mock did not receive the authored first send")
 	}
 	requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), outgoing, false)
@@ -525,28 +522,14 @@ service-probe:
 		t.Errorf("service mock first inbound reply was not durably acknowledged; connections=%d disconnected=%d", connections, disconnected)
 		t.Logf("serve output after first inbound reply:\n%s", process.outputString())
 	} else {
-		select {
-		case reply := <-peer.sent:
-			if reply.To.ToNonAD() != customer && reply.To.ToNonAD() != customerLID || reply.Body.GetConversation() != incomingText || reply.ID == "" {
-				t.Error("service mock business reply changed its account, customer or text")
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("service mock inbound reply did not reach the authored customer flow")
-		}
-		replies := make(map[string]bool)
+		receive(customer, customerLID, incomingText)
 		for i := 1; i <= 2; i++ {
 			person := types.NewJID(fmt.Sprintf("1555123458%d", i), types.DefaultUserServer)
 			lid := types.NewJID(fmt.Sprintf("10000000001%d", i), types.HiddenUserServer)
 			other, chat, chatLID := peer.senderFrom(person, lid)
 			text := fmt.Sprintf("Independent sitting customer %d", i)
 			peer.sendEncrypted(other.EncryptText(t, text, fmt.Sprintf("SITTING_CUSTOMER_%d", i)), fmt.Sprintf("SITTING_CUSTOMER_%d", i))
-			select {
-			case reply := <-peer.sent:
-				if reply.To.ToNonAD() != chat && reply.To.ToNonAD() != chatLID || reply.Body.GetConversation() != text || reply.ID == "" || replies[reply.ID] {
-					t.Fatal("independent customer reply crossed chats or reused an effect", i)
-				}
-				replies[reply.ID] = true
-			case <-time.After(5 * time.Second):
+			if _, received := receive(chat, chatLID, text); !received {
 				t.Fatal("independent customer did not receive its authored reply", i)
 			}
 		}
@@ -661,6 +644,65 @@ service-probe:
 	}
 	if pending := readOfflinePairedWhatsAppCaptures(t, opts, registered, failure); len(pending) != 0 {
 		t.Fatal("first fixed boot left the acknowledged reply in private capture")
+	}
+}
+
+func standingBusinessReceiver(t *testing.T, peer *serveNativeProtocolPeer, endpoint, runID string, operator bool) func(types.JID, types.JID, string) (servedNativeMessage, bool) {
+	seen, cardSeen := map[string]bool{}, false
+	return func(chat, lid types.JID, text string) (servedNativeMessage, bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		for {
+			select {
+			case message := <-peer.sent:
+				if message.ID == "" || seen[message.ID] || time.Now().After(deadline) {
+					t.Error("standing reply has an empty/reused effect ID or exceeded its original budget")
+					return message, false
+				}
+				seen[message.ID] = true
+				if message.To.ToNonAD() == chat || message.To.ToNonAD() == lid {
+					if message.Body.GetConversation() != text {
+						t.Error("service mock business reply changed its exact text")
+						return message, false
+					}
+					return message, true
+				}
+				_, reference, _ := strings.Cut(message.Body.GetConversation(), "\nReference: ")
+				cardID, _, _ := strings.Cut(reference, "\n")
+				to := message.To.ToNonAD()
+				if !operator || cardSeen || cardID == "" || message.Body.GetExtendedTextMessage() != nil ||
+					(to != types.NewJID("15551234568", types.DefaultUserServer) && to != types.NewJID("100000000002", types.HiddenUserServer)) {
+					t.Error("unexpected outbound packet crossed the standing customer boundary")
+					return message, false
+				}
+				var view struct {
+					Card struct {
+						registeredChannelCard
+						Decision   string             `json:"decision"`
+						AnchorKind string             `json:"anchor_kind"`
+						Scope      decisioncard.Scope `json:"scope"`
+					} `json:"decision_card"`
+				}
+				response := requestServedJSONRPCWithTimeout(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, time.Until(deadline))
+				if response.Error != nil || json.Unmarshal(response.Result, &view) != nil || view.Card.CardID != cardID || view.Card.RunID != runID ||
+					view.Card.Status != decisioncard.StatusPending || view.Card.Decision != "retire_service" || view.Card.AnchorKind != string(decisioncard.AnchorKindStageGate) ||
+					view.Card.Scope.Kind != decisioncard.ScopeEntity || view.Card.Scope.FlowInstance == "" || view.Card.Scope.EntityID == "" {
+					t.Error("operator packet is not the current root's pending retirement card")
+					return message, false
+				}
+				expected := fmt.Sprintf("Retire service\nGate: . / active\nRun: %.8s\nScope: entity\nFlow instance: %s\nEntity: %s\nContext: {}\nDecision: pending\nAction: Retire\nReference: %s\nAction: Retire", runID, view.Card.Scope.FlowInstance, view.Card.Scope.EntityID, cardID)
+				if message.Body.GetConversation() != expected || time.Now().After(deadline) {
+					t.Error("operator retirement card changed its exact presentation or exceeded the original budget")
+					return message, false
+				}
+				cardSeen = true
+			case <-timer.C:
+				t.Error("standing customer did not receive its exact message within the original budget")
+				return servedNativeMessage{}, false
+			}
+		}
 	}
 }
 
