@@ -180,7 +180,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	}
 	lifecycle.retryErr = channelonboarding.ErrRevisionConflict
 	staleLocale := localeRequest("2")
-	requireOperatorChannelAPIErrorCode(t, staleLocale, ChannelBindingConflictCode)
+	requireOperatorChannelAPIErrorCode(t, staleLocale, ChannelRevisionConflictCode)
 	if lifecycle.retry.ExpectedLocaleRevision != 2 || deploymentCalls != 2 {
 		t.Fatal("deployment locale changed its stale revision before owner refusal")
 	}
