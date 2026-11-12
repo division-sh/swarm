@@ -102,7 +102,10 @@ func ForNativeTarget(target string) (Binding, bool) {
 
 func Installed() []Binding { return append([]Binding(nil), installed[:]...) }
 
-func (b Binding) Provider() string      { return b.id }
+func (b Binding) Provider() string { return b.id }
+func (b Binding) MatchesProvider(provider string) bool {
+	return b.id != "" && b.id == provider
+}
 func (b Binding) DisplayName() string   { return b.displayName }
 func (b Binding) ReadyTeaching() string { return b.readyTeaching }
 func (b Binding) RegistrationTeaching() string {

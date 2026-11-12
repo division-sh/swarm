@@ -44,6 +44,15 @@ type unifiedConfigSource struct {
 	Present *bool
 }
 
+type unifiedConfigPreparation struct {
+	opts        unifiedConfigLoadOptions
+	repoRoot    string
+	source      unifiedConfigSource
+	document    yaml.Node
+	diagnostics []unifiedConfigDiagnostic
+	config      *config.Config
+}
+
 type unifiedConfigDiagnosticKind string
 
 const (
@@ -104,16 +113,24 @@ func loadUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, 
 }
 
 func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, error) {
-	RepoRoot, err := requireInvocationRootPath(opts.RepoRoot)
+	prepared, err := prepareUnifiedConfig(opts)
 	if err != nil {
 		return unifiedConfigLoadResult{}, err
+	}
+	return validateUnifiedConfig(prepared)
+}
+
+func prepareUnifiedConfig(opts unifiedConfigLoadOptions) (unifiedConfigPreparation, error) {
+	RepoRoot, err := requireInvocationRootPath(opts.RepoRoot)
+	if err != nil {
+		return unifiedConfigPreparation{}, err
 	}
 	source, diagnostics := selectUnifiedConfigSource(RepoRoot, opts.ExplicitPath)
 	document, sourceDiagnostics := readUnifiedConfigSource(source)
 	diagnostics = append(diagnostics, sourceDiagnostics...)
 	cfg, err := defaultRuntimeConfig()
 	if err != nil {
-		return unifiedConfigLoadResult{}, err
+		return unifiedConfigPreparation{}, err
 	}
 	if len(document.Content) > 0 {
 		if err := config.DecodeSource(yamlsource.ValueFromNode(&document), cfg); err != nil {
@@ -129,6 +146,13 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	if backendOverride != "" {
 		cfg.LLM.Backend = backendOverride
 	}
+	return unifiedConfigPreparation{opts: opts, repoRoot: RepoRoot, source: source,
+		document: document, diagnostics: diagnostics, config: cfg}, nil
+}
+
+func validateUnifiedConfig(prepared unifiedConfigPreparation) (unifiedConfigLoadResult, error) {
+	cfg, document := prepared.config, prepared.document
+	source, diagnostics := prepared.source, prepared.diagnostics
 	if len(unifiedConfigBlockers(diagnostics)) == 0 {
 		if err := cfg.Validate(); err != nil {
 			diagnostics = append(diagnostics, unifiedConfigValidationDiagnostic(err, source.Path, &document, "fix the referenced swarm.yaml key or command flag"))
@@ -145,7 +169,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	} else {
 		diagnostics = unifiedConfigBlockers(diagnostics)
 	}
-	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: delegated}); err != nil {
+	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: prepared.repoRoot, RuntimeConfigPath: prepared.opts.ExplicitPath, DelegatedSources: delegated}); err != nil {
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Path: source.Path, Message: err.Error()})
 	}
 	result := unifiedConfigLoadResult{
