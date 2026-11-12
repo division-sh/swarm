@@ -207,7 +207,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	store.lLMPostgresOwner = llmOwner
 	store.llmMethods = llmOwner
-	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
+	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData)
+	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +548,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	store.lLMSQLiteOwner = llmOwner
 	store.llmMethods = llmOwner
-	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
+	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +582,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, store.now)
+	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, store.now, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}

@@ -15,12 +15,12 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+
 	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
-func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+func externalEffectAuthorityCurrentPostgres(ctx context.Context, nativeChecks nativeChannelChecks, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	if !authority.Valid() {
 		return false, nil
 	}
@@ -56,7 +56,7 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		return serveRegistrationAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelConfirmation:
 		if authority.ChannelConfirmation.TransportParent != nil {
-			return channelonboarding.RegisteredConfirmationCurrent(ctx, q, authority, true, false)
+			return nativeChecks.RegisteredConfirmationCurrent(ctx, q, authority, true, false)
 		}
 		return channelConfirmationAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelDelivery:
@@ -66,20 +66,20 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return channelNativeSettingAuthorityCurrent(ctx, q, authority, true, false, "")
 	case runtimeeffects.AuthorityChannelLogout:
-		return channelonboarding.LogoutEffectAuthorityCurrent(ctx, q, authority, true, false)
+		return nativeChecks.LogoutEffectAuthorityCurrent(ctx, q, authority, true, false)
 	default:
 		return false, nil
 	}
 }
 
-func ExternalEffectAuthorityCurrentPostgres(ctx context.Context, q interface {
+func ExternalEffectAuthorityCurrentPostgres(ctx context.Context, nativeChecks nativeChannelChecks, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, authority runtimeeffects.Authority) (bool, error) {
-	return externalEffectAuthorityCurrentPostgres(ctx, q, authority)
+	return externalEffectAuthorityCurrentPostgres(ctx, nativeChecks, q, authority)
 }
 
-func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+func externalEffectAuthorityCurrentSQLite(ctx context.Context, nativeChecks nativeChannelChecks, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	if !authority.Valid() {
 		return false, nil
 	}
@@ -115,7 +115,7 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 		return serveRegistrationAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelConfirmation:
 		if authority.ChannelConfirmation.TransportParent != nil {
-			return channelonboarding.RegisteredConfirmationCurrent(ctx, q, authority, false, false)
+			return nativeChecks.RegisteredConfirmationCurrent(ctx, q, authority, false, false)
 		}
 		return channelConfirmationAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelDelivery:
@@ -125,20 +125,20 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return channelNativeSettingAuthorityCurrent(ctx, q, authority, false, false, "")
 	case runtimeeffects.AuthorityChannelLogout:
-		return channelonboarding.LogoutEffectAuthorityCurrent(ctx, q, authority, false, false)
+		return nativeChecks.LogoutEffectAuthorityCurrent(ctx, q, authority, false, false)
 	default:
 		return false, nil
 	}
 }
 
-func ExternalEffectAuthorityCurrentSQLite(ctx context.Context, q interface {
+func ExternalEffectAuthorityCurrentSQLite(ctx context.Context, nativeChecks nativeChannelChecks, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, authority runtimeeffects.Authority) (bool, error) {
-	return externalEffectAuthorityCurrentSQLite(ctx, q, authority)
+	return externalEffectAuthorityCurrentSQLite(ctx, nativeChecks, q, authority)
 }
 
-func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
+func requireExternalEffectAuthorityPostgres(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
@@ -153,14 +153,14 @@ func requireExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, aut
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
 		return claimOrValidateForkChatAuthorityPostgres(ctx, tx, authority)
 	}
-	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
+	return requireCurrentExternalEffectAuthorityPostgres(ctx, nativeChecks, tx, authority)
 }
 
 func (s *EffectPostgresOwner) RequireExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
-	return requireExternalEffectAuthorityPostgres(ctx, tx, authority, authorize)
+	return requireExternalEffectAuthorityPostgres(ctx, s.channelChecks, tx, authority, authorize)
 }
 
-func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
+func requireExternalEffectAuthoritySQLite(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
@@ -175,11 +175,11 @@ func requireExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, autho
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && authorize {
 		return claimOrValidateForkChatAuthoritySQLite(ctx, tx, authority)
 	}
-	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
+	return requireCurrentExternalEffectAuthoritySQLite(ctx, nativeChecks, tx, authority)
 }
 
 func (s *EffectSQLiteOwner) RequireExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, authorize bool) error {
-	return requireExternalEffectAuthoritySQLite(ctx, tx, authority, authorize)
+	return requireExternalEffectAuthoritySQLite(ctx, s.channelChecks, tx, authority, authorize)
 }
 
 func externalEffectRunID(ctx context.Context, authority runtimeeffects.Authority) (string, bool, error) {
@@ -253,7 +253,7 @@ func externalEffectRunCurrentSQLite(ctx context.Context, q schemaQueryer, author
 	return err == nil, err
 }
 
-func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
+func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
@@ -316,7 +316,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 	case runtimeeffects.AuthorityChannelConfirmation:
 		confirmation := authority.ChannelConfirmation
 		if confirmation.TransportParent != nil {
-			return requireRegisteredConfirmation(ctx, tx, authority, true)
+			return requireRegisteredConfirmation(ctx, nativeChecks, tx, authority, true)
 		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE connected_channel_activations activation SET updated_at=activation.updated_at
@@ -343,7 +343,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return requireChannelNativeSettingAuthorityTx(ctx, tx, authority, true)
 	case runtimeeffects.AuthorityChannelLogout:
-		return requireChannelLogoutAuthorityTx(ctx, tx, authority, true)
+		return requireChannelLogoutAuthorityTx(ctx, nativeChecks, tx, authority, true)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -351,14 +351,14 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 }
 
 func (s *EffectPostgresOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
-	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
+	return requireCurrentExternalEffectAuthorityPostgres(ctx, s.channelChecks, tx, authority)
 }
 
 func (s *EffectPostgresOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
-	return externalEffectAuthorityCurrentPostgres(ctx, q, authority)
+	return externalEffectAuthorityCurrentPostgres(ctx, s.channelChecks, q, authority)
 }
 
-func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
+func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, nativeChecks nativeChannelChecks, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	if !authority.Valid() {
 		return invalidExternalAuthority(authority, "invalid")
 	}
@@ -421,7 +421,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 	case runtimeeffects.AuthorityChannelConfirmation:
 		confirmation := authority.ChannelConfirmation
 		if confirmation.TransportParent != nil {
-			return requireRegisteredConfirmation(ctx, tx, authority, false)
+			return requireRegisteredConfirmation(ctx, nativeChecks, tx, authority, false)
 		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE connected_channel_activations SET updated_at=updated_at
@@ -448,7 +448,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return requireChannelNativeSettingAuthorityTx(ctx, tx, authority, false)
 	case runtimeeffects.AuthorityChannelLogout:
-		return requireChannelLogoutAuthorityTx(ctx, tx, authority, false)
+		return requireChannelLogoutAuthorityTx(ctx, nativeChecks, tx, authority, false)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -456,7 +456,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 }
 
 func (s *EffectSQLiteOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
-	return requireCurrentExternalEffectAuthoritySQLite(ctx, tx, authority)
+	return requireCurrentExternalEffectAuthoritySQLite(ctx, s.channelChecks, tx, authority)
 }
 
 func requireCurrentNormalAgentTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, sqlite bool) error {
@@ -471,7 +471,7 @@ func requireCurrentNormalAgentTx(ctx context.Context, tx *sql.Tx, authority runt
 }
 
 func (s *EffectSQLiteOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
-	return externalEffectAuthorityCurrentSQLite(ctx, q, authority)
+	return externalEffectAuthorityCurrentSQLite(ctx, s.channelChecks, q, authority)
 }
 
 func requireCurrentExternalEffectAuthorityMutation(res sql.Result, err error, authority runtimeeffects.Authority) error {

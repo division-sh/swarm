@@ -12,10 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
-// LogoutEffectAuthorityCurrent consumes the existing strict teardown codec.
+// logoutEffectAuthorityCurrent consumes the existing strict teardown codec.
 // Retired business admission cannot authorize a message, but the frozen logout
 // responsibility can still admit its one original unlink.
-func LogoutEffectAuthorityCurrent(ctx context.Context, q interface {
+func logoutEffectAuthorityCurrent(ctx context.Context, owner runner, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, a effects.Authority, postgres, lock bool) (bool, error) {
@@ -83,10 +83,10 @@ func logoutEffectMatches(op domain.TeardownOperation, a effects.Authority) bool 
 		effects.Fingerprint(raw) == l.TargetFingerprint
 }
 
-// SettleLogoutEffectTx is called only inside the existing effect settlement
+// settleLogoutEffectTx is called only inside the existing effect settlement
 // transaction, after exact journal evidence has been checked. Ordinary teardown
 // completion intentionally cannot project this result.
-func SettleLogoutEffectTx(ctx context.Context, tx *sql.Tx, s effects.Settlement, postgres bool) (bool, error) {
+func settleLogoutEffectTx(ctx context.Context, owner runner, tx *sql.Tx, s effects.Settlement, postgres bool) (bool, error) {
 	if !s.Authority.Valid() || s.Authority.Kind != effects.AuthorityChannelLogout ||
 		s.OperationID != s.Authority.ChannelLogout.EffectOperationID || s.Now.IsZero() {
 		return false, fmt.Errorf("%w: invalid logout effect settlement", domain.ErrConflict)
