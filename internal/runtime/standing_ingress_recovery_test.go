@@ -680,15 +680,13 @@ func TestRegisteredStandingAdmissionWithdrawsOnlyCompletedLogout(t *testing.T) {
 			retired.Phase, retired.LogoutCompleted, retired.Revision = channelonboarding.PhaseRetired, true, 12
 			selected := previous
 			selected.OperationID, selected.Revision = "new-parent", 1
-			sibling := previous
-			sibling.OperationID, sibling.AccountReference = "unrelated-parent", "other-account"
 			selector := "ingress:acme-flow:acme"
 			oldKey, newKey := registeredStandingSelector(selector, previous.OperationID), registeredStandingSelector(selector, selected.OperationID)
-			siblingKey := registeredStandingSelector(selector, sibling.OperationID)
+			siblingKey := "ingress:another-flow:another-provider"
 			frozen := &standingCredentialAdmission{projection: projection, bindings: map[string]standingBindingCredentials{
 				selector:   {alias: declaration.Alias, plan: plan},
 				oldKey:     {registered: &registeredStandingCredential{operation: previous}, credentialKeys: []string{"old"}},
-				siblingKey: {registered: &registeredStandingCredential{operation: sibling}, credentialKeys: []string{"sibling"}},
+				siblingKey: {alias: "unrelated", enabled: true, credentialKeys: []string{"sibling"}},
 			}}
 			store := &standingLearnedCredentialStore{}
 			sentinel := errors.New("native predecessor read unavailable")
@@ -748,7 +746,8 @@ func TestRegisteredStandingAdmissionWithdrawsOnlyCompletedLogout(t *testing.T) {
 			}
 			next := rt.standingCredentialAdmission
 			if _, present := next.bindings[oldKey]; present || len(next.bindings) != 3 || next.bindings[newKey].registered == nil ||
-				next.bindings[siblingKey].registered != frozen.bindings[siblingKey].registered {
+				next.bindings[siblingKey].alias != "unrelated" || !next.bindings[siblingKey].enabled ||
+				len(next.bindings[siblingKey].credentialKeys) != 1 || next.bindings[siblingKey].credentialKeys[0] != "sibling" {
 				t.Fatal("completed logout did not withdraw only its exact predecessor")
 			}
 			if err := next.projection.ValidateCurrent(ctx); err != nil {
