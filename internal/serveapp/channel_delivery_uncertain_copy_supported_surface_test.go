@@ -107,20 +107,42 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				if oldEdits != 1 {
 					t.Fatalf("uncertain provider write was automatically retried/re-edited: %d", oldEdits)
 				}
-				assertUncertainCopyRebindFence(t, h, db, cardID)
+				assertUncertainCopyRebindFence(t, h, db, cardID, backend)
 			})
 		}
 	}
 }
 
-func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string) {
+func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string, backend servedparity.Backend) {
 	t.Helper()
 	oldCommand := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 	confirmationIndex := 0
 	for h.provider.Confirmation(confirmationIndex) != nil {
 		confirmationIndex++
 	}
+	indexQuery := `SELECT sql FROM sqlite_master WHERE name='idx_deployment_channel_account'`
+	if backend == servedparity.BackendExplicitPostgres {
+		indexQuery = `SELECT indexdef FROM pg_indexes WHERE schemaname=current_schema() AND indexname='idx_deployment_channel_account'`
+	}
+	var originalIndex string
+	if err := db.QueryRow(indexQuery).Scan(&originalIndex); err != nil {
+		t.Fatal(err)
+	}
+	priorParent := h.registration.OperationID
+	logoutDeploymentChannelFixtureAccount(t, h)
 	h.registration = connectDeploymentChannelFixtureOperator(t, h, "uncertain-copy-token", 1002, 7000+confirmationIndex, "private")
+	var parents, confirmed, retired int
+	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN account_confirmed AND phase<>'retired' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN phase='retired' AND logout_completed THEN 1 ELSE 0 END)
+		FROM deployment_channel_operations WHERE provider='telegram'`).Scan(&parents, &confirmed, &retired); err != nil ||
+		parents != 2 || confirmed != 1 || retired != 1 || h.registration.OperationID == priorParent {
+		t.Fatalf("logout/connect retained a second reservation: parents=%d confirmed=%d retired=%d err=%v", parents, confirmed, retired, err)
+	}
+	var currentIndex string
+	if err := db.QueryRow(indexQuery).Scan(&currentIndex); err != nil || currentIndex != originalIndex {
+		t.Fatalf("logout/connect changed the account uniqueness constraint: %v", err)
+	}
+	t.Logf("logout/connect: historical_parents=%d confirmed_current=%d retired_logout=%d unique_index_unchanged=true operator_chat=1002", parents, confirmed, retired)
 	command := waitNativeInboxCommand(t, h.provider, "chat", "1002", "")
 	callback, signing, _ := h.provider.Registration()
 	before := 0
@@ -169,6 +191,27 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 			t.Fatalf("rebound old audience received an authorized readback: %v", output)
 		}
 	}
+}
+
+func logoutDeploymentChannelFixtureAccount(t *testing.T, h *channelOnboardingE2EHarness) {
+	t.Helper()
+	var out, errOut lockedBuffer
+	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "logout", "telegram", "420079", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	var result channelonboarding.Result
+	if code != 0 || json.Unmarshal([]byte(out.String()), &result) != nil || result.Operation.OperationID != h.registration.OperationID ||
+		!result.Operation.LogoutCompleted || result.Operation.Phase != channelonboarding.PhaseRetired {
+		t.Fatalf("deployment logout did not retire the registered account: exit=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	h.registration = result.Operation
+	out, errOut = lockedBuffer{}, lockedBuffer{}
+	code = cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	var listing struct {
+		Accounts []channelonboarding.Result `json:"accounts"`
+	}
+	if code != 0 || json.Unmarshal([]byte(out.String()), &listing) != nil || len(listing.Accounts) != 0 {
+		t.Fatalf("logged-out account retained a public reservation: exit=%d out=%s err=%s", code, out.String(), errOut.String())
+	}
+	t.Log("public deployment logout completed; channel list has zero current accounts")
 }
 
 func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE2EHarness, credential string, chatID, userID int, chatType string, beforeClaim ...func()) channelonboarding.Operation {
