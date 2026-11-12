@@ -23,7 +23,7 @@ func (s *EffectPostgresOwner) RecoverSelectedForkEffectsTx(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		generic, err := reconcileGenericExternalEffectCandidates(ctx, tx, true, candidates, req.Now())
+		generic, err := reconcileGenericExternalEffectCandidates(ctx, s.channelChecks, tx, true, candidates, req.Now())
 		if err != nil {
 			return err
 		}
@@ -47,7 +47,7 @@ func (s *EffectSQLiteOwner) RecoverSelectedForkEffectsTx(ctx context.Context, mu
 		if err != nil {
 			return err
 		}
-		generic, err := reconcileGenericExternalEffectCandidates(ctx, tx, false, candidates, req.Now())
+		generic, err := reconcileGenericExternalEffectCandidates(ctx, s.channelChecks, tx, false, candidates, req.Now())
 		if err != nil {
 			return err
 		}

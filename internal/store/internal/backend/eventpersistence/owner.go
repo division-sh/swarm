@@ -19,6 +19,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -50,7 +51,12 @@ type operatorChannelClaimSQLiteOwner interface {
 	SettleInboundClaimTx(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
 }
 
+type nativeChannelChecks interface {
+	RequireSessionBusinessInputTx(context.Context, *sql.Tx, bool, nativeinput.Admission) error
+}
+
 type EventPostgresOwner struct {
+	channelChecks  nativeChannelChecks
 	channelChanges *render.ReconcileSignal
 	*storeactivityjournal.ActivityPostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
@@ -69,6 +75,7 @@ type EventPostgresOwner struct {
 }
 
 type EventSQLiteOwner struct {
+	channelChecks        nativeChannelChecks
 	channelChanges       *render.ReconcileSignal
 	preparedPublishEvent eventrecordsqlite.SingleEventReader
 	*storeactivityjournal.ActivitySQLiteOwner
@@ -118,21 +125,21 @@ func (s *EventSQLiteOwner) publishChannelChanges(acknowledged, changed bool) err
 	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivityPostgresOwner, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, apiIdempotency *storeapiidempotency.PostgresOwner, durableData *storedurabledata.Owner) (*EventPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil || apiIdempotency == nil || durableData == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivityPostgresOwner, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, apiIdempotency *storeapiidempotency.PostgresOwner, durableData *storedurabledata.Owner, channelChecks nativeChannelChecks) (*EventPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil || apiIdempotency == nil || durableData == nil || channelChecks == nil {
 		return nil, errors.New("event PostgreSQL owner dependencies are required")
 	}
-	return &EventPostgresOwner{ActivityPostgresOwner: activity, RunLifecyclePostgresOwner: lifecycle, DeliveryPostgresOwner: delivery, ReplyPostgresOwner: reply, backend: backend, requireCurrent: requireCurrent, apiIdempotency: apiIdempotency, durableData: durableData}, nil
+	return &EventPostgresOwner{ActivityPostgresOwner: activity, RunLifecyclePostgresOwner: lifecycle, DeliveryPostgresOwner: delivery, ReplyPostgresOwner: reply, backend: backend, requireCurrent: requireCurrent, apiIdempotency: apiIdempotency, durableData: durableData, channelChecks: channelChecks}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivitySQLiteOwner, lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner, delivery *storedelivery.DeliverySQLiteOwner, reply *storereplycontext.ReplySQLiteOwner, apiIdempotency *storeapiidempotency.SQLiteOwner, durableData *storedurabledata.Owner, now func() time.Time) (*EventSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil || apiIdempotency == nil || durableData == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivitySQLiteOwner, lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner, delivery *storedelivery.DeliverySQLiteOwner, reply *storereplycontext.ReplySQLiteOwner, apiIdempotency *storeapiidempotency.SQLiteOwner, durableData *storedurabledata.Owner, now func() time.Time, channelChecks nativeChannelChecks) (*EventSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil || apiIdempotency == nil || durableData == nil || channelChecks == nil {
 		return nil, errors.New("event SQLite owner dependencies are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &EventSQLiteOwner{ActivitySQLiteOwner: activity, RunLifecycleSQLiteOwner: lifecycle, DeliverySQLiteOwner: delivery, ReplySQLiteOwner: reply, backend: backend, requireCurrent: requireCurrent, apiIdempotency: apiIdempotency, durableData: durableData, nowFn: now}, nil
+	return &EventSQLiteOwner{ActivitySQLiteOwner: activity, RunLifecycleSQLiteOwner: lifecycle, DeliverySQLiteOwner: delivery, ReplySQLiteOwner: reply, backend: backend, requireCurrent: requireCurrent, apiIdempotency: apiIdempotency, durableData: durableData, nowFn: now, channelChecks: channelChecks}, nil
 }
 
 func (s *EventPostgresOwner) BindPipeline(owner *storepipeline.PipelinePostgresOwner) error {
