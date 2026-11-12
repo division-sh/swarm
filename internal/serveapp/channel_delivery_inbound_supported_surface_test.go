@@ -733,6 +733,12 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 			releaseCommandApply()
 		})
+		db, err := sql.Open(backend, observerDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var qualification channelnative.Qualification
 		deadline := time.Now().Add(15 * time.Second)
 		for {
 			writes := provider.CommandWrites()
@@ -760,30 +766,27 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			// Logout ends the predecessor's authority; the new destination must
 			// qualify its own installation rather than inherit a cumulative write.
 			if len(writes) == 2 && byChat["1001"] == 1 && byChat["1002"] == 1 && cardDelivered {
-				t.Logf("delayed native writes by physical scope: %v; card delivered only to new operator", byChat)
-				break
+				var evidence []byte
+				if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, h.registration.OperationID).Scan(&evidence); err != nil {
+					t.Fatal(err)
+				}
+				parent, err := channelnative.DecodeTransportParent(evidence)
+				if err != nil || parent.ID != h.registration.OperationID || parent.Revision != h.registration.Revision {
+					t.Fatalf("fresh installation lost its own parent: %+v err=%v", parent, err)
+				}
+				qualification, err = qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if qualification.State == channelnative.QualificationQualified {
+					t.Logf("delayed native writes by physical scope: %v; fresh parent independently qualified; card delivered only to new operator", byChat)
+					break
+				}
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("delayed predecessor did not converge: writes=%v card=%v", writes, cardDelivered)
+				t.Fatalf("delayed predecessor did not converge: writes=%v card=%v fresh_qualification=%+v", writes, cardDelivered, qualification)
 			}
 			time.Sleep(20 * time.Millisecond)
-		}
-		db, err := sql.Open(backend, observerDSN)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		var evidence []byte
-		if err := db.QueryRow(`SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`, h.registration.OperationID).Scan(&evidence); err != nil {
-			t.Fatal(err)
-		}
-		parent, err := channelnative.DecodeTransportParent(evidence)
-		if err != nil || parent.ID != h.registration.OperationID || parent.Revision != h.registration.Revision {
-			t.Fatalf("fresh installation lost its own parent: %+v err=%v", parent, err)
-		}
-		qualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), parent)
-		if err != nil || qualification.State != channelnative.QualificationQualified {
-			t.Fatalf("fresh installation was not independently qualified: %+v err=%v", qualification, err)
 		}
 		retiredQualification, err := qualificationReader.ReadNativeInboxQualificationParent(t.Context(), delayedParent)
 		if err != nil || retiredQualification.State == channelnative.QualificationQualified {
