@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -162,7 +164,7 @@ func newStopCommitStoreOwner(t *testing.T, backend string, db *sql.DB) selectedF
 	if backend == "postgres" {
 		return admitTestPostgresStore(t, db)
 	}
-	selected := NewSQLiteRuntimeStoreForTest(db)
+	selected := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 	selected.schema.AcceptCurrentForTest()
 	selected.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 	registerTestAuthorActivityCatalog(t, selected)

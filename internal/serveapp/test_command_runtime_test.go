@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -1044,7 +1046,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		t.Fatalf("%s first derived runtime stop code = %d\n%s", backend, code, process.outputString())
 	}
 	if backend == servedparity.BackendExplicitPostgres {
-		reopened, err := store.NewPostgresStore(postgresDSN)
+		reopened, err := store.NewPostgresStore(postgresDSN, channelfixture.Facts)
 		if err != nil {
 			t.Fatalf("reopen PostgreSQL derived runtime store: %v", err)
 		}

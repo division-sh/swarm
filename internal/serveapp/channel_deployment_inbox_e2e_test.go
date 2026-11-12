@@ -124,7 +124,7 @@ func runDeploymentWhatsAppOrderedInput(t *testing.T, backend string, held bool) 
 		}
 	}()
 	go func() {
-		code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, out, errOut, nil, nil, factory)
+		code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, out, errOut, nil, nil, fixtureRegistration(factory))
 		done <- code
 		progress <- code
 	}()
@@ -162,7 +162,7 @@ func runDeploymentWhatsAppOrderedInput(t *testing.T, backend string, held bool) 
 	bundleHash := identity.SourceArtifacts[0].BundleHash
 	runID := requireServedNativePairingRun(t, endpoint, bundleHash)
 	var listed, listErr lockedBuffer
-	if code := cliapp.Execute(t.Context(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", process.endpoint(t), "--json"}, &listed, &listErr, nil, nil, factory); code != 0 {
+	if code := cliapp.Execute(t.Context(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", process.endpoint(t), "--json"}, &listed, &listErr, nil, nil, fixtureRegistration(factory)); code != 0 {
 		t.Fatalf("deployment account list exit=%d err=%s", code, listErr.String())
 	}
 	var listing struct {
@@ -286,7 +286,7 @@ func runDeploymentWhatsAppOrderedInput(t *testing.T, backend string, held bool) 
 	var loggedOut, logoutErr lockedBuffer
 	if code := cliapp.Execute(t.Context(), []string{"--config", opts.ConfigPath, "channel", "logout", "whatsapp",
 		listing.Accounts[0].Operation.DeploymentAccount(), "--api-server", process.endpoint(t), "--json"},
-		&loggedOut, &logoutErr, nil, nil, factory); code != 0 {
+		&loggedOut, &logoutErr, nil, nil, fixtureRegistration(factory)); code != 0 {
 		t.Fatalf("deployment logout exit=%d err=%s", code, logoutErr.String())
 	}
 	var retired channelonboarding.Result

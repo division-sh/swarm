@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -54,7 +56,7 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 		},
 	})
 	t.Cleanup(func() { _ = db.Close() })
-	store := NewSQLiteRuntimeStoreForTest(db)
+	store := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 	if err := store.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatal(err)
 	}

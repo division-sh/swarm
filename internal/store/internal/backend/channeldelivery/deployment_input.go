@@ -31,7 +31,7 @@ type PreparedDeploymentInput struct {
 
 func PrepareDeploymentInput(ctx context.Context, request render.DeploymentInput) (PreparedDeploymentInput, error) {
 	if request.Parent.Validate() != nil || request.Parent.Kind != channelnative.TransportDeploymentRegistration ||
-		request.Account.Validate() != nil || request.BindingRevision < 1 || request.ReceivedAt.IsZero() {
+		request.Account.Validate(request.Channel.ProviderFacts()) != nil || request.BindingRevision < 1 || request.ReceivedAt.IsZero() {
 		return PreparedDeploymentInput{}, fmt.Errorf("deployment operator input is incomplete")
 	}
 	if err := request.Input.RequireDeploymentOperator(ctx, request.Account, request.Parent.ID, request.Parent.Revision, request.Session); err != nil {

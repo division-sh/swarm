@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
@@ -53,11 +54,11 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 	if !admitted || !object || !supplied || pc.registeredAccounts == nil || pc.providerCredentials == nil {
 		return nil, nil, nil, true, fmt.Errorf("connection-provider activity requires an explicit account and its deployment registration owners")
 	}
-	ref, err := channelonboarding.CanonicalAccount(profile.Provider(), account)
+	ref, err := channelonboarding.CanonicalAccount(plan.ProviderFacts().ForProvider(profile.Provider()), account)
 	if err != nil {
 		return nil, nil, nil, true, fmt.Errorf("activity account: %w", err)
 	}
-	op, err := pc.activityAccountRegistration(ctx, ref)
+	op, err := pc.activityAccountRegistration(ctx, ref, plan.ProviderFacts())
 	if err != nil {
 		return nil, nil, nil, true, err
 	}
@@ -71,7 +72,7 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 		return nil, nil, nil, true, err
 	}
 	current := func(ctx context.Context) error {
-		selected, err := pc.activityAccountRegistration(ctx, ref)
+		selected, err := pc.activityAccountRegistration(ctx, ref, plan.ProviderFacts())
 		if err != nil {
 			return err
 		}
@@ -84,8 +85,8 @@ func (pc *PipelineCoordinator) accountActivityCredentials(ctx context.Context, i
 	return values, secrets, current, true, current(ctx)
 }
 
-func (pc *PipelineCoordinator) activityAccountRegistration(ctx context.Context, ref channelonboarding.AccountReference) (channelonboarding.Operation, error) {
-	op, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref)
+func (pc *PipelineCoordinator) activityAccountRegistration(ctx context.Context, ref channelonboarding.AccountReference, facts channelprovider.Binding) (channelonboarding.Operation, error) {
+	op, err := channelonboarding.RegisteredAccount(ctx, pc.registeredAccounts, ref, facts)
 	if err == channelonboarding.ErrNotFound {
 		err = runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "channel_account_not_linked", "activity-runtime", "select_account", map[string]any{
 			"auth_kind": "channel_account", "provider": ref.Provider, "account": ref.Account,

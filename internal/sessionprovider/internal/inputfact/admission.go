@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -22,6 +23,7 @@ type CapturedRequestVerifier interface {
 // Capture is accessible only inside the native owner's Go internal boundary.
 // It is not exported through the read-only consumption facade.
 type Capture struct {
+	ProviderFacts              channelprovider.Binding
 	Store                      channelonboarding.Store
 	Responsibility             channelonboarding.AdmissionResponsibility
 	Scope                      channelonboarding.SessionInputScope
@@ -48,6 +50,13 @@ type admittedInput struct {
 }
 
 type Admission struct{ value *admittedInput }
+
+func (a Admission) ProviderFacts() channelprovider.Binding {
+	if a.value == nil || !a.value.capture.ProviderFacts.MatchesProvider(a.value.capture.Responsibility.Provider) {
+		return channelprovider.Binding{}
+	}
+	return a.value.capture.ProviderFacts
+}
 
 func (a Admission) NativeCaptureEvidence() (string, string) {
 	if a.value == nil {
@@ -110,7 +119,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	if err != nil {
 		return err
 	}
-	if op.AccountConnection() != capture.AccountOnly {
+	if op.AccountConnection(op.ProviderFacts()) != capture.AccountOnly {
 		return fmt.Errorf("native business input contradicts its account-only scope")
 	}
 	activation, err := capture.Store.GetConnectedChannelActivation(ctx, op.SlotKey)
@@ -121,7 +130,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 		ctx.Err() != nil || capture.Context.Err() != nil {
 		return fmt.Errorf("native business input contradicts its original binding")
 	}
-	if capture.Responsibility.MatchesAccountBusiness(op, activation) {
+	if capture.Responsibility.MatchesAccountBusiness(op, activation, op.ProviderFacts()) {
 		if capture.RunCurrent == nil {
 			return fmt.Errorf("native business input has no exact selected run owner")
 		}
@@ -144,7 +153,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 func (capture Capture) requireBusinessBinding(ctx context.Context, op channelonboarding.Operation, activation channelonboarding.ConnectedChannelActivation, rows []operatorchannel.Binding) error {
 	matched := 0
 	for _, binding := range rows {
-		if capture.Responsibility.MatchesBusinessBinding(op, activation, binding, capture.BindingRevision) {
+		if capture.Responsibility.MatchesBusinessBinding(op, activation, binding, capture.BindingRevision, op.ProviderFacts()) {
 			matched++
 		}
 	}

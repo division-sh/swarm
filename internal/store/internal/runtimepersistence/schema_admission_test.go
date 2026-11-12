@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"strings"
@@ -22,13 +24,13 @@ func TestUnacceptedSelectedStoreRuntimeCallsFailBeforeSQL(t *testing.T) {
 
 			var call func() error
 			if backend == "postgres" {
-				store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+				store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 				call = func() error {
 					_, err := store.ListActiveAgentDescriptors(context.Background(), unacceptedAdmissionEventID)
 					return err
 				}
 			} else {
-				store := NewSQLiteRuntimeStoreForTest(db)
+				store := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 				call = func() error {
 					_, err := store.ListActiveAgentDescriptors(context.Background(), unacceptedAdmissionEventID)
 					return err
@@ -61,7 +63,7 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 				call func() error
 			}
 			if backend == "postgres" {
-				store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+				store := newPostgresStoreWithBackend(mustPostgresBackend(db), channelfixture.Facts)
 				calls = []struct {
 					name string
 					call func() error
@@ -82,7 +84,7 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 					}},
 				}
 			} else {
-				store := NewSQLiteRuntimeStoreForTest(db)
+				store := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 				calls = []struct {
 					name string
 					call func() error

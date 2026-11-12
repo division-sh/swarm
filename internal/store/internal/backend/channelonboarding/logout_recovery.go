@@ -39,7 +39,7 @@ func recoverUnlaunchedLogout(ctx context.Context, r runner, id string, revision 
 		if !found {
 			return domain.ErrNotFound
 		}
-		if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.ValidateWithFacts(r.providerFact(op.Logout.Account.Provider)) != nil {
+		if op.Kind != domain.TeardownLogout || op.Logout == nil || op.Logout.Validate(r.providerFact(op.Logout.Account.Provider)) != nil {
 			return domain.ErrConflict
 		}
 		out = op

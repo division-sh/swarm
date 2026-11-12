@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -721,7 +722,7 @@ type callbackLockFixture struct {
 
 func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 	t.Helper()
-	return newCallbackLockFixtureWithFacts(t, backend, channelprovider.Lookup)
+	return newCallbackLockFixtureWithFacts(t, backend, channelfixture.Facts)
 }
 
 func newCallbackLockFixtureWithFacts(t *testing.T, backend string, providerFacts func(string) (channelprovider.Binding, bool)) callbackLockFixture {

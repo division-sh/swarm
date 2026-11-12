@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -36,7 +35,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		return nil
 	}
 	for _, activation := range activations {
-		binding, installed := channelprovider.Lookup(activation.Provider)
+		binding, installed := installedChannelFactsFor(activation.Provider)
 		if !installed || !binding.Session() {
 			continue
 		}

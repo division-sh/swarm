@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"bytes"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"net/url"
 	"strings"
 	"testing"
@@ -101,7 +102,7 @@ func TestWhatsAppClaimInstructionsRefuseMissingOrMaskedDestination(t *testing.T)
 
 func TestWhatsAppReadyTeachingUsesRuledCommands(t *testing.T) {
 	var out bytes.Buffer
-	binding, _ := channelprovider.Lookup("whatsapp")
+	binding, _ := channelfixture.Facts("whatsapp")
 	writeProviderConnection(&out, binding, nil, true)
 	const want = "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.\n"
 	if out.String() != want {

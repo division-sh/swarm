@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -41,11 +40,11 @@ type retainedSessionAccountReader interface {
 
 func newSessionAuthorityOwner(state retainedSessionAccountReader, store channelonboarding.OperationStore, operation channelonboarding.Operation, credentials operatorchannel.CredentialCurrentness, invocation sessionWorkParent) (*sessionAuthorityOwner, error) {
 	if state == nil || reflect.ValueOf(state).Kind() == reflect.Pointer && reflect.ValueOf(state).IsNil() || store == nil ||
-		operation.ValidateSessionAccount() != nil || !operation.DeploymentRegistration && operation.Coordinate.ValidateContext() != nil {
+		operation.ValidateSessionAccount(operation.ProviderFacts()) != nil || !operation.DeploymentRegistration && operation.Coordinate.ValidateContext() != nil {
 		return nil, fmt.Errorf("session authority requires its original declared operation and private state")
 	}
 	provider, connection, occurrence, err := state.sessionAccountScope()
-	if !channelprovider.Session(provider) || operation.Provider != provider || operation.SessionAccount.ConnectionID != connection {
+	if !operation.ProviderFacts().Session() || operation.Provider != provider || operation.SessionAccount.ConnectionID != connection {
 		return nil, fmt.Errorf("session authority requires its original declared operation and private state")
 	}
 	if err != nil {

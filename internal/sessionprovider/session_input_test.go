@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -164,7 +166,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				if !ok {
 					return nil
 				}
-				event, err := captureSDKMessage(scope, originalSource, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+				event, err := captureSDKMessage(scope, originalSource, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond), channelfixture.For("whatsapp"))
 				if err != nil {
 					return err
 				}

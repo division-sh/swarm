@@ -249,7 +249,7 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	}
 	opts.sourceRoot = opts.publicationSourceRoot(root)
 	if strings.TrimSpace(opts.sourceRoot) != "" {
-		_, bundle, _, err := loadConfiguredCLIWorkflowModule(root.Path(), CLISourcePathOptions{SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath})
+		_, bundle, _, err := loadConfiguredCLIWorkflowModule(root.Path(), CLISourcePathOptions{SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath, ChannelRegistration: opts.apiOptions.channelRegistration})
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -363,6 +363,7 @@ func (o runCommandOptions) withLocalForegroundServeAuth(root InvocationRoot) (ru
 		return o, nil
 	}
 	serveOpts := DefaultServeOptions()
+	serveOpts.ChannelRegistration = o.apiOptions.channelRegistration
 	serveOpts.ConfigPath = o.configPath
 	auth, err := ResolveServeAPIAuth(root, serveOpts)
 	if err != nil {

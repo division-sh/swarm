@@ -16,7 +16,6 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -367,7 +366,7 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 		return nil, err
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
-		PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
+		PlatformPackBases: packBases, AdmitPackInventory: ChannelRegistrations().AdmitInventory,
 	})
 	if err != nil {
 		return nil, err
@@ -403,7 +402,7 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases:  packBases,
-		AdmitPackInventory: packadmission.AdmitInventory,
+		AdmitPackInventory: ChannelRegistrations().AdmitInventory,
 	})
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -810,17 +809,19 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.recordDefaultAPITokenWarning()
 	}
 	resolvedPaths, err := cliapp.ResolveCLISourcePaths(repo, cliapp.CLISourcePathOptions{
-		SourceRoot: opts.SourceRoot,
-		ConfigPath: opts.ConfigPath,
+		ChannelRegistration: ChannelRegistrations(),
+		SourceRoot:          opts.SourceRoot,
+		ConfigPath:          opts.ConfigPath,
 	})
 	if err != nil {
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
 	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
-		RepoRoot:        repo,
-		ExplicitPath:    opts.ConfigPath,
-		BackendOverride: opts.Backend,
+		ChannelRegistration: ChannelRegistrations(),
+		RepoRoot:            repo,
+		ExplicitPath:        opts.ConfigPath,
+		BackendOverride:     opts.Backend,
 	})
 	if err != nil {
 		presenter.fail(2, "config_load", err)
@@ -1215,7 +1216,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	supervisor.resetContainerRuntime = workspace.NewDockerManager()
 	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	if coordinator := buildSelectedResetCoordinator(stores, processCapability, supervisor, runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo, Store: stores.SourceArtifactStore(), PlatformPackBases: platformPackBases,
+		AdmitPackInventory: ChannelRegistrations().AdmitInventory,
+		RepoRoot:           repo, Store: stores.SourceArtifactStore(), PlatformPackBases: platformPackBases,
 	}); coordinator != nil {
 		resetRecovery, err = coordinator.RecoverPending(ctx)
 		if err != nil {
@@ -1260,7 +1262,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			presenter.fail(5, "pinned_bundle_admission", errors.New("bundle upgrade read owner is unavailable"))
 			return 3
 		}
-		bundleUpgrade, err = cliapp.PrepareBundleUpgrade(ctx, reader, stores.SourceArtifactStore(), repo, source, platformPackBases)
+		bundleUpgrade, err = cliapp.PrepareBundleUpgrade(ctx, reader, stores.SourceArtifactStore(), repo, source, platformPackBases, ChannelRegistrations().AdmitInventory)
 		if err != nil {
 			if recovery, available := stores.StartupRecovery(); available {
 				if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, stores.SourceArtifactStore(), presenter); exitCode != 0 {
@@ -1755,11 +1757,11 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				return serveRegistrationSelectionCurrent(ctx, runtimeContextManager, channelOnboardingStore, pair, exactRevision)
 			},
 			EnrollmentAdmission: func(ctx context.Context, account channelonboarding.AccountReference) error {
-				provider, _ := channelprovider.Lookup(account.Provider)
+				provider, _ := installedChannelFactsFor(account.Provider)
 				if !provider.Webhook() {
 					return nil
 				}
-				op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account)
+				op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), account, provider)
 				if err == channelonboarding.ErrNotFound {
 					return nil
 				}
@@ -2022,7 +2024,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(22, "channel_registration", err)
 		return 1
 	}
-	for _, binding := range channelprovider.Installed() {
+	for _, binding := range installedChannelFacts() {
 		if mismatch, err := registeredAccountMismatch(binding, runtimeContextManager.LoadedContexts(), registeredOperations); err != nil {
 			presenter.fail(22, "channel_registration", err)
 			return 1
@@ -2584,6 +2586,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		return nil, errors.New("runtime config is required")
 	}
 	request := storeselected.RuntimeRequest{
+		ProviderFacts:  installedChannelFactsFor,
 		Selection:      selection,
 		SessionLockTTL: cfg.LLM.Session.LockTTL,
 	}

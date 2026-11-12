@@ -1,6 +1,8 @@
 package selectedtest
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"time"
@@ -41,7 +43,7 @@ func (f *ProcessLeaseFixture) Close() error { return f.close() }
 
 func OpenProcessLeaseFixture(ctx context.Context, scope backendselection.Selection, dsn string) (*ProcessLeaseFixture, error) {
 	if scope.Backend == backendselection.BackendSQLite {
-		owner, _, err := construction.OpenSQLiteRuntimeForServing(ctx, scope.SQLitePath)
+		owner, _, err := construction.OpenSQLiteRuntimeForServing(ctx, scope.SQLitePath, channelfixture.Facts)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +51,7 @@ func OpenProcessLeaseFixture(ctx context.Context, scope backendselection.Selecti
 			RunFixtureStore: owner, Store: owner, ChannelStore: owner, close: owner.Close}, nil
 	}
 	if scope.Backend == backendselection.BackendPostgres {
-		owner, _, err := construction.OpenPostgresRuntime(ctx, dsn)
+		owner, _, err := construction.OpenPostgresRuntime(ctx, dsn, channelfixture.Facts)
 		if err != nil {
 			return nil, err
 		}

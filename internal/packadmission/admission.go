@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
@@ -25,6 +26,26 @@ type Projection struct {
 	ProviderConnectors  *providerconnectors.PackRegistry
 	ChannelPlans        []packs.SatisfactionPlan
 	providerSource      ProviderSource
+}
+
+// The composition supplies one selected fact value; authored declarations and
+// their frozen source identity are unchanged.
+func (p Projection) WithProviderFacts(facts channelprovider.Binding) Projection {
+	p.ChannelPlans = append([]packs.SatisfactionPlan(nil), p.ChannelPlans...)
+	for i, plan := range p.ChannelPlans {
+		if facts.MatchesProvider(plan.Provider()) {
+			p.ChannelPlans[i] = plan.WithProviderFacts(facts)
+		}
+	}
+	definitions := make(map[string]ProviderDefinition, len(p.providerSource.definitions))
+	for key, definition := range p.providerSource.definitions {
+		if definition.hasChannel && facts.MatchesProvider(definition.channel.Provider()) {
+			definition.channel = definition.channel.WithProviderFacts(facts)
+		}
+		definitions[key] = definition
+	}
+	p.providerSource.definitions = definitions
+	return p
 }
 
 func (p Projection) EffectivePackInventoryDigest() string {
