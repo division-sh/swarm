@@ -25,7 +25,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 			}
 			for _, cut := range cuts {
 				t.Run(string(backend)+"/"+presentation+"/"+cut, func(t *testing.T) {
-					h, db := prepareChannelAnchorJourney(t, backend, "ack-crash-token")
+					h, db, _ := startChannelAnchorJourney(t, backend, "ack-crash-token", false, true)
 					observation := openChannelFixtureObservation(t, string(backend), h.storeDSN)
 					if presentation == "cli" {
 						runRegisteredCLIProcessRestart(t, h, cut)

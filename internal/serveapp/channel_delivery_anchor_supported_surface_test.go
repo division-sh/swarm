@@ -351,27 +351,22 @@ func waitChannelAnchorDispatchEdit(t *testing.T, h *channelOnboardingE2EHarness,
 	}
 }
 
-func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, prepareOnly ...bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
-	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0)
+	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0, prepareOnly...)
 }
 
-func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, prepareOnly ...bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
-	h, hash := startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
-	return h, openChannelAnchorDatabase(t, h), hash
-}
-
-func prepareChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string) (*channelOnboardingE2EHarness, *sql.DB) {
-	t.Helper()
-	h := prepareChannelAnchorPublicJourney(t, backend, token, false, 0, nil)
-	return h, openChannelAnchorDatabase(t, h)
-}
-
-func openChannelAnchorDatabase(t *testing.T, h *channelOnboardingE2EHarness) *sql.DB {
-	t.Helper()
+	var h *channelOnboardingE2EHarness
+	var hash string
+	if len(prepareOnly) > 0 && prepareOnly[0] {
+		h = prepareChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
+	} else {
+		h, hash = startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
+	}
 	driver := "sqlite"
-	if h.backend == servedparity.BackendExplicitPostgres {
+	if backend == servedparity.BackendExplicitPostgres {
 		driver = "postgres"
 	}
 	db, err := sql.Open(driver, h.storeDSN)
@@ -379,7 +374,7 @@ func openChannelAnchorDatabase(t *testing.T, h *channelOnboardingE2EHarness) *sq
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return h, db, hash
 }
 
 func prepareChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) *channelOnboardingE2EHarness {
