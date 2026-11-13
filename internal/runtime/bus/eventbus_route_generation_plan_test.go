@@ -167,6 +167,7 @@ func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *te
 	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.identity_route")))
 	evt := routeGenerationTestEvent("identity-route-generation", "test.identity_route")
+	evt = eventtest.WithEnvelope(evt, events.EnvelopeForEntityID(evt.Envelope(), busInternalTestRunID))
 	intent := decisioncardtest.RequesterReturn(t, evt, agentID, events.DeliveryContext{})
 	evt = intent.Event
 	plan, err := eb.routeTable.requesterReturn.bind(context.Background(), eb.deliveryPlanner, evt, intent.RequesterReturn)

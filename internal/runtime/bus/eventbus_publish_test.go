@@ -1760,7 +1760,7 @@ func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *tes
 		0,
 		runtimebustest.DefaultRunID,
 		"",
-		events.EventEnvelope{},
+		events.EnvelopeForEntityID(events.EventEnvelope{}, runtimebustest.DefaultRunID),
 		time.Now().UTC(),
 	), "agent-a", deliveryContext)
 	eventID = intent.Event.ID()

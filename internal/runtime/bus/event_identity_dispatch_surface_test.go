@@ -349,9 +349,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	seedCompleteEventDispatchRunWithOrigin(t, ctx, selected, runID, createdAt, origin)
-	sourceRoute := events.RouteIdentity{
-		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
-	}
+	sourceRoute := events.RouteIdentity{EntityID: runID}
 	var rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
 	if constructSource {
 		constructionCtx := runtimecorrelation.WithRunID(ctx, runID)
