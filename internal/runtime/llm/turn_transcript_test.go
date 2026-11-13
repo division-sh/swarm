@@ -169,6 +169,47 @@ func TestBuildTurnBlocks_DefaultsRuntimeLogMessageForCanonicalValidation(t *test
 }
 
 func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) {
+	for _, test := range []struct{ name, raw, want string }{
+		{"selected", `{"choices":[{"message":{"content":"  selected reply  ","reasoning_content":"private reasoning"}},{"message":{"content":"unselected reply"}}]}`, "selected reply"},
+		{"empty_first", `{"choices":[{"message":{"content":""}},{"message":{"content":"unselected reply"}}]}`, ""},
+		{"null", `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-1"}]}}]}`, ""},
+		{"tool_only", `{"choices":[{"message":{"tool_calls":[{"id":"call-1"}],"reasoning_content":"private reasoning"}}]}`, ""},
+		{"whitespace", `{"choices":[{"message":{"content":" \n "}}]}`, ""},
+		{"array", `{"choices":[{"message":{"content":[{"text":"not an admitted string"}]}}]}`, ""},
+		{"object", `{"choices":[{"message":{"content":{"text":"not an admitted string"}}}]}`, ""},
+		{"number", `{"choices":[{"message":{"content":42}}]}`, ""},
+		{"empty_choices", `{"choices":[]}`, ""},
+	} {
+		t.Run("chat/"+test.name, func(t *testing.T) {
+			raw := []byte(test.raw)
+			if !json.Valid(raw) {
+				t.Fatal("invalid response fixture")
+			}
+			before := string(raw)
+			blocks := BuildTurnBlocks(AgentTurnRecord{ResponseRaw: raw})
+			if string(raw) != before {
+				t.Fatal("transcript builder rewrote the provider response")
+			}
+			summary, found, err := DecodeCanonicalTurnSummaryBlocks(blocks)
+			if err != nil || found != (test.want != "") || summary.AssistantVisibleOutput != test.want || summary.Outcome != test.want {
+				t.Fatalf("selected reply/normalizer summary: found=%t summary=%+v err=%v", found, summary, err)
+			}
+			texts := 0
+			for _, block := range blocks {
+				if block.Kind == "assistant_text" {
+					texts++
+					if block.Text != test.want {
+						t.Fatalf("wrong selected content: %+v", block)
+					}
+				} else if block.Kind != turnSummaryBlockKind {
+					t.Fatalf("invented outcome/reasoning/tool block: %+v", block)
+				}
+			}
+			if texts != boolToTranscriptCount(test.want != "") {
+				t.Fatalf("assistant blocks=%d", texts)
+			}
+		})
+	}
 	blocks := BuildTurnBlocks(AgentTurnRecord{
 		TurnBlocks: []TurnBlock{
 			{Kind: "progress", Text: "Scheduling the follow-up review."},
@@ -208,6 +249,13 @@ func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) 
 	if summary.ToolResults[0].ToolName != "schedule" {
 		t.Fatalf("tool_result = %#v", summary.ToolResults[0])
 	}
+}
+
+func boolToTranscriptCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func TestDecodeCanonicalTurnSummaryBlocks_FailsWhenSummaryBearingBlocksLackCanonicalSummary(t *testing.T) {
