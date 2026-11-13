@@ -1775,7 +1775,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		deploymentRegistration = registrationController
 		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
 			_, manager := supervisor.PublicIngressState()
-			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController, stores.ChannelDelivery().NotifyChannelPublication, deploymentTransport)
+			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController, stores.ChannelDelivery().NotifyChannelPublication, sessionBootstrap, ready.RuntimeLoad(), deploymentTransport)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
