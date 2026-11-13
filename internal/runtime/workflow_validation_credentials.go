@@ -47,13 +47,12 @@ func bootAdmittedCredentials(source semanticview.Source, store channelonboarding
 		plan, _ := definition.ChannelPlan()
 		connector, _ := definition.ConnectorDescriptor()
 		declared, owned := connector.Tools[use.Name]
-		actual, found := bundle.ToolEntryForFlow(flow, use.Name)
-		if !owned || !found {
+		if !owned {
 			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
 		}
 		want, err := declared.CanonicalHash()
-		got, actualErr := actual.CanonicalHash()
-		bound, independent := bootCredentialUseBound(source, bundle, flow, use.Name, account.Policy, plan)
+		got, actualErr := use.Entry.CanonicalHash()
+		bound, independent := bootCredentialUseBound(source, bundle, flow, use.Name, account.Policy, got, plan)
 		if err != nil || actualErr != nil || want != got || !bound {
 			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
 		}
@@ -81,15 +80,6 @@ func bootAdmittedCredentials(source semanticview.Source, store channelonboarding
 			operations = selected.DeploymentChannelOperations()
 			op, err = channelonboarding.RegisteredAccount(ctx, operations, ref, plan.ProviderFacts())
 			if errors.Is(err, channelonboarding.ErrNotFound) {
-				rows, readErr := operations.ListChannelOnboardingOperations(ctx)
-				if readErr != nil {
-					return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, readErr
-				}
-				for _, previous := range rows {
-					if previous.Provider == ref.Provider && previous.AccountReference == ref.Account && len(previous.CredentialAdmissions) != 0 {
-						return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-					}
-				}
 				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
 			}
 		} else {
@@ -161,10 +151,12 @@ func bootAdmittedCredentials(source semanticview.Source, store channelonboarding
 	}
 }
 
-func bootCredentialUseBound(source semanticview.Source, bundle *contracts.WorkflowContractBundle, flow, tool, account string, plan packs.SatisfactionPlan) (bool, bool) {
+func bootCredentialUseBound(source semanticview.Source, bundle *contracts.WorkflowContractBundle, flow, tool, account, hash string, plan packs.SatisfactionPlan) (bool, bool) {
 	independent := false
-	for _, agent := range semanticview.AgentDeclarationsForOwner(source, flow) {
-		if slices.Contains(agent.Entry.Tools, tool) || slices.Contains(agent.Entry.Tools, "*") {
+	for _, agent := range semanticview.AgentDeclarations(source) {
+		entry, found := bundle.ToolEntryForFlow(agent.OwnerFlowID, tool)
+		got, _ := entry.CanonicalHash()
+		if found && got == hash && (slices.Contains(agent.Entry.Tools, tool) || slices.Contains(agent.Entry.Tools, "*")) {
 			independent = true // An unconstrained agent call is not an exact account use.
 		}
 	}
