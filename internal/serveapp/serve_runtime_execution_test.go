@@ -137,7 +137,27 @@ func TestSupervisorDelegatesRegisteredResetContextShutdownOnlyToManager(t *testi
 		t.Fatal("duplicate direct shutdown bypassed the registered context owner")
 		return nil
 	}
-	if err := supervisor.ShutdownProcessWithOptions(context.Background(), runtime.DefaultShutdownOptions()); err != nil {
+	work, err := rt.WorkOccurrence().Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = work.Done() }()
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- supervisor.ShutdownProcessWithOptions(context.Background(), runtime.DefaultShutdownOptions())
+	}()
+	select {
+	case <-work.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("registered context did not reach its final work join")
+	}
+	if !manager.LookupBundleHashStatus(hash).Loaded() {
+		t.Error("registered reset-capable source was withdrawn before its work joined")
+	}
+	if err := work.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stopped; err != nil {
 		t.Fatal(err)
 	}
 	if lookup := manager.LookupBundleHashStatus(hash); lookup.Loaded() {
