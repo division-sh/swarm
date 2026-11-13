@@ -1060,7 +1060,9 @@ func (s *Service) RestoreSessions(ctx context.Context) error {
 	}
 	for _, op := range operations {
 		if err := s.recoverOperation(ctx, op.OperationID, true); err != nil {
-			return err
+			if !SessionUnavailableOnly(err) {
+				return err
+			}
 		}
 	}
 	return nil

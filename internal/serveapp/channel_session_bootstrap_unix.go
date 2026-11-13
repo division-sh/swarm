@@ -643,6 +643,11 @@ func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account
 	}
 	connection, err := selected.finishedConnection(ctx)
 	if err != nil {
+		if channelonboarding.SessionUnavailableOnly(err) {
+			if _, _, readErr := s.sessionRecovery(ctx, selected.operation); readErr == nil || channelonboarding.SessionUnavailableOnly(readErr) {
+				return authority.Admission{}, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
+			}
+		}
 		return authority.Admission{}, err
 	}
 	return connection.AdmitActivityAccount(ctx, account)

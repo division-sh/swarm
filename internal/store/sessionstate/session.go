@@ -12,6 +12,7 @@ import (
 )
 
 var ErrSessionAccount = private.ErrSessionAccount
+var ErrSessionNotLinked = private.ErrSessionNotLinked
 
 type Owner struct{ owner *private.Owner }
 type Capture struct{ owner *private.CaptureStore }
