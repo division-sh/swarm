@@ -143,6 +143,11 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	verified := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
 	assertFullLifecycleVerifySuccess(t, verified)
 	s.start()
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("joined process evidence:\n%s", s.process.output.String())
+		}
+	})
 	s.runID = waitForFullLifecycleStandingRun(t, s.process.rpc, "", "").RunID
 	joinedRegisterTelegram(t, s)
 	s.seedID = s.publish("control.seed", "memory", "seed")
@@ -335,7 +340,7 @@ func (s *joinedRetainedScenario) publish(name, key, identity string) string {
 		params["source_event_id"] = s.seedID
 	}
 	if err := s.process.rpc.call(s.ctx, "event.publish", params, &result); err != nil || result.EventID == "" {
-		s.t.Fatalf("publish %s: %v", name, err)
+		s.t.Fatalf("publish %s: %v\n%s", name, err, s.process.output.String())
 	}
 	s.events[result.EventID] = identity
 	return result.EventID
