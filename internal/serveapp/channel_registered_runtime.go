@@ -164,6 +164,7 @@ func observeDeploymentAccountList(ctx context.Context, raw json.RawMessage, runt
 		}
 		if operation.AccountConfirmed && row.Connection != nil {
 			row.Connection.State = row.Status.Health
+			row.Connection.Cause = row.Status.Cause
 		}
 	}
 	return json.Marshal(list)

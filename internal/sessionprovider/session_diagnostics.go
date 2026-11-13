@@ -13,12 +13,18 @@ import (
 // SessionDiagnostic is observation only: no raw SDK values or execution rights.
 type SessionDiagnostic struct {
 	ConnectionID, OccurrenceID, Socket, Lifecycle string
+	Failure                                       string
 	Errno, CloseStatus                            int
 	Down                                          bool
+	Disconnected, Intentional                     bool
 	KeepAliveTimeout, KeepAliveRestored           bool
+	fenced                                        bool
 }
 
 func (d SessionDiagnostic) Cause() string {
+	if d.Failure != "" {
+		return fixedSessionFailure(d.Failure)
+	}
 	if cause := map[string]string{
 		"logged out": "logged out", "account temporarily banned": "account temporarily banned",
 		"session replaced by another connection": "connection replaced",
@@ -28,10 +34,50 @@ func (d SessionDiagnostic) Cause() string {
 	}[d.Lifecycle]; cause != "" {
 		return cause
 	}
-	if cause := map[string]string{"peer_close": "closed by the other side", "reset": "connection reset", "unreachable": "network unreachable", "timeout": "connection timed out"}[d.Socket]; cause != "" {
+	if cause := map[string]string{"peer_close": "closed by the other side", "reset": "connection reset", "unreachable": "network path unavailable", "timeout": "connection timed out"}[d.Socket]; cause != "" {
 		return cause
 	}
 	return "cause unknown"
+}
+
+func (d SessionDiagnostic) Failed() bool { return (d.Down || d.fenced) && !d.Intentional }
+
+func fixedSessionFailure(cause string) string {
+	switch cause {
+	case "closed by the other side", "connection reset", "network path unavailable", "connection timed out",
+		"logged out", "account temporarily banned", "connection replaced", "connection rejected",
+		"authentication refresh failed", "client needs an update", "connection must be re-established",
+		"connection attempt failed", "connection attempt cancelled", "incoming callback panic",
+		"incoming capture failed", "storage failure", "currentness failure", "runtime release failed":
+		return cause
+	default:
+		return "cause unknown"
+	}
+}
+
+func (o *clientOccurrence) recordFailure(cause string, disconnected bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.diagnostic.Intentional && (cause == "connection attempt cancelled" || cause == "connection attempt failed") {
+		return
+	}
+	if o.diagnostic.Failure == "" {
+		o.diagnostic.Failure = fixedSessionFailure(cause)
+		o.diagnostic.Disconnected, o.diagnostic.Intentional = disconnected, false
+	}
+}
+
+func (o *clientOccurrence) fenceFailure(cause string) {
+	o.recordFailure(cause, false)
+	o.fenceAfterDisconnect(false, "")
+}
+
+func (o *clientOccurrence) intentionalDisconnect() {
+	o.mu.Lock()
+	if o.diagnostic.Failure == "" {
+		o.diagnostic.Intentional = true
+	}
+	o.mu.Unlock()
 }
 
 type sdkDiagnosticLog struct {
@@ -88,5 +134,6 @@ func (o *clientOccurrence) diagnosticSnapshot() SessionDiagnostic {
 	defer o.mu.Unlock()
 	d := o.diagnostic
 	d.ConnectionID, d.OccurrenceID, d.Down = o.connectionID, o.occurrenceID, o.fenced && o.authenticated
+	d.fenced = o.fenced
 	return d
 }

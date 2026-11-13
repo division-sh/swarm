@@ -512,7 +512,7 @@ func requireServedRevokedPairingRecovery(t *testing.T, endpoint string, peer *se
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": old.OperationID}, &revoked)
 	if revoked.Operation.OperationID != old.OperationID || revoked.Operation.Phase != channelonboarding.PhaseActivatingProvider ||
 		revoked.Pairing == nil || *revoked.Pairing != (channelonboarding.PairingReadback{Status: "failed"}) ||
-		revoked.Connection == nil || revoked.Connection.State != "disconnected" || revoked.Connection.Reason != "logged out" ||
+		revoked.Connection == nil || revoked.Connection.State != "error" || revoked.Connection.Cause != "logged out" || revoked.Connection.Reason != "logged out" ||
 		revoked.IdentityOperation != nil || revoked.Binding != nil || revoked.Operation.ActivationRevision != 0 ||
 		revoked.Readiness != nil && revoked.Readiness.Ready {
 		t.Fatal("exact native revocation did not remain observable without QR or executable authority")

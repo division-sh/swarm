@@ -1,13 +1,30 @@
 package cliapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/channelonboarding"
 )
 
 func TestChannelCLIExplicitDeploymentAccountApprovalOutputModes(t *testing.T) {
+	for _, reason := range []string{"network unreachable", "competing_holders"} {
+		status := channelonboarding.AccountStatus{Provider: "whatsapp", Account: "+15551234567", State: "refused", Linked: true, Health: "error", Cause: "connection reset", Reason: reason}
+		var output bytes.Buffer
+		writeDeploymentAccountStatus(&output, status)
+		if !strings.Contains(output.String(), "error: connection reset") || strings.Contains(output.String(), "network unreachable") ||
+			(reason == "competing_holders") != strings.Contains(output.String(), " · competing_holders") {
+			t.Fatal("account line merged link failure and holder refusal", output.String())
+		}
+		raw, err := json.Marshal(status)
+		var decoded channelonboarding.AccountStatus
+		if err != nil || json.Unmarshal(raw, &decoded) != nil || decoded.Cause != status.Cause || decoded.Reason != reason || decoded.Health != "error" {
+			t.Fatal("account JSON changed independent reason or cause", err, string(raw))
+		}
+	}
 	for _, provider := range []string{"telegram", "whatsapp"} {
 		for _, mode := range []string{"human", "--json", "--quiet"} {
 			for _, approve := range []bool{false, true} {

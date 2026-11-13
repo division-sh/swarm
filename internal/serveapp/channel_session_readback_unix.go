@@ -16,9 +16,13 @@ func (s *serveSessionBootstrap) ReadSessionConnection(ctx context.Context, op ch
 	connection := s.connection(op.OperationID)
 	if connection != nil {
 		view.Reason = connection.DisconnectionReason()
+		view.Cause = connection.FailureCause()
+		if view.Cause != "" && !(op.Phase == channelonboarding.PhaseSucceeded && view.Linked && view.Reason == "") {
+			view.State = "error"
+		}
 	}
 	if op.SessionAccount.Validate() != nil {
-		if view.Reason == "" {
+		if view.Reason == "" && view.Cause == "" {
 			view.State = "connecting"
 		}
 		return view, nil

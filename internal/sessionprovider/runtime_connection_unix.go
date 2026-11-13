@@ -323,10 +323,11 @@ func (c *RuntimeConnection) Connect(ctx context.Context) (err error) {
 	case err := <-done:
 		return errors.Join(err, context.Cause(ctx))
 	case <-ctx.Done():
-		occurrence.fence()
+		occurrence.fenceFailure("connection attempt cancelled")
 		return context.Cause(ctx)
 	case <-c.ctx.Done():
-		occurrence.fence()
+		occurrence.intentionalDisconnect()
+		occurrence.fenceAfterDisconnect(false, "")
 		return context.Cause(c.ctx)
 	}
 }

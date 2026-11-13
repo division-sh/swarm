@@ -141,6 +141,7 @@ func (o *sessionAuthorityOwner) releaseRuntime(work *worklifetime.Lease) {
 		o.releaseErr = err
 		o.mu.Unlock()
 		if occurrence := o.state.currentOccurrence(); occurrence != nil {
+			occurrence.recordFailure("runtime release failed", false)
 			occurrence.mu.Lock()
 			callbacks := occurrence.callbacks
 			occurrence.mu.Unlock()

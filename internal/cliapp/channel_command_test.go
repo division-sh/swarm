@@ -202,6 +202,25 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			}
 		}
 	})
+	t.Run("native list separates failure cause from legacy reason", func(t *testing.T) {
+		calls := 0
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			calls++
+			if request.Method != "channel.list" {
+				t.Fatal("failure read changed RPC", request.Method)
+			}
+			result := operatorChannelCLIListResult("unbound", nil)
+			row := result["channels"].([]any)[0].(map[string]any)
+			op := sessionProgressCLIResult("whatsapp", "", "succeeded", true)["operation"].(map[string]any)
+			row["identity"].(map[string]any)["interface"], row["operation"] = op["interface"], op
+			row["connection"] = map[string]any{"state": "error", "linked": true, "reason": "network unreachable", "cause": "cause unknown"}
+			return result
+		})
+		out, errOut, code := runOperatorChannelCLI(t, server, "channel", "list")
+		if code != 0 || calls != 1 || errOut != "" || !strings.Contains(out, "WhatsApp: error: cause unknown") || strings.Contains(out, "network unreachable") || strings.Contains(out, "reconnecting") {
+			t.Fatal("failure rendering lost cause or changed read behavior", code, calls, out, errOut)
+		}
+	})
 
 	t.Run("status selects one exact activation coordinate", func(t *testing.T) {
 		firstBundle := "bundle-v2:sha256:" + strings.Repeat("b", 64)

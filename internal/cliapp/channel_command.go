@@ -709,7 +709,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client channelControlC
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
 		switch {
-		case current.Connection != nil && current.Connection.State == "disconnected" && current.Connection.Reason != "" &&
+		case current.Connection != nil && (current.Connection.State == "disconnected" || current.Connection.State == "error") && current.Connection.Reason != "" &&
 			(!expired || current.Connection.Reason != "network unreachable"):
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("WhatsApp disconnected: %s", cliSanitizeOneLineValue(current.Connection.Reason)))
 		case expired:

@@ -155,9 +155,11 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-expired-disconnect", "human-cached-expiry", "human-expired-banned", "human-network-failure", "human-reentry", "human-reentry-receptionist", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-expired-disconnect", "human-cached-expiry", "human-expired-banned", "human-network-failure", "human-reentry", "human-reentry-receptionist", "--json", "--quiet", "human-error-expired-disconnect", "human-error-expired-banned", "human-error-network-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			human := strings.HasPrefix(mode, "human")
+			errorState := strings.HasPrefix(mode, "human-error-")
+			mode = strings.Replace(mode, "human-error-", "human-", 1)
 			loginHandoff := strings.HasPrefix(mode, "human-login-")
 			reentry := strings.Contains(mode, "reentry")
 			receptionist := strings.Contains(mode, "receptionist")
@@ -220,6 +222,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				}
 				if loginHandoff || reentry {
 					result["operation"].(map[string]any)["revision"] = stage + checkpoints + 1
+				}
+				if connection, ok := result["connection"].(map[string]any); ok && connection["state"] == "disconnected" && errorState {
+					connection["state"], connection["cause"] = "error", "cause unknown"
 				}
 				return result
 			}
