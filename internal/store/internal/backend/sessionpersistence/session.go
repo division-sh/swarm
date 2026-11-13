@@ -18,6 +18,7 @@ import (
 )
 
 var ErrSessionAccount = errors.New("WhatsApp private state does not match its exact retained account")
+var ErrSessionNotLinked = errors.New("WhatsApp retained device is absent")
 
 // Owner contains only the connection-private SDK/capture database. It is never
 // a selected runtime store and does not issue native execution authority.
@@ -113,7 +114,7 @@ func (o *Owner) CurrentDevice(ctx context.Context, expectedAccount string) (*sto
 	}
 	if len(devices) == 0 {
 		if expectedAccount != "" {
-			return nil, ErrSessionAccount
+			return nil, errors.Join(ErrSessionAccount, ErrSessionNotLinked)
 		}
 		return o.NewDevice(), nil
 	}

@@ -216,6 +216,9 @@ func (c *RuntimeConnection) open(incoming *RuntimeIncomingOptions) error {
 	var err error
 	c.state, err = openSessionState(c.ctx, c.directory, c.operation.SessionConnectionID, c.operation.SessionAccount.AccountRef)
 	if err != nil {
+		if missingSessionDevice(err) {
+			return channelonboarding.ErrSessionNotLinked
+		}
 		return err
 	}
 	c.captures, err = newCaptureStore(c.ctx, c.state.database, c.operation.SessionConnectionID)

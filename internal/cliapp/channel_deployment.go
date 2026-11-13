@@ -34,6 +34,7 @@ import (
 // registration; this composition retains only its current SDK possession.
 type DeploymentChannelControl struct {
 	mu              sync.Mutex
+	closed          bool
 	store           *selected.Owner
 	service         *channelonboarding.Service
 	process         *worklifetime.Process
@@ -407,6 +408,7 @@ func (c *DeploymentChannelControl) retryRegistration(ctx context.Context, params
 func (c *DeploymentChannelControl) Close(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closed = true
 	if c.remote != nil {
 		return nil
 	}
@@ -437,17 +439,35 @@ func (c *DeploymentChannelControl) Dispatch(ctx context.Context, method string, 
 
 // ResumeRegisteredAccount restores only the retained transport. It neither
 // advances registration nor grants any source/flow execution authority.
-func (c *DeploymentChannelControl) ResumeRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference) error {
+func (c *DeploymentChannelControl) ResumeRegisteredAccount(ctx context.Context, ref channelonboarding.AccountReference, expected ...channelonboarding.Operation) (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.remote != nil || c.store == nil || ref.Provider != c.provider {
+	if c.closed || c.process == nil || c.remote != nil || c.store == nil || ref.Provider != c.provider || len(expected) > 1 {
 		return channelonboarding.ErrInvalidRequest
 	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found && process != c.process {
+		return channelonboarding.ErrInvalidRequest
+	}
+	ctx, err = c.registrationContext(ctx)
+	if err != nil {
+		return err
+	}
+	work, err := c.process.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
 	op, err := channelonboarding.RegisteredAccount(ctx, c.store.DeploymentChannels(), ref)
 	if err != nil {
 		return err
 	}
-	return c.session.ResumeSession(ctx, op, channelonboarding.Candidate{})
+	if len(expected) == 1 {
+		e := expected[0]
+		if op.OperationID != e.OperationID || op.Revision != e.Revision || op.Provider != e.Provider || op.PrincipalID != e.PrincipalID || op.SessionAccount != e.SessionAccount || op.SessionConnectionID != e.SessionConnectionID || op.AccountReference != e.AccountReference || op.Coordinate != e.Coordinate || op.Interface.Normalized() != e.Interface.Normalized() || op.RequestHash != e.RequestHash || op.FailureCode != "" {
+			return channelonboarding.ErrRevisionConflict
+		}
+	}
+	return c.session.ResumeSession(work.Context(), op, channelonboarding.Candidate{})
 }
 
 // DeploymentTransport consumes this invocation's admitted definition and

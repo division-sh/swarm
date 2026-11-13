@@ -35,6 +35,15 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 	if d.onboarding == nil {
 		return nil
 	}
+	owner, ok := d.sessions.(interface {
+		registeredSessionConnections(context.Context) ([]serveSessionDiagnostic, error)
+		sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
+	})
+	if !ok {
+		return nil
+	}
+	var operations []channelonboarding.Operation
+	presentations := map[string]string{}
 	for _, activation := range activations {
 		if activation.Provider != "whatsapp" {
 			continue
@@ -47,31 +56,79 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		if op.Phase != channelonboarding.PhaseSucceeded || result.Connection == nil {
 			continue
 		}
-		state := result.Connection.State
+		operations = append(operations, op)
+		presentations[op.OperationID] = result.Connection.AccountPresentation
+	}
+	registered, err := owner.registeredSessionConnections(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range registered {
+		if item.Fact.ConnectionID == "" {
+			continue
+		}
+		operations = append(operations, item.Operation)
+		presentations[item.Operation.OperationID] = item.Account
+	}
+	for _, op := range operations {
+		at, connected, err := owner.sessionRecovery(ctx, op)
+		if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+			if d.sessionStates[op.OperationID] != "not_linked" {
+				fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)
+			}
+			d.sessionStates[op.OperationID] = "not_linked"
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		state := "disconnected"
+		if connected {
+			state = "connected"
+		}
 		if state == "connected" {
 			if d.sessionStates[op.OperationID] != state {
-				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", result.Connection.AccountPresentation)
+				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentations[op.OperationID])
 			}
 			d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
 			continue
 		}
 		if d.sessionStates[op.OperationID] != "disconnected" {
-			reason := result.Connection.Reason
-			if reason == "" {
-				reason = "connection unavailable"
-			} else if reason == "network unreachable" {
-				reason += ", reconnecting..."
-			}
-			fmt.Fprintf(d.output, "WhatsApp disconnected: %s\n", reason)
+			fmt.Fprintln(d.output, "WhatsApp disconnected: network unreachable, reconnecting...")
 			d.sessionStates[op.OperationID] = "disconnected"
+			d.sessionAttempts[op.OperationID] = 5
+			d.sessionNextAttempt[op.OperationID] = at.Add(5 * time.Second)
 		}
-		if d.sessionAttempts[op.OperationID] >= 3 || d.now().Before(d.sessionNextAttempt[op.OperationID]) {
+		if at.IsZero() || d.now().Before(d.sessionNextAttempt[op.OperationID]) {
 			continue
 		}
-		d.sessionAttempts[op.OperationID]++
-		d.sessionNextAttempt[op.OperationID] = d.now().Add(5 * time.Second)
-		if _, err := d.onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: op.OperationID}); err != nil {
+		if op.DeploymentRegistration {
+			if d.deployment == nil || d.deployment.resume == nil {
+				return channelonboarding.ErrInvalidRequest
+			}
+			err = d.deployment.resume(ctx, op)
+		} else {
+			_, err = d.onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: op.OperationID})
+		}
+		if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
 			return err
+		}
+		if errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+			fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)
+			d.sessionStates[op.OperationID] = "not_linked"
+			continue
+		}
+		d.sessionAttempts[op.OperationID] = min(d.sessionAttempts[op.OperationID]*2, 7200)
+		d.sessionNextAttempt[op.OperationID] = d.now().Add(time.Duration(d.sessionAttempts[op.OperationID]) * time.Second)
+		if err == nil {
+			_, connected, err := owner.sessionRecovery(ctx, op)
+			if err != nil {
+				return err
+			}
+			if connected {
+				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentations[op.OperationID])
+				d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = "connected", 0
+			}
 		}
 	}
 	return nil
@@ -125,7 +182,7 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 			if fact.Down && !old.Down && hitl != nil && hitl.Provider == item.Operation.Provider && hitl.Account == item.Account {
 				fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
 			}
-			if verbose && fact != old && (fact.Down || fact.Socket != "") {
+			if verbose && fact != old && (fact.Down || fact.Socket != "" || fact.Lifecycle != "") {
 				fmt.Fprintf(errOut, "ERROR whatsapp occurrence=%s socket=%s errno=%d close_status=%d lifecycle=%q\n", fact.OccurrenceID, fact.Socket, fact.Errno, fact.CloseStatus, fact.Lifecycle)
 			}
 			if verbose && fact.KeepAliveTimeout && !old.KeepAliveTimeout {

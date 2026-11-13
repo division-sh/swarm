@@ -203,6 +203,9 @@ func (c *RuntimeConnection) DisconnectionReason() string {
 	}
 	occurrence.mu.Lock()
 	defer occurrence.mu.Unlock()
+	if occurrence.failureReason == "" && occurrence.startFailure {
+		return "network unreachable"
+	}
 	return occurrence.failureReason
 }
 

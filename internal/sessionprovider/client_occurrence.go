@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
@@ -48,6 +50,9 @@ type clientOccurrence struct {
 	revoked        *events.LoggedOut
 
 	transientDisconnect bool
+	disconnectedAt      time.Time
+	startFailure        bool
+	authenticated       bool
 
 	diagnostic SessionDiagnostic
 }
@@ -88,6 +93,9 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		observedDisconnect := false
 		switch observed := event.(type) {
 		case *events.Connected:
+			o.mu.Lock()
+			o.authenticated = true
+			o.mu.Unlock()
 			o.connectOnce.Do(func() { close(o.connected) })
 		case *events.KeepAliveTimeout, *events.KeepAliveRestored:
 			_, timeout := event.(*events.KeepAliveTimeout)
@@ -96,6 +104,7 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 			o.mu.Lock()
 			if !o.fenced {
 				o.transientDisconnect = true
+				o.disconnectedAt = time.Now()
 			}
 			o.mu.Unlock()
 			reason, observedDisconnect = "network unreachable", true
@@ -248,7 +257,16 @@ func (o *clientOccurrence) connect(ctx context.Context) (err error) {
 	defer func() {
 		o.release()
 		if err != nil {
+			transient := transientConnectError(err) && ctx.Err() == nil
 			err = errors.Join(err, o.join(context.WithoutCancel(o.ctx)))
+			if transient && transientConnectError(err) {
+				o.mu.Lock()
+				if o.failureReason == "" && o.revoked == nil && ctx.Err() == nil && (o.callbacks == nil || o.callbacks.currentFailure() == nil) {
+					o.startFailure, o.disconnectedAt = true, time.Now()
+					err = channelonboarding.ErrSessionUnavailable
+				}
+				o.mu.Unlock()
+			}
 		}
 	}()
 	// The SDK retains its connect context for the socket's lifetime. Cancel

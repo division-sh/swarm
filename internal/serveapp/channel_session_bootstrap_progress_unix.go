@@ -79,7 +79,10 @@ func (s *serveSessionBootstrap) connectSessionAttempt(ctx context.Context, attem
 		err = connection.ReconcileIncoming(ctx)
 	}
 	if err != nil {
-		err = errors.Join(err, connection.Close(ctx))
+		err = connection.RecoveryFailure(ctx, attempt.operation, err)
+		if !channelonboarding.SessionUnavailableOnly(err) {
+			err = errors.Join(err, connection.Close(ctx))
+		}
 	}
 	return err
 }
