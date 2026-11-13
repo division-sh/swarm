@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -232,6 +233,9 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	release := make(chan struct{})
 	var finish sync.Once
 	releaseWork := func() { finish.Do(func() { close(release) }) }
+	var coordinator *runtimedeliverycontinuation.Coordinator
+	var handoffs []runtimedelivery.DurableHandoffProof
+	handoffResult := make(chan error, 1)
 
 	agent := runtimeShutdownTestAgent{
 		id:            "agent-1",
@@ -243,7 +247,9 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 			}
 			select {
 			case <-release:
-				return nil, nil
+				handoffErr := coordinator.AcceptCommitted(handoffs)
+				handoffResult <- handoffErr
+				return nil, handoffErr
 			case <-ctx.Done():
 				canceled <- struct{}{}
 				<-release
@@ -310,14 +316,21 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		t.Fatal("timed out waiting for in-flight work to start")
 	}
 
-	// Hold a real coordinator dispatch across shutdown. Its manager dependency
-	// must outlive it, even though retirement has already canceled dispatch.
+	// A held producer must not prevent the accepted manager frontier draining;
+	// its retirement still joins before terminal manager cleanup.
 	dispatcher := &shutdownBlockedDispatcher{entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
 	var releaseOnce sync.Once
 	releaseDispatch := func() { releaseOnce.Do(func() { close(dispatcher.release) }) }
 	defer releaseDispatch()
 	continuationEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-continuation"), "test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission")}
+	handoffEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-accepted-handoff"), "test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
+	handoffEvent = fixture.PublishDelivery(fixture.Context, handoffEvent, []events.DeliveryRoute{route}, deliveryStore.authority)
+	proof, err := deliveryStore.ProveHandoff(fixture.Context, handoffEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffs = []runtimedelivery.DurableHandoffProof{proof}
 	deliveryID, err := runtimedelivery.DeliveryID(continuationEvent.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -326,7 +339,7 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		DeliveryID: deliveryID, Event: continuationEvent, Disposition: runtimedelivery.ClaimAcquired,
 		Snapshot: runtimedelivery.Snapshot{DeliveryID: deliveryID, Route: route, Status: runtimedelivery.StatusPending, Authority: deliveryStore.authority},
 	}}
-	coordinator, err := runtimedeliverycontinuation.New(page, deliveryStore.authority, workOwner, dispatcher, nil)
+	coordinator, err = runtimedeliverycontinuation.New(page, deliveryStore.authority, workOwner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,10 +357,19 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		shutdownErrCh <- rt.Shutdown()
 	}()
 
+	drainStarted := time.After(time.Second)
+	for am.IsRunning() {
+		select {
+		case <-drainStarted:
+			t.Fatal("accepted manager drain could not start while its continuation producer remained held")
+		default:
+			goruntime.Gosched()
+		}
+	}
 	select {
 	case <-dispatcher.canceled:
-	case <-time.After(time.Second):
-		t.Fatal("continuations not retired before manager")
+		t.Fatal("continuation producer retired before accepted manager work drained")
+	default:
 	}
 	select {
 	case <-canceled:
@@ -359,16 +381,6 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		t.Fatalf("shutdown detached continuation: %v", err)
 	default:
 	}
-	releaseDispatch()
-	select {
-	case err := <-startResult:
-		if err != nil {
-			t.Fatalf("startup scan: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("startup scan did not complete")
-	}
-
 	select {
 	case <-canceled:
 		t.Fatal("accepted work canceled before its graceful release")
@@ -397,6 +409,28 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	}
 
 	releaseWork()
+	select {
+	case err := <-handoffResult:
+		if err != nil {
+			t.Fatalf("accepted handler lost native handoff: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("accepted handler did not hand off")
+	}
+	select {
+	case <-dispatcher.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("continuation producer not retired after accepted manager drain")
+	}
+	releaseDispatch()
+	select {
+	case err := <-startResult:
+		if err != nil {
+			t.Fatalf("startup scan: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("startup scan did not complete")
+	}
 
 	select {
 	case err := <-shutdownErrCh:
