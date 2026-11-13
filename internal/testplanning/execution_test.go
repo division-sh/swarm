@@ -159,6 +159,15 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			}
 			if profile != ProfileCore {
 				assertNumericTimerInspectionOwnership(t, plan)
+				journeys, err := plan.Unit("hitl-releasee2e-journeys")
+				if err != nil {
+					t.Fatal(err)
+				}
+				const joined = "TestCompiledProcessFullLifecycleRetainedStateBothStores"
+				if profile == ProfileFull && (!unitRequires(journeys, joined) || unitDefers(journeys, joined) || !slices.Equal(journeys.RequiredChildren[joined], []string{"sqlite", "postgres"})) ||
+					profile != ProfileFull && (unitRequires(journeys, joined) || !unitDefers(journeys, joined)) {
+					t.Fatalf("joined retained-state root must execute both stores only in full: %+v", journeys)
+				}
 			}
 		})
 	}
