@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -169,6 +170,25 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 	}
 	if strings.Contains(captured.String(), private) || strings.Contains(captured.String(), "password") {
 		t.Fatal("native diagnostic exposed private text or failure attributes")
+	}
+	// Obtain the owner's static refusal, not an independently fabricated string.
+	retired := &deliverycontinuation.Coordinator{}
+	retired.BeginRetirement()
+	retirement := retired.AcceptCommitted(nil)
+	publisher.fault = errors.Join(retirement, native)
+	captured.Reset()
+	_, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+	if !errors.Is(err, retirement) || !errors.Is(err, native) {
+		t.Fatalf("known-cause projection changed publication errors: %v", err)
+	}
+	if !strings.Contains(captured.String(), `"sentinel":"delivery continuation coordinator is retired"`) {
+		t.Fatalf("owned retirement cause stayed opaque: %s", captured.String())
+	}
+	publisher.fault = errors.New(retirement.Error())
+	captured.Reset()
+	_, _ = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
+	if strings.Contains(captured.String(), `"sentinel":"delivery continuation coordinator is retired"`) || !strings.Contains(captured.String(), `"message_sha256":`) {
+		t.Fatalf("unowned matching text gained static-cause identity: %s", captured.String())
 	}
 	publisher.fault = fault
 	for i := 0; i < 12; i++ {
