@@ -3,6 +3,7 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -68,8 +69,20 @@ outputs: [inbound.whatsapp.message]
 			if err != nil {
 				t.Fatal(err)
 			}
+			retainedConfig, ok := strings.CutPrefix(string(content), "runtime:\n  recovery_on_startup: false\n")
+			if !ok {
+				t.Fatal("runtime config helper no longer has the expected recovery override")
+			}
+			token := make([]byte, 32)
+			if _, err := rand.Read(token); err != nil {
+				t.Fatal(err)
+			}
+			tokenFile := filepath.Join(t.TempDir(), "api.token")
+			if err := os.WriteFile(tokenFile, []byte(fmt.Sprintf("%x\n", token)), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			api := "127.0.0.1:" + freeDoctorTCPPort(t)
-			writeStandingCandidateFile(t, config, string(content)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nconnection:\n  api_server: http://%s\nserve:\n  api_listen_addr: %s\n  mcp_listen_addr: 127.0.0.1:0\n", directory, api, api))
+			writeStandingCandidateFile(t, config, retainedConfig+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nconnection:\n  api_server: http://%s\n  api_token_file: %q\nserve:\n  api_listen_addr: %s\n  api_token_file: %q\n  mcp_listen_addr: 127.0.0.1:0\n", directory, api, tokenFile, api, tokenFile))
 			t.Chdir(filepath.Dir(config))
 
 			qr := make(chan channelonboarding.Result, 1)
