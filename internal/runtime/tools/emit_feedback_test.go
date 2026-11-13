@@ -158,7 +158,7 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 	publisher.fault = errors.Join(context.Canceled, worklifetime.ErrAdmissionFenced, fmt.Errorf("private wrapper %s: %w", private, native), emitDiagnosticStateError{errors.New(private)})
 	captured.Reset()
 	_, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
-	if !errors.Is(err, context.Canceled) || !errors.Is(err, native) {
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, worklifetime.ErrAdmissionFenced) || !errors.Is(err, native) {
 		t.Fatalf("capture changed independent publication causes: %v", err)
 	}
 	diagnostic()
