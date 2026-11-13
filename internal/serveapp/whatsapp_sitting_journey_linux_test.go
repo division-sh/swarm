@@ -68,7 +68,8 @@ outputs: [inbound.whatsapp.message]
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeStandingCandidateFile(t, config, string(content)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nserve:\n  api_listen_addr: 127.0.0.1:0\n  mcp_listen_addr: 127.0.0.1:0\n", directory))
+			api := "127.0.0.1:" + freeDoctorTCPPort(t)
+			writeStandingCandidateFile(t, config, string(content)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nconnection:\n  api_server: http://%s\nserve:\n  api_listen_addr: %s\n  mcp_listen_addr: 127.0.0.1:0\n", directory, api, api))
 			t.Chdir(filepath.Dir(config))
 
 			qr := make(chan channelonboarding.Result, 1)
