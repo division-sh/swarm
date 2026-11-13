@@ -15,18 +15,18 @@ import (
 
 // NativeTLSConfig prepares serving only; automatic issuance starts on a TLS
 // handshake, never during configuration admission.
-func NativeTLSConfig(settings *config.PublicWebhookConfig, stateDir string) (*tls.Config, error) {
+func NativeTLSConfig(settings *config.PublicWebhookConfig, stateDir, invocationRoot string) (*tls.Config, error) {
 	if settings == nil {
 		return nil, nil
 	}
 	if err := settings.Validate(); err != nil {
 		return nil, err
 	}
-	if !filepath.IsAbs(stateDir) {
-		return nil, fmt.Errorf("public webhook TLS requires the resolved deployment state directory")
-	}
 	host := strings.TrimSpace(settings.Hostname)
 	if settings.CertificateFile == nil {
+		if !filepath.IsAbs(stateDir) {
+			return nil, fmt.Errorf("automatic public webhook TLS requires the resolved deployment state directory")
+		}
 		configuration := nativeCertificateManager(host, stateDir, settings.Email).TLSConfig()
 		// ACME challenge-token selection precedes the manager's HostPolicy check.
 		configuration.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
@@ -37,14 +37,11 @@ func NativeTLSConfig(settings *config.PublicWebhookConfig, stateDir string) (*tl
 		}
 		return configuration, nil
 	}
-	certPath, err := stateCertificatePath(stateDir, *settings.CertificateFile)
-	if err != nil {
-		return nil, err
+	if !filepath.IsAbs(invocationRoot) {
+		return nil, fmt.Errorf("supplied public webhook paths require the captured invocation directory")
 	}
-	keyPath, err := stateCertificatePath(stateDir, *settings.PrivateKeyFile)
-	if err != nil {
-		return nil, err
-	}
+	certPath := certificatePath(invocationRoot, *settings.CertificateFile)
+	keyPath := certificatePath(invocationRoot, *settings.PrivateKeyFile)
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("load supplied public webhook certificate: %w", err)
@@ -70,24 +67,12 @@ func nativeCertificateManager(host, stateDir, email string) *autocert.Manager {
 	}
 }
 
-func stateCertificatePath(stateDir, reference string) (string, error) {
-	root, err := filepath.EvalSymlinks(stateDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve public webhook state directory: %w", err)
-	}
+func certificatePath(invocationRoot, reference string) string {
 	path := strings.TrimSpace(reference)
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
+		return filepath.Join(invocationRoot, path)
 	}
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve supplied public webhook file: %w", err)
-	}
-	relative, err := filepath.Rel(root, path)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("supplied public webhook files must be inside the deployment state directory")
-	}
-	return path, nil
+	return path
 }
 
 func freshTLSProbeClient(base *http.Client) (*http.Client, error) {

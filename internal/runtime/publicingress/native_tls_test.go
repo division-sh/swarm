@@ -57,19 +57,19 @@ func webhookCertificateFixture(t *testing.T, root, hostname string, expiry time.
 	return &config.PublicWebhookConfig{Hostname: hostname, CertificateFile: &certFile, PrivateKeyFile: &keyFile}, leaf, certPEM, keyPEM
 }
 
-func TestNativeTLSSuppliedCertificateIsStateBoundAndRestartOwned(t *testing.T) {
+func TestNativeTLSSuppliedCertificateUsesOperatorPathsAndRestartOwned(t *testing.T) {
 	root := t.TempDir()
 	settings, _, _, _ := webhookCertificateFixture(t, root, "hooks.example.test", time.Now().Add(90*24*time.Hour))
-	first, err := NativeTLSConfig(settings, root)
+	first, err := NativeTLSConfig(settings, root, root)
 	if err != nil || first.GetCertificate != nil || len(first.Certificates) != 1 {
 		t.Fatalf("supplied TLS must load once without an issuer: config=%v error=%v", first, err)
 	}
 	webhookCertificateFixture(t, root, settings.Hostname, time.Now().Add(90*24*time.Hour))
-	second, err := NativeTLSConfig(settings, root)
+	second, err := NativeTLSConfig(settings, root, root)
 	if err != nil || bytes.Equal(first.Certificates[0].Certificate[0], second.Certificates[0].Certificate[0]) {
 		t.Fatalf("replacement must take a new startup, not mutate the loaded pair: %v", err)
 	}
-	for _, failure := range []string{"wrong name", "expired", "partial", "bad key", "escape", "symlink escape"} {
+	for _, failure := range []string{"wrong name", "expired", "partial", "bad key", "missing file"} {
 		t.Run(failure, func(t *testing.T) {
 			state := t.TempDir()
 			cfg, _, _, _ := webhookCertificateFixture(t, state, settings.Hostname, time.Now().Add(time.Hour))
@@ -84,21 +84,47 @@ func TestNativeTLSSuppliedCertificateIsStateBoundAndRestartOwned(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(state, *cfg.PrivateKeyFile), []byte("not a key"), 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "escape", "symlink escape":
-				outside := filepath.Join(root, "cert.pem")
-				if failure == "symlink escape" {
-					outside = filepath.Join(state, "outside.pem")
-					if err := os.Symlink(filepath.Join(root, "cert.pem"), outside); err != nil {
-						t.Fatal(err)
-					}
-				}
-				cfg.CertificateFile = &outside
+			case "missing file":
+				missing := filepath.Join(state, "absent.pem")
+				cfg.CertificateFile = &missing
 			}
-			if got, err := NativeTLSConfig(cfg, state); err == nil || got != nil {
+			if got, err := NativeTLSConfig(cfg, state, state); err == nil || got != nil {
 				t.Fatalf("bad supplied pair must refuse, never fall back to ACME: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(state, "public-webhook-certs")); !os.IsNotExist(err) {
 				t.Fatalf("supplied branch touched automatic certificate storage: %v", err)
+			}
+		})
+	}
+	for _, spelling := range []string{"absolute", "relative", "symlink"} {
+		t.Run(spelling, func(t *testing.T) {
+			state, invocation, outside := t.TempDir(), t.TempDir(), t.TempDir()
+			cfg, leaf, _, _ := webhookCertificateFixture(t, outside, settings.Hostname, time.Now().Add(time.Hour))
+			certPath, keyPath := filepath.Join(outside, *cfg.CertificateFile), filepath.Join(outside, *cfg.PrivateKeyFile)
+			if spelling == "relative" {
+				certPath, err = filepath.Rel(invocation, certPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				keyPath, err = filepath.Rel(invocation, keyPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if spelling == "symlink" {
+				for name, target := range map[string]string{"cert-link": certPath, "key-link": keyPath} {
+					if err := os.Symlink(target, filepath.Join(invocation, name)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				certPath, keyPath = "cert-link", "key-link"
+			}
+			cfg.CertificateFile, cfg.PrivateKeyFile = &certPath, &keyPath
+			loaded, err := NativeTLSConfig(cfg, state, invocation)
+			if err != nil || loaded.GetCertificate != nil || !bytes.Equal(loaded.Certificates[0].Certificate[0], leaf.Raw) {
+				t.Fatalf("operator paths outside the state directory must load without an issuer: %v", err)
+			}
+			if entries, err := os.ReadDir(state); err != nil || len(entries) != 0 {
+				t.Fatalf("supplied paths must not copy material into the state directory: %v %v", entries, err)
 			}
 		})
 	}
@@ -107,7 +133,7 @@ func TestNativeTLSSuppliedCertificateIsStateBoundAndRestartOwned(t *testing.T) {
 func TestNativeTLSAutomaticManagerUsesOneNameAndMockCA(t *testing.T) {
 	root := t.TempDir()
 	host := "hooks.example.test"
-	cfg, err := NativeTLSConfig(&config.PublicWebhookConfig{Hostname: host}, root)
+	cfg, err := NativeTLSConfig(&config.PublicWebhookConfig{Hostname: host}, root, root)
 	if err != nil || cfg.GetCertificate == nil || len(cfg.Certificates) != 0 {
 		t.Fatalf("automatic TLS configuration: %v", err)
 	}
@@ -151,7 +177,7 @@ func TestNativeTLSAutomaticManagerUsesOneNameAndMockCA(t *testing.T) {
 func TestNativeTLSProbeUsesFreshVerifiedHandshakeAndRevokesExpiry(t *testing.T) {
 	root := t.TempDir()
 	settings, leaf, _, _ := webhookCertificateFixture(t, root, "hooks.example.test", time.Now().Add(time.Hour))
-	loaded, err := NativeTLSConfig(settings, root)
+	loaded, err := NativeTLSConfig(settings, root, root)
 	if err != nil {
 		t.Fatal(err)
 	}

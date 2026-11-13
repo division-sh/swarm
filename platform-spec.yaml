@@ -12970,8 +12970,9 @@ tool_model:
         external_origin: '`swarm serve --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>` under either retained plain serve or development serve; it uses the invocation''s selected-store posture without changing its lifetime'
         native_tls: 'Optional deployment configuration serve.public_webhook selects serve-owned HTTPS on public port 443 for one configured hostname; conflicts with --expose and --public-webhook-*; absence preserves existing modes.'
       native_tls_certificates: >
-        A complete supplied certificate_file/private_key_file pair is read once from inside the resolved deployment
-        state directory, checked for hostname and current validity, and replaced only by restarting serve. Invalid
+        A complete supplied certificate_file/private_key_file pair is read once from operator-named paths,
+        relative to the captured CLI invocation directory or absolute anywhere readable by serve, following ordinary
+        filesystem symlinks. The pair is checked for hostname and current validity and replaced only by restarting serve. Invalid
         supplied material never falls back to automatic issuance. Without the pair, unchanged autocert uses one
         hostname, its state-directory public-webhook-certs cache, Let's Encrypt defaults and accepted terms, with
         contact only when email is configured. No certificate upload to Telegram or self-signed generation is provided.
@@ -24150,8 +24151,8 @@ configuration_source_authority:
             api_token_file: secret_reference
             public_webhook:
               hostname: one_configured_dns_hostname
-              certificate_file: optional_state_directory_file_reference_paired_with_private_key_file
-              private_key_file: optional_state_directory_secret_reference_paired_with_certificate_file
+              certificate_file: optional_operator_file_path_paired_with_private_key_file
+              private_key_file: optional_operator_secret_file_path_paired_with_certificate_file
               email: optional_acme_contact
           owner: cli_specification.command_catalog.serve.listener_topology_v2_1
         runtime:

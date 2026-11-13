@@ -1029,7 +1029,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	if publicIngressMode != runtimepublicingress.ModeNativeTLS {
 		tlsSettings = nil
 	}
-	webhookTLS, err := runtimepublicingress.NativeTLSConfig(tlsSettings, swarmDir.Path)
+	webhookTLS, err := runtimepublicingress.NativeTLSConfig(tlsSettings, swarmDir.Path, repo)
 	if err != nil {
 		presenter.fail(1, "public_ingress", err)
 		return 2
