@@ -159,6 +159,35 @@ func TestLeaseHeartbeatCannotRenewSameOwnerReplacement(t *testing.T) {
 	if !found || current.GrantID != second.GrantID || !current.LockExpiresAt.Equal(second.ExpiresAt) {
 		t.Fatalf("heartbeat changed replacement grant: %+v found=%v", current, found)
 	}
+	t.Run("retained_heartbeat_after_fence", func(t *testing.T) {
+		if err := runtime.Fence(); err != nil {
+			t.Fatal(err)
+		}
+		failures := make(chan error, 1)
+		stopRetained := StartLeaseHeartbeatWithErrorHandler(ctx, registry, second, func(err error) { failures <- err })
+		defer stopRetained()
+		select {
+		case err := <-failures:
+			t.Fatalf("accepted turn lost its session heartbeat during drain: %v", err)
+		default:
+		}
+		if got := runtime.ActiveCount(); got != 2 {
+			t.Fatalf("accepted parent and heartbeat leases=%d, want 2", got)
+		}
+		stopRetained()
+		fresh := worklifetime.WithOccurrence(context.Background(), runtime)
+		StartLeaseHeartbeatWithErrorHandler(fresh, registry, second, func(err error) { failures <- err })()
+		if err := <-failures; !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			t.Fatalf("fresh heartbeat after fence=%v", err)
+		}
+		if err := work.Done(); err != nil {
+			t.Fatal(err)
+		}
+		StartLeaseHeartbeatWithErrorHandler(ctx, registry, second, func(err error) { failures <- err })()
+		if err := <-failures; !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			t.Fatalf("settled parent opened heartbeat after fence: %v", err)
+		}
+	})
 }
 
 func TestInMemoryRegistryExactIdentityIsolation(t *testing.T) {
