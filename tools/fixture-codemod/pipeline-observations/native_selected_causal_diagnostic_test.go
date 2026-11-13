@@ -1,6 +1,7 @@
 package main
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -97,6 +98,36 @@ func selectedCausalObservationBody(t *testing.T, path, name string) string {
 	return string(body[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
 }
 
+func selectedCausalObservationOwnerMethodBody(t *testing.T, owner, name string) string {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "internal/store/internal/backend/eventpersistence/test_event_record_observation.go")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, path, body, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != name || fn.Recv == nil || len(fn.Recv.List) != 1 {
+			continue
+		}
+		pointer, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		receiver, ok := pointer.X.(*ast.Ident)
+		if ok && receiver.Name == owner {
+			return string(body[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
+		}
+	}
+	t.Fatalf("missing %s.%s native observation", owner, name)
+	return ""
+}
+
 func TestNativeSelectedCausalDiagnosticOwnersPreserveEveryOriginalQuery(t *testing.T) {
 	row := nativeMissingHeaderRecipe(t, "native-selected-causal-diagnostic-readback")
 	callback := nativeMissingHeaderRecipe(t, "native-selected-causal-parent-read")
@@ -127,11 +158,32 @@ func TestNativeSelectedCausalDiagnosticOwnersPreserveEveryOriginalQuery(t *testi
 			t.Fatalf("strict lineage or complete read boundary missing: %s", required)
 		}
 	}
-	for _, name := range []string{"ReadSelectedCausalDiagnosticStorageForTest", "ReadSelectedCausalDiagnosticConservationForTest"} {
+	for _, pair := range [][3]string{
+		{"ReadSelectedCausalDiagnosticStorageForTest", "eventrecord.ReadLifecycleDiagnosticEventLineage", "ReadLifecycleDiagnosticProjection"},
+		{"ReadSelectedCausalDiagnosticConservationForTest", "eventrecord.CountLifecycleDiagnosticEvents", "CountPendingLifecycleDiagnostic"},
+	} {
+		name := pair[0]
 		adapter := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_event_support.go", name)
-		for _, required := range []string{"validateSelectedForkStorageIdentity(outboxID)", "validateChannelObservationOwner(selected)", "readServedDeliveryObservation(ctx, selected,"} {
-			if !strings.Contains(adapter, required) {
-				t.Fatalf("original selected owner boundary missing in %s: %s", name, required)
+		identity := strings.Index(adapter, "validateSelectedForkStorageIdentity(outboxID)")
+		selected := strings.Index(adapter, "validateChannelObservationOwner(selected)")
+		if identity < 0 || selected <= identity {
+			t.Fatalf("original selected owner validation order missing in %s", name)
+		}
+		for _, owner := range []struct {
+			name, field, dialect string
+		}{
+			{"EventPostgresOwner", "eventPostgresOwner", "true"},
+			{"EventSQLiteOwner", "eventSQLiteOwner", "false"},
+		} {
+			if !strings.Contains(adapter, "store."+owner.field+"."+name+"(ctx, outboxID)") {
+				t.Fatalf("%s facade lost %s delegation", name, owner.name)
+			}
+			method := selectedCausalObservationOwnerMethodBody(t, owner.name, name)
+			transaction := strings.Index(method, "s.backend.RunReadTransaction(ctx,")
+			first := strings.Index(method, pair[1]+"(ctx, tx, "+owner.dialect+", outboxID)")
+			second := strings.Index(method, pair[2]+"(ctx, tx, outboxID)")
+			if transaction < 0 || first <= transaction || second <= first || !strings.Contains(method[first:second], "if err != nil") {
+				t.Fatalf("%s.%s lost one ordered diagnostic snapshot", owner.name, name)
 			}
 		}
 	}

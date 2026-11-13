@@ -231,10 +231,7 @@ func ReadSelectedForkExecutableCardinalityForTest(ctx context.Context, selected 
 	return result, nil
 }
 
-type SelectedCausalDiagnosticStorage struct {
-	Events     []eventrecord.LifecycleDiagnosticEventLineage
-	Projection []byte
-}
+type SelectedCausalDiagnosticStorage = eventpersistence.SelectedCausalDiagnosticStorage
 
 func ReadAgentSettledAttemptCountForTest(ctx context.Context, selected any, eventID, agentID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
@@ -273,9 +270,7 @@ func SetEventChainDepthForTest(ctx context.Context, selected any, eventID string
 	}
 }
 
-type SelectedCausalDiagnosticConservation struct {
-	Events, Pending int
-}
+type SelectedCausalDiagnosticConservation = eventpersistence.SelectedCausalDiagnosticConservation
 
 func ReadSelectedCausalDiagnosticStorageForTest(ctx context.Context, selected any, outboxID string) (SelectedCausalDiagnosticStorage, error) {
 	if err := validateSelectedForkStorageIdentity(outboxID); err != nil {
@@ -284,21 +279,14 @@ func ReadSelectedCausalDiagnosticStorageForTest(ctx context.Context, selected an
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return SelectedCausalDiagnosticStorage{}, err
 	}
-	var out SelectedCausalDiagnosticStorage
-	_, postgres := selected.(*PostgresStore)
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out.Events, err = eventrecord.ReadLifecycleDiagnosticEventLineage(ctx, tx, postgres, outboxID)
-		if err != nil {
-			return err
-		}
-		out.Projection, err = eventpersistence.ReadLifecycleDiagnosticProjection(ctx, tx, outboxID)
-		return err
-	})
-	if err != nil {
-		return SelectedCausalDiagnosticStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadSelectedCausalDiagnosticStorageForTest(ctx, outboxID)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadSelectedCausalDiagnosticStorageForTest(ctx, outboxID)
+	default:
+		return SelectedCausalDiagnosticStorage{}, fmt.Errorf("causal diagnostic observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadSelectedCausalDiagnosticConservationForTest(ctx context.Context, selected any, outboxID string) (SelectedCausalDiagnosticConservation, error) {
@@ -308,21 +296,14 @@ func ReadSelectedCausalDiagnosticConservationForTest(ctx context.Context, select
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return SelectedCausalDiagnosticConservation{}, err
 	}
-	var out SelectedCausalDiagnosticConservation
-	_, postgres := selected.(*PostgresStore)
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out.Events, err = eventrecord.CountLifecycleDiagnosticEvents(ctx, tx, postgres, outboxID)
-		if err != nil {
-			return err
-		}
-		out.Pending, err = eventpersistence.CountPendingLifecycleDiagnostic(ctx, tx, outboxID)
-		return err
-	})
-	if err != nil {
-		return SelectedCausalDiagnosticConservation{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadSelectedCausalDiagnosticConservationForTest(ctx, outboxID)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadSelectedCausalDiagnosticConservationForTest(ctx, outboxID)
+	default:
+		return SelectedCausalDiagnosticConservation{}, fmt.Errorf("causal diagnostic conservation requires the original native owner")
 	}
-	return out, nil
 }
 
 type CausalEventStorageRow = eventrecord.CausalObservationRow
@@ -333,17 +314,14 @@ func ReadGlobalEventChronologyForTest(ctx context.Context, selected any) ([]Glob
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var out []GlobalEventChronologyRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.ReadGlobalEventChronologyTx(ctx, tx, postgres)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadGlobalEventChronologyForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadGlobalEventChronologyForTest(ctx)
+	default:
+		return nil, fmt.Errorf("global event chronology requires the original native owner")
 	}
-	return out, nil
 }
 
 type ScatterGatherPhysicalCounts struct {
@@ -379,16 +357,14 @@ func CountRunEventNameStorageForTest(ctx context.Context, selected any, run, nam
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = eventrecord.CountRunEventNameStorage(ctx, tx, run, name)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.CountRunEventNameStorageForTest(ctx, run, name)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.CountRunEventNameStorageForTest(ctx, run, name)
+	default:
+		return 0, fmt.Errorf("run event name observation requires the original native owner")
 	}
-	return count, nil
 }
 
 type SourceRouteSettlementStorage = eventrecord.SourceRouteSettlementStorage
@@ -397,67 +373,56 @@ func ReadSourceRouteSettlementStorageForTest(ctx context.Context, selected any, 
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return SourceRouteSettlementStorage{}, err
 	}
-	var out SourceRouteSettlementStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.ReadSourceRouteSettlementStorage(ctx, tx, runID, eventID)
-		return err
-	})
-	if err != nil {
-		return SourceRouteSettlementStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadSourceRouteSettlementStorageForTest(ctx, runID, eventID)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadSourceRouteSettlementStorageForTest(ctx, runID, eventID)
+	default:
+		return SourceRouteSettlementStorage{}, fmt.Errorf("source route settlement observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func CountChainDepthDiagnosticStorageForTest(ctx context.Context, selected any, runID, entityID, handlerNode string) (int, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		count, err = eventrecord.CountChainDepthDiagnosticStorage(ctx, tx, postgres, runID, entityID, handlerNode)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.CountChainDepthDiagnosticStorageForTest(ctx, runID, entityID, handlerNode)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.CountChainDepthDiagnosticStorageForTest(ctx, runID, entityID, handlerNode)
+	default:
+		return 0, fmt.Errorf("chain depth diagnostic observation requires the original native owner")
 	}
-	return count, nil
 }
 
 func ReadLatestHandlerErrorLogForTest(ctx context.Context, selected any) (json.RawMessage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out json.RawMessage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		out, err = eventrecord.ReadLatestHandlerErrorLog(ctx, tx, postgres)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadLatestHandlerErrorLogForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadLatestHandlerErrorLogForTest(ctx)
+	default:
+		return nil, fmt.Errorf("handler error observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadCausalEventStorageSinceForTest(ctx context.Context, selected any, since time.Time) ([]CausalEventStorageRow, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []CausalEventStorageRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		out, err = eventrecord.ReadCausalObservationSince(ctx, tx, postgres, since)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadCausalEventStorageSinceForTest(ctx, since)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadCausalEventStorageSinceForTest(ctx, since)
+	default:
+		return nil, fmt.Errorf("causal event observation requires the original native owner")
 	}
-	return out, nil
 }
 
 // Record-bearing fixture evidence uses the publication fixture's closed codec.
