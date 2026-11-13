@@ -35,3 +35,13 @@ func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeShutdownAfterStoppedManagerJoinsDependencies(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runtimepkg.VerifyRuntimeShutdownAfterStoppedManagerJoinsDependenciesForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
+				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
+			})
+		})
+	}
+}
