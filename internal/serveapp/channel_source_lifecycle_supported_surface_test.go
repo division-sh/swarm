@@ -732,7 +732,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			t.Fatal("restart changed the deployment parent or repeated its acknowledged installation")
 		}
 		var out, errOut lockedBuffer
-		if code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "420079", "--yes", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
+		if code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "connect", "telegram", "420079", "--yes", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, ChannelRegistrations()); code != 0 {
 			t.Fatalf("public registered-account reverify exit=%d err=%s", code, errOut.String())
 		}
 		var reverified channelonboarding.Result
