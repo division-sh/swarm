@@ -128,16 +128,14 @@ func CountClosedSourceFanOutIssuanceForTest(ctx context.Context, selected any, r
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = pipelinepersistence.CountClosedSourceFanOutIssuance(ctx, tx, runID, eventID, cardinality)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.CountClosedSourceFanOutIssuanceForTest(ctx, runID, eventID, cardinality)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.CountClosedSourceFanOutIssuanceForTest(ctx, runID, eventID, cardinality)
+	default:
+		return 0, fmt.Errorf("closed-source fan-out issuance requires the original native owner")
 	}
-	return count, nil
 }
 
 type DeliveryAttemptDiagnosticRow = delivery.DeliveryAttemptDiagnosticRow
@@ -222,49 +220,42 @@ func ReadSourceFanOutIntentDiagnosticRowsForTest(ctx context.Context, selected a
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []SourceFanOutIntentDiagnosticRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = pipelinepersistence.ReadSourceFanOutIntentDiagnosticRows(ctx, tx, runID, eventID)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadSourceFanOutIntentDiagnosticRowsForTest(ctx, runID, eventID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadSourceFanOutIntentDiagnosticRowsForTest(ctx, runID, eventID)
+	default:
+		return nil, fmt.Errorf("source fan-out intent observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadEarliestEventPipelineReceiptRowsForTest(ctx context.Context, selected any) ([]EventPipelineReceiptObservationRow, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []EventPipelineReceiptObservationRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = pipelinepersistence.ReadEarliestEventPipelineReceiptRows(ctx, tx)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadEarliestEventPipelineReceiptRowsForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadEarliestEventPipelineReceiptRowsForTest(ctx)
+	default:
+		return nil, fmt.Errorf("pipeline receipt observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadLatestPlatformPipelineReceiptStorageForTest(ctx context.Context, selected any, eventID string) (LatestPipelineReceiptStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return LatestPipelineReceiptStorage{}, err
 	}
-	var out LatestPipelineReceiptStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		out, err = pipelinepersistence.ReadLatestPlatformPipelineReceiptStorage(ctx, tx, postgres, eventID)
-		return err
-	})
-	if err != nil {
-		return LatestPipelineReceiptStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadLatestPlatformPipelineReceiptStorageForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadLatestPlatformPipelineReceiptStorageForTest(ctx, eventID)
+	default:
+		return LatestPipelineReceiptStorage{}, fmt.Errorf("platform pipeline receipt requires the original native owner")
 	}
-	return out, nil
 }
 
 func CountDeadLettersForOriginalEventForTest(ctx context.Context, selected any, originalEventID string) (int, error) {
@@ -355,16 +346,14 @@ func ReadServedIncompletePipelineHandoffCountForTest(ctx context.Context, select
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = pipelinepersistence.ReadIncompletePipelineHandoffCount(ctx, tx, runID)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadServedIncompletePipelineHandoffCountForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadServedIncompletePipelineHandoffCountForTest(ctx, runID)
+	default:
+		return 0, fmt.Errorf("pipeline handoff observation requires the original native owner")
 	}
-	return count, nil
 }
 
 func ReadServedDeliveryStatusCountForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
