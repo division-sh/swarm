@@ -16,6 +16,15 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- Retained WhatsApp transports reconnect on the same stored device after a
+  positively identified transient drop, including registered accounts. Retries
+  begin after five seconds, double to a two-hour interval, and continue while
+  eligible; successful login resets the next outage to five seconds. (#3011)
+  The schedule is process-local. Startup still checks retained pairing and
+  physical ownership; positively absent or revoked devices print
+  `Not linked: run swarm channel connect whatsapp`. Logout, replacement, ban,
+  storage, capture and currentness failures never grant reconnect permission.
+
 - A configured WhatsApp HITL/operator link going down prints one normal
   `ERROR WhatsApp disconnected: <short cause>` line, including registered
   accounts. Other accounts do not receive this new normal-output line.

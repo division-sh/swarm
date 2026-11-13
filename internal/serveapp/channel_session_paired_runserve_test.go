@@ -67,6 +67,7 @@ func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
 }
 
 type servedNativeJourneyProof struct {
+	recoveryOwner        func() *serveSessionBootstrap
 	revokedPairing       bool
 	quotedRetirement     bool
 	explicitLogout       bool
@@ -269,6 +270,10 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			peer.mu.Lock()
 			settledSends := peer.acceptedSends
 			peer.mu.Unlock()
+			if proof.recoveryOwner != nil {
+				exerciseServedSessionRecovery(t, opts, process, peer, result.Operation.OperationID, false, proof.recoveryOwner)
+				return
+			}
 			if code := process.stop(); code != 0 {
 				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
 			}

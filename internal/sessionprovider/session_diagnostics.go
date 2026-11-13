@@ -87,6 +87,6 @@ func (o *clientOccurrence) diagnosticSnapshot() SessionDiagnostic {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	d := o.diagnostic
-	d.ConnectionID, d.OccurrenceID, d.Down = o.connectionID, o.occurrenceID, o.fenced
+	d.ConnectionID, d.OccurrenceID, d.Down = o.connectionID, o.occurrenceID, o.fenced && o.authenticated
 	return d
 }

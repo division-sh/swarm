@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -21,6 +22,7 @@ import (
 type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error)
 
 type deploymentRuntimeOptions struct {
+	output     io.Writer
 	deployment *serveDeploymentTransport
 	manager    *runtime.RuntimeContextManager
 	sessions   serveSessionBootstrapOwner

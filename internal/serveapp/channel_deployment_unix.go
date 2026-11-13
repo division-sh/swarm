@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sync"
 	"time"
@@ -68,6 +69,13 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			}
 			return deploymentTransportControl(ctx, op, root, config, directory, stores, process, factory, clients, &mu)
 		}
+		runtimeOptions.deployment.resume = func(ctx context.Context, op channelonboarding.Operation) error {
+			client, err := control(ctx, op)
+			if err != nil {
+				return err
+			}
+			return client.ResumeRegisteredAccount(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}, op)
+		}
 		runtimeOptions.deployment.registrations = func(ctx context.Context) ([]serveDeploymentRegistration, error) {
 			if rootErr != nil {
 				return nil, rootErr
@@ -103,7 +111,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if err != nil || rootErr != nil {
 			return errors.Join(err, rootErr)
 		}
-		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu)
+		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu, runtimeOptions.output)
 	}
 	return handler, claim, restore, close
 }
@@ -281,7 +289,7 @@ func rememberDeploymentControl(clients map[string]*cliapp.DeploymentChannelContr
 	}
 }
 
-func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) error {
+func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex, output io.Writer) error {
 	for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
 		ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
 		client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
@@ -289,7 +297,18 @@ func restoreDeploymentAccountControls(ctx context.Context, operations []channelo
 			return err
 		}
 		if err := client.ResumeRegisteredAccount(ctx, ref); err != nil {
-			return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+			if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+				if err := client.Close(context.WithoutCancel(ctx)); err != nil {
+					return err
+				}
+				if output != nil {
+					fmt.Fprintln(output, channelonboarding.ErrSessionNotLinked)
+				}
+				continue
+			}
+			if !channelonboarding.SessionUnavailableOnly(err) {
+				return errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+			}
 		}
 		mu.Lock()
 		clients[op.Provider+":"+op.OperationID] = client
@@ -390,7 +409,7 @@ func (c *deploymentChannelSession) ResumeSession(ctx context.Context, op channel
 	if op.Provider == "whatsapp" && op.AccountConfirmed {
 		// Wait for login while preserving observed revocation for re-verification.
 		_, err := c.connection.VerifyDeploymentRegistration(ctx, op)
-		return err
+		return c.connection.RecoveryFailure(ctx, op, err)
 	}
 	return nil
 }
