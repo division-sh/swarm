@@ -163,8 +163,7 @@ func proveProviderTranscriptSettlement(t *testing.T, backend, adapter string) {
 			prefix = append(prefix, llm.BuildTurnBlocks(llm.AgentTurnRecord{ResponseRaw: raw})...)
 		}
 		blocks := llm.BuildTurnBlocks(llm.AgentTurnRecord{TurnBlocks: prefix})
-		event := eventtest.ExistingRunRootIngress(uuid.NewString(), "task.in", "chat-proof", "", nil, 0, runID, events.EventEnvelope{}, at)
-		event = eventtest.InExecutionMode(event, mode)
+		event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "task.in", "chat-proof", "", nil, 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at, mode)
 		storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, pipelineobligation.ScopeSubscribed)
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: selected, Selected: selected, Identity: identity,
 			RunID: runID, SessionID: sessionID, TurnID: turnID, Event: event, TurnBlocks: blocks, ResponsePayload: raw,
