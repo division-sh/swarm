@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -53,7 +54,9 @@ func emitPublicationDiagnostic(err error, remaining *int) map[string]any {
 			node["opaque"] = true
 		}
 	default:
-		if err == context.Canceled || err == context.DeadlineExceeded || err == worklifetime.ErrAdmissionFenced {
+		if cause, known := deliverycontinuation.StaticRetirementCause(err); known {
+			node["sentinel"] = cause
+		} else if err == context.Canceled || err == context.DeadlineExceeded || err == worklifetime.ErrAdmissionFenced {
 			node["sentinel"] = err.Error()
 		} else {
 			node["opaque"], node["message_sha256"] = true, fmt.Sprintf("%x", sha256.Sum256([]byte(err.Error())))

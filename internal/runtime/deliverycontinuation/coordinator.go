@@ -26,6 +26,14 @@ func (e *retirementRefusal) Error() string { return e.message }
 
 var errCoordinatorRetired error = &retirementRefusal{message: "delivery continuation coordinator is retired"}
 
+// StaticRetirementCause exposes only this owner's immutable diagnostic leaf.
+func StaticRetirementCause(err error) (string, bool) {
+	if err != errCoordinatorRetired {
+		return "", false
+	}
+	return errCoordinatorRetired.Error(), true
+}
+
 type shutdownFenceRefusal struct{ cause error }
 
 func (e *shutdownFenceRefusal) Error() string { return errCoordinatorRetired.Error() }
