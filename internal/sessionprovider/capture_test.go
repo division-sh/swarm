@@ -69,6 +69,7 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	if err := json.Unmarshal(legacy, &decoded); err != nil || !decoded.SameCapture(business) {
 		t.Fatal("legacy capture changed", err)
 	}
+	decoded = decoded.WithProviderFacts(business.ProviderFacts())
 	projection, err := decoded.ProjectedBody()
 	if err != nil || !bytes.Equal(projection, business.Body) {
 		t.Fatal("absent phone changed old body", err)
