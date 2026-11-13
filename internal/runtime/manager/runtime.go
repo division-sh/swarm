@@ -1050,6 +1050,7 @@ func (am *AgentManager) startShutdownWatcher(runCtx context.Context, kind string
 
 func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLifecycleTransition, executor *worklifetime.Lease) {
 	am.lifecycle.joinShutdownDrain(transition)
+	am.lifecycle.retireWorkAdmissionAs(true)
 	_, done := am.lifecycle.cancelShutdownWork()
 	for _, wait := range done {
 		<-wait
