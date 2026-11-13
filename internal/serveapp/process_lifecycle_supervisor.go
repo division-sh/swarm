@@ -186,10 +186,10 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	opts.Grace = remainingServeShutdownGrace(grace, deadline)
-	return s.shutdownDependentRuntimesLocked(ctx, opts, selectedErr)
+	return s.shutdownDependentRuntimesLocked(ctx, drainCtx, opts, selectedErr)
 }
 
-func (s *processLifecycleSupervisor) shutdownDependentRuntimesLocked(ctx context.Context, opts runtime.ShutdownOptions, shutdownErr error) error {
+func (s *processLifecycleSupervisor) shutdownDependentRuntimesLocked(ctx, drainCtx context.Context, opts runtime.ShutdownOptions, shutdownErr error) error {
 	s.mu.RLock()
 	manager, current := s.runtimeContexts, s.currentRT
 	s.mu.RUnlock()
@@ -228,7 +228,7 @@ func (s *processLifecycleSupervisor) shutdownDependentRuntimesLocked(ctx context
 			shutdownErr = s.releaseResetProjections(ctx)
 		}
 	} else if manager != nil {
-		for _, result := range manager.DeactivateAllWithOptions(runtime.RuntimeContextCauseUnavailable, opts) {
+		for _, result := range manager.ShutdownAllWithOptions(drainCtx, runtime.RuntimeContextCauseUnavailable, opts) {
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 		}
 	} else if current != nil {
