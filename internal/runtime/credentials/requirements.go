@@ -61,7 +61,21 @@ func BuildRequirementUses(source semanticview.Source) map[string][]RequirementUs
 	if source == nil {
 		return index
 	}
-	appendToolRequirements(index, source, "", source.ToolEntries())
+	rootTools := source.ToolEntries()
+	if bundle, present := semanticview.Bundle(source); present && bundle != nil {
+		authored := bundle.ToolEntries()
+		capabilities := source.SemanticCapabilities()
+		for _, scope := range source.FlowScopes() {
+			for name := range scope.Tools {
+				_, declared := authored[name]
+				_, admitted := capabilities.ConnectorPackProvenance(scope.ID, name)
+				if admitted && !declared {
+					delete(rootTools, name)
+				}
+			}
+		}
+	}
+	appendToolRequirements(index, source, "", rootTools)
 	for _, scope := range source.FlowScopes() {
 		appendToolRequirements(index, source, strings.TrimSpace(scope.ID), scope.Tools)
 	}
