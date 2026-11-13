@@ -102,6 +102,16 @@ func TestCoordinatorRetireBeforeStartAndDrainAcceptedCarrier(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	select {
+	case <-c.admissionClosed:
+	default:
+		t.Fatal("retirement did not publish admission closure")
+	}
+	select {
+	case <-c.done:
+		t.Fatal("admission closure published a terminal result before startup")
+	default:
+	}
 	if err := c.Start(context.Background()); err == nil {
 		t.Fatal("retired coordinator started")
 	}
@@ -298,6 +308,83 @@ func TestCoordinatorRetirementPreservesFatalDispatch(t *testing.T) {
 	awaitRetirementProof(t, entered)
 	retireWithoutWaiting(c)
 	assertRetirementResult(t, c, owner, reported, want, true)
+
+	for _, cause := range []string{"scan", "dispatch"} {
+		t.Run("admission_closure/"+cause, func(t *testing.T) {
+			authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+			defer cleanup()
+			scanFailure := errors.New("independent scan failure before dispatch join")
+			workerFailure := errors.New("independent accepted dispatch failure")
+			scanEntered, scanRelease := make(chan struct{}), make(chan struct{})
+			dispatchEntered, dispatchRelease := make(chan struct{}), make(chan struct{})
+			unblockScan := sync.OnceFunc(func() { close(scanRelease) })
+			unblockDispatch := sync.OnceFunc(func() { close(dispatchRelease) })
+			defer unblockScan()
+			defer unblockDispatch()
+			store := &retirementScanStore{scan: func(_ context.Context, call int) (runtimedelivery.ContinuationPage, error) {
+				if call == 1 {
+					return runtimedelivery.ContinuationPage{Exhausted: true, Items: []runtimedelivery.ContinuationItem{{DeliveryID: "dispatch", Disposition: runtimedelivery.ClaimAcquired}}}, nil
+				}
+				if call == 2 {
+					close(scanEntered)
+					<-scanRelease
+					if cause == "scan" {
+						return runtimedelivery.ContinuationPage{}, scanFailure
+					}
+				}
+				return runtimedelivery.ContinuationPage{Exhausted: true}, nil
+			}}
+			dispatcher := retirementDispatchFunc(func(context.Context, events.Event, events.DeliveryRoute) DispatchResult {
+				close(dispatchEntered)
+				<-dispatchRelease
+				return Fatal(workerFailure)
+			})
+			reported := make(chan error, 2)
+			c, err := New(store, authority, owner, dispatcher, func(_ context.Context, err error) { reported <- err })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				unblockScan()
+				unblockDispatch()
+				_ = c.Retire(context.Background())
+			}()
+			if err := c.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			awaitRetirementProof(t, dispatchEntered)
+			awaitRetirementProof(t, scanEntered)
+			want := workerFailure
+			if cause == "scan" {
+				want = scanFailure
+				unblockScan()
+			} else {
+				unblockDispatch()
+				// The startup wake has entered its blocked read; this wake follows
+				// recording the independent worker failure, not just dispatch entry.
+				awaitRetirementProof(t, c.wake)
+				c.BeginRetirement()
+			}
+			awaitRetirementProof(t, c.admissionClosed)
+			c.BeginRetirement()
+			if err := c.Synchronize(context.Background()); !errors.Is(err, want) {
+				t.Fatalf("closed admission hid known failure: %v, want %v", err, want)
+			}
+			select {
+			case <-c.done:
+				t.Fatal("admission closure skipped accepted read/dispatch join")
+			default:
+			}
+			unblockScan()
+			unblockDispatch()
+			awaitRetirementProof(t, c.done)
+			finalErr := c.Retire(context.Background())
+			if !errors.Is(finalErr, workerFailure) || cause == "scan" && !errors.Is(finalErr, scanFailure) {
+				t.Fatalf("final result lost independent failures: %v", finalErr)
+			}
+			assertRetirementResult(t, c, owner, reported, want, true)
+		})
+	}
 }
 
 func TestCoordinatorStartupPreservesLeaseCleanupFailure(t *testing.T) {

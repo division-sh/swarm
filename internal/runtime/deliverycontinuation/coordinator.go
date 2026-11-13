@@ -102,6 +102,9 @@ type Coordinator struct {
 	scanCursor    runtimedelivery.ContinuationCursor
 	scanSeen      map[string]struct{}
 	scanSkipped   bool
+
+	admissionClosed  chan struct{}
+	admissionFailure error
 }
 
 func New(
@@ -171,7 +174,8 @@ func newCoordinator(
 		workerLimit: workerLimit,
 		entries:     make(map[string]entry), reserved: make(map[string]struct{}),
 		wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
-		jobs: make(chan dispatchJob, dispatchCapacity),
+		jobs:            make(chan dispatchJob, dispatchCapacity),
+		admissionClosed: make(chan struct{}),
 	}, nil
 }
 
@@ -269,12 +273,14 @@ func (c *Coordinator) Synchronize(ctx context.Context) error {
 		return failure
 	}
 	if retired {
-		return errCoordinatorRetired
+		return c.stoppedError()
 	}
 	request := synchronizationRequest{result: make(chan error, 1)}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-c.admissionClosed:
+		return c.stoppedError()
 	case <-c.done:
 		return c.stoppedError()
 	case c.sync <- request:
@@ -302,11 +308,22 @@ func (c *Coordinator) BeginRetirement() {
 	}
 	c.mu.Lock()
 	retired := c.retired
-	c.retired = true
+	c.closeAdmissionLocked()
 	cancel := c.cancel
 	c.mu.Unlock()
 	if cancel != nil && !retired {
 		cancel()
+	}
+}
+
+// Admission closure wakes unaccepted scans without publishing the joined result.
+func (c *Coordinator) closeAdmissionLocked() {
+	if c.retired {
+		return
+	}
+	c.retired = true
+	if c.admissionClosed != nil {
+		close(c.admissionClosed)
 	}
 }
 
@@ -620,7 +637,10 @@ func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) er
 func (c *Coordinator) finish(ctx context.Context, cancel context.CancelFunc, lease *worklifetime.Lease, err error, report bool) error {
 	c.mu.Lock()
 	retired := c.retired
-	c.retired = true
+	if !ordinaryCoordinatorStop(ctx, err, retired) {
+		c.admissionFailure = err
+	}
+	c.closeAdmissionLocked()
 	c.mu.Unlock()
 	var drainErr error
 	if refusal, ownShutdownFence := err.(*shutdownFenceRefusal); ownShutdownFence && refusal.cause == worklifetime.ErrAdmissionFenced {
@@ -697,6 +717,9 @@ func (c *Coordinator) stoppedError() error {
 	defer c.mu.Unlock()
 	if c.failure != nil {
 		return c.failure
+	}
+	if err := errors.Join(c.admissionFailure, c.workerFailure); err != nil {
+		return err
 	}
 	if c.retired {
 		return errCoordinatorRetired
@@ -843,7 +866,7 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Dur
 					// This exact occurrence is fenced by the process shutdown drain.
 					// Retire new handoffs without canceling accepted carrier contexts.
 					c.mu.Lock()
-					c.retired = true
+					c.closeAdmissionLocked()
 					c.mu.Unlock()
 					return 0, false, &shutdownFenceRefusal{cause: err}
 				}
