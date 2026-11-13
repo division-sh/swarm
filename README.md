@@ -266,9 +266,10 @@ serve:
     # email: ops@example.com
 ```
 
-This binds the dedicated webhook-only listener publicly on port 443. Both supplied
-files must be inside the resolved deployment state directory (`--swarm-dir`),
-relative to that directory or absolute within it; escaping symlinks are refused.
+This binds the dedicated webhook-only listener publicly on port 443. Supplied
+certificate and key paths may be anywhere the serving process can read. Relative
+paths resolve from the captured CLI invocation directory, not the configuration
+file, source directory or state directory; absolute paths and ordinary symlinks work.
 They are loaded once, must match the hostname and be currently valid, and must
 chain to a root trusted by the reachability probe. Replace them by restarting
 serve; a bad supplied pair never falls back to automatic issuance.
