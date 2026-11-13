@@ -46,7 +46,8 @@ func TestServeSessionRecoveryClockSchedule(t *testing.T) {
 	}}
 	poll := func() {
 		t.Helper()
-		if err := d.reconcileSessionConnections(t.Context(), nil); err != nil {
+		accountErr, fatalErr := d.reconcileSessionConnections(t.Context(), nil)
+		if err := errors.Join(accountErr, fatalErr); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -86,7 +87,7 @@ func TestServeSessionRecoveryClockSchedule(t *testing.T) {
 		t.Fatal("new outage did not reset at5s")
 	}
 	owner.failure = errors.Join(channelonboarding.ErrSessionUnavailable, errors.New("independent storage failure"))
-	if err := d.reconcileSessionConnections(t.Context(), nil); err == nil || calls != before {
+	if accountErr, fatalErr := d.reconcileSessionConnections(t.Context(), nil); errors.Join(accountErr, fatalErr) == nil || calls != before {
 		t.Fatal("mixed read error permitted attempt")
 	}
 	owner.failure = channelonboarding.ErrSessionNotLinked
@@ -109,14 +110,17 @@ func TestServeSessionRecoveryClockHeldCancellation(t *testing.T) {
 		<-ctx.Done()
 		return context.Cause(ctx)
 	}}
-	if err := d.reconcileSessionConnections(t.Context(), nil); err != nil {
-		t.Fatal(err)
+	if accountErr, fatalErr := d.reconcileSessionConnections(t.Context(), nil); errors.Join(accountErr, fatalErr) != nil {
+		t.Fatal(accountErr, fatalErr)
 	}
 	now = now.Add(5 * time.Second)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- d.reconcileSessionConnections(ctx, nil) }()
+	go func() {
+		accountErr, fatalErr := d.reconcileSessionConnections(ctx, nil)
+		done <- errors.Join(accountErr, fatalErr)
+	}()
 	select {
 	case <-entered:
 	case <-time.After(time.Second):

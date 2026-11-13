@@ -5,6 +5,7 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,9 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/tests/support/testutil"
+	waBinary "go.mau.fi/whatsmeow/binary"
 	"gopkg.in/yaml.v3"
 )
 
@@ -97,6 +100,17 @@ func recoveryLoginGate(t *testing.T, peer *serveNativeProtocolPeer) (*servedNati
 	return gate, release
 }
 
+func waitSessionRecovery(t *testing.T, check func() bool, detail func() string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !check() {
+		if time.Now().After(deadline) {
+			t.Fatal("recovery observation timed out", detail())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, process *serveRuntimeTestProcess, peer *serveNativeProtocolPeer, id string, registered bool, read func() *serveSessionBootstrap) {
 	t.Helper()
 	operation := func() channelonboarding.Operation {
@@ -119,16 +133,7 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 		}
 		return op
 	}
-	wait := func(check func() bool) {
-		t.Helper()
-		deadline := time.Now().Add(20 * time.Second)
-		for !check() {
-			if time.Now().After(deadline) {
-				t.Fatal("recovery observation timed out", process.outputString())
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	wait := func(check func() bool) { waitSessionRecovery(t, check, process.outputString) }
 	counts := func() (int, int, int) {
 		peer.mu.Lock()
 		defer peer.mu.Unlock()
@@ -407,5 +412,80 @@ func requireRecoveryPermanentBoot(t *testing.T, opts cliapp.ServeOptions, peer *
 	peer.mu.Unlock()
 	if after != before+1 || after != closed || accepted != sends || strings.Contains(process.outputString(), "reconnecting...") {
 		t.Fatal("permanent boot retried/resent or failed its owned join", before, after, closed, accepted)
+	}
+}
+
+// Invariant: terminal-first registered refusal cannot starve another live registration or healthy Telegram inbox work; real peers, both stores.
+func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
+	read := captureRecoveryBootstrap(t)
+	for _, backend := range servedparity.RequiredBackends {
+		for _, kind := range []string{"replacement", "ban"} {
+			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
+				peer := newServeNativeProtocolPeer(t)
+				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, nil)
+				h.opts.SwarmDir, h.opts.SwarmDirSet = t.TempDir(), true
+				body, err := os.ReadFile(h.opts.ConfigPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeStandingCandidateFile(t, h.opts.ConfigPath, string(body)+"\npaths:\n  swarm_dir: "+h.opts.SwarmDir+"\n")
+				first := issue3011RegisterForSend(t, h.opts, peer, 1)
+				peer.account.User, peer.lid.User = "15551234570", "100000000003"
+				second := issue3011RegisterForSend(t, h.opts, peer, 2)
+				var diagnostics lockedBuffer
+				previous := log.Writer()
+				log.SetOutput(&diagnostics)
+				t.Cleanup(func() { log.SetOutput(previous) })
+				h.opts.TestChannelReconcileCadence.Native = 20 * time.Millisecond
+				h.start(t)
+				t.Cleanup(func() { h.stop(t) })
+				ctx := servedRuntimeProofAuthorActivityContext(t, h.runtime, h.runtime.Options.SourceArtifactFact.BundleHash())
+				healthy := func(op channelonboarding.Operation) bool {
+					connection := read().connection(op.OperationID)
+					if connection == nil {
+						return false
+					}
+					_, ready, err := connection.SessionRecovery(ctx, op)
+					return err == nil && ready
+				}
+				waitSessionRecovery(t, func() bool { return healthy(first) && healthy(second) }, h.process.outputString)
+				registered, err := read().registeredSessionConnections(ctx)
+				peer.mu.Lock()
+				wire, before, sends := peer.accountWires[15551234567], peer.connections, peer.acceptedSends
+				peer.mu.Unlock()
+				if err != nil || len(registered) != 2 || registered[0].Operation.OperationID != first.OperationID || registered[1].Operation.OperationID != second.OperationID || wire == nil {
+					t.Fatal("terminal-first exact registration order or owned socket unavailable", err)
+				}
+				node := waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"}, Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "replaced"}}}}
+				if kind == "ban" {
+					node = waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "402", "code": "101", "expire": "60"}}
+				}
+				if err := wire.Send(ctx, node); err != nil {
+					t.Fatal(err)
+				}
+				firstConnection := read().connection(first.OperationID)
+				var terminalErr error
+				waitSessionRecovery(t, func() bool {
+					fact, _, factErr := firstConnection.SessionDiagnostic(ctx)
+					_, _, terminalErr = firstConnection.SessionRecovery(ctx, first)
+					return factErr == nil && fact.Lifecycle == map[string]string{"replacement": "session replaced by another connection", "ban": "account temporarily banned"}[kind] && terminalErr != nil && !channelonboarding.SessionUnavailableOnly(terminalErr)
+				}, h.process.outputString)
+				readsBefore, _ := h.provider.CommandReadbackCounts()
+				peer.disconnect()
+				waitSessionRecovery(t, func() bool {
+					reads, _ := h.provider.CommandReadbackCounts()
+					return healthy(second) && reads > readsBefore && strings.Contains(diagnostics.String(), terminalErr.Error())
+				}, h.process.outputString)
+				peer.mu.Lock()
+				after, sent := peer.connections, peer.acceptedSends
+				peer.mu.Unlock()
+				_, _, refused := firstConnection.SessionRecovery(ctx, first)
+				if after != before+1 || sent != sends || read().connection(first.OperationID) != firstConnection || refused == nil || channelonboarding.SessionUnavailableOnly(refused) {
+					t.Fatal("terminal account retried/sent, lost refusal, or sibling failed genuine single recovery", before, after, sends, sent, refused)
+				}
+			}) {
+				t.Fatal("first mixed-account backend/kind failed")
+			}
+		}
 	}
 }

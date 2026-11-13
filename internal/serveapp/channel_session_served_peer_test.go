@@ -33,6 +33,8 @@ type serveNativeProtocolPeer struct {
 	ctx                 context.Context
 	account             types.JID
 	lid                 types.JID
+	accountWires        map[uint64]*whatsappfixture.Transport
+	accountLIDs         map[uint64]types.JID
 	mu                  sync.Mutex
 	wire                *whatsappfixture.Transport
 	postLoginWire       *whatsappfixture.Transport
@@ -142,6 +144,7 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 		lid:     types.NewJID("100000000001", types.HiddenUserServer), paired: make(chan struct{}, 4),
 		receipts: make(chan waBinary.Node, 16), sent: make(chan servedNativeMessage, 16), logouts: make(chan waBinary.Node, 4), receivers: map[types.JID]servedNativeReceiver{}}
 	peer.account.Device, peer.lid.Device = 1, 1
+	peer.accountWires, peer.accountLIDs = map[uint64]*whatsappfixture.Transport{}, map[uint64]types.JID{}
 	var mu sync.Mutex
 	var sockets []*websocket.Conn
 	var workers sync.WaitGroup
@@ -271,6 +274,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	if payload.DevicePairingData != nil {
 		p.registration = payload.DevicePairingData
 	} else {
+		p.accountWires[payload.GetUsername()] = wire
 		login, p.nextLogin = p.nextLogin, nil
 		rejectLogin, p.rejectNextLogin = p.rejectNextLogin, false
 		permanent, p.permanentLogin = p.permanentLogin, ""
@@ -530,14 +534,25 @@ func TestServedNativePeerPostLoginUsesCurrentOccurrence(t *testing.T) {
 }
 
 func (p *serveNativeProtocolPeer) success(wire *whatsappfixture.Transport) error {
-	return wire.Send(p.ctx, waBinary.Node{Tag: "success", Attrs: waBinary.Attrs{"lid": p.lid, "t": time.Now().Unix()}})
+	p.mu.Lock()
+	lid := p.lid
+	if selected, found := p.accountLIDs[wire.ClientPayload().GetUsername()]; found {
+		lid = selected
+	}
+	p.mu.Unlock()
+	return wire.Send(p.ctx, waBinary.Node{Tag: "success", Attrs: waBinary.Attrs{"lid": lid, "t": time.Now().Unix()}})
 }
 
 func (p *serveNativeProtocolPeer) pair(qr string) {
 	p.t.Helper()
 	p.mu.Lock()
 	wire := p.wire
+	account := p.account.UserInt()
+	p.accountLIDs[account] = p.lid
 	p.mu.Unlock()
+	if account == 0 {
+		p.t.Fatal("synthetic linked account is not a normal numeric user")
+	}
 	if wire == nil {
 		p.t.Fatal("RunServe did not connect the actual SDK")
 	}

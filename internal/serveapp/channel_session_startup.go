@@ -31,16 +31,16 @@ func newServeChannelProviderOwners(manager *runtime.RuntimeContextManager, store
 
 // The existing joined channel worker owns bounded recovery, through the same
 // fenced native owner as startup/connect. SDK auto-reconnect stays disabled.
-func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context.Context, activations []channelonboarding.ConnectedChannelActivation) error {
+func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context.Context, activations []channelonboarding.ConnectedChannelActivation) (accountErr, fatalErr error) {
 	if d.onboarding == nil {
-		return nil
+		return nil, nil
 	}
 	owner, ok := d.sessions.(interface {
 		registeredSessionConnections(context.Context) ([]serveSessionDiagnostic, error)
 		sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
 	})
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var operations []channelonboarding.Operation
 	presentations := map[string]string{}
@@ -50,7 +50,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		}
 		result, err := d.onboarding.Get(ctx, activation.OperationID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		op := result.Operation
 		if op.Phase != channelonboarding.PhaseSucceeded || result.Connection == nil {
@@ -61,7 +61,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 	}
 	registered, err := owner.registeredSessionConnections(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, item := range registered {
 		if item.Fact.ConnectionID == "" {
@@ -70,12 +70,14 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		operations = append(operations, item.Operation)
 		presentations[item.Operation.OperationID] = item.Account
 	}
+	var result error
 	for _, op := range operations {
-		if err := d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return result, context.Cause(ctx)
 		}
+		result = errors.Join(result, d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery))
 	}
-	return nil
+	return result, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.Context, op channelonboarding.Operation, presentation string, recovery func(context.Context, channelonboarding.Operation) (time.Time, bool, error)) error {

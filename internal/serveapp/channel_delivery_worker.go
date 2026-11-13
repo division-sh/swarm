@@ -537,7 +537,8 @@ type channelDeliveryWorkerOptions struct {
 	passed  func(runtimechanneldelivery.ReconcilePass)
 	started func(runtimechanneldelivery.Store, func() (runtimechanneldelivery.ReconcileMark, bool))
 
-	diagnostics func(context.Context) error
+	runtimeReady <-chan struct{}
+	diagnostics  func(context.Context) error
 }
 
 func (options channelDeliveryWorkerOptions) observeSessionDiagnostics(ctx context.Context) error {
@@ -623,12 +624,16 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 
 func (options channelDeliveryWorkerOptions) waitForRuntimeLoad(ctx context.Context, dispatcher *serveChannelDeliveryDispatcher, ticks <-chan time.Time) bool {
 	for dispatcher.ingress != nil && !dispatcher.ingress.RuntimeLoad() {
+		if ctx.Err() != nil {
+			return false
+		}
 		if err := options.observeSessionDiagnostics(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("native session diagnostics: %v", err)
 		}
 		select {
 		case <-ctx.Done():
 			return false
+		case <-options.runtimeReady:
 		case <-ticks:
 		}
 	}

@@ -2033,6 +2033,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	if supervisor.selected != nil {
 		channelSelectedDecisions = supervisor.selected
 	}
+	channelWorkerReady := make(chan struct{})
 	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
 		deployment: deploymentTransport,
 		store:      stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
@@ -2050,7 +2051,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
-	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose)}); err != nil {
+	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, runtimeReady: channelWorkerReady, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose)}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)
 		return 1
 	}
@@ -2114,6 +2115,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		supervisor.mu.Lock()
 		supervisor.apiReady = true
 		ready.Store(true)
+		close(channelWorkerReady)
 		supervisor.mu.Unlock()
 	}) {
 		return 1
