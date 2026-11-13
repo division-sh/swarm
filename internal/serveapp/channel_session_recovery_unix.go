@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 	"time"
 )
 
@@ -55,7 +56,7 @@ func (s *serveSessionBootstrap) recordDeploymentNotLinked(ctx context.Context, o
 	return nil
 }
 
-func (s *serveSessionBootstrap) sessionPublicationCurrent(ctx context.Context, activation channelonboarding.CompiledActivation) (bool, error) {
+func (s *serveSessionBootstrap) sessionPublicationCurrent(ctx context.Context, activation channelonboarding.CompiledActivation, live bool) (bool, error) {
 	if activation.Plan.Transport() != packs.ChannelTransportSession ||
 		activation.Source != channelonboarding.ActivationSourceLearned && activation.Source != channelonboarding.ActivationSourceRegistered {
 		return true, nil
@@ -82,6 +83,9 @@ func (s *serveSessionBootstrap) sessionPublicationCurrent(ctx context.Context, a
 	at, connected, err := s.sessionRecovery(ctx, op)
 	if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) && !errors.Is(err, channelonboarding.ErrSessionUnavailable) {
 		return false, nil // Terminal Not linked, never a deferred or retryable channel.
+	}
+	if live && sessionprovider.TerminalAccountRefusalOnly(err) {
+		return false, nil
 	}
 	if err != nil {
 		return false, err

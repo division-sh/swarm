@@ -1307,11 +1307,11 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 		return err
 	}
 	if owner, ok := r.sessions.(interface {
-		sessionPublicationCurrent(context.Context, channelonboarding.CompiledActivation) (bool, error)
+		sessionPublicationCurrent(context.Context, channelonboarding.CompiledActivation, bool) (bool, error)
 	}); ok {
 		current := snapshot.Activations[:0]
 		for _, activation := range snapshot.Activations {
-			admit, err := owner.sessionPublicationCurrent(ctx, activation)
+			admit, err := owner.sessionPublicationCurrent(ctx, activation, r.ingress.RuntimeLoad())
 			if err != nil {
 				return err
 			}
