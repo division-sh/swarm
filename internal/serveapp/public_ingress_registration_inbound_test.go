@@ -248,8 +248,8 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration,
 	}
-	providerFacts, installed := installedChannelFactsFor(target.Provider)
-	if !installed {
+	providerFacts, hasProviderFacts := installedChannelFactsFor(target.Provider)
+	if !hasProviderFacts {
 		t.Fatal("fixture registration requires its installed provider facts")
 	}
 	pair := runtimepublicingress.RegistrationPair{
