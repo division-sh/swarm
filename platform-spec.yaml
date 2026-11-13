@@ -36531,7 +36531,7 @@ api_specification:
           account_unclaimed: {type: integer, minimum: 0}
           linked: {type: boolean}
           health: {type: string, enum: [pairing, connecting, connected, disconnected, error]}
-          cause: {type: string, enum: [closed by the other side, connection reset, network path unavailable, connection timed out, logged out, account temporarily banned, connection replaced, connection rejected, authentication refresh failed, client needs an update, connection must be re-established, connection attempt failed, connection attempt cancelled, incoming callback panic, incoming capture failed, storage failure, currentness failure, runtime release failed, cause unknown], description: Sanitized link failure, preserved when an independent holder refusal overrides reason.}
+          cause: {type: string, enum: [closed by the other side, connection reset, network path unavailable, connection timed out, logged out, account temporarily banned, connection replaced, connection rejected, authentication refresh failed, client needs an update, connection must be re-established, connection attempt failed, connection attempt cancelled, incoming callback panic, incoming capture failed, storage failure, currentness failure, runtime release failed, cause unknown], description: "Sanitized link failure, preserved when an independent holder refusal overrides reason."}
           holders:
             type: array
             items:
