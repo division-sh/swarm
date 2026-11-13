@@ -39,7 +39,9 @@ type transcriptNativeStore interface {
 
 func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend+"/chat_reply", func(t *testing.T) { proveChatTranscriptSettlement(t, backend) })
+		for _, adapter := range []string{"openai_compatible", "openai_responses", "mock_python"} {
+			t.Run(backend+"/"+adapter, func(t *testing.T) { proveProviderTranscriptSettlement(t, backend, adapter) })
+		}
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, memory := range []bool{false, true} {
@@ -115,39 +117,58 @@ func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
 	}
 }
 
-func proveChatTranscriptSettlement(t *testing.T, backend string) {
+func proveProviderTranscriptSettlement(t *testing.T, backend, adapter string) {
 	t.Helper()
 	opened, reopen := completion2270HistoryStore(t, backend)
 	selected := opened.(transcriptNativeStore)
 	ctx := originalAPIFixtureContext(t, context.Background(), selected)
+	mode, configuredBackend := effects.ExecutionModeLive, adapter
+	if adapter == "mock_python" {
+		mode, configuredBackend = effects.ExecutionModeMock, "mock"
+	}
+	ctx = effects.WithExecutionMode(ctx, mode)
 	runID, sessionID := uuid.NewString(), uuid.NewString()
 	identity := sqliteAgentUsageIdentityForRun(t, runID, "chat-transcript")
 	at := time.Now().UTC().Truncate(time.Second)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Hour)})
 	storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: runtimeactors.AgentConfig{
-		ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
-		ResolvedLLMBackend: "openai_compatible", FlowPath: identity.FlowInstance(), Intent: apiTestResolvedIntent(t, identity.AgentID(), "Show the selected reply."),
+		ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: mode,
+		ResolvedLLMBackend: configuredBackend, FlowPath: identity.FlowInstance(), Intent: apiTestResolvedIntent(t, identity.AgentID(), "Show the selected reply."),
 	}, Status: "active", StartedAt: at.Add(-time.Minute)})
 	turnIDs := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 	// Tied timestamps retain the public ordinal contract by sorting the IDs.
 	sort.Strings(turnIDs)
 	var rawReplies []json.RawMessage
+	legacy := ""
 	for i, turnID := range turnIDs {
 		raw := json.RawMessage(fmt.Sprintf(`{"choices":[{"message":{"content":"message-%d","reasoning_content":"private reasoning"}},{"message":{"content":"unselected"}}]}`, i+1))
+		if adapter == "openai_responses" {
+			raw = json.RawMessage(fmt.Sprintf(`{"output":[{"type":"reasoning","summary":[{"text":"private reasoning"}]},{"type":"message","content":[{"text":"message-%d"}]},{"type":"function_call","name":"read_flow_data","arguments":"private arguments"}]}`, i+1))
+		} else if adapter == "mock_python" {
+			raw = json.RawMessage(fmt.Sprintf(`{"text":"message-%d","calls":[{"name":"read_flow_data","arguments":{}}]}`, i+1))
+		}
 		rawReplies = append(rawReplies, raw)
 		prefix := []llm.TurnBlock{{Kind: "tool_use", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-1"}`)},
 			{Kind: "tool_result", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-1"}`)},
 			{Kind: "tool_use", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-2"}`)},
 			{Kind: "tool_result", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-2"}`)}}
-		if i != 0 { // First row models already-recorded blocks: raw reply present, no text block.
+		if i == 0 && adapter == "openai_responses" {
+			var object map[string]any
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatal(err)
+			}
+			legacy = fmt.Sprint(object["output"])
+			prefix = append(prefix, llm.TurnBlock{Kind: "assistant_text", Text: legacy}, llm.TurnBlock{Kind: "outcome", Text: legacy})
+		} else if i != 0 { // First row retains the previously recorded canonical blocks.
 			prefix = append(prefix, llm.BuildTurnBlocks(llm.AgentTurnRecord{ResponseRaw: raw})...)
 		}
 		blocks := llm.BuildTurnBlocks(llm.AgentTurnRecord{TurnBlocks: prefix})
 		event := eventtest.ExistingRunRootIngress(uuid.NewString(), "task.in", "chat-proof", "", nil, 0, runID, events.EventEnvelope{}, at)
+		event = eventtest.InExecutionMode(event, mode)
 		storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, pipelineobligation.ScopeSubscribed)
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: selected, Selected: selected, Identity: identity,
 			RunID: runID, SessionID: sessionID, TurnID: turnID, Event: event, TurnBlocks: blocks, ResponsePayload: raw,
-			Adapter: "openai_compatible", ParseOK: true, CreatedAt: at, Latency: time.Millisecond})
+			Adapter: adapter, ParseOK: true, CreatedAt: at, Latency: time.Millisecond})
 	}
 	page, err := selected.ListAuthorActivity(ctx, authoractivity.ListOptions{RunID: runID, Limit: 500})
 	if err != nil || len(page.Occurrences) >= 500 {
@@ -213,14 +234,14 @@ func proveChatTranscriptSettlement(t *testing.T, backend string) {
 		provePublicTranscriptReadback(t, owner, runID, identity.AgentID(), sessionID, turnIDs)
 		for i, id := range turnIDs {
 			turn, err := owner.LoadOperatorPublicConversationTurn(ctx, sessionID, id)
-			want := ""
+			want := legacy
 			if i != 0 {
 				want = fmt.Sprintf("message-%d", i+1)
 			}
 			if err != nil || turn.Turn.AssistantVisibleOutput != want || turn.Turn.Outcome != want {
 				t.Fatalf("fresh/legacy reply: %+v %v", turn, err)
 			}
-			if strings.Contains(fmt.Sprint(turn.Turn.Activity), "private reasoning") || strings.Contains(fmt.Sprint(turn.Turn.Activity), "unselected") {
+			if i != 0 && (strings.Contains(fmt.Sprint(turn.Turn.Activity), "private") || strings.Contains(fmt.Sprint(turn.Turn.Activity), "unselected")) {
 				t.Fatal("private/unselected content escaped")
 			}
 		}

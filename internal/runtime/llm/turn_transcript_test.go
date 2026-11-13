@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -170,17 +171,28 @@ func TestBuildTurnBlocks_DefaultsRuntimeLogMessageForCanonicalValidation(t *test
 
 func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) {
 	for _, test := range []struct{ name, raw, want string }{
-		{"selected", `{"choices":[{"message":{"content":"  selected reply  ","reasoning_content":"private reasoning"}},{"message":{"content":"unselected reply"}}]}`, "selected reply"},
-		{"empty_first", `{"choices":[{"message":{"content":""}},{"message":{"content":"unselected reply"}}]}`, ""},
-		{"null", `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-1"}]}}]}`, ""},
-		{"tool_only", `{"choices":[{"message":{"tool_calls":[{"id":"call-1"}],"reasoning_content":"private reasoning"}}]}`, ""},
-		{"whitespace", `{"choices":[{"message":{"content":" \n "}}]}`, ""},
-		{"array", `{"choices":[{"message":{"content":[{"text":"not an admitted string"}]}}]}`, ""},
-		{"object", `{"choices":[{"message":{"content":{"text":"not an admitted string"}}}]}`, ""},
-		{"number", `{"choices":[{"message":{"content":42}}]}`, ""},
-		{"empty_choices", `{"choices":[]}`, ""},
+		{"chat/selected", `{"choices":[{"message":{"content":"  selected reply  ","reasoning_content":"private reasoning"}},{"message":{"content":"unselected reply"}}]}`, "selected reply"},
+		{"chat/empty_first", `{"choices":[{"message":{"content":""}},{"message":{"content":"unselected reply"}}]}`, ""},
+		{"chat/null", `{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-1"}]}}]}`, ""},
+		{"chat/tool_only", `{"choices":[{"message":{"tool_calls":[{"id":"call-1"}],"reasoning_content":"private reasoning"}}]}`, ""},
+		{"chat/whitespace", `{"choices":[{"message":{"content":" \n "}}]}`, ""},
+		{"chat/array", `{"choices":[{"message":{"content":[{"text":"not an admitted string"}]}}]}`, ""},
+		{"chat/object", `{"choices":[{"message":{"content":{"text":"not an admitted string"}}}]}`, ""},
+		{"chat/number", `{"choices":[{"message":{"content":42}}]}`, ""},
+		{"chat/empty_choices", `{"choices":[]}`, ""},
+		{"responses/joined", `{"output":[{"type":"reasoning","summary":[{"text":"private reasoning"}],"encrypted_content":"private ciphertext"},{"type":" message ","role":"user","content":[{"type":"output_text","text":" first "},{"type":"different_type","text":" second "},{"text":" "}]},{"type":"function_call","name":"read_flow_data","call_id":"call-1","arguments":"private arguments"},{"type":"message","content":[{"text":" third "}]},{"type":"unknown","text":"private unknown"}]}`, "first\nsecond\nthird"},
+		{"responses/tool_only", `{"output":[{"type":"function_call","name":"read_flow_data","arguments":"{}"}]}`, ""},
+		{"responses/reasoning_only", `{"output":[{"type":"reasoning","summary":[{"text":"private reasoning"}]}]}`, ""},
+		{"responses/empty", `{"output":[]}`, ""},
+		{"responses/blank", `{"output":[{"type":"message","content":[{"text":" \n "},{"text":null}]}]}`, ""},
+		{"responses/non_strings", `{"output":[null,42,{"type":"message","content":[null,{"text":42},{"text":["private"]},{"text":{"secret":"private"}}]}]}`, ""},
+		{"mock/text", `{"text":" mock reply ","calls":[{"name":"read_flow_data","arguments":{}}],"usage":{"input_tokens":1,"output_tokens":2}}`, "mock reply"},
+		{"mock/tool_only", `{"calls":[{"name":"read_flow_data","arguments":{}}]}`, ""},
+		{"mock/null", `{"text":null,"calls":[{"name":"read_flow_data","arguments":{}}]}`, ""},
+		{"mock/blank", `{"text":" \n ","calls":[{"name":"read_flow_data","arguments":{}}]}`, ""},
+		{"mock/non_string", `{"text":{"secret":"private"}}`, ""},
 	} {
-		t.Run("chat/"+test.name, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			raw := []byte(test.raw)
 			if !json.Valid(raw) {
 				t.Fatal("invalid response fixture")
@@ -207,6 +219,29 @@ func TestBuildTurnBlocks_AppendsCanonicalSummaryForExplicitBlocks(t *testing.T) 
 			}
 			if texts != boolToTranscriptCount(test.want != "") {
 				t.Fatalf("assistant blocks=%d", texts)
+			}
+			if strings.HasPrefix(test.name, "responses/") {
+				var parsed openAIResponsesResponse
+				if json.Unmarshal(raw, &parsed) == nil {
+					if response, err := convertOpenAIResponsesResponse(parsed, nil); err == nil && response.Message.Content != test.want {
+						t.Fatalf("executing adapter selected %q, builder expected %q", response.Message.Content, test.want)
+					}
+				}
+			}
+			if strings.HasPrefix(test.name, "mock/") {
+				tools := []ToolDefinition{{Name: "read_flow_data"}}
+				if response, _, err := parseMockCompletionOutput(raw, nil, tools, "mock-model"); err == nil && response.Message.Content != test.want {
+					t.Fatalf("executing mock selected %q, builder expected %q", response.Message.Content, test.want)
+				}
+			}
+		})
+	}
+	for _, field := range []string{"result", "assistant_text", "output"} {
+		t.Run("scalar/"+field, func(t *testing.T) {
+			blocks := BuildTurnBlocks(AgentTurnRecord{ResponseRaw: []byte(fmt.Sprintf(`{%q:"legacy reply"}`, field))})
+			summary, found, err := DecodeCanonicalTurnSummaryBlocks(blocks)
+			if err != nil || !found || summary.AssistantVisibleOutput != "legacy reply" || summary.Outcome != "legacy reply" {
+				t.Fatalf("scalar generic response changed: %+v %v", summary, err)
 			}
 		})
 	}
