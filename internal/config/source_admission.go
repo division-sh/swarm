@@ -33,11 +33,7 @@ type CLISourceConfig struct {
 		APIServer    string `yaml:"api_server"`
 		APITokenFile string `yaml:"api_token_file"`
 	} `yaml:"connection"`
-	Serve struct {
-		APIListenAddr string `yaml:"api_listen_addr"`
-		MCPListenAddr string `yaml:"mcp_listen_addr"`
-		APITokenFile  string `yaml:"api_token_file"`
-	} `yaml:"serve"`
+	Serve ServeConfig `yaml:"serve"`
 	Paths struct {
 		SwarmDir   string `yaml:"swarm_dir"`
 		MonitorDir string `yaml:"monitor_dir"`

@@ -136,7 +136,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
 	}
-	publicMode, publicEnabled, err := cliapp.ResolveServePublicIngressMode(opts)
+	publicMode, publicEnabled, err := cliapp.ResolveServePublicIngressMode(opts, nil)
 	if err != nil {
 		return 1, err
 	}

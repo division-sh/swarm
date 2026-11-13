@@ -20,6 +20,41 @@ func decodeConfigSourceTest(source string, target *Config) error {
 	return DecodeSource(yamlsource.ValueFromNode(&document), target)
 }
 
+func TestPublicWebhookConfigUsesAdmittedDeploymentSource(t *testing.T) {
+	for _, row := range []struct {
+		source string
+		valid  bool
+	}{
+		{"serve: {api_listen_addr: '127.0.0.1:9000'}", true},
+		{"serve: {public_webhook: {hostname: hooks.example.test}}", true},
+		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: tls/cert.pem, private_key_file: tls/key.pem}}", true},
+		{"serve: {public_webhook: {hostname: hooks.example.test, email: ops@example.test}}", true},
+		{"serve: {public_webhook: null}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: null, private_key_file: null}}", false},
+		{"serve: {public_webhook: {}}", false},
+		{"serve: {public_webhook: {hostname: 'https://hooks.example.test'}}", false},
+		{"serve: {public_webhook: {hostname: 'hooks.example.test:443'}}", false},
+		{"serve: {public_webhook: {hostname: '127.0.0.1'}}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: cert.pem}}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: '', private_key_file: key.pem}}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, key: key.pem}}", false},
+	} {
+		t.Run(row.source, func(t *testing.T) {
+			var cfg Config
+			err := decodeConfigSourceTest(row.source, &cfg)
+			if err == nil {
+				err = cfg.Serve.PublicWebhook.Validate()
+			}
+			if (err == nil) != row.valid {
+				t.Fatalf("configuration admission: %v, want valid=%v", err, row.valid)
+			}
+			if row.valid && strings.Contains(row.source, "public_webhook") && cfg.Serve.PublicWebhook == nil {
+				t.Fatal("admitted public webhook configuration was lost in the runtime projection")
+			}
+		})
+	}
+}
+
 func TestConfigCurrentVocabularySuggestionsFollowSourcePolicy(t *testing.T) {
 	for _, row := range []struct {
 		source              string

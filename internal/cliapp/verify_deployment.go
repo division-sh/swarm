@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -133,7 +134,7 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePa
 	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
 	inspectVerifyListeners(ctx, repo, cfg, result)
 	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
-	inspectVerifyPublicIngress(ctx, result, "source:"+result.BootReport.SourceArtifactHash)
+	inspectVerifyPublicIngress(ctx, cfg, result, "source:"+result.BootReport.SourceArtifactHash)
 	inspectVerifySelectedStore(ctx, repo, paths, cfg, swarmDir, source, opts, packBases, workspaces, workspaceOK, result)
 	result.BootReport.Sort()
 }
@@ -302,12 +303,16 @@ func inspectVerifyManagedCatalogAdmission(ctx context.Context, source semanticvi
 	})
 }
 
-func inspectVerifyPublicIngress(ctx context.Context, result *runtime.WorkflowContractValidationResult, subject string) {
+func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, subject string) {
 	intent := ServeOptions{}
-	mode, enabled, err := ResolveServePublicIngressMode(intent)
+	mode, enabled, err := ResolveServePublicIngressMode(intent, cfg.Config.Serve.PublicWebhook)
 	if err != nil {
 		verifyDeploymentObservation(ctx, result, "public_ingress_admission", "internal/cliapp.ResolveServePublicIngressMode", subject, failures.ClassSchemaInvalid, func(context.Context) error { return err })
 		return
+	}
+	if mode == publicingress.ModeNativeTLS {
+		intent.PublicWebhookBaseURL = "https://" + strings.TrimSpace(cfg.Config.Serve.PublicWebhook.Hostname)
+		intent.PublicWebhookListen = ":443"
 	}
 	if !enabled {
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{

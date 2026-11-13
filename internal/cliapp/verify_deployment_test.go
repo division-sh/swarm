@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -21,6 +22,23 @@ import (
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
 )
+
+func TestVerifyNativePublicIngressUsesAdmittedConfiguration(t *testing.T) {
+	for _, settings := range []*config.PublicWebhookConfig{nil, {Hostname: "hooks.example.test"}, {}} {
+		cfg := RuntimeConfigLoadResult{Config: &config.Config{Serve: config.ServeConfig{PublicWebhook: settings}}}
+		var result runtime.WorkflowContractValidationResult
+		inspectVerifyPublicIngress(context.Background(), cfg, &result, "test")
+		if len(result.BootReport.Observations) != 1 {
+			t.Fatalf("public ingress admission was not observed: %#v", result.BootReport)
+		}
+		status := result.BootReport.Observations[0].Status
+		if settings == nil && status != bootverify.AdmissionNotApplicable ||
+			settings != nil && settings.Hostname != "" && status != bootverify.AdmissionPassed ||
+			settings != nil && settings.Hostname == "" && status != bootverify.AdmissionFailed {
+			t.Fatalf("wrong ingress observation: %s", status)
+		}
+	}
+}
 
 func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 	for _, selection := range []string{"explicit", "project", "user_global", "deployment", "locator", "no_deployment"} {
