@@ -117,13 +117,15 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 			} else if ordinal == 3 && arm == "kill" && !bytes.Equal(priorBody, request.Body) {
 				return llmapi.Reply{}, fmt.Errorf("interrupted read-only request changed on reissue")
 			}
-			if ordinal > 1 && !bytes.Contains(request.Body, []byte("cedar-731")) {
-				return llmapi.Reply{}, fmt.Errorf("memory prefix missing from continuation")
+			if arm == "kill" && ordinal >= 3 {
+				ordinal--
 			}
 		default:
 			return llmapi.Reply{}, fmt.Errorf("unexpected model %q", body.Model)
 		}
-		return llmapi.Reply{ID: fmt.Sprint(request.Number), Model: body.Model, Text: "Remembered cedar-731.", InputTokens: 4, OutputTokens: 4, TotalTokens: 8}, nil
+		arguments, _ := json.Marshal(map[string]string{"key": "memory", "text": "Remembered cedar-731."})
+		return llmapi.Reply{ID: fmt.Sprint(request.Number), Model: body.Model, Text: "Remembered cedar-731.", InputTokens: 4, OutputTokens: 4, TotalTokens: 8,
+			Tools: []llmapi.ToolCall{{ID: fmt.Sprintf("memory-reply-%d", ordinal), Name: "emit_memory_replied", Arguments: arguments}}}, nil
 	})
 	telegram := &telegramapi.Double{}
 	proxyEnv := joinedTelegramTransport(t, root, telegram)
@@ -185,10 +187,7 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	s.waitDelivery(dead, "dead-worker", "dead_letter")
 	second := s.publish("work.requested", "memory", "memory-second")
 	select {
-	case body := <-s.entered:
-		if !bytes.Contains(body, []byte("cedar-731")) {
-			t.Fatal("held provider request has no retained memory")
-		}
+	case <-s.entered:
 	case <-ctx.Done():
 		t.Fatal("provider request boundary not reached")
 	}
@@ -291,6 +290,19 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 		} else if !turn.ParseOK || turn.Failure != nil {
 			t.Fatalf("business turn failed: %s", joinedJSON(turn))
 		}
+	}
+	emissions := map[string]int{}
+	events, err := listGoldenEvents(ctx, s.process.rpc, s.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.EventName == "memory.replied" {
+			emissions[event.SourceEventID]++
+		}
+	}
+	if !reflect.DeepEqual(emissions, map[string]int{first: 1, second: 1, third: 1}) {
+		t.Fatalf("accepted memory emissions missing/repeated: %v", emissions)
 	}
 	if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
 		current, err := readNumericFeed(ctx, s.process.rpc, s.runID)
@@ -690,7 +702,19 @@ func (s *joinedRetainedScenario) memoryTimer() joinedMemoryTimer {
 func (s *joinedRetainedScenario) memoryTranscript() []any {
 	s.t.Helper()
 	var transcript []any
-	for _, turn := range s.memoryTurns() {
+	var recorded [][]any
+	for _, request := range s.model.Requests() {
+		body := joinedDecode(s.t, request.Body).(map[string]any)
+		if body["model"] == "memory" {
+			recorded = append(recorded, body["messages"].([]any))
+		}
+	}
+	turns := s.memoryTurns()
+	if len(recorded) != len(turns) {
+		s.t.Fatalf("recorded memory requests=%d, turns=%d", len(recorded), len(turns))
+	}
+	history := []any{map[string]any{"role": "system", "content": joinedMemoryPrompt}}
+	for i, turn := range turns {
 		if !turn.ParseOK {
 			continue
 		} // The caller separately asserts the exact kill-only failed attempt.
@@ -701,28 +725,34 @@ func (s *joinedRetainedScenario) memoryTranscript() []any {
 				Output  string `json:"assistant_visible_output"`
 			} `json:"turn"`
 			Rendering struct {
-				Status string `json:"status"`
-				Source string `json:"source"`
-				Input  []struct {
-					Role    string `json:"role"`
-					Content string `json:"content"`
-				} `json:"input"`
+				Status string          `json:"status"`
+				Source string          `json:"source"`
+				Input  json.RawMessage `json:"input"`
 			} `json:"provider_rendering"`
 		}
 		if err := s.process.rpc.call(s.ctx, "conversation.get_turn", map[string]any{"session_id": s.session.SessionID, "turn_id": turn.TurnID}, &detail); err != nil {
 			s.t.Fatal(err)
 		}
-		if detail.Turn.TurnID != turn.TurnID || detail.Turn.Ordinal != turn.Ordinal || detail.Turn.Output != "Remembered cedar-731." || detail.Rendering.Status != "recorded" || detail.Rendering.Source != "recorded_provider_request" || len(detail.Rendering.Input) != 1 || detail.Rendering.Input[0].Role != "user" {
+		if detail.Turn.TurnID != turn.TurnID || detail.Turn.Ordinal != turn.Ordinal || detail.Turn.Output != "Remembered cedar-731." || detail.Rendering.Status != "recorded" || detail.Rendering.Source != "recorded_provider_request" {
 			s.t.Fatalf("public logical transcript missing/changed: %s", joinedJSON(detail))
 		}
-		input := joinedDecode(s.t, json.RawMessage(detail.Rendering.Input[0].Content))
 		note := "Recall the marker from the previous conversation."
 		if len(transcript) == 0 {
 			note = "Remember cedar-731."
 		}
-		if !reflect.DeepEqual(input, map[string]any{"key": "memory", "note": note}) {
-			s.t.Fatalf("persisted user content changed: %s", joinedJSON(input))
+		input := map[string]any{"key": "memory", "note": note}
+		history = append(history, map[string]any{"role": "user", "content": joinedJSON(input)})
+		publicStart := len(history) - 1
+		if len(transcript) > 0 {
+			publicStart-- // The public suffix includes the preceding accepted tool result.
 		}
+		if !reflect.DeepEqual(recorded[i], history) || !reflect.DeepEqual(joinedDecode(s.t, detail.Rendering.Input), history[publicStart:]) {
+			s.t.Fatalf("recorded/public memory transcript changed: wire=%s public=%s want=%s", joinedJSON(recorded[i]), detail.Rendering.Input, joinedJSON(history))
+		}
+		callID := fmt.Sprintf("memory-reply-%d", len(transcript)+1)
+		arguments := joinedJSON(map[string]any{"key": "memory", "text": detail.Turn.Output})
+		history = append(history, map[string]any{"role": "assistant", "content": detail.Turn.Output, "tool_calls": []any{map[string]any{"id": callID, "type": "function", "function": map[string]any{"name": "emit_memory_replied", "arguments": arguments}}}},
+			map[string]any{"role": "tool", "tool_call_id": callID, "content": "ok"})
 		transcript = append(transcript, []any{len(transcript) + 1, s.events[turn.TriggerEventID], "user", input, "assistant", detail.Turn.Output})
 	}
 	if len(transcript) != 3 {

@@ -76,20 +76,24 @@ stages:
   done: {final: true}
 inputs: [control.seed, control.review, control.finish, work.requested, retry.requested, dead.requested]
 `,
-		"control/state.yaml": "key: text\n",
+		"control/state.yaml":  "key: text\nreply: text\n",
+		"control/events.yaml": "memory.replied:\n  key: text\n  text: text\n",
 		"control/nodes.yaml": `owner:
   control.seed:
     data_accumulation:
       writes: [{source_field: key, target_field: key}]
   control.review: {advances_to: review}
   control.finish: {advances_to: done}
+  memory.replied:
+    data_accumulation:
+      writes: [{source_field: text, target_field: reply}]
 `,
 		"control/agents.yaml": `worker:
   role: continuity_worker
   intent: prompts/worker.md
   model: memory
   memory: true
-  tools: []
+  emit_events: [memory.replied]
   subscriptions: [work.requested]
 retry-worker:
   role: retry_worker
@@ -104,7 +108,7 @@ dead-worker:
   tools: []
   subscriptions: [dead.requested]
 `,
-		"control/prompts/worker.md":       "Remember the synthetic marker supplied in the first event. Recall it on later turns.\n",
+		"control/prompts/worker.md":       joinedMemoryPrompt,
 		"control/prompts/retry-worker.md": "Handle the synthetic retry request.\n",
 		"control/prompts/dead-worker.md":  "Handle the synthetic refused request.\n",
 	} {
@@ -112,6 +116,8 @@ dead-worker:
 	}
 	return source
 }
+
+const joinedMemoryPrompt = "Remember the synthetic marker supplied in the first event. Recall it on later turns. Call emit_memory_replied once per input.\n"
 
 // Ordinary TLS trust and CONNECT proxy configuration reach the existing double
 // from unmodified child binaries. Only the synthetic Telegram endpoint is routed.
