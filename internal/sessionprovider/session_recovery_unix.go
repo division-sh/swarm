@@ -42,6 +42,14 @@ func transientConnectError(err error) bool {
 	return !typed && only && network
 }
 
+// TerminalAccountRefusalOnly identifies a known refusal, never executable authority.
+func TerminalAccountRefusalOnly(err error) bool {
+	_, typed := failures.As(err)
+	return !typed && errors.Is(err, errTerminalAccountRefusal) && failures.OnlyBranches(err, func(branch error) bool {
+		return branch == errTerminalAccountRefusal || branch == errClientOccurrenceFenced
+	})
+}
+
 // SessionRecovery checks the live original owner; diagnostic facts are not permits.
 func (c *RuntimeConnection) SessionRecovery(ctx context.Context, expected channelonboarding.Operation) (at time.Time, connected bool, err error) {
 	work, err := c.begin(ctx)
@@ -79,6 +87,12 @@ func (c *RuntimeConnection) SessionRecovery(ctx context.Context, expected channe
 		return at, false, nil
 	}
 	err = c.CheckBootstrap(work.Context())
+	o.mu.Lock()
+	terminal, callbacks := o.fenced && !o.logoutReserved && o.revoked == nil && (o.failureReason == "session replaced by another connection" || o.failureReason == "account temporarily banned"), o.callbacks
+	o.mu.Unlock()
+	if _, typed := failures.As(err); !typed && terminal && (callbacks == nil || callbacks.currentFailure() == nil) && failures.OnlyBranches(err, func(branch error) bool { return branch == errClientOccurrenceFenced }) {
+		return time.Time{}, false, errors.Join(errTerminalAccountRefusal, err, context.Cause(work.Context()), context.Cause(c.ctx))
+	}
 	if o.transientAdmissionRefusal(err) {
 		return at, false, nil
 	}

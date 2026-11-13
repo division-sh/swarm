@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
@@ -92,7 +93,7 @@ func TestWhatsAppRecoverySocketAndCurrentnessBothStores(t *testing.T) {
 				} {
 					op := f.operation
 					change(&op)
-					if _, _, err := c.SessionRecovery(f.ctx, op); err == nil {
+					if _, _, err := c.SessionRecovery(f.ctx, op); err == nil || TerminalAccountRefusalOnly(err) {
 						t.Fatal("foreign expected tuple admitted")
 					}
 				}
@@ -101,12 +102,12 @@ func TestWhatsAppRecoverySocketAndCurrentnessBothStores(t *testing.T) {
 				c.operations = diagnosticOperationFault{OperationStore: operations, cause: storage}
 				_, _, err := c.SessionRecovery(f.ctx, f.operation)
 				c.operations = operations
-				if !errors.Is(err, storage) {
+				if !errors.Is(err, storage) || TerminalAccountRefusalOnly(err) {
 					t.Fatal("read failure became recovery", err)
 				}
 				ctx, cancel := context.WithCancel(f.ctx)
 				cancel()
-				if _, _, err := c.SessionRecovery(ctx, f.operation); err == nil {
+				if _, _, err := c.SessionRecovery(ctx, f.operation); err == nil || TerminalAccountRefusalOnly(err) {
 					t.Fatal("canceled recovery")
 				}
 				second, err := open()
@@ -115,7 +116,7 @@ func TestWhatsAppRecoverySocketAndCurrentnessBothStores(t *testing.T) {
 						t.Fatal(closeErr)
 					}
 				}
-				if err == nil || channelonboarding.SessionUnavailableOnly(err) {
+				if err == nil || channelonboarding.SessionUnavailableOnly(err) || TerminalAccountRefusalOnly(err) {
 					t.Fatal("physical competitor queued for retry", err)
 				}
 				f.peer.mu.Lock()
@@ -192,8 +193,8 @@ func TestWhatsAppRecoveryPermanentEventsBothStores(t *testing.T) {
 					return fact.Down && fact.Lifecycle != ""
 				})
 				at, healthy, err := c.SessionRecovery(f.ctx, f.operation)
-				if err == nil || healthy {
-					t.Fatal("permanent event admitted recovery", at, err)
+				if err == nil || healthy || kind != "logout" && (!TerminalAccountRefusalOnly(err) || TerminalAccountRefusalOnly(errors.Join(err, context.Canceled)) || TerminalAccountRefusalOnly(errors.Join(err, errors.New("independent storage error"))) || TerminalAccountRefusalOnly(failures.Wrap(failures.ClassDependencyUnavailable, "dependency_unavailable", "whatsapp", "test", nil, err))) {
+					t.Fatal("permanent refusal was admitted or hid a mixed error", at, err)
 				}
 				if channelonboarding.SessionUnavailableOnly(c.RecoveryFailure(f.ctx, f.operation, errClientOccurrenceFenced)) {
 					t.Fatal("permanent fact became transient")
