@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 func canonicalExampleNames() []ArtifactID {
@@ -256,6 +257,11 @@ func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load release E2E full lifecycle fixture: %v", err)
 	}
+	admitted, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.PackAdmission = admitted.WithProviderFacts(channelfixture.For("telegram"))
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		t.Fatalf("hash release E2E full lifecycle fixture: %v", err)
