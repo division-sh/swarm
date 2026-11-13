@@ -297,7 +297,7 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 		t.Fatal(err)
 	}
 	for _, event := range events {
-		if event.EventName == "memory.replied" {
+		if event.EventName == s.memoryFlow+"/memory.replied" {
 			emissions[event.SourceEventID]++
 		}
 	}
