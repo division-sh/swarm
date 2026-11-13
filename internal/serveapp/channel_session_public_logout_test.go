@@ -66,7 +66,7 @@ func requireServedNativeCLILogout(t *testing.T, endpoint, operationID, key strin
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 	code := executeCLI(ctx, []string{"channel", "logout", operationID, "--idempotency-key", key,
-		"--api-server", server.String(), "--api-token-file", token, "--json"}, &stdout, &stderr, nil)
+		"--api-server", server.String(), "--api-token-file", token, "--json"}, &stdout, &stderr, nil, ChannelRegistrations())
 	if code != 0 {
 		t.Fatal("public CLI logout failed", code, stdout.String(), stderr.String())
 	}
