@@ -111,6 +111,15 @@ func TestFanOutReadbackStateAndUnavailableMetrics(t *testing.T) {
 	if _, err := base.ReadbackAt(now); err == nil {
 		t.Fatal("corrupt intent became a diagnostic row")
 	}
+	age := int64(0)
+	for _, invalid := range []ReadWaitObservation{
+		{NotBefore: now.Add(-time.Second), Since: &now, AgeMS: &age, Failure: &retry},
+		{NotBefore: now.Add(time.Second), Since: &now, AgeMS: &age, Failure: &blocked},
+	} {
+		if invalid.Validate(now) == nil {
+			t.Fatal("wire read wait admitted facts the native episode refuses")
+		}
+	}
 }
 
 func TestFanOutReadRuntimeObservation(t *testing.T) {

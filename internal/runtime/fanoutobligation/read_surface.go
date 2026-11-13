@@ -210,10 +210,10 @@ func (r ReadWaitObservation) Validate(at time.Time) error {
 		return errors.New("read wait requires its exact floor and nullable observed-failure facts")
 	}
 	if r.Since != nil {
-		if r.Since.After(at) || *r.AgeMS != at.Sub(*r.Since).Milliseconds() {
+		if r.Since.IsZero() || r.Since.After(r.NotBefore) || r.Since.After(at) || *r.AgeMS != at.Sub(*r.Since).Milliseconds() {
 			return errors.New("read wait age disagrees with its observation")
 		}
-		return runtimefailures.ValidateEnvelope(*r.Failure)
+		return (RetryWait{ReadyAt: r.NotBefore, Failure: *r.Failure}).Validate()
 	}
 	return nil
 }
