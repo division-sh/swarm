@@ -191,6 +191,7 @@ func TestRuntimeConfigDoctorOwnerInspectsTheAdmittedStore(t *testing.T) {
 			}
 			opts := doctorOptions{configPath: path}
 			opts.apiOptions.invocationRoot = root
+			opts.apiOptions.channelRegistration = channelRegistrationFixture{}
 			report, err := buildDoctorTargetReport(context.Background(), repo, opts, loaded.cli, swarmDir, loaded.Config)
 			if err != nil || report.Store == nil || report.Store.Path != sqlitePath || report.ProjectOwner == nil || report.ProjectOwner.Status != "available" || !strings.HasPrefix(report.ProjectOwner.Detail, "Project owner: selected-store lease is not held; last admitted serve ") || !strings.HasSuffix(report.ProjectOwner.Detail, " (generation 1)") {
 				t.Fatalf("doctor inspected a different or reloaded store: store=%#v owner=%#v error=%v", report.Store, report.ProjectOwner, err)

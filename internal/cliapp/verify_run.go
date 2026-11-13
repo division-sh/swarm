@@ -131,7 +131,7 @@ func prepareVerifyRunInspection(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, paths.SourceRoot, base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, paths.SourceRoot, base, cfg.AdmitPackInventory)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
