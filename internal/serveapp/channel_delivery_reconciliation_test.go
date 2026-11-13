@@ -95,7 +95,7 @@ func TestChannelWorkerKeepsInPassHintAndJoinsExactProcess(t *testing.T) {
 		return nil
 	}}
 	passes := make(chan render.ReconcilePass, 8)
-	if err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
+	if _, err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
 		cadence: render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour},
 		passed:  func(pass render.ReconcilePass) { passes <- pass },
 	}); err != nil {
@@ -166,7 +166,7 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 		return nil
 	}}
 	passes := make(chan render.ReconcilePass, 8)
-	if err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
+	if _, err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
 		cadence: render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour},
 		passed:  func(pass render.ReconcilePass) { passes <- pass },
 	}); err != nil {
@@ -249,7 +249,7 @@ func testChannelWorkerSubscriptionShutdown(t *testing.T) {
 				t.Error("failed subscription launched a scan")
 				return nil
 			}
-			err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
+			_, err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
 				started: func(render.Store, func() (render.ReconcileMark, bool)) {
 					t.Error("failed subscription reported worker startup")
 				},
