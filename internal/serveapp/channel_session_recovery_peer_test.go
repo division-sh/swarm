@@ -423,7 +423,7 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
 				peer := newServeNativeProtocolPeer(t)
 				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, nil)
-				h.opts.SwarmDir, h.opts.SwarmDirSet = t.TempDir(), true
+				h.opts.SwarmDir, h.opts.SwarmDirSet = filepath.Join(t.TempDir(), "native"), true
 				body, err := os.ReadFile(h.opts.ConfigPath)
 				if err != nil {
 					t.Fatal(err)
