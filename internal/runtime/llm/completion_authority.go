@@ -427,7 +427,13 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 		}
 		workLease, err = process.Begin(context.WithoutCancel(ctx))
 	} else if occurrenceOwned {
-		workLease, err = owner.Begin(ctx)
+		if accepted, ok := owner.(interface {
+			BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+		}); ok {
+			workLease, err = accepted.BeginAcceptedDescendant(ctx)
+		} else {
+			workLease, err = owner.Begin(ctx)
+		}
 	} else if process, processOwned := worklifetime.ProcessFromContext(ctx); processOwned {
 		workLease, err = process.Begin(ctx)
 	} else {

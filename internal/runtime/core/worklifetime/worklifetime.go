@@ -1253,10 +1253,41 @@ func (s *SelectedForkOccurrence) Retire() {
 }
 
 func (s *SelectedForkOccurrence) Fence() error {
+	return s.closeAdmission(false)
+}
+
+// CloseDispatch seals selected work while its accepted producers retain their
+// publication handoff. Explicit Fence still closes that handoff authority.
+func (s *SelectedForkOccurrence) CloseDispatch() error {
+	return s.closeAdmission(true)
+}
+
+func (s *SelectedForkOccurrence) closeAdmission(dispatchOnly bool) error {
 	if s == nil {
 		return errors.New("selected-fork occurrence is required")
 	}
-	return s.occurrence.fence()
+	g := s.occurrence.gate
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.state == gateRetired {
+		return ErrRetired
+	}
+	if dispatchOnly && g.state == gateFenced {
+		return nil
+	}
+	g.state = gateFenced
+	g.dispatchClosed = dispatchOnly
+	return nil
+}
+
+func (s *SelectedForkOccurrence) DispatchClosed() bool {
+	if s == nil {
+		return false
+	}
+	g := s.occurrence.gate
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.state == gateFenced && g.dispatchClosed
 }
 
 func (s *SelectedForkOccurrence) Identity() SelectedForkIdentity {

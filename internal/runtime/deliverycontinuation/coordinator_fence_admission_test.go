@@ -41,6 +41,38 @@ func TestCoordinatorPublishedDispatchUsesPreFenceLease(t *testing.T) {
 	}
 }
 
+func TestCoordinatorPublishedDispatchAfterSealKeepsUnstartedRecipientQueued(t *testing.T) {
+	dispatched := make(chan struct{}, 1)
+	f := newPublishedDispatchTestFixture(t, &coordinatorTestDispatcher{dispatched: dispatched, result: Transferred()}, nil)
+	if err := f.coordinator.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	event := coordinatorTestEvent("post-seal-accepted-publication")
+	route := publishedDispatchTestNodeRoute(t, "post-seal")
+	f.owner.CloseDispatch()
+	// This publication was accepted before the stop; its recipient was not.
+	f.accept(t, event, route)
+	if err := f.coordinator.DispatchPublished(event, []events.DeliveryRoute{route}); err != nil {
+		t.Fatalf("sealed dispatch lost committed handoff: %v", err)
+	}
+	publishedDispatchTestQuiesce(t, f.owner)
+	select {
+	case <-dispatched:
+		t.Fatal("accepted publication started a fresh recipient after the dispatch seal")
+	default:
+	}
+	id, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.coordinator.mu.Lock()
+	state := f.coordinator.entries[id].state
+	f.coordinator.mu.Unlock()
+	if state != ownershipCoordinator {
+		t.Fatalf("sealed recipient did not remain queued under its coordinator: state=%d", state)
+	}
+}
+
 func TestCoordinatorDispatchUsesExactPreFenceLease(t *testing.T) {
 	for _, variant := range []string{"accepted", "unowned", "foreign", "settled", "retired"} {
 		t.Run(variant, func(t *testing.T) {

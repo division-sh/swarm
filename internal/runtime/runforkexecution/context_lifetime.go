@@ -373,7 +373,7 @@ func (o SelectedContractExecutionOwner) DrainSelectedContexts(ctx context.Contex
 		selected[index] = entry.operation.selected
 		entry.operation.mu.Unlock()
 		if selected[index] != nil {
-			if err := selected[index].Fence(); err != nil && !errors.Is(err, worklifetime.ErrRetired) {
+			if err := selected[index].CloseDispatch(); err != nil && !errors.Is(err, worklifetime.ErrRetired) {
 				drainErr = errors.Join(drainErr, err)
 			}
 		}
