@@ -14,16 +14,17 @@ import (
 
 type fanOutClaimOutcomeOwner struct {
 	fanOutFailureTestOwner
-	claimFn   func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
-	releaseFn func(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error)
-	loads     int
-	groups    int
+	claimFn         func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
+	releaseFn       func(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error)
+	loads           int
+	groups          int
+	loadDisposition FanOutReadDisposition
 }
 
 func (o *fanOutClaimOutcomeOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(FanOutEvaluationInput) error) (FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
 	input, err := o.LoadFanOutEvaluation(ctx, claim)
 	if err != nil {
-		return input, nil, &FanOutEvaluationLoadError{Cause: err}
+		return input, nil, &FanOutEvaluationLoadError{Cause: err, Stage: "hydrate_read", Disposition: o.loadDisposition}
 	}
 	if err := validate(input); err != nil {
 		return input, nil, &FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation", Disposition: FanOutReadDefect}
@@ -181,6 +182,7 @@ func TestFanOutPreparationFailureReportsUnsettledCleanup(t *testing.T) {
 			owner := &fanOutCleanupOutcomeOwner{
 				blockErr: blockErr,
 				fanOutClaimOutcomeOwner: &fanOutClaimOutcomeOwner{
+					loadDisposition: FanOutReadDefect,
 					claimFn: func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
 						return fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: claim.Key}}, claim, true, nil
 					},
