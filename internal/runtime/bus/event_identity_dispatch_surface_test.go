@@ -100,10 +100,14 @@ func (f completeEventDispatchFixture) recordedReplay(t testing.TB, ctx context.C
 	if err != nil {
 		t.Fatal(err)
 	}
+	targets := make([]events.RouteIdentity, 0, len(selection.Routes()))
+	for _, route := range selection.Routes() {
+		targets = append(targets, route.Target.Route())
+	}
 	event, err := events.NewReplayEvent(events.ReplayEventInput{
 		Facts: events.EventFacts{ID: uuid.NewString(), Type: snapshot.Type(), Producer: events.ProducerClaim{Type: snapshot.ProducerType(), ID: snapshot.SourceAgent()},
 			TaskID: snapshot.TaskID(), Payload: snapshot.Payload(), ChainDepth: snapshot.ChainDepth() + 1, RoutingSource: snapshot.RoutingSource(),
-			Envelope: snapshot.Envelope(), CreatedAt: time.Now().UTC(), ExecutionMode: snapshot.ExecutionMode()},
+			Envelope: events.EnvelopeForTargetSet(snapshot.Envelope(), targets), CreatedAt: time.Now().UTC(), ExecutionMode: snapshot.ExecutionMode()},
 		Lineage: events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
 	})
 	if err != nil {

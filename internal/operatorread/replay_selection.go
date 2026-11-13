@@ -78,11 +78,16 @@ func (s ReplaySelection) Routes() []events.DeliveryRoute {
 
 func (s ReplaySelection) ValidateEvent(replay events.Event) error {
 	original := s.original
+	targets := make([]events.RouteIdentity, 0, len(s.routes))
+	for _, route := range s.routes {
+		targets = append(targets, route.Target.Route())
+	}
+	envelope := events.EnvelopeForTargetSet(original.Envelope(), targets)
 	if s.Empty() || replay.AdmissionClass() != events.EventAdmissionReplay || replay.ID() == "" || replay.ID() == original.ID() || replay.ParentEventID() != original.ID() ||
 		replay.RunID() != original.RunID() || replay.Type() != original.Type() || !replay.Producer().Equal(original.Producer()) ||
 		replay.RoutingSource() != original.RoutingSource() || replay.TaskID() != original.TaskID() ||
 		replay.ChainDepth() != original.ChainDepth()+1 || replay.ExecutionMode() != original.ExecutionMode() ||
-		!reflect.DeepEqual(replay.NormalizedEnvelope(), original.NormalizedEnvelope()) ||
+		!reflect.DeepEqual(replay.NormalizedEnvelope(), envelope) ||
 		!bytes.Equal(replay.Payload(), original.Payload()) {
 		return fmt.Errorf("replay publication differs from its selected original event")
 	}

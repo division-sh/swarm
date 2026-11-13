@@ -214,8 +214,12 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: operatorReplayRunID, EntityID: operatorReplayRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: runtimebustest.IdentityForRun(t, operatorReplayRunID, "agent-a", ""),
-		Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}}}
+		Target: target, Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}}}
 	deliveryID, err := runtimedelivery.DeliveryID(originalEvent.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -233,6 +237,13 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 		t.Fatal(err)
 	}
 	replay, err := replayEventFromOriginal(original, uuid.NewString(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateEvent(replay); err == nil {
+		t.Fatal("replay selection accepted the unprojected original envelope")
+	}
+	replay, err = events.ResolveEnvelope(replay, events.EnvelopeForTargetSet(replay.Envelope(), []events.RouteIdentity{target.Route()}))
 	if err != nil {
 		t.Fatal(err)
 	}

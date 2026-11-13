@@ -37,11 +37,15 @@ func recordedReplaySelectionForTest(t testing.TB, original events.Event, routes 
 	if err != nil {
 		t.Fatal(err)
 	}
+	targets := make([]events.RouteIdentity, 0, len(routes))
+	for _, route := range routes {
+		targets = append(targets, route.Target.Route())
+	}
 	replay, err := events.NewReplayEvent(events.ReplayEventInput{
 		Facts: events.EventFacts{ID: eventtest.UUID(fmt.Sprintf("replay-%s", original.ID())), Type: original.Type(),
 			Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
 			TaskID:   original.TaskID(), Payload: original.Payload(), ChainDepth: original.ChainDepth() + 1,
-			RoutingSource: original.RoutingSource(), Envelope: original.Envelope(), CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode()},
+			RoutingSource: original.RoutingSource(), Envelope: events.EnvelopeForTargetSet(original.Envelope(), targets), CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode()},
 		Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
 	})
 	if err != nil {
