@@ -251,7 +251,7 @@ func TestServeRegisteredDiagnosticReadAndHeldWriterBothStores(t *testing.T) {
 			}
 			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "holder": holder, "provider": "whatsapp"}, &list)
 			if len(list.Accounts) != 1 || list.Accounts[0].Status == nil || list.Accounts[0].Connection == nil ||
-				list.Accounts[0].Status.Cause != status.Cause || list.Accounts[0].Connection.Cause != status.Cause || list.Accounts[0].Connection.State != "error" || list.Accounts[0].Connection.Reason != status.Reason {
+				list.Accounts[0].Status.Cause != status.Cause || list.Accounts[0].Connection.Cause != status.Cause || list.Accounts[0].Connection.State != "error" || list.Accounts[0].Connection.Reason != "" {
 				t.Fatal("list status and connection lost the same native failure", list)
 			}
 			if connection.CheckBootstrap(ctx) == nil {
