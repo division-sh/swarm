@@ -549,6 +549,20 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 					_, _, terminalErr = firstConnection.SessionRecovery(ctx, registered[0].Operation)
 					return factErr == nil && fact.Lifecycle == map[string]string{"replacement": "session replaced by another connection", "ban": "account temporarily banned"}[kind] && terminalErr != nil && !channelonboarding.SessionUnavailableOnly(terminalErr)
 				}, h.process.outputString)
+				fact, _, err := firstConnection.SessionDiagnostic(ctx)
+				if err != nil || !fact.StoppedRefusalOnly(terminalErr) {
+					t.Fatal("exact terminal refusal was not positively classified", err)
+				}
+				for _, refusal := range []error{context.Canceled, channelonboarding.ErrRevisionConflict, errors.New("independent storage failure")} {
+					if fact.StoppedRefusalOnly(errors.Join(terminalErr, refusal)) {
+						t.Fatal("mixed terminal refusal was accepted", refusal)
+					}
+				}
+				notice := onlyPublicChannelNoticeID(t, h.rpcEndpoint(), "")
+				message := h.provider.Delivery(waitLinkNoticeReceipt(t, openChannelAnchorObservation(t, h), notice, h.process.outputString) - 1)
+				if message["text"] != "Swarm Notice: WhatsApp link needs attention: "+fact.Cause() {
+					t.Fatal("positive terminal cause did not reach the existing notice path", message)
+				}
 				readsBefore, _ := h.provider.CommandReadbackCounts()
 				peer.disconnect()
 				observed := ""

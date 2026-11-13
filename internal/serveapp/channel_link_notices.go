@@ -15,18 +15,14 @@ import (
 	"github.com/google/uuid"
 )
 
-type linkNoticePending struct {
-	item    tools.MailboxItem
-	binding operatorchannel.Binding
-	event   linkNoticeEvent
-}
-
 type linkNoticeEntry struct {
 	linkNoticeState
 	connection string
 	account    operatorchannel.SessionAccountAdmission
 	valid      bool
-	pending    *linkNoticePending
+	item       tools.MailboxItem
+	binding    operatorchannel.Binding
+	event      linkNoticeEvent
 }
 
 type serveLinkNotices struct {
@@ -81,7 +77,7 @@ func (n *serveLinkNotices) destination(ctx context.Context) (channelonboarding.R
 
 func (n *serveLinkNotices) observe(op channelonboarding.Operation, observedErr error, at time.Time) {
 	for _, item := range n.items {
-		if item.Operation.OperationID != op.OperationID || item.Operation.SessionConnectionID != op.SessionConnectionID || item.Operation.SessionAccount != op.SessionAccount {
+		if item.Operation.OperationID != op.OperationID || item.Operation.Revision != op.Revision || item.Operation.RequestHash != op.RequestHash || item.Operation.DeploymentRegistration != op.DeploymentRegistration || item.Operation.SessionConnectionID != op.SessionConnectionID || item.Operation.SessionAccount != op.SessionAccount {
 			continue
 		}
 		entry := n.entries[op.OperationID]
@@ -90,7 +86,7 @@ func (n *serveLinkNotices) observe(op channelonboarding.Operation, observedErr e
 			n.entries[op.OperationID] = entry
 		}
 		fact, state := item.Fact, n.dispatcher.sessionStates[op.OperationID]
-		entry.valid = observedErr == nil || fact.Stopped
+		entry.valid = observedErr == nil || fact.StoppedRefusalOnly(observedErr)
 		if !entry.valid {
 			return
 		}
@@ -118,17 +114,17 @@ func (n *serveLinkNotices) reconcile(ctx context.Context, readErr error) error {
 			text = linkNoticeText(*event, id == selected.Operation.OperationID)
 		}
 		current := entry.valid && targetErr == nil && selected.Binding != nil && text != ""
-		if entry.pending == nil && current {
-			entry.pending = &linkNoticePending{tools.MailboxItem{ID: uuid.NewString(), Type: render.LinkNoticeType, Summary: text}, *selected.Binding, *event}
+		if entry.item.ID == "" && current {
+			entry.item, entry.binding, entry.event = tools.MailboxItem{ID: uuid.NewString(), Type: render.LinkNoticeType, Summary: text}, *selected.Binding, *event
 		}
-		if pending := entry.pending; pending != nil {
+		if pending := entry; pending.item.ID != "" {
 			create := current && pending.item.Summary == text && pending.binding == *selected.Binding && pending.event == *event
 			_, err := n.mailbox.InsertMailboxItem(render.WithLinkNoticeBinding(ctx, pending.binding, create), pending.item)
 			if err == nil {
 				entry.admitted(pending.event, d.now())
-				entry.pending = nil
+				entry.item = tools.MailboxItem{}
 			} else if !create && failures.OnlyBranches(err, func(e error) bool { return e == render.ErrLinkNoticeAbsent }) {
-				entry.pending = nil
+				entry.item = tools.MailboxItem{}
 			} else {
 				result = errors.Join(result, err)
 			}

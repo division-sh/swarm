@@ -83,7 +83,7 @@ func TestChannelNoticeLinkAttentionHasIndependentCauseSuppression(t *testing.T) 
 	if s.next(now.Add(3*time.Second)) != nil {
 		t.Fatal("previously seen cause repeated without recovery")
 	}
-	old := linkNoticeEvent{kind: "attention", cause: "logged out", drops: s.drops, generation: s.generation}
+	old := linkNoticeEvent{kind: "attention", cause: "logged out", drops: s.drops}
 	s.observe(now.Add(4*time.Second), true, false, "")
 	s.admitted(old, now.Add(5*time.Second))
 	s.observe(now.Add(6*time.Second), false, true, "logged out")
