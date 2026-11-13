@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -474,6 +475,55 @@ func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(
 }
 
 func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *testing.T) {
+	t.Run("graceful_stop_retains_accepted_source_and_handoff", func(t *testing.T) {
+		definition := capturedOrdinaryRuntimeContext(t, "graceful.requested")
+		owner, err := newTestRuntimeContextManager(t, nil, definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rt := definition.Runtime
+		authority, err := rt.Bus.DeliveryAuthority()
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinator, err := deliverycontinuation.New(&shutdownContinuationPage{}, authority, definition.WorkOwner, &shutdownBlockedDispatcher{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rt.deliveryContinuations = coordinator
+		_, release, admitted := rt.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
+		if !admitted {
+			t.Fatal("accepted producer was not admitted")
+		}
+		defer release()
+		done := make(chan []RuntimeContextDeactivationResult, 1)
+		go func() {
+			done <- owner.DeactivateAllWithOptions(RuntimeContextCauseUnavailable, ShutdownOptions{Grace: time.Second})
+		}()
+		deadline := time.After(time.Second)
+		for !rt.shutdownAdmissionClosed() {
+			select {
+			case <-deadline:
+				t.Fatal("fresh ingress was not sealed")
+			default:
+				goruntime.Gosched()
+			}
+		}
+		if !owner.LookupBundleHashStatus(definition.BundleHash()).Loaded() {
+			t.Error("accepted source was withdrawn before its producer joined")
+		}
+		if err := coordinator.AcceptCommitted(nil); err != nil {
+			t.Errorf("accepted handoff admission retired before its producer joined: %v", err)
+		}
+		release()
+		results := <-done
+		if len(results) != 1 || results[0].ShutdownErr != nil {
+			t.Fatalf("joined stop: %+v", results)
+		}
+		if owner.LookupBundleHashStatus(definition.BundleHash()).Loaded() {
+			t.Fatal("joined source remained loaded")
+		}
+	})
 	first := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	second := capturedOrdinaryRuntimeContext(t, "beta.requested")
 	if first.BundleHash() == second.BundleHash() {
