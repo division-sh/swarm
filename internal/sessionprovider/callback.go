@@ -73,6 +73,7 @@ func (g *callbackGuard) receive(event any) (success bool) {
 			diaglog.ProcessLog(diaglog.LevelWarn, "whatsapp", "unsupported incoming content discarded", "disposition", "discarded")
 		default:
 			diaglog.ProcessLog(diaglog.LevelError, "whatsapp", "incoming callback failed",
+				"sender_phone_read", errors.Is(err, errSenderPhoneRead),
 				"unsupported", errors.Is(err, errIncomingUnsupported), "malformed", errors.Is(err, errIncomingMalformed),
 				"scope_changed", errors.Is(err, errCaptureScopeChanged), "account_invalid", errors.Is(err, errSessionAccount),
 				"occurrence_fenced", errors.Is(err, errClientOccurrenceFenced), "runtime_unavailable", errors.Is(err, errRuntimeConnection),

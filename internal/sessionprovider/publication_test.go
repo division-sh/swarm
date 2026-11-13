@@ -241,10 +241,11 @@ func TestWhatsAppCaptureRetirementWriteFailureRetainsPublicationRequest(t *testi
 }
 
 func TestWhatsAppCapturePublicationCorruptionBlocksEveryConsumer(t *testing.T) {
-	for _, corruption := range []string{"digest", "request_identity"} {
+	for _, corruption := range []string{"digest", "request_identity", "phone_provenance"} {
 		for _, consumer := range []string{"pending", "duplicate", "new_event", "stage", "retire"} {
 			t.Run(corruption+"/"+consumer, func(t *testing.T) {
 				event := captureFixture(t)
+				event.SenderPhone = "+100000001"
 				request := capturePublicationFixture(t, event)
 				db, store := openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), event.Scope.Session.ConnectionID)
 				ctx := context.Background()
@@ -261,6 +262,11 @@ func TestWhatsAppCapturePublicationCorruptionBlocksEveryConsumer(t *testing.T) {
 				} else {
 					changed := request
 					changed.ProviderEventID = "foreign"
+					if corruption == "phone_provenance" {
+						other := event
+						other.SenderPhone = "+100000009"
+						changed = capturePublicationFixture(t, other)
+					}
 					var err error
 					changed.PublicationID, changed.MarkerEventID, err = runtimeinbound.DeterministicIDs(changed.Identity())
 					if err != nil {

@@ -59,6 +59,22 @@ func captureFixture(t *testing.T) capturedEvent {
 
 func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	business := captureFixture(t)
+	legacy, err := json.Marshal(business)
+	if err != nil || bytes.Contains(legacy, []byte("SenderPhone")) {
+		t.Fatal("absent phone changed legacy envelope", err)
+	}
+	var decoded capturedEvent
+	if err := json.Unmarshal(legacy, &decoded); err != nil || !decoded.SameCapture(business) {
+		t.Fatal("legacy capture changed", err)
+	}
+	projection, err := decoded.ProjectedBody()
+	if err != nil || !bytes.Equal(projection, business.Body) {
+		t.Fatal("absent phone changed old body", err)
+	}
+	projection[0] = '['
+	if bytes.Equal(projection, decoded.Body) {
+		t.Fatal("projection aliased frozen body")
+	}
 	bootstrap := business
 	bootstrap.Scope.Kind = channelonboarding.SessionInputOnboarding
 	bootstrap.Scope.PublicationBinding = runtimeinbound.BindingGeneration{}
@@ -77,6 +93,7 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 		edit func(*capturedEvent)
 	}{
 		{"unknown_scope", business, func(e *capturedEvent) { e.Scope.Kind = "guessed" }},
+		{"bad_phone", business, func(e *capturedEvent) { e.SenderPhone = "not a phone" }},
 		{"no_scope", business, func(e *capturedEvent) { e.Scope.Kind = "" }},
 		{"no_operation_revision", business, func(e *capturedEvent) { e.Scope.OperationRevision = 0 }},
 		{"no_target", business, func(e *capturedEvent) { e.Scope.TargetSelector = "" }},

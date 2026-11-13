@@ -53,6 +53,10 @@ normalized_events:
       external_account:
         from: external_account
         schema: {type: string, minLength: 1}
+      sender_phone:
+        from: sender_phone
+        optional: true
+        schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}
       provider_message_reference:
         from: provider_message_reference
         schema: {type: string, minLength: 1}

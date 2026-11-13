@@ -313,6 +313,10 @@ func (f *activeInputFixture) bindCaptureCallbacks(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		event.SenderPhone, err = incomingSenderPhone(ctx, message.Info.MessageSource, f.occurrence.client.Store.LIDs.GetPNForLID)
+		if err != nil {
+			return err
+		}
 		if err := f.spool.capture(ctx, event); err != nil {
 			return err
 		}

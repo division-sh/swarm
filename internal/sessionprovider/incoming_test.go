@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +43,59 @@ func incomingPayloadFixture(t *testing.T, event capturedEvent) incomingPayload {
 }
 
 func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
+	t.Run("phone_sources", func(t *testing.T) {
+		var output bytes.Buffer
+		old := log.Writer()
+		log.SetOutput(&output)
+		t.Cleanup(func() { log.SetOutput(old) })
+		pn, lid := types.NewJID("100000001", types.DefaultUserServer), types.NewJID("200000001", types.HiddenUserServer)
+		broken := errors.New("private map error")
+		for _, row := range []struct {
+			name                      string
+			sender, alternate, mapped types.JID
+			failure                   error
+			want                      string
+			reads                     int
+		}{
+			{"sender", pn, types.NewJID("100000009", types.DefaultUserServer), pn, nil, "+100000001", 0},
+			{"alternate", lid, pn, types.EmptyJID, nil, "+100000001", 0},
+			{"map", lid, lid, pn, nil, "+100000001", 1},
+			{"miss", lid, lid, types.EmptyJID, nil, "", 1},
+			{"read_error", lid, lid, types.EmptyJID, broken, "", 1},
+			{"fence_error", lid, lid, types.EmptyJID, errClientOccurrenceFenced, "", 1},
+			{"bad_sender", types.NewJID("bad", types.DefaultUserServer), pn, pn, nil, "", 0},
+			{"bad_alternate", lid, types.NewJID("bad", types.DefaultUserServer), pn, nil, "", 0},
+			{"bad_map", lid, lid, types.NewJID("bad", types.DefaultUserServer), nil, "", 1},
+		} {
+			t.Run(row.name, func(t *testing.T) {
+				output.Reset()
+				reads := 0
+				resolve := sync.OnceValues(func() (string, error) {
+					return incomingSenderPhone(context.Background(), types.MessageSource{Sender: row.sender, SenderAlt: row.alternate}, func(_ context.Context, key types.JID) (types.JID, error) {
+						reads++
+						if key != lid {
+							t.Fatal("map key changed", key)
+						}
+						return row.mapped, row.failure
+					})
+				})
+				phone, err := resolve()
+				again, againErr := resolve()
+				if again != phone || againErr != err {
+					t.Fatal("callback resolution was not frozen")
+				}
+				if phone != row.want || reads != row.reads || !errors.Is(err, row.failure) || (row.failure != nil && !errors.Is(err, errSenderPhoneRead)) {
+					t.Fatal("phone source/error changed", phone, reads, err)
+				}
+				if strings.HasPrefix(row.name, "bad_") && !strings.Contains(output.String(), `"category":"sender_phone_malformed"`) {
+					t.Fatal("malformed phone omitted without fixed error", output.String())
+				}
+				if strings.Contains(output.String(), "100000001") || strings.Contains(output.String(), broken.Error()) {
+					t.Fatal("phone log exposed private evidence")
+				}
+			})
+		}
+	})
 	for _, kind := range []string{"message", "edit", "revoke"} {
 		for _, group := range []bool{false, true} {
 			t.Run(kind+map[bool]string{false: "/direct", true: "/group"}[group], func(t *testing.T) {
@@ -71,6 +127,12 @@ func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
 					t.Fatal(err)
 				}
 				payload := incomingPayloadFixture(t, captured)
+				captured.SenderPhone, err = incomingSenderPhone(context.Background(), event.Info.MessageSource, nil)
+				projected, projectErr := captured.ProjectedBody()
+				var fields map[string]any
+				if err != nil || projectErr != nil || json.Unmarshal(projected, &fields) != nil || fields["sender_phone"] != "+100000001" || fields["external_account"] != self.String() {
+					t.Fatal("phone projection changed delivered identity", fields, err, projectErr)
+				}
 				if captured.Kind != kind || captured.EventID != "DELIVERY_1" || captured.Conversation != event.Info.Chat.String() ||
 					payload.MessageReference != "DELIVERY_1" || payload.Sender != self.String() || payload.OperatorAccount != "+100000002" {
 					t.Fatalf("SDK target key replaced delivery/routing identity: %+v", payload)

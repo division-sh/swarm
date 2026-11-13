@@ -10,6 +10,7 @@ normalized_events:
     fields:
       text: {from: text, schema: {type: string, minLength: 1}}
       external_account: {from: external_account, schema: {type: string, minLength: 1}}
+      sender_phone: {from: sender_phone, optional: true, schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}}
       conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
       conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
       provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}
@@ -33,6 +34,7 @@ normalized_events:
       text: {from: text, schema: {type: string, minLength: 1}}
       target_message_reference: {from: target_message_reference, schema: {type: string, minLength: 1}}
       external_account: {from: external_account, schema: {type: string, minLength: 1}}
+      sender_phone: {from: sender_phone, optional: true, schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}}
       conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
       conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
       provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}
@@ -45,6 +47,7 @@ normalized_events:
     fields:
       target_message_reference: {from: target_message_reference, schema: {type: string, minLength: 1}}
       external_account: {from: external_account, schema: {type: string, minLength: 1}}
+      sender_phone: {from: sender_phone, optional: true, schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}}
       conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
       conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
       provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}
