@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/publicingress"
 )
 
@@ -16,11 +17,16 @@ func TestResolveServePublicIngressMode(t *testing.T) {
 	tests := []struct {
 		name    string
 		opts    cliapp.ServeOptions
+		webhook *config.PublicWebhookConfig
 		mode    string
 		enabled bool
 		ok      bool
 	}{
 		{name: "disabled", opts: cliapp.ServeOptions{}, ok: true},
+		{name: "native TLS", webhook: &config.PublicWebhookConfig{Hostname: "hooks.example.test"}, mode: publicingress.ModeNativeTLS, enabled: true, ok: true},
+		{name: "native TLS refuses expose", webhook: &config.PublicWebhookConfig{Hostname: "hooks.example.test"}, opts: cliapp.ServeOptions{Dev: true, Expose: true}},
+		{name: "native TLS refuses proxy flags", webhook: &config.PublicWebhookConfig{Hostname: "hooks.example.test"}, opts: cliapp.ServeOptions{PublicWebhookBaseURL: "https://proxy.example.test", PublicWebhookListen: "127.0.0.1:8443"}},
+		{name: "empty native TLS block", webhook: &config.PublicWebhookConfig{}},
 		{name: "managed", opts: cliapp.ServeOptions{Dev: true, Expose: true}, mode: publicingress.ModeManagedQuickTunnel, enabled: true, ok: true},
 		{name: "external in dev", opts: cliapp.ServeOptions{Dev: true, PublicWebhookBaseURL: "https://hooks.example.test", PublicWebhookListen: "127.0.0.1:8443"}, mode: publicingress.ModeExternalOrigin, enabled: true, ok: true},
 		{name: "external in retained serve", opts: cliapp.ServeOptions{PublicWebhookBaseURL: "https://hooks.example.test", PublicWebhookListen: "127.0.0.1:8443"}, mode: publicingress.ModeExternalOrigin, enabled: true, ok: true},
@@ -32,7 +38,7 @@ func TestResolveServePublicIngressMode(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mode, enabled, err := cliapp.ResolveServePublicIngressMode(tc.opts)
+			mode, enabled, err := cliapp.ResolveServePublicIngressMode(tc.opts, tc.webhook)
 			if (err == nil) != tc.ok || mode != tc.mode || enabled != tc.enabled {
 				t.Fatalf("resolveServePublicIngressMode = %q,%v,%v want %q,%v,ok=%v", mode, enabled, err, tc.mode, tc.enabled, tc.ok)
 			}
@@ -51,7 +57,7 @@ func TestRetainedServeExternalOriginExposesOnlyWebhookRoutes(t *testing.T) {
 	listenAddress := listener.Addr().String()
 	mode, enabled, err := cliapp.ResolveServePublicIngressMode(cliapp.ServeOptions{
 		PublicWebhookBaseURL: "https://hooks.example.test", PublicWebhookListen: listenAddress,
-	})
+	}, nil)
 	if err != nil || !enabled || mode != publicingress.ModeExternalOrigin {
 		t.Fatalf("retained external-origin admission = %q,%v,%v", mode, enabled, err)
 	}

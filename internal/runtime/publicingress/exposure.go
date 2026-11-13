@@ -3,6 +3,7 @@ package publicingress
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 const (
 	ModeManagedQuickTunnel = "managed_quick_tunnel"
 	ModeExternalOrigin     = "external_origin"
+	ModeNativeTLS          = "native_tls"
 )
 
 var cloudflaredVersionPattern = regexp.MustCompile(`(?i)cloudflared version\s+([0-9]+)\.([0-9]+)\.([0-9]+)`) // exact CLI contract
@@ -55,6 +57,7 @@ type Options struct {
 	PublicOrigin      string
 	ListenAddress     string
 	Listener          *net.TCPListener // Successful construction takes ownership of this bound socket.
+	TLSConfig         *tls.Config
 	CloudflaredBinary string
 	Handler           http.Handler
 	HTTPClient        *http.Client
@@ -122,8 +125,11 @@ func NewController(opts Options) (*Controller, error) {
 	if err := ValidateConfiguration(opts.Mode, opts.PublicOrigin, opts.ListenAddress); err != nil {
 		return nil, err
 	}
-	if opts.Listener != nil && (opts.Mode != ModeExternalOrigin || opts.Listener.Addr().String() != opts.ListenAddress) {
-		return nil, fmt.Errorf("bound public webhook listener must match the external-origin listen address")
+	if opts.Listener != nil && ((opts.Mode != ModeExternalOrigin && opts.Mode != ModeNativeTLS) || opts.Listener.Addr().String() != opts.ListenAddress) {
+		return nil, fmt.Errorf("bound public webhook listener must match its configured listen address")
+	}
+	if (opts.Mode == ModeNativeTLS) != (opts.TLSConfig != nil) {
+		return nil, fmt.Errorf("native public ingress requires its own TLS configuration")
 	}
 	controller := &Controller{opts: opts, done: make(chan struct{}), waitRetry: waitPublicRouteRetry}
 	if opts.Listener != nil {
@@ -144,6 +150,15 @@ func ValidateConfiguration(mode, publicOrigin, listenAddress string) error {
 		}
 		if err := admitLoopbackListen(listenAddress, false); err != nil {
 			return err
+		}
+	case ModeNativeTLS:
+		if _, err := admitPublicOrigin(publicOrigin); err != nil {
+			return err
+		}
+		host, port, err := net.SplitHostPort(listenAddress)
+		number, portErr := strconv.Atoi(port)
+		if err != nil || portErr != nil || number < 1 || number > 65535 || host != "" && net.ParseIP(host) == nil {
+			return fmt.Errorf("native public webhook listener requires an IP bind address and a non-zero port")
 		}
 	default:
 		return fmt.Errorf("public exposure mode %q is unsupported", mode)
@@ -170,7 +185,7 @@ func (c *Controller) Start(ctx context.Context) error {
 			return fmt.Errorf("bind dedicated public webhook listener: %w", err)
 		}
 	}
-	if err := admitLoopbackListen(listener.Addr().String(), true); err != nil {
+	if err := admitLoopbackListen(listener.Addr().String(), true); err != nil && c.opts.Mode != ModeNativeTLS {
 		listener.Close()
 		cancel()
 		return err
@@ -182,11 +197,15 @@ func (c *Controller) Start(ctx context.Context) error {
 		cancel()
 		return err
 	}
-	c.server = &http.Server{Handler: http.HandlerFunc(c.servePublicRoute), ReadHeaderTimeout: 5 * time.Second}
+	c.server = &http.Server{Handler: http.HandlerFunc(c.servePublicRoute), ReadHeaderTimeout: 5 * time.Second, TLSConfig: c.opts.TLSConfig}
 	c.serverDone = make(chan struct{})
 	go func() {
 		defer close(c.serverDone)
-		_ = c.server.Serve(listener)
+		if c.opts.Mode == ModeNativeTLS {
+			_ = c.server.ServeTLS(listener, "", "")
+		} else {
+			_ = c.server.Serve(listener)
+		}
 	}()
 	if err := c.establish(ctx); err != nil {
 		_ = c.Stop(context.Background())
@@ -442,7 +461,16 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 		},
 	}
 	request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
-	response, err := c.httpClient().Do(request)
+	client := c.httpClient()
+	if c.opts.Mode == ModeNativeTLS {
+		fresh, closeIdle, err := freshTLSProbeClient(client)
+		if err != nil {
+			return err
+		}
+		defer closeIdle()
+		client = fresh
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		mu.Lock()
 		defer mu.Unlock()

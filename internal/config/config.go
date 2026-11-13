@@ -22,6 +22,7 @@ type Config struct {
 	LLM        LLMConfig       `yaml:"llm"`
 	Platform   PlatformConfig  `yaml:"platform"`
 	Channels   ChannelsConfig  `yaml:"channels"`
+	Serve      ServeConfig     `yaml:"serve"`
 	Extensions map[string]any  `yaml:",inline"`
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
@@ -247,6 +248,9 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validate(backendOverride string) error {
+	if err := c.Serve.PublicWebhook.Validate(); err != nil {
+		return err
+	}
 	if err := c.validateDecisionCardCadence(); err != nil {
 		return err
 	}

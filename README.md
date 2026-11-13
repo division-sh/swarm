@@ -255,6 +255,37 @@ development serve and plain retained serve; only the managed quick tunnel is
 development-only. The public listener exposes `/webhooks/*` only and never
 exposes API, MCP, health, or other control-plane routes.
 
+For serve-owned HTTPS instead, opt in through the deployment's `swarm.yaml`:
+
+```yaml
+serve:
+  public_webhook:
+    hostname: hooks.example.com # or an sslip.io-style name for your public IP
+    # certificate_file: tls/fullchain.pem
+    # private_key_file: tls/private-key.pem
+    # email: ops@example.com
+```
+
+This binds the dedicated webhook-only listener publicly on port 443. Both supplied
+files must be inside the resolved deployment state directory (`--swarm-dir`),
+relative to that directory or absolute within it; escaping symlinks are refused.
+They are loaded once, must match the hostname and be currently valid, and must
+chain to a root trusted by the reachability probe. Replace them by restarting
+serve; a bad supplied pair never falls back to automatic issuance.
+
+With neither file configured, serve uses autocert with Let's Encrypt for exactly
+the configured name, accepting its terms; contact is omitted unless `email` is
+set. Its private cache is `public-webhook-certs/` inside the state directory.
+DNS must point to this deployment and TCP 443 must be publicly reachable, including
+the TLS-ALPN challenge. A cold start can fail its unchanged readiness window while
+issuance is underway; restart once the certificate is cached. Library renewal work
+is not joined by same-process teardown; CLI process exit ends local work, but cannot
+recall a certificate request already sent. Each native-TLS readiness probe uses a
+fresh verified handshake, so expiry or a bad renewal revokes exposure at the next
+completed probe, not instantaneously. No certificate is uploaded to Telegram.
+The config block conflicts with `--expose` and `--public-webhook-*`; omitting it
+preserves the existing reverse-proxy and dev quick-tunnel modes.
+
 For credentialless scenarios, use `swarm test` and give each agent one
 contracts-root-relative Python performance. The command owns a fresh private
 runtime; no running server or deployment configuration is required. `swarm serve`

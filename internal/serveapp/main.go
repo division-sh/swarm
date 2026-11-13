@@ -774,27 +774,6 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(1, "serve_admission", fmt.Errorf("--no-feed requires --dev"))
 		return 2
 	}
-	publicIngressMode, publicIngressEnabled, err := cliapp.ResolveServePublicIngressMode(opts)
-	if err != nil {
-		presenter.fail(1, "serve_admission", err)
-		return 2
-	}
-	if publicIngressEnabled {
-		if err := runtimepublicingress.ValidateConfiguration(publicIngressMode, opts.PublicWebhookBaseURL, opts.PublicWebhookListen); err != nil {
-			presenter.fail(1, "serve_admission", err)
-			return 2
-		}
-	}
-	if publicListener != nil && publicIngressMode != runtimepublicingress.ModeExternalOrigin {
-		presenter.fail(1, "serve_admission", fmt.Errorf("a bound public webhook listener requires external-origin mode"))
-		return 2
-	}
-	if publicIngressMode == runtimepublicingress.ModeManagedQuickTunnel {
-		if err := runtimepublicingress.PreflightCloudflared(ctx, ""); err != nil {
-			presenter.fail(1, "serve_admission", err)
-			return 3
-		}
-	}
 	presenter.boot(1, "process_start", "ok", "")
 	apiAuth, err := cliapp.ResolveServeAPIAuth(invocationRoot, opts)
 	if err != nil {
@@ -826,6 +805,31 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	cfg := cfgResult.Config
+	publicIngressMode, publicIngressEnabled, err := cliapp.ResolveServePublicIngressMode(opts, cfg.Serve.PublicWebhook)
+	if err != nil {
+		presenter.fail(1, "serve_admission", err)
+		return 2
+	}
+	if publicIngressMode == runtimepublicingress.ModeNativeTLS {
+		opts.PublicWebhookBaseURL = "https://" + strings.TrimSpace(cfg.Serve.PublicWebhook.Hostname)
+		opts.PublicWebhookListen = ":443"
+	}
+	if publicIngressEnabled {
+		if err := runtimepublicingress.ValidateConfiguration(publicIngressMode, opts.PublicWebhookBaseURL, opts.PublicWebhookListen); err != nil {
+			presenter.fail(1, "serve_admission", err)
+			return 2
+		}
+	}
+	if publicListener != nil && publicIngressMode != runtimepublicingress.ModeExternalOrigin && publicIngressMode != runtimepublicingress.ModeNativeTLS {
+		presenter.fail(1, "serve_admission", fmt.Errorf("a bound public webhook listener requires external-origin or native TLS mode"))
+		return 2
+	}
+	if publicIngressMode == runtimepublicingress.ModeManagedQuickTunnel {
+		if err := runtimepublicingress.PreflightCloudflared(ctx, ""); err != nil {
+			presenter.fail(1, "serve_admission", err)
+			return 3
+		}
+	}
 	presenter.boot(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
 	platformPackBase, err := cliapp.LoadConfiguredPlatformPackBase(repo, cfgResult)
 	if err != nil {
@@ -1019,6 +1023,15 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	bootStartedAt, runtimeInstanceID := req.BootStartedAt, req.RuntimeInstanceID
 	if !req.Purpose.Valid() {
 		presenter.fail(3, "runtime_composition", fmt.Errorf("command execution purpose is required"))
+		return 2
+	}
+	tlsSettings := cfg.Serve.PublicWebhook
+	if publicIngressMode != runtimepublicingress.ModeNativeTLS {
+		tlsSettings = nil
+	}
+	webhookTLS, err := runtimepublicingress.NativeTLSConfig(tlsSettings, swarmDir.Path)
+	if err != nil {
+		presenter.fail(1, "public_ingress", err)
 		return 2
 	}
 	processWorkOwner := worklifetime.NewProcess()
@@ -1783,8 +1796,9 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		}
 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
-			Listener: publicListener,
-			Handler:  publicHandler, Readiness: ready,
+			Listener:  publicListener,
+			TLSConfig: webhookTLS,
+			Handler:   publicHandler, Readiness: ready,
 			StartupAuthority: func() string {
 				current, _ := supervisor.PublicIngressState()
 				if current == nil {

@@ -1459,6 +1459,8 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 	repo := t.TempDir()
 	configPath := filepath.Join(repo, "runtime.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
+		"serve:",
+		"  public_webhook: {hostname: hooks.example.test}",
 		"runtime:",
 		"  recovery_on_startup: true",
 		"llm:",
@@ -1477,6 +1479,9 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 		t.Fatalf("LoadRuntimeConfigWithOptions: %v", err)
 	}
 	cfg := result.Config
+	if cfg.Serve.PublicWebhook == nil || cfg.Serve.PublicWebhook.Hostname != "hooks.example.test" {
+		t.Fatal("deployment public webhook configuration was lost in the admitted runtime projection")
+	}
 	if !cfg.Runtime.RecoveryOnStartup {
 		t.Fatalf("runtime.recovery_on_startup = false, want true from config")
 	}

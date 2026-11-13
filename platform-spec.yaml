@@ -12968,8 +12968,21 @@ tool_model:
       modes:
         managed_quick_tunnel: '`swarm serve --dev --expose`; requires parseable cloudflared semver >= 2021.7.0, a Swarm-owned empty temporary config, exact `/ready` and `/quicktunnel` endpoint admission, and one `*.trycloudflare.com` hostname'
         external_origin: '`swarm serve --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>` under either retained plain serve or development serve; it uses the invocation''s selected-store posture without changing its lifetime'
+        native_tls: 'Optional deployment configuration serve.public_webhook selects serve-owned HTTPS on public port 443 for one configured hostname; conflicts with --expose and --public-webhook-*; absence preserves existing modes.'
+      native_tls_certificates: >
+        A complete supplied certificate_file/private_key_file pair is read once from inside the resolved deployment
+        state directory, checked for hostname and current validity, and replaced only by restarting serve. Invalid
+        supplied material never falls back to automatic issuance. Without the pair, unchanged autocert uses one
+        hostname, its state-directory public-webhook-certs cache, Let's Encrypt defaults and accepted terms, with
+        contact only when email is configured. No certificate upload to Telegram or self-signed generation is provided.
+        Automatic issuance/renewal work is library-owned, not joined on same-process teardown; process exit ends local
+        work but cannot recall an already-sent CA request. Cold issuance can exceed the unchanged startup window.
+        Native TLS exposure proofs use a fresh verified TCP/TLS connection without pooled or resumed sessions on
+        every probe; a failed handshake revokes exposure under existing readiness semantics. This is not instantaneous
+        expiry detection or proof of provider delivery. Admission-only configuration checks never issue certificates.
       route_scope: >
-        A dedicated loopback listener fronts only `/webhooks/*`. API, JSON-RPC, WebSocket, MCP, tools, health, and
+        A dedicated loopback listener in proxy/tunnel modes, or public TLS listener in native mode, fronts only
+        `/webhooks/*`. API, JSON-RPC, WebSocket, MCP, tools, health, and
         readiness routes are absent. `/webhooks/_swarm_probe/*` is reserved for one unguessable reachability nonce and
         cannot be selected by an ingress alias.
       bound_listener_ownership: >
@@ -24135,6 +24148,11 @@ configuration_source_authority:
             api_listen_addr: supported_listener_address
             mcp_listen_addr: supported_listener_address
             api_token_file: secret_reference
+            public_webhook:
+              hostname: one_configured_dns_hostname
+              certificate_file: optional_state_directory_file_reference_paired_with_private_key_file
+              private_key_file: optional_state_directory_secret_reference_paired_with_certificate_file
+              email: optional_acme_contact
           owner: cli_specification.command_catalog.serve.listener_topology_v2_1
         runtime:
           keys:
