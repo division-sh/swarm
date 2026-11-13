@@ -7,21 +7,36 @@ import (
 	"errors"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
 // Deployment restore opens transport before holders are executable. Drain only
 // after their runtime contexts have been released, using the original owner.
 func (s *serveSessionBootstrap) reconcileDeploymentIncoming(ctx context.Context) error {
 	s.mu.Lock()
-	var connections []*sessionprovider.RuntimeConnection
+	var connections []*serveSessionBootstrapAttempt
 	for _, attempt := range s.connections {
 		if attempt.operation.DeploymentRegistration {
-			connections = append(connections, attempt.connection)
+			connections = append(connections, attempt)
 		}
 	}
 	s.mu.Unlock()
-	for _, connection := range connections {
+	for _, attempt := range connections {
+		operations, err := s.operationsFor(attempt.operation)
+		if err != nil {
+			return err
+		}
+		op, err := operations.GetChannelOnboarding(ctx, attempt.operation.OperationID)
+		if err != nil {
+			return err
+		}
+		at, connected, err := s.sessionRecovery(ctx, op)
+		if channelonboarding.SessionUnavailableOnly(err) || err == nil && !connected && !at.IsZero() {
+			continue // No live incoming admission until the same worker restores the owner.
+		}
+		if err != nil {
+			return err
+		}
+		connection := attempt.connection
 		if err := connection.AwaitSessionAccount(ctx); err != nil {
 			return err
 		}

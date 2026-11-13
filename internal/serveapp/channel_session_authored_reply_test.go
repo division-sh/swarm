@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/tools"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T) {
@@ -30,7 +31,7 @@ func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T)
 	}
 }
 
-func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, uncertain bool) servedNativeMessage {
+func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, uncertain bool, messageIDs ...string) servedNativeMessage {
 	t.Helper()
 	const text = "A genuine customer message for the authored activity"
 	if uncertain {
@@ -38,7 +39,20 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 		peer.malformedAck = text
 		peer.mu.Unlock()
 	}
-	customer, customerLID := peer.customer(text, "SERVED_AUTHORED_CUSTOMER")
+	var customer, customerLID types.JID
+	if len(messageIDs) == 0 {
+		customer, customerLID = peer.customer(text, "SERVED_AUTHORED_CUSTOMER")
+	} else {
+		if len(messageIDs) != 1 || messageIDs[0] == "" {
+			t.Fatal("one exact new proof input is required")
+		}
+		customer, customerLID = types.NewJID("15551234573", types.DefaultUserServer), types.NewJID("100000000005", types.HiddenUserServer)
+		if customer == peer.account.ToNonAD() || customer == peer.from.ToNonAD() || customerLID == peer.lid.ToNonAD() || customerLID == peer.fromLID.ToNonAD() {
+			t.Fatal("post-boot customer aliases a bound role")
+		}
+		sender, _, _ := peer.senderFrom(customer, customerLID)
+		peer.sendEncrypted(sender.EncryptText(t, text, messageIDs[0]), messageIDs[0])
+	}
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
