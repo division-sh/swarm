@@ -2029,6 +2029,32 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	if publicIngressEnabled {
 		presenter.recordNoConnectedChannels(len(initialRegistrationPairs), accountRows)
 	}
+	var channelSelectedDecisions selectedChannelDecisionOwner
+	if supervisor.selected != nil {
+		channelSelectedDecisions = supervisor.selected
+	}
+	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
+		deployment: deploymentTransport,
+		store:      stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
+		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
+		activations: channelOnboardingStore, manager: runtimeContextManager,
+		selectedDecisions: channelSelectedDecisions,
+		sessions:          sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
+		refreshSessions: func(refreshCtx context.Context) error {
+			if err := channelActivationRefresher.RefreshChannelActivations(refreshCtx); err != nil {
+				return err
+			}
+			return sessionBootstrap.reconcileDeploymentIncoming(refreshCtx)
+		},
+		sessionStates: map[string]string{}, sessionAttempts: map[string]int{}, sessionNextAttempt: map[string]time.Time{},
+		ingress: ready,
+		effects: stores.Effects(), credentials: providerCredentialOwner,
+		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
+	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose)}); err != nil {
+		presenter.runtimeFailure("channel_delivery", err)
+		return 1
+	}
+
 	if opts.TestBeforeReadinessCommit != nil {
 		if err := opts.TestBeforeReadinessCommit(); err != nil {
 			presenter.fail(22, "ready", err)
@@ -2102,25 +2128,6 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 				return 1
 			}
 		}
-	}
-	var channelSelectedDecisions selectedChannelDecisionOwner
-	if supervisor.selected != nil {
-		channelSelectedDecisions = supervisor.selected
-	}
-	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
-		deployment: deploymentTransport,
-		store:      stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
-		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
-		activations: channelOnboardingStore, manager: runtimeContextManager,
-		selectedDecisions: channelSelectedDecisions,
-		sessions:          sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
-		sessionStates: map[string]string{}, sessionAttempts: map[string]int{}, sessionNextAttempt: map[string]time.Time{},
-		ingress: ready,
-		effects: stores.Effects(), credentials: providerCredentialOwner,
-		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
-	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose)}); err != nil {
-		presenter.runtimeFailure("channel_delivery", err)
-		return 1
 	}
 
 	return finishRuntimeHost(ctx, req.OnReady != nil, func() error {

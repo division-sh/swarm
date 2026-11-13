@@ -74,6 +74,7 @@ func TestServeSessionRecoveryClockSchedule(t *testing.T) {
 	d.deployment.resume = func(context.Context, channelonboarding.Operation) error { calls++; owner.connected = true; return nil }
 	now = d.sessionNextAttempt[owner.op.OperationID]
 	poll()
+	poll() // A fresh post-recovery presentation is observed on the following worker pass.
 	if d.sessionAttempts[owner.op.OperationID] != 0 || d.sessionStates[owner.op.OperationID] != "connected" {
 		t.Fatal("authenticated success did not end outage")
 	}
@@ -87,6 +88,11 @@ func TestServeSessionRecoveryClockSchedule(t *testing.T) {
 	owner.failure = errors.Join(channelonboarding.ErrSessionUnavailable, errors.New("independent storage failure"))
 	if err := d.reconcileSessionConnections(t.Context(), nil); err == nil || calls != before {
 		t.Fatal("mixed read error permitted attempt")
+	}
+	owner.failure = channelonboarding.ErrSessionNotLinked
+	poll()
+	if calls != before || d.sessionStates[owner.op.OperationID] != "not_linked" {
+		t.Fatal("terminal Not linked entered the retry schedule")
 	}
 }
 

@@ -52,6 +52,7 @@ type serveChannelDeliveryDispatcher struct {
 	runtimeInstanceID  string
 	httpClient         *http.Client
 	sessions           serveSessionBootstrapOwner
+	refreshSessions    func(context.Context) error
 	onboarding         *channelonboarding.Service
 	output             io.Writer
 	sessionStates      map[string]string

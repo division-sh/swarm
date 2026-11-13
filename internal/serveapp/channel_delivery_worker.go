@@ -593,6 +593,17 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		defer nativeTicker.Stop()
 		nativeDue := true
 		for {
+			if dispatcher.ingress != nil && !dispatcher.ingress.RuntimeLoad() {
+				if err := options.observeSessionDiagnostics(workCtx); err != nil && workCtx.Err() == nil {
+					log.Printf("native session diagnostics: %v", err)
+				}
+				select {
+				case <-workCtx.Done():
+					return
+				case <-ticker.C:
+				}
+				continue
+			}
 			demand, start := subscription.BeginPass()
 			if start.Subscription == 0 {
 				return

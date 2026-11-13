@@ -62,6 +62,8 @@ type serveNativeProtocolPeer struct {
 	loginHandoff        bool
 	loginHandoffRelease <-chan struct{}
 	nextLogin           *servedNativeLoginGate
+	failNextDial        bool
+	permanentLogin      string
 	rejectNextLogin     bool
 	pairSuccessGate     *servedPairSuccessGate
 	closeReason         string
@@ -197,6 +199,21 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 	dial := &net.Dialer{}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		if address == "web.whatsapp.com:443" {
+			peer.mu.Lock()
+			fail := peer.failNextDial
+			peer.failNextDial = false
+			peer.mu.Unlock()
+			if fail {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					return nil, err
+				}
+				closedAddress := listener.Addr().String()
+				if err := listener.Close(); err != nil {
+					return nil, err
+				}
+				return dial.DialContext(ctx, network, closedAddress)
+			}
 			return dial.DialContext(ctx, network, server.Listener.Addr().String())
 		}
 		host, _, err := net.SplitHostPort(address)
@@ -234,6 +251,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	var replacement *servedReplacementQRBatchCut
 	var login *servedNativeLoginGate
 	var rejectLogin bool
+	var permanent string
 	defer func() {
 		p.mu.Lock()
 		p.disconnected++
@@ -255,6 +273,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 	} else {
 		login, p.nextLogin = p.nextLogin, nil
 		rejectLogin, p.rejectNextLogin = p.rejectNextLogin, false
+		permanent, p.permanentLogin = p.permanentLogin, ""
 	}
 	p.mu.Unlock()
 	if payload.DevicePairingData != nil {
@@ -282,8 +301,18 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 				return
 			}
 		}
-		if rejectLogin {
-			if err := wire.Send(p.ctx, waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "401"}}); err != nil {
+		if rejectLogin || permanent != "" {
+			node := waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "401"}}
+			if permanent == "logout" || permanent == "replacement" {
+				conflict := "device_removed"
+				if permanent == "replacement" {
+					conflict = "replaced"
+				}
+				node = waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"}, Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": conflict}}}}
+			} else if permanent == "ban" {
+				node = waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "402", "code": "101", "expire": "60"}}
+			}
+			if err := wire.Send(p.ctx, node); err != nil {
 				p.t.Error(err)
 				return
 			}

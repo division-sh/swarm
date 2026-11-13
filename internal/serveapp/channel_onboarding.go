@@ -924,6 +924,18 @@ func (o *serveConnectedChannelReadiness) observeSessionReadiness(ctx context.Con
 	activation channelonboarding.ConnectedChannelActivation, facts *channelonboarding.ReadinessFacts,
 ) (bool, error) {
 	provider, observed, current, err := observeServeChannelSession(ctx, o.sessions, op, activation)
+	if err != nil && channelonboarding.SessionUnavailableOnly(err) {
+		if owner, ok := o.sessions.(interface {
+			sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
+		}); ok {
+			at, connected, recoveryErr := owner.sessionRecovery(ctx, op)
+			if recoveryErr == nil && !connected && !at.IsZero() ||
+				channelonboarding.SessionUnavailableOnly(recoveryErr) && errors.Is(recoveryErr, channelonboarding.ErrSessionNotLinked) && !errors.Is(recoveryErr, channelonboarding.ErrSessionUnavailable) {
+				return false, nil // Nonexecutable readback is not native admission.
+			}
+			return false, errors.Join(err, recoveryErr)
+		}
+	}
 	if err != nil || !current {
 		return false, err
 	}
@@ -1293,6 +1305,21 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 	snapshot, err := compileServeChannelActivationSnapshot(ctx, r.manager, r.store, r.identities, r.credentials)
 	if err != nil {
 		return err
+	}
+	if owner, ok := r.sessions.(interface {
+		sessionPublicationCurrent(context.Context, channelonboarding.CompiledActivation) (bool, error)
+	}); ok {
+		current := snapshot.Activations[:0]
+		for _, activation := range snapshot.Activations {
+			admit, err := owner.sessionPublicationCurrent(ctx, activation)
+			if err != nil {
+				return err
+			}
+			if admit {
+				current = append(current, activation)
+			}
+		}
+		snapshot.Activations = current
 	}
 	changed, err := publishServeChannelActivationSnapshot(ctx, r.manager, snapshot)
 	if changed && r.published != nil {
