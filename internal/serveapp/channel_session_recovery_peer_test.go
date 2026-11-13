@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
@@ -53,7 +54,7 @@ func TestRunServeSessionRecoveryLearnedBothStores(t *testing.T) {
 func TestRunServeSessionRecoveryRegisteredBothStores(t *testing.T) {
 	read := captureRecoveryBootstrap(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, permanent := range []string{"transient", "logout", "replacement", "ban"} {
+		for _, permanent := range []string{"transient", "logout", "replacement", "ban", "replacement/publication", "ban/publication", "replacement/incoming", "ban/incoming"} {
 			if !t.Run(backend+"/"+permanent, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
@@ -378,9 +379,72 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 
 func requireRecoveryPermanentBoot(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, kind string) {
 	t.Helper()
+	kind, boundary, _ := strings.Cut(kind, "/")
+	observed := false
+	if boundary != "" {
+		read := captureRecoveryBootstrap(t)
+		var runtime *swarmruntime.Runtime
+		opts.TestRuntimeReadyHook = func(value *swarmruntime.Runtime) { runtime = value }
+		opts.TestBeforeReadinessCommit = func() error {
+			ctx := servedRuntimeProofAuthorActivityContext(t, runtime, runtime.Options.SourceArtifactFact.BundleHash())
+			registered, err := read().registeredSessionConnections(ctx)
+			if err != nil || len(registered) != 1 {
+				return errors.Join(errors.New("late boot proof lost its exact registration"), err)
+			}
+			op := registered[0].Operation
+			connection := read().connection(op.OperationID)
+			if connection == nil {
+				return errors.New("late boot proof has no restored connection")
+			}
+			if _, connected, err := connection.SessionRecovery(ctx, op); err != nil || !connected {
+				return errors.Join(errors.New("late boot proof did not follow successful restore"), err)
+			}
+			peer.mu.Lock()
+			wire := peer.accountWires[15551234567]
+			peer.mu.Unlock()
+			if wire == nil {
+				return errors.New("late boot proof lost the owned socket")
+			}
+			node := waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"}, Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "replaced"}}}}
+			if kind == "ban" {
+				node = waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "402", "code": "101", "expire": "60"}}
+			}
+			if err := wire.Send(ctx, node); err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			for !observed {
+				_, _, err := connection.SessionRecovery(ctx, op)
+				observed = sessionprovider.TerminalAccountRefusalOnly(err)
+				select {
+				case <-ctx.Done():
+					return context.Cause(ctx)
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			if boundary == "incoming" {
+				return read().reconcileDeploymentIncoming(ctx, false)
+			}
+			lease, current := runtime.ChannelActivations.AcquirePresentation()
+			if !current {
+				return errors.New("late boot proof lacks its actual publication")
+			}
+			defer lease.Release()
+			for _, activation := range lease.Activations() {
+				if activation.OnboardingOperationID == op.OperationID {
+					_, err := read().sessionPublicationCurrent(ctx, activation, false)
+					return err
+				}
+			}
+			return errors.New("late boot proof omitted the registered activation")
+		}
+	}
 	peer.mu.Lock()
 	before, sends := peer.connections, peer.acceptedSends
-	peer.permanentLogin = kind
+	if boundary == "" {
+		peer.permanentLogin = kind
+	}
 	peer.mu.Unlock()
 	process := startServeRuntimeTestProcess(t, opts)
 	if kind == "logout" {
@@ -397,6 +461,9 @@ func requireRecoveryPermanentBoot(t *testing.T, opts cliapp.ServeOptions, peer *
 		}
 	} else if code, done := process.waitForExit(5 * time.Second); !done || code != 1 || serveOutputIsReady(process.outputString()) {
 		t.Fatal("permanent boot was deferred instead of refused", code, done, process.outputString())
+	}
+	if boundary != "" && (!observed || !strings.Contains(process.outputString(), "WhatsApp account transport has a terminal refusal")) {
+		t.Fatal("boot did not retain the late permanent refusal at its actual consumer", process.outputString())
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -425,7 +492,9 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, kind := range []string{"replacement", "ban"} {
 			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
-				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, nil)
+				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, func(opts *cliapp.ServeOptions) {
+					opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
+				})
 				mux := http.NewServeMux()
 				mux.Handle("/", h.provider)
 				mux.Handle("/webhooks/_swarm_probe/", httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: h.opts.PublicWebhookListen}))
@@ -437,7 +506,6 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 				previous := log.Writer()
 				log.SetOutput(&diagnostics)
 				t.Cleanup(func() { log.SetOutput(previous) })
-				h.opts.TestChannelReconcileCadence.Native = 20 * time.Millisecond
 				h.start(t)
 				t.Cleanup(func() { h.stop(t) })
 				ctx := servedRuntimeProofAuthorActivityContext(t, h.runtime, h.runtime.Options.SourceArtifactFact.BundleHash())
@@ -482,14 +550,14 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 					peer.mu.Unlock()
 					ready := healthy(registered[1].Operation)
 					logged := strings.Contains(diagnostics.String(), terminalErr.Error())
-					observed = fmt.Sprintf("connections_delta=%d expected=1 native_ready=%t inbox_reads_delta=%d terminal_logged=%t", connections-before, ready, reads-readsBefore, logged)
-					return connections == before+1 && ready && reads > readsBefore && logged
+					observed = fmt.Sprintf("connections_delta=%d expected=1 native_ready=%t inbox_reads_delta=%d terminal_logged=%t recovered_lines=%d", connections-before, ready, reads-readsBefore, logged, strings.Count(h.process.outputString(), "WhatsApp: reconnected ("+second.AccountReference+")"))
+					return connections == before+1 && ready && reads > readsBefore && logged && strings.Count(h.process.outputString(), "WhatsApp: reconnected ("+second.AccountReference+")") == 2
 				}, func() string { return observed + "\n" + diagnostics.String() + h.process.outputString() })
 				peer.mu.Lock()
 				after, sent := peer.connections, peer.acceptedSends
 				peer.mu.Unlock()
 				_, _, refused := firstConnection.SessionRecovery(ctx, registered[0].Operation)
-				if after != before+1 || sent != sends || read().connection(first.OperationID) != firstConnection || refused == nil || channelonboarding.SessionUnavailableOnly(refused) {
+				if after != before+1 || sent != sends || read().connection(first.OperationID) != firstConnection || refused == nil || channelonboarding.SessionUnavailableOnly(refused) || strings.Count(h.process.outputString(), "WhatsApp: reconnected ("+second.AccountReference+")") != 2 {
 					t.Fatal("terminal account retried/sent, lost refusal, or sibling failed genuine single recovery", before, after, sends, sent, refused)
 				}
 			}) {

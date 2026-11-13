@@ -29,6 +29,7 @@ import (
 
 var errRuntimeConnection = errors.New("WhatsApp connection requires its retained operation and live runtime source")
 var errRuntimeIngressUnavailable = errors.New("WhatsApp runtime incoming publication is not installed")
+var errTerminalAccountRefusal = errors.New("WhatsApp account transport has a terminal refusal")
 
 type RuntimeConnectionOptions struct {
 	operatorAccount    channelonboarding.AccountReference

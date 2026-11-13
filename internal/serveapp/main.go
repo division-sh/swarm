@@ -1919,7 +1919,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		return 1
 	}
 	if sessionBootstrap != nil {
-		if err := sessionBootstrap.reconcileDeploymentIncoming(ctx); err != nil {
+		if err := sessionBootstrap.reconcileDeploymentIncoming(ctx, ready.RuntimeLoad()); err != nil {
 			presenter.fail(22, "channel_onboarding", err)
 			return 1
 		}
@@ -2045,7 +2045,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			if err := channelActivationRefresher.RefreshChannelActivations(refreshCtx); err != nil {
 				return err
 			}
-			return sessionBootstrap.reconcileDeploymentIncoming(refreshCtx)
+			return sessionBootstrap.reconcileDeploymentIncoming(refreshCtx, ready.RuntimeLoad())
 		},
 		sessionStates: map[string]string{}, sessionAttempts: map[string]int{}, sessionNextAttempt: map[string]time.Time{},
 		ingress: ready,
