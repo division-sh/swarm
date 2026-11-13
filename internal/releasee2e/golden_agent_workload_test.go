@@ -1396,6 +1396,7 @@ type goldenEventDelivery struct {
 	Status         string               `json:"status"`
 	Terminal       bool                 `json:"terminal"`
 	RetryCount     int                  `json:"retry_count"`
+	RetryScheduled bool                 `json:"retry_scheduled"`
 	ReasonCode     string               `json:"reason_code"`
 }
 
