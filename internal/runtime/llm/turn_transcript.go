@@ -158,6 +158,13 @@ func parseTurnBlocksFromObjectLine(line string) []TurnBlock {
 
 func parseGenericProviderObject(obj map[string]any) []TurnBlock {
 	blocks := []TurnBlock{}
+	if choices, ok := obj["choices"].([]any); ok && len(choices) > 0 {
+		choice, _ := choices[0].(map[string]any)
+		message, _ := choice["message"].(map[string]any)
+		if content, ok := message["content"].(string); ok && strings.TrimSpace(content) != "" {
+			blocks = append(blocks, TurnBlock{Kind: "assistant_text", Text: strings.TrimSpace(content)})
+		}
+	}
 	if content, ok := obj["content"].([]any); ok {
 		blocks = append(blocks, parseBlocksFromContent(content)...)
 	}
