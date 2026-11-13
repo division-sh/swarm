@@ -171,16 +171,7 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if claimed {
 		go am.completeClaimedShutdownTransition(transition, executor)
 	}
-	waitErr := waitForRuntimeLifecycleTransitionContext(drainCtx, transition, grace, "shutdown drain")
-	drainErr := transition.drainErr
-	// Each caller retains its reporting budget, not another work-drain grace.
-	if drainErr == context.DeadlineExceeded && drainCtx.Err() == nil {
-		drainErr = nil
-	}
-	if drainErr != nil && drainCtx.Err() != nil {
-		drainErr = fmt.Errorf("agent manager shutdown drain timed out after %s: %w", grace, drainErr)
-	}
-	return errors.Join(drainErr, waitErr)
+	return waitForRuntimeLifecycleTransitionContext(drainCtx, transition, grace, "shutdown drain")
 }
 
 func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {

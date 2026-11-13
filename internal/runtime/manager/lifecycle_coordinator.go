@@ -54,6 +54,7 @@ type runtimeLifecycleTransition struct {
 	result        error
 	drainCtx      context.Context
 	drainCancel   context.CancelFunc
+	drainGrace    time.Duration
 	drainAccepted bool
 	drainOnce     sync.Once
 	drainErr      error
@@ -68,6 +69,7 @@ func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind, grace ..
 			budget = grace[0]
 		}
 		transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), budget)
+		transition.drainGrace = budget
 	}
 	return transition
 }
@@ -1435,6 +1437,9 @@ func (c *agentLifecycleCoordinator) joinShutdownDrain(transition *runtimeLifecyc
 			if errors.Is(transition.drainErr, worklifetime.ErrRetired) {
 				transition.drainErr = nil
 			}
+			if errors.Is(transition.drainErr, context.DeadlineExceeded) && transition.drainCtx.Err() == context.DeadlineExceeded {
+				transition.drainErr = fmt.Errorf("agent manager shutdown drain timed out after %s: %w", transition.drainGrace, transition.drainErr)
+			}
 			if transition.drainErr != nil {
 				c.retireWorkAdmissionAs(true)
 				c.cancelShutdownWork()
@@ -1569,7 +1574,7 @@ func (c *agentLifecycleCoordinator) completeShutdownTransition(transition *runti
 	if c.transitionExecutor != nil {
 		result = errors.Join(result, c.transitionExecutor.Done())
 	}
-	transition.result = errors.Join(transition.dependencyErr, result)
+	transition.result = errors.Join(transition.drainErr, transition.dependencyErr, result)
 	if transition.drainCancel != nil {
 		transition.drainCancel()
 	}
