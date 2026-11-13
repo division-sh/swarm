@@ -498,7 +498,7 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 		defer release()
 		done := make(chan []RuntimeContextDeactivationResult, 1)
 		go func() {
-			done <- owner.DeactivateAllWithOptions(RuntimeContextCauseUnavailable, ShutdownOptions{Grace: time.Second})
+			done <- owner.ShutdownAllWithOptions(context.Background(), RuntimeContextCauseUnavailable, ShutdownOptions{Grace: time.Second})
 		}()
 		deadline := time.After(time.Second)
 		for !rt.shutdownAdmissionClosed() {

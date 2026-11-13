@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -2221,6 +2222,10 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 }
 
 func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, cause string, opts ShutdownOptions, releasePreparation func()) RuntimeContextDeactivationResult {
+	return m.deactivateBundleHashForStop(bundleHash, cause, opts, releasePreparation, false)
+}
+
+func (m *RuntimeContextManager) deactivateBundleHashForStop(bundleHash, cause string, opts ShutdownOptions, releasePreparation func(), graceful bool) RuntimeContextDeactivationResult {
 	defer func() {
 		if releasePreparation != nil {
 			releasePreparation()
@@ -2254,7 +2259,7 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		if strings.TrimSpace(entry.cause) != "" {
 			result.Cause = strings.TrimSpace(entry.cause)
 		}
-	} else {
+	} else if !graceful {
 		if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 			entry: entry, state: RuntimeContextStateUnloaded, cause: result.Cause,
 		}); err != nil {
@@ -2265,12 +2270,14 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 			return result
 		}
 		result.Changed = true
+	} else {
+		result.State = RuntimeContextStateLoaded
 	}
 	if entry.context != nil {
 		runtimeToShutdown = entry.runtime
 		if runtimeToShutdown != nil {
 			runtimeToShutdown.CloseAdmission()
-			if runtimeToShutdown.shutdownGate.closedAndDrained() {
+			if !graceful && runtimeToShutdown.shutdownGate.closedAndDrained() {
 				runtimeToShutdown.deliveryContinuations.BeginRetirement()
 			}
 		}
@@ -2281,11 +2288,17 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		releasePreparation = nil
 	}
 	if runtimeToShutdown == nil {
+		if graceful {
+			m.finishGracefulContextVisibility(entry, &result)
+		}
 		return result
 	}
 	entry.shutdownMu.Lock()
 	defer entry.shutdownMu.Unlock()
 	if entry.shutdownComplete {
+		if graceful {
+			m.finishGracefulContextVisibility(entry, &result)
+		}
 		return result
 	}
 	remaining, drainErr := runtimeToShutdown.drainIngressForContextWithdrawal(opts)
@@ -2295,7 +2308,7 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.drainAdmittedIngress(context.Background(), 0))
 	}
 	// Return continuation carriers before joining their runtime occurrence.
-	if runtimeToShutdown.deliveryContinuations != nil {
+	if !graceful && runtimeToShutdown.deliveryContinuations != nil {
 		result.ShutdownErr = errors.Join(result.ShutdownErr, runtimeToShutdown.deliveryContinuations.Retire(context.Background()))
 	}
 	if remaining.Grace <= 0 {
@@ -2305,7 +2318,29 @@ func (m *RuntimeContextManager) deactivateBundleHashWithOptions(bundleHash, caus
 	if result.ShutdownErr == nil {
 		entry.shutdownComplete = true
 	}
+	if graceful {
+		runtimeToShutdown.lifecycleMu.Lock()
+		joined := runtimeToShutdown.replacementQuiesced
+		runtimeToShutdown.lifecycleMu.Unlock()
+		if joined {
+			m.finishGracefulContextVisibility(entry, &result)
+		}
+	}
 	return result
+}
+
+func (m *RuntimeContextManager) finishGracefulContextVisibility(entry *runtimeContextEntry, result *RuntimeContextDeactivationResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if entry.state != "" && entry.state != RuntimeContextStateLoaded {
+		return
+	}
+	err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{entry: entry, state: RuntimeContextStateUnloaded, cause: result.Cause})
+	result.ShutdownErr = errors.Join(result.ShutdownErr, err)
+	if err == nil {
+		result.Changed = true
+		result.State = RuntimeContextStateUnloaded
+	}
 }
 
 func (m *RuntimeContextManager) QuiesceAllRuntimeContexts(_ context.Context) error {
@@ -2323,8 +2358,28 @@ func (m *RuntimeContextManager) DeactivateAll(cause string) []RuntimeContextDeac
 }
 
 func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts ShutdownOptions) []RuntimeContextDeactivationResult {
+	return m.deactivateAllWithOptions(context.Background(), cause, opts, false)
+}
+
+// Graceful stop seals the complete set before draining but retains accepted
+// source visibility and handoff dependencies until each runtime has joined.
+func (m *RuntimeContextManager) ShutdownAllWithOptions(ctx context.Context, cause string, opts ShutdownOptions) []RuntimeContextDeactivationResult {
+	return m.deactivateAllWithOptions(ctx, cause, opts, true)
+}
+
+func (m *RuntimeContextManager) deactivateAllWithOptions(ctx context.Context, cause string, opts ShutdownOptions, graceful bool) []RuntimeContextDeactivationResult {
 	if m == nil {
 		return nil
+	}
+	var deadline time.Time
+	if graceful {
+		grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
+		if err != nil {
+			return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
+		}
+		drainCtx, cancel := context.WithTimeout(ctx, grace)
+		defer cancel()
+		deadline, _ = drainCtx.Deadline()
 	}
 	m.sourceSetMu.Lock()
 	m.mu.Lock()
@@ -2333,15 +2388,17 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 	changed := make(map[string]bool, len(hashes))
 	for _, hash := range hashes {
 		entry := m.contexts[hash]
-		if runtimeContextEntryLoaded(entry) {
+		if !graceful && runtimeContextEntryLoaded(entry) {
 			updates = append(updates, runtimeContextVisibilityUpdate{entry: entry, state: RuntimeContextStateUnloaded, cause: normalizeRuntimeContextDeactivationCause(cause)})
 			changed[hash] = true
 		}
 	}
-	if err := m.publishRuntimeContextVisibilityLocked(updates...); err != nil {
-		m.mu.Unlock()
-		m.sourceSetMu.Unlock()
-		return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
+	if !graceful {
+		if err := m.publishRuntimeContextVisibilityLocked(updates...); err != nil {
+			m.mu.Unlock()
+			m.sourceSetMu.Unlock()
+			return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
+		}
 	}
 	// Withdraw the whole selectable set and fence every occurrence before the
 	// first join. Draining one context must not leave a sibling admitting work.
@@ -2352,7 +2409,7 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 		}
 		if entry.runtime != nil {
 			entry.runtime.CloseAdmission()
-			if entry.runtime.shutdownGate.closedAndDrained() {
+			if !graceful && entry.runtime.shutdownGate.closedAndDrained() {
 				entry.runtime.deliveryContinuations.BeginRetirement()
 			}
 		}
@@ -2364,7 +2421,13 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 	m.sourceSetMu.Unlock()
 	results := make([]RuntimeContextDeactivationResult, 0, len(hashes))
 	for _, bundleHash := range hashes {
-		result := m.deactivateBundleHashWithOptions(bundleHash, cause, opts, nil)
+		if graceful {
+			opts.Grace = time.Until(deadline)
+			if opts.Grace <= 0 {
+				opts.Grace = time.Nanosecond
+			}
+		}
+		result := m.deactivateBundleHashForStop(bundleHash, cause, opts, nil, graceful)
 		result.Changed = result.Changed || changed[bundleHash]
 		results = append(results, result)
 	}
