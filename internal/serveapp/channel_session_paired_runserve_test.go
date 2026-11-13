@@ -107,6 +107,12 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			if proof.noticeAcknowledgment {
 				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-notice")
 			}
+			if proof.recoveryOwner != nil {
+				original := opts.SourceRoot
+				opts.SourceRoot = filepath.Join(t.TempDir(), "source")
+				copyReleaseFixtureTree(t, original, opts.SourceRoot)
+				issue3011NoticeSource(t, opts.SourceRoot)
+			}
 			if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -271,7 +277,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			settledSends := peer.acceptedSends
 			peer.mu.Unlock()
 			if proof.recoveryOwner != nil {
-				exerciseServedSessionRecovery(t, opts, process, peer, result.Operation.OperationID, false, proof.recoveryOwner)
+				exerciseServedSessionRecovery(t, opts, process, peer, result.Operation.OperationID, false, proof.recoveryOwner, storeDSN)
 				return
 			}
 			if code := process.stop(); code != 0 {

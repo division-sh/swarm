@@ -622,8 +622,24 @@ func (s *serveSessionBootstrap) CurrentValueMatchesSeal(ctx context.Context, exp
 }
 
 func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account operatorchannel.SessionAccountAdmission) (authority.Admission, error) {
+	connection, err := s.activityAccountConnection(ctx, account)
+	if err != nil {
+		return authority.Admission{}, err
+	}
+	return connection.AdmitActivityAccount(ctx, account)
+}
+
+func (s *serveSessionBootstrap) ValidateActivityRequestAccount(ctx context.Context, account operatorchannel.SessionAccountAdmission, parent string, revision int64) error {
+	connection, err := s.activityAccountConnection(ctx, account)
+	if err != nil {
+		return err
+	}
+	return connection.ValidateActivityRequestAccount(ctx, account, parent, revision)
+}
+
+func (s *serveSessionBootstrap) activityAccountConnection(ctx context.Context, account operatorchannel.SessionAccountAdmission) (*sessionprovider.RuntimeConnection, error) {
 	if s == nil || ctx == nil || ctx.Err() != nil || account.Validate() != nil || account.Provider != "whatsapp" {
-		return authority.Admission{}, channelonboarding.ErrInvalidRequest
+		return nil, channelonboarding.ErrInvalidRequest
 	}
 	s.mu.Lock()
 	var selected *serveSessionBootstrapAttempt
@@ -632,25 +648,25 @@ func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account
 		if connection != nil && connection.ConnectionID() == account.ConnectionID {
 			if selected != nil {
 				s.mu.Unlock()
-				return authority.Admission{}, channelonboarding.ErrConflict
+				return nil, channelonboarding.ErrConflict
 			}
 			selected = attempt
 		}
 	}
 	s.mu.Unlock()
 	if selected == nil {
-		return authority.Admission{}, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
+		return nil, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
 	}
 	connection, err := selected.finishedConnection(ctx)
 	if err != nil {
 		if channelonboarding.SessionUnavailableOnly(err) {
 			if _, _, readErr := s.sessionRecovery(ctx, selected.operation); readErr == nil || channelonboarding.SessionUnavailableOnly(readErr) {
-				return authority.Admission{}, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
+				return nil, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
 			}
 		}
-		return authority.Admission{}, err
+		return nil, err
 	}
-	return connection.AdmitActivityAccount(ctx, account)
+	return connection, nil
 }
 
 func (s *serveSessionBootstrap) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {

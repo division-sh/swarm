@@ -213,7 +213,7 @@ func (pc *PipelineCoordinator) channelActivityTarget(ctx context.Context, toolID
 		return ChannelActivityTarget{}, false, nil, nil
 	}
 	operation := lease.Operation()
-	if err := lease.ValidateAdmission(ctx); err != nil {
+	if err := lease.ValidateActivityRequest(ctx); err != nil {
 		lease.Release()
 		return ChannelActivityTarget{}, false, nil, err
 	}

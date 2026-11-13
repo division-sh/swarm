@@ -9,8 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,16 +22,17 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"go.mau.fi/whatsmeow/types"
 	"gopkg.in/yaml.v3"
 )
 
-// Diagnostic overlay only. Public authored input, no row setup or admission hook.
-func TestRegisteredWhatsAppPublicInputDownLinkSettlesBeforeActivityBothStores(t *testing.T) {
+// Invariant: a down-link send reaches its ordinary failed activity, never a handler retry or later resend.
+func TestRegisteredWhatsAppPublicInputDownLinkFailsActivityBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		if !t.Run(backend, func(t *testing.T) { issue3011SendSettlement(t, backend) }) {
 			t.Fatal("first diagnostic/setup failure; later backend not run")
@@ -176,50 +179,46 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	record["peer_after_cut"] = map[string]int{"accepts": peer.connections, "closed": peer.disconnected, "post_logins": peer.postLogins}
 	peer.mu.Unlock()
 	record["stage"] = "down-link public-input settlement"
-	exhausted := issue3011PublishAndSettle(t, endpoint, "exhaust", record)
-	terminal := exhausted.Deliveries[0]
-	if terminal.ReasonCode != "retry_exhausted" || terminal.RetryCount != 3 || terminal.Failure.Class != failures.ClassRetryExhausted || terminal.Failure.Detail.Code != "delivery_retry_exhausted" {
-		t.Fatal("existing authored retry budget did not produce typed exhaustion", terminal)
-	}
-	if err := failures.ValidateEnvelope(*terminal.Failure); err != nil {
-		t.Fatal("invalid exhaustion/history", err)
-	}
-	for _, prior := range terminal.Failure.Detail.Attributes["retry_history"].([]any) {
-		if prior.(map[string]any)["failure"].(map[string]any)["class"] != string(failures.ClassDependencyUnavailable) {
-			t.Fatal("exhaustion contains a different underlying failure", prior)
-		}
-	}
 	settled := issue3011PublishAndSettle(t, endpoint, "down", record)
 	record["down_input"] = settled
-	if settled.Deliveries[0].Failure.Class != failures.ClassDependencyUnavailable || settled.Deliveries[0].Failure.Detail.Code != "dependency_unavailable" || !settled.Deliveries[0].Failure.Retryable {
-		t.Fatal("down-link admission did not reach typed existing retry settlement")
+	failed := issue3011ActivityOutcome(t, endpoint, settled, backend, location, "")
+	record["failed_activity"] = failed
+	startBoth := make(chan struct{})
+	concurrent := make(chan lifecycleContenderResult, 2)
+	var inputs sync.WaitGroup
+	for _, key := range []string{"parallel-a", "parallel-b"} {
+		params := maps.Clone(record["down_public_input_params"].(map[string]any))
+		payload := maps.Clone(params["payload"].(map[string]any))
+		payload["text"], params["payload"], params["idempotency_key"] = key, payload, "issue3011-"+key
+		inputs.Add(1)
+		go func() {
+			defer inputs.Done()
+			<-startBoth
+			concurrent <- lifecycleContenderRPC(endpoint, "event.publish", params)
+		}()
 	}
-	if t.Failed() {
-		return
-	}
-	reader := selected.Load().(serveRuntimePersistence).deps.DeliveryStore
-	var snapshot deliverylifecycle.Snapshot
-	var outcomes []deliverylifecycle.Outcome
-	if err := reader.(interface {
-		InspectSnapshot(context.Context, func(context.Context) error) error
-	}).InspectSnapshot(t.Context(), func(ctx context.Context) error {
-		var err error
-		snapshot, err = reader.Snapshot(ctx, settled.Deliveries[0].DeliveryID)
-		if err == nil {
-			outcomes, err = reader.Outcomes(ctx, snapshot.DeliveryID)
+	close(startBoth)
+	responses := []lifecycleContenderResult{<-concurrent, <-concurrent}
+	inputs.Wait()
+	var parallel []operatorread.OperatorEventFull
+	for _, response := range responses {
+		var published servedEventPublishRPCResult
+		if response.err != nil || response.reply.Error != nil {
+			t.Fatal("concurrent public input failed", response.err, response.reply.Error)
 		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
+		if err := json.Unmarshal(response.reply.Result, &published); err != nil || published.RunID != settled.RunID {
+			t.Fatal("concurrent input lost original run", err)
+		}
+		input := operatorread.OperatorEventFull{EventID: published.EventID, RunID: published.RunID}
+		parallel = append(parallel, issue3011ActivityOutcome(t, endpoint, input, backend, location, ""))
 	}
-	if len(outcomes) == 0 {
-		t.Fatal("retry has no committed outcome")
+	if parallel[0].EventID == parallel[1].EventID || parallel[0].SourceEventID == parallel[1].SourceEventID || parallel[0].SourceEventID == failed.SourceEventID || parallel[1].SourceEventID == failed.SourceEventID {
+		t.Fatal("concurrent inputs shared one failed result")
 	}
-	last := outcomes[len(outcomes)-1]
-	if snapshot.EventID != settled.EventID || snapshot.RunID != settled.RunID || !snapshot.RetryScheduled || last.Outcome != "retry_scheduled" || last.DeliveryID != snapshot.DeliveryID || last.ClaimVersion != snapshot.ClaimVersion || last.RetryEligibleAt == nil || !snapshot.NextEligibleAt.Equal(*last.RetryEligibleAt) || !snapshot.NextEligibleAt.After(last.SettledAt) {
-		t.Fatal("retry lost exact committed eligibility/outcome", snapshot, outcomes)
+	record["parallel_failed_activities"] = parallel
+	if replay := issue3011PublishAndSettle(t, endpoint, "down", record); replay.EventID != settled.EventID {
+		t.Fatal("input replay reminted the request")
 	}
-	record["retry_due"], record["retry_outcomes"] = snapshot.NextEligibleAt, outcomes
 	stop()
 	if t.Failed() {
 		return
@@ -232,35 +231,29 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if restored.Status.State != "live" || restored.Status.Health != "connected" || len(restored.Status.Holders) != 1 {
 		t.Fatal("existing startup path did not restore the exact registered account")
 	}
-	select {
-	case sent := <-peer.sent:
-		record["restored_send"] = map[string]any{"id": sent.ID, "to": sent.To.String(), "text": sent.Body.GetConversation()}
-		requireServedNativeActivityResult(t, endpoint, sent.ID, "15557654321@s.whatsapp.net", "synthetic diagnostic notice", false)
-	case <-time.After(10 * time.Second):
-		t.Fatal("eligible retry did not send after explicit restoration")
-	}
-	var requests operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": settled.RunID, "event_name": "platform.activity_requested"}, "limit": 100}, &requests)
-	record["restored_activity_requests"] = requests
-	if len(requests.Events) != 1 || requests.Events[0].Payload["source_event_id"] != settled.EventID || requests.Events[0].CreatedAt.Before(snapshot.NextEligibleAt) {
-		t.Fatal("activity ran before committed due or lost original input", requests)
-	}
 	waitServedRunDeliveryQuiescence(t, selected.Load().(serveRuntimePersistence).deps.DeliveryStore.SummarizeRun, settled.RunID)
-	var after operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": settled.EventID}, &after)
-	record["down_input_after_restore"] = after
-	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != settled.Deliveries[0].DeliveryID || after.Deliveries[0].Status != "delivered" {
-		t.Fatal("retried original delivery did not succeed", after)
-	}
-	after = operatorread.OperatorEventFull{}
-	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": exhausted.EventID}, &after)
-	record["exhausted_after_restore"] = after
-	if len(after.Deliveries) != 1 || after.Deliveries[0].DeliveryID != terminal.DeliveryID || after.Deliveries[0].Status != terminal.Status || after.Deliveries[0].Failure == nil || after.Deliveries[0].Failure.Detail.Code != terminal.Failure.Detail.Code {
-		t.Fatal("restoration revived exhausted work", after)
+	if after := issue3011ActivityOutcome(t, endpoint, settled, backend, location, ""); !reflect.DeepEqual(after, failed) {
+		t.Fatal("restart changed the original failed result")
 	}
 	select {
 	case extra := <-peer.sent:
 		t.Fatal("duplicate or unrelated application send", extra.ID)
+	default:
+	}
+	healthy := issue3011PublishAndSettle(t, endpoint, "healthy", record)
+	select {
+	case sent := <-peer.sent:
+		if sent.To.ToNonAD().String() != "15557654321@s.whatsapp.net" || sent.Body.GetConversation() != "synthetic diagnostic notice" {
+			t.Fatal("fresh authored send changed its customer/input")
+		}
+		record["healthy_activity"] = issue3011ActivityOutcome(t, endpoint, healthy, backend, location, sent.ID)
+	case <-time.After(5 * time.Second):
+		t.Fatal("new authored request did not send after recovery")
+	}
+	waitServedRunDeliveryQuiescence(t, selected.Load().(serveRuntimePersistence).deps.DeliveryStore.SummarizeRun, settled.RunID)
+	select {
+	case extra := <-peer.sent:
+		t.Fatal("duplicate fresh send", extra.ID)
 	default:
 	}
 	peer.mu.Lock()
@@ -291,6 +284,7 @@ func issue3011NoticeSource(t *testing.T, root string) {
 			node := document["customer-reply"].(map[string]any)
 			node["notice.requested"] = map[string]any{"activity": map[string]any{"id": "notice_delivery", "tool": "whatsapp.send_text",
 				"input": map[string]any{"account": "policy.operator_account", "destination": "payload.destination", "text": "payload.text"}}}
+			node["notice_delivery.failed"] = map[string]any{}
 		}
 		raw, err = yaml.Marshal(document)
 		if err != nil {
@@ -339,16 +333,90 @@ func issue3011PublishAndSettle(t *testing.T, endpoint, key string, record map[st
 	for time.Now().Before(deadline) {
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": publication.EventID}, &event)
 		record[key+"_last_event"] = event
-		if len(event.Deliveries) == 1 && event.Deliveries[0].Failure != nil && ((key == "down" && event.Deliveries[0].RetryScheduled) || (key != "down" && event.Deliveries[0].Terminal)) {
+		if len(event.Deliveries) == 1 && event.Deliveries[0].Terminal {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if event.EventID != publication.EventID || event.RunID != run.RunID || event.EventName != "notice.requested" || len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberType != "node" || event.Deliveries[0].SubscriberID != node.Key() || event.Deliveries[0].Failure == nil || (key == "down" && (!event.Deliveries[0].RetryScheduled || event.Deliveries[0].Terminal)) || (key != "down" && !event.Deliveries[0].Terminal) {
+	if event.EventID != publication.EventID || event.RunID != run.RunID || event.EventName != "notice.requested" || len(event.Deliveries) != 1 || event.Deliveries[0].SubscriberType != "node" || event.Deliveries[0].SubscriberID != node.Key() || !event.Deliveries[0].Terminal {
 		t.Fatal("public input did not reach the exact existing node settlement")
 	}
-	issue3011NoActivity(t, endpoint, run.RunID, record, key+"_activity_requests")
+	if key == "unlinked" {
+		issue3011NoActivity(t, endpoint, run.RunID, record, key+"_activity_requests")
+	} else if event.Deliveries[0].Status != "delivered" || event.Deliveries[0].Failure != nil || event.Deliveries[0].RetryCount != 0 {
+		t.Fatal("send refusal escaped the activity into handler retry", event)
+	}
 	return event
+}
+
+func issue3011ActivityOutcome(t *testing.T, endpoint string, input operatorread.OperatorEventFull, backend, location, messageID string) operatorread.OperatorEventFull {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		var requests operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": input.RunID, "event_name": "platform.activity_requested"}, "limit": 100}, &requests)
+		var matching []operatorread.OperatorEventFull
+		for _, request := range requests.Events {
+			if request.Payload["source_event_id"] == input.EventID {
+				matching = append(matching, request)
+			}
+		}
+		if len(matching) > 1 || requests.NextCursor != "" {
+			t.Fatal("ambiguous or truncated original activity requests")
+		}
+		if len(matching) == 1 {
+			request := matching[0]
+			outcome, status := "notice_delivery.failed", pipeline.ActivityAttemptStatusFailed
+			if messageID != "" {
+				outcome, status = "notice_delivery.succeeded", pipeline.ActivityAttemptStatusSucceeded
+			}
+			var results operatorread.OperatorEventListResult
+			requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": input.RunID, "event_name": outcome}, "limit": 100}, &results)
+			for _, row := range results.Events {
+				if row.SourceEventID != input.EventID {
+					continue
+				}
+				var result operatorread.OperatorEventFull
+				requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": row.EventID}, &result)
+				if messageID == "" && (len(result.Deliveries) != 1 || result.Deliveries[0].Status != "delivered") {
+					continue
+				}
+				if len(result.Payload) != 3 || result.Payload["activity_id"] != request.Payload["activity_id"] || result.Payload["tool"] != "whatsapp.send_text" || result.RunID != input.RunID {
+					t.Fatal("failure result lost exact ordinary activity/causal input", result)
+				}
+				if messageID == "" {
+					cause := failures.Normalize(failures.New(failures.ClassDependencyUnavailable, "dependency_unavailable", "whatsapp", "admit_activity", nil), "whatsapp", "admit_activity")
+					raw, err := json.Marshal(cause)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var expected map[string]any
+					if err := json.Unmarshal(raw, &expected); err != nil || !reflect.DeepEqual(expected, result.Payload["failure"]) {
+						t.Fatal("down-link failed-event envelope changed", result.Payload)
+					}
+				} else if value, ok := result.Payload["result"].(map[string]any); !ok || len(value) != 1 || value["id"] != messageID || strings.ReplaceAll(request.EventID, "-", "") != messageID {
+					t.Fatal("fresh send result adopted another provider acknowledgement")
+				}
+				attempt := readServedNativeActivityAttempt(t, backend, location, request.EventID)
+				var original operatorread.OperatorEventFull
+				requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": input.EventID}, &original)
+				if len(original.Deliveries) != 1 || original.Deliveries[0].Status != "delivered" || original.Deliveries[0].Failure != nil || original.Deliveries[0].RetryCount != 0 {
+					t.Fatal("activity refusal leaked into input settlement", original)
+				}
+				value, err := canonicaljson.FromGo(request.Payload["input"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				hash, err := canonicaljson.HashValue(value)
+				if err != nil || attempt.Status != status || attempt.RequestEventID != request.EventID || attempt.ResultEventID != result.EventID || attempt.RunID != input.RunID || attempt.SourceEventID != input.EventID || attempt.InputHash != hash {
+					t.Fatal("ordinary outcome has no exact terminal journal", attempt)
+				}
+				return result
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("original request did not settle its exact activity result")
+	return operatorread.OperatorEventFull{}
 }
 
 func issue3011NoActivity(t *testing.T, endpoint, run string, record map[string]any, key string) {

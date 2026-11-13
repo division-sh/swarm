@@ -28,6 +28,15 @@ release approval or a promise of old-store migration.
   is down, no down notice is created for later delivery. On return, its single
   recovery notice adds the observed diagnostic cause to the back sentence.
 
+- A WhatsApp send meeting a positively identified transient down link, with its
+  original request responsibility still valid, completes as the ordinary failed
+  activity for the flow to handle. Its existing failure envelope and causal
+  identity are unchanged; no message, destination or diagnostic cause is added.
+  A failed request is not held for recovery or sent automatically after restart;
+  the flow must author a new attempt. Missing/unlinked accounts, permanent
+  refusals and ownership/storage/cancellation failures retain their checks.
+  A write that may already have reached the provider remains uncertain. (#3011)
+
 - Retained WhatsApp transports reconnect on the same stored device after a
   positively identified transient drop, including registered accounts. Retries
   begin after five seconds, double to a two-hour interval, and continue while

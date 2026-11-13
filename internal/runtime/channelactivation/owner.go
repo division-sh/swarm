@@ -25,6 +25,7 @@ type snapshot struct {
 	tools       map[string]runtimecontracts.ToolSchemaEntry
 	leases      int
 	admit       func(context.Context, channelonboarding.ChannelActivationPublication) error
+	request     func(context.Context, channelonboarding.ChannelActivationPublication) error
 }
 
 // Lease pins one exact executable activation snapshot until the caller has
@@ -158,12 +159,23 @@ func (l *Lease) ValidateAdmission(ctx context.Context) error {
 	if !l.live() {
 		return fmt.Errorf("channel activation lease is no longer live")
 	}
-	if l.operation.Binding.BindingID() != "" && (l.operation.Binding.Transport() != packs.ChannelTransportSession || l.snapshot.admit == nil) {
+	return l.validateAdmission(ctx, l.snapshot.admit)
+}
+
+func (l *Lease) ValidateActivityRequest(ctx context.Context) error {
+	if !l.live() || l.snapshot.request == nil {
+		return l.ValidateAdmission(ctx)
+	}
+	return l.validateAdmission(ctx, l.snapshot.request)
+}
+
+func (l *Lease) validateAdmission(ctx context.Context, admit func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
+	if l.operation.Binding.BindingID() != "" && (l.operation.Binding.Transport() != packs.ChannelTransportSession || admit == nil) {
 		if err := l.operation.Binding.RequireExecutableProvider(); err != nil {
 			return err
 		}
 	}
-	if l.snapshot.admit != nil {
+	if admit != nil {
 		publication := l.snapshot.publication
 		if bindingID := l.operation.Binding.BindingID(); bindingID != "" {
 			selected := []channelonboarding.CompiledActivation{}
@@ -181,7 +193,7 @@ func (l *Lease) ValidateAdmission(ctx context.Context) error {
 				return err
 			}
 		}
-		return l.snapshot.admit(ctx, publication)
+		return admit(ctx, publication)
 	}
 	return nil
 }
@@ -252,7 +264,7 @@ func (o *Owner) Replace(publication channelonboarding.ChannelActivationPublicati
 }
 
 func (o *Owner) ReplaceContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication) error {
-	return o.replaceContext(ctx, publication, nil)
+	return o.replaceContext(ctx, publication, nil, nil)
 }
 
 // Deployment admission is rechecked after predecessor leases drain, immediately
@@ -261,10 +273,17 @@ func (o *Owner) ReplaceAdmittedContext(ctx context.Context, publication channelo
 	if admit == nil {
 		return fmt.Errorf("channel activation deployment admission is required")
 	}
-	return o.replaceContext(ctx, publication, admit)
+	return o.replaceContext(ctx, publication, admit, nil)
 }
 
-func (o *Owner) replaceContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication, admit func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
+func (o *Owner) ReplaceWithActivityRequestAdmission(ctx context.Context, publication channelonboarding.ChannelActivationPublication, admit, request func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
+	if admit == nil || request == nil {
+		return fmt.Errorf("channel publication and request admissions are required")
+	}
+	return o.replaceContext(ctx, publication, admit, request)
+}
+
+func (o *Owner) replaceContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication, admit, request func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
 	if o == nil {
 		return fmt.Errorf("channel activation owner is required")
 	}
@@ -284,13 +303,15 @@ func (o *Owner) replaceContext(ctx context.Context, publication channelonboardin
 		}
 	}
 	next.admit = admit
+	next.request = request
 
 	o.mu.Lock()
 	if o.changed == nil {
 		o.changed = sync.NewCond(&o.mu)
 	}
 	predecessor := o.current
-	if admit != nil && o.accepting && predecessor != nil && predecessor.admit != nil && predecessor.publication.Generation().Equal(publication.Generation()) {
+	if admit != nil && o.accepting && predecessor != nil && predecessor.admit != nil &&
+		(request == nil) == (predecessor.request == nil) && predecessor.publication.Generation().Equal(publication.Generation()) {
 		err := predecessor.admit(ctx, predecessor.publication)
 		o.mu.Unlock()
 		return err

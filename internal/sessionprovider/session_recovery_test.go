@@ -199,6 +199,9 @@ func TestWhatsAppRecoveryPermanentEventsBothStores(t *testing.T) {
 				if channelonboarding.SessionUnavailableOnly(c.RecoveryFailure(f.ctx, f.operation, errClientOccurrenceFenced)) {
 					t.Fatal("permanent fact became transient")
 				}
+				if err := c.ValidateActivityRequestAccount(f.ctx, f.operation.SessionAccount, f.operation.OperationID, f.operation.Revision); err == nil {
+					t.Fatal("permanent lifecycle admitted an activity request")
+				}
 				if kind == "logout" && !errors.Is(err, channelonboarding.ErrSessionNotLinked) {
 					t.Fatal("positive revocation missing", err)
 				}
