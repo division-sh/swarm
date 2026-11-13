@@ -161,8 +161,12 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	defer cancelDrain()
 	transition := am.lifecycle.prepareShutdownTransitionWithGrace(true, grace)
 	if transition == nil {
+		var dependencyErr error
+		if am.lifecycle.shutdownJoin != nil {
+			dependencyErr = am.lifecycle.shutdownJoin.JoinManagerShutdownDependencies(drainCtx)
+		}
 		// A joined run can retain exact activation cleanup after a failed settlement.
-		return am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext()))
+		return errors.Join(dependencyErr, am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext())))
 	}
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
