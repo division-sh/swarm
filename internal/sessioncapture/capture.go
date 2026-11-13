@@ -99,6 +99,7 @@ type Event struct {
 	EventID      string
 	Kind         string
 	Body         []byte
+	SenderPhone  string `json:",omitempty"`
 	ReceivedAt   time.Time
 	Source       Source
 }
@@ -111,6 +112,11 @@ type Source struct {
 }
 
 func (e Event) Validate() error {
+	if e.SenderPhone != "" {
+		if err := (channelonboarding.AccountReference{Provider: "whatsapp", Account: e.SenderPhone}).Validate(); err != nil {
+			return fmt.Errorf("WhatsApp capture has invalid sender phone evidence")
+		}
+	}
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}
@@ -134,6 +140,25 @@ func (e Event) Validate() error {
 	}
 	_, err := canonicaljson.Decode(e.Body)
 	return err
+}
+
+// ProjectedBody binds the optional observation to this capture, not its retry identity.
+func (e Event) ProjectedBody() ([]byte, error) {
+	if err := e.Validate(); err != nil {
+		return nil, err
+	}
+	if e.SenderPhone == "" {
+		return bytes.Clone(e.Body), nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(e.Body, &fields); err != nil || fields == nil {
+		return nil, fmt.Errorf("WhatsApp phone projection requires its original object payload")
+	}
+	if _, exists := fields["sender_phone"]; exists {
+		return nil, ErrCaptureConflict
+	}
+	fields["sender_phone"], _ = json.Marshal(e.SenderPhone)
+	return json.Marshal(fields)
 }
 
 func (e Event) RequireOriginalScope(current Scope) error {
@@ -172,7 +197,7 @@ func (e Event) SameCapture(other Event) bool {
 	}
 	return e.Scope == other.Scope && e.OccurrenceID == other.OccurrenceID && e.Conversation == other.Conversation &&
 		e.EventID == other.EventID && e.Kind == other.Kind && e.ReceivedAt.Equal(other.ReceivedAt) &&
-		sourceCurrent && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
+		sourceCurrent && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body) && e.SenderPhone == other.SenderPhone
 }
 
 func (e Event) PublicationFingerprint() (string, error) {

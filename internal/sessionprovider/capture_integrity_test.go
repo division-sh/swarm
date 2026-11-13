@@ -116,6 +116,82 @@ func TestWhatsAppCaptureValidRedeliveryRetainsOriginalOccurrence(t *testing.T) {
 }
 
 func TestWhatsAppCaptureDuplicateScopeBodyAndEnvelopeValidation(t *testing.T) {
+	t.Run("concurrent_first_arrivals", func(t *testing.T) {
+		event := captureFixture(t)
+		_, spool := openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), event.Scope.Session.ConnectionID)
+		start, done := make(chan struct{}), make(chan error, 2)
+		for _, phone := range []string{"", "+100000001"} {
+			go func() {
+				candidate := event
+				candidate.SenderPhone = phone
+				<-start
+				done <- spool.capture(context.Background(), candidate)
+			}()
+		}
+		close(start)
+		for range 2 {
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		}
+		rows, err := spool.pending(context.Background())
+		if err != nil || len(rows) != 1 {
+			t.Fatal("concurrent capture did not choose one winner", rows, err)
+		}
+		winner := rows[0]
+		event.SenderPhone = "+100000009"
+		if err := spool.capture(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+		rows, err = spool.pending(context.Background())
+		if err != nil || len(rows) != 1 || !rows[0].SameCapture(winner) {
+			t.Fatal("later phone changed concurrent winner", rows, err)
+		}
+	})
+	t.Run("phone_winner_and_reopen", func(t *testing.T) {
+		for _, first := range []string{"", "+100000001"} {
+			event := captureFixture(t)
+			event.SenderPhone = first
+			path := filepath.Join(t.TempDir(), "incoming.db")
+			db, spool := openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
+			if err := spool.capture(context.Background(), event); err != nil {
+				t.Fatal(err)
+			}
+			before := captureStoredRowsFixture(t, db)
+			failures := make(chan error, 8)
+			for i := 0; i < cap(failures); i++ {
+				go func() {
+					duplicate := event
+					duplicate.SenderPhone = "+100000009"
+					failures <- spool.capture(context.Background(), duplicate)
+				}()
+			}
+			for i := 0; i < cap(failures); i++ {
+				if err := <-failures; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !reflect.DeepEqual(before, captureStoredRowsFixture(t, db)) {
+				t.Fatal("phone redelivery rewrote winner")
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, spool = openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
+			rows, err := spool.pending(context.Background())
+			if err != nil || len(rows) != 1 || !rows[0].SameCapture(event) {
+				t.Fatal("reopen changed first phone/absence", rows, err)
+			}
+			projected, err := rows[0].ProjectedBody()
+			var fields map[string]any
+			if err != nil || json.Unmarshal(projected, &fields) != nil {
+				t.Fatal(err)
+			}
+			if phone, present := fields["sender_phone"]; present != (first != "") || present && phone != first {
+				t.Fatal("first phone projection", fields)
+			}
+		}
+	})
 	for _, dimension := range []string{"body", "principal", "source", "admission", "revision", "responsibility", "invalid_envelope"} {
 		t.Run(dimension, func(t *testing.T) {
 			event := captureFixture(t)

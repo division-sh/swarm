@@ -103,6 +103,15 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return validateLinkedDeviceEcho(message, device.ID, device.LID)
 	}
 	incoming := c.incoming
+	phone := sync.OnceValues(func() (string, error) {
+		return incomingSenderPhone(work.Context(), message.Info.MessageSource, func(ctx context.Context, jid types.JID) (types.JID, error) {
+			occurrence := c.state.currentOccurrence()
+			if occurrence == nil {
+				return types.EmptyJID, errClientOccurrenceFenced
+			}
+			return occurrence.client.Store.LIDs.GetPNForLID(ctx, jid)
+		})
+	})
 	if c.operation.DeploymentRegistration {
 		reserved, sender, err := incoming.completedOperatorConversation(work.Context(), op, message)
 		if err != nil {
@@ -116,7 +125,7 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 			return err
 		}
 		if !claim && !reserved && c.registeredBusiness != nil {
-			incoming, err = c.registeredCustomerIncoming(work.Context(), incoming, op, message)
+			incoming, err = c.registeredCustomerIncoming(work.Context(), incoming, op, message, phone)
 			if err != nil || incoming == nil {
 				return err
 			}
@@ -127,10 +136,10 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	if !c.operation.DeploymentRegistration || incoming.registered == nil {
 		ctx = work.Context()
 	}
-	return c.captureIncomingMessage(ctx, incoming, message)
+	return c.captureIncomingMessage(ctx, incoming, message, phone)
 }
 
-func (c *RuntimeConnection) captureIncomingMessage(ctx context.Context, incoming *runtimeIncoming, message *events.Message) error {
+func (c *RuntimeConnection) captureIncomingMessage(ctx context.Context, incoming *runtimeIncoming, message *events.Message, phone func() (string, error)) error {
 	scope, source, err := incoming.receiveScope(ctx, message)
 	if err != nil {
 		return err
@@ -140,6 +149,10 @@ func (c *RuntimeConnection) captureIncomingMessage(ctx context.Context, incoming
 		return errClientOccurrenceFenced
 	}
 	event, err := captureSDKMessage(scope, source, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+	if err != nil {
+		return err
+	}
+	event.SenderPhone, err = phone()
 	if err != nil {
 		return err
 	}
@@ -173,7 +186,7 @@ func validateLinkedDeviceEcho(message *events.Message, id *types.JID, lid types.
 	return nil
 }
 
-func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, incoming *runtimeIncoming, op channelonboarding.Operation, message *events.Message) (*runtimeIncoming, error) {
+func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, incoming *runtimeIncoming, op channelonboarding.Operation, message *events.Message, phone func() (string, error)) (*runtimeIncoming, error) {
 	occurrence := c.state.currentOccurrence()
 	if occurrence == nil {
 		return nil, errClientOccurrenceFenced
@@ -181,6 +194,10 @@ func (c *RuntimeConnection) registeredCustomerIncoming(ctx context.Context, inco
 	unclaimed, err := captureSDKMessage(captureScope{DeploymentRegistration: true, Kind: channelonboarding.SessionInputOnboarding,
 		Session: op.SessionAccount, OnboardingOperation: op.OperationID, OperationRevision: op.Revision, PrincipalID: op.PrincipalID},
 		captureSource{DeploymentRegistration: true, CatalogGeneration: incoming.handoff.trigger.Generation()}, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+	if err != nil {
+		return nil, err
+	}
+	unclaimed.SenderPhone, err = phone()
 	if err != nil {
 		return nil, err
 	}

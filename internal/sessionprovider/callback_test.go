@@ -53,7 +53,7 @@ func TestWhatsAppCallbackPanicsReturnFailureAndFenceOccurrence(t *testing.T) {
 }
 
 func TestWhatsAppCallbackFailureAndSuccessStatus(t *testing.T) {
-	for _, failure := range []error{nil, errors.New("capture commit rejected")} {
+	for _, failure := range []error{nil, errors.New("capture commit rejected"), fmt.Errorf("%w: %w", errSenderPhoneRead, errClientOccurrenceFenced)} {
 		guard, err := newCallbackGuard(context.Background(), uuid.NewString(), uuid.NewString(),
 			func(context.Context, any) error { return failure },
 			func(context.Context, callbackFailure) error { return nil })

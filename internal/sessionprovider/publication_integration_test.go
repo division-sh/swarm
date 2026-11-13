@@ -233,6 +233,9 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 					for _, reopen := range []bool{false, true} {
 						t.Run(fmt.Sprintf("%s/fresh=%t/reopen=%t", phase, fresh, reopen), func(t *testing.T) {
 							event := f.capture(t)
+							if fresh {
+								event.SenderPhone = "+100000001"
+							}
 							path := filepath.Join(t.TempDir(), "incoming.db")
 							db, spool := openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
 							if err := spool.capture(f.ctx, event); err != nil {
@@ -262,6 +265,7 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 								_, spool = openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
 							}
 							duplicate := event
+							duplicate.SenderPhone = "+100000009"
 							if fresh {
 								duplicate.OccurrenceID = uuid.NewString()
 							}
@@ -299,6 +303,14 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 							original, err := publicationCaptureProvenance(result.Record.Request)
 							if err != nil || !original.SameCapture(event) {
 								t.Fatal("history lost exact original capture occurrence", err)
+							}
+							var projected map[string]any
+							if err := json.Unmarshal(result.Record.Events[1].Event.Payload(), &projected); err != nil {
+								t.Fatal(err)
+							}
+							phone, present := projected["sender_phone"]
+							if present != (event.SenderPhone != "") || present && phone != event.SenderPhone {
+								t.Fatal("history enriched first phone/absence", projected)
 							}
 							pending, err = spool.pending(f.ctx)
 							if err != nil || len(pending) != 0 {
@@ -614,10 +626,14 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 		t.Fatal(err)
 	}
 	var payload map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes(event.Body, &payload); err != nil {
+	body, err := event.ProjectedBody()
+	if err != nil {
 		t.Fatal(err)
 	}
-	authenticated, err := trigger.AdmitRequest(providertriggers.Request{Provider: "whatsapp", Target: providertriggers.Target{WebhookSecret: "isolated-fixture-secret"}, Headers: http.Header{"X-Fixture-Signature": {"isolated-fixture-secret"}}, Body: event.Body, Payload: payload, Received: event.ReceivedAt})
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := trigger.AdmitRequest(providertriggers.Request{Provider: "whatsapp", Target: providertriggers.Target{WebhookSecret: "isolated-fixture-secret"}, Headers: http.Header{"X-Fixture-Signature": {"isolated-fixture-secret"}}, Body: body, Payload: payload, Received: event.ReceivedAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +710,11 @@ func (f *sessionPublicationFixture) commit(ctx context.Context, command runtimei
 
 func fixtureRawPublicationMatches(event capturedEvent, body []byte) bool {
 	var content map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes(event.Body, &content); err != nil {
+	projected, err := event.ProjectedBody()
+	if err != nil {
+		return false
+	}
+	if err := canonicaljson.DecodePreservingNumberLexemes(projected, &content); err != nil {
 		return false
 	}
 	expected, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
@@ -710,6 +730,7 @@ func TestWhatsAppSessionCaptureNormalizedPublicationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newSessionPublicationFixture(t, backend)
 			event := f.capture(t)
+			event.SenderPhone = "+100000001"
 			path := filepath.Join(t.TempDir(), "incoming.db")
 			db, spool := openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
 			if err := spool.capture(f.ctx, event); err != nil {
@@ -742,6 +763,23 @@ func TestWhatsAppSessionCaptureNormalizedPublicationBothStores(t *testing.T) {
 			record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity())
 			if err != nil || !found || record.OutputCount != 2 || len(record.Events) != 2 || !fixtureRawPublicationMatches(event, record.Events[0].Event.Payload()) {
 				t.Fatalf("verified historical event set changed: %+v %t %v", record, found, err)
+			}
+			var projected map[string]any
+			if err := json.Unmarshal(record.Events[1].Event.Payload(), &projected); err != nil || projected["sender_phone"] != event.SenderPhone {
+				t.Fatal("published phone lost", projected, err)
+			}
+			projected["sender_phone"] = "+100000009"
+			raw, _ := json.Marshal(projected)
+			payloadAdmission, found := record.Events[1].Event.PayloadAdmission()
+			if !found {
+				t.Fatal("published event lost payload integrity")
+			}
+			tampered, err := events.NewPayloadAdmission(raw, payloadAdmission.Binding())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := events.ApplyPayloadAdmission(record.Events[1].Event, tampered); err == nil {
+				t.Fatal("published phone could be replaced")
 			}
 			changed := command
 			changed.Request.RequestFingerprint, _ = runtimeinbound.SemanticFingerprint("different capture")

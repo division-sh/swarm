@@ -50,6 +50,14 @@ kinds and reconnect first. The provider accepts phone-number and LID forms and
 does not normalize them into one identity. Mocked messages do not establish
 live stability; do not add a phone lookup or silently merge those IDs.
 
+Inbound message, edit and revoke events may also carry `sender_phone` as a
+canonical E.164 string. It is absent when unknown, never an empty string.
+The value comes from the delivered sender, its phone-form alternate, or the
+already-learned local map, in that order; there is no remote lookup or retry.
+The first successful capture freezes this optional value, including absence.
+Later knowledge does not enrich a pending or published message. This field is
+ordinary flow data that can be handed to an agent, not sender identity or proof.
+
 In `swarm test` scenarios, `whatsapp.send_text` returns a deterministic
 schema-valid response without pairing or sending a real message. A `derive`
 scenario can override that response with `connector_responses`; mocked

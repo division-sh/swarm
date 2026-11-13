@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -15,7 +16,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -271,12 +276,87 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				t.Fatal("runtime incoming publication changed its original admitted scope", err)
 			}
 			var payload map[string]any
-			if err := json.Unmarshal(record.Events[1].Event.Payload(), &payload); err != nil || payload["text"] != "installed native business text" {
+			if err := json.Unmarshal(record.Events[1].Event.Payload(), &payload); err != nil || payload["text"] != "installed native business text" || payload["sender_phone"] != "+100000000003" {
 				t.Fatal("runtime incoming publication changed SDK text", payload, err)
 			}
 			rows, err := c.captures.pending(f.ctx)
 			if err != nil || len(rows) != 0 {
 				t.Fatal("runtime publication retained completed capture", len(rows), err)
+			}
+			intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.worker.intent", "Read the admitted message.")
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt, err := agentintent.IntentOnlyPrompt(intent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
+			if err != nil {
+				t.Fatal(err)
+			}
+			actor := agentidentity.Identity{RunID: record.ResolvedRunID, Name: agentidentity.Name{AgentID: "worker", Owner: "native-input-fixture", Source: agentidentity.NameSourceDeclared}, Route: agentidentity.RootRoute()}
+			surface, err := managedcapabilities.New(managedcapabilities.Plan{ActorIdentity: actor, RuntimeMode: "api", Provider: "anthropic", Transport: "api", ProviderContract: "messages.v1",
+				Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "native-input-fixture", RunID: record.ResolvedRunID, SessionID: uuid.NewString(), TurnOrdinal: 1}, CreatedAt: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame, err := agentframe.Complete(agentframe.SessionSeed{AgentIdentity: actor, Intent: intent, ProviderPrompt: providerPrompt, RuntimeMode: "api", Provider: "anthropic", Transport: "api", ModelAlias: "regular", Model: "test-model"},
+				agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: record.Events[1].Event}, agentframe.Completion{BundleHash: f.source.Coordinate.BundleHash, Surface: surface})
+			if err != nil {
+				t.Fatal(err)
+			}
+			role, content, err := frame.ProviderInput()
+			var agentPayload map[string]any
+			if err != nil || role != "user" || json.Unmarshal([]byte(content), &agentPayload) != nil || agentPayload["sender_phone"] != payload["sender_phone"] {
+				t.Fatal("admitted phone did not reach agent input", err)
+			}
+			for _, source := range []string{"alternate", "map", "absent", "malformed"} {
+				message := incomingMessageFixture()
+				message.Info.ID = uuid.NewString()
+				message.Info.Sender = types.NewJID("20000000"+fmt.Sprint(len(source)), types.HiddenUserServer)
+				message.Info.Chat = message.Info.Sender
+				if source == "alternate" {
+					message.Info.SenderAlt = types.NewJID("100000000009", types.DefaultUserServer)
+				}
+				if source == "map" {
+					if err := c.state.currentOccurrence().client.Store.LIDs.PutLIDMapping(f.ctx, message.Info.Sender, types.NewJID("100000000009", types.DefaultUserServer)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if source == "malformed" {
+					message.Info.SenderAlt = types.NewJID("bad", types.DefaultUserServer)
+				}
+				if !c.state.currentOccurrence().callbacks.receive(message) {
+					t.Fatal("optional phone fenced valid input", source)
+				}
+				capture, err := captureSDKMessage(f.scope, f.source, uuid.NewString(), message, captureFixture(t).ReceivedAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				key, _ := capture.PublicationIdentity()
+				read, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, key)
+				if err != nil || !found || len(read.Events) != 2 {
+					t.Fatal("phone input lost publication", source, err)
+				}
+				var projected map[string]any
+				if err := json.Unmarshal(read.Events[1].Event.Payload(), &projected); err != nil {
+					t.Fatal(err)
+				}
+				phone, present := projected["sender_phone"]
+				if present != (source == "alternate" || source == "map") || present && phone != "+100000000009" {
+					t.Fatal("native optional phone projection", source, projected)
+				}
+				if err := c.state.currentOccurrence().client.Store.LIDs.PutLIDMapping(f.ctx, message.Info.Sender, types.NewJID("100000000008", types.DefaultUserServer)); err != nil {
+					t.Fatal(err)
+				}
+				if !c.state.currentOccurrence().callbacks.receive(message) {
+					t.Fatal("map change rejected redelivery", source)
+				}
+				replayed, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, key)
+				if err != nil || !found || !bytes.Equal(replayed.Events[1].Event.Payload(), read.Events[1].Event.Payload()) {
+					t.Fatal("redelivery enriched published phone", err)
+				}
 			}
 			assertRuntimeIncomingSetupReceipt(t, f)
 			spoofed := incomingMessageFixture()
@@ -284,6 +364,9 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			guard := c.state.currentOccurrence().callbacks
 			if guard.receive(spoofed) || !errors.Is(guard.currentFailure(), errIncomingMalformed) || c.CheckBootstrap(f.ctx) == nil {
 				t.Fatal("a foreign sender bypassed refusal by claiming a self echo")
+			}
+			if _, err := incomingSenderPhone(f.ctx, types.MessageSource{Sender: types.NewJID("200000099", types.HiddenUserServer)}, c.state.currentOccurrence().client.Store.LIDs.GetPNForLID); !errors.Is(err, errSenderPhoneRead) {
+				t.Fatal("fenced map became absence", err)
 			}
 		})
 	}

@@ -33,6 +33,7 @@ func TestWhatsAppCaptureRedeliveryAfterRetirementUsesHistoricalEvidence(t *testi
 	_, spool = openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
 	for _, fresh := range []bool{false, true, true} {
 		duplicate := event
+		duplicate.SenderPhone = "+100000009"
 		if fresh {
 			duplicate.OccurrenceID = uuid.NewString()
 			duplicate.ReceivedAt = event.ReceivedAt.Add(time.Hour)

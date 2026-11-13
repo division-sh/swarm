@@ -47,10 +47,14 @@ func prepareSessionSetup(ctx context.Context, admitted input.Admission, trigger 
 	if err := json.Unmarshal(admitted.OriginalCapture(), &event); err != nil {
 		return absent, err
 	}
+	projectedBody, err := event.ProjectedBody()
+	if err != nil {
+		return absent, err
+	}
 	if event.Scope.Kind != channelonboarding.SessionInputOnboarding || admitted.Scope() != channelonboarding.SessionInputOnboarding ||
 		event.Scope.DeploymentRegistration != admitted.Responsibility().DeploymentRegistration ||
 		(!event.Scope.DeploymentRegistration && !event.Source.Coordinate.MatchesDeclaration(admitted.Coordinate())) ||
-		!event.ReceivedAt.Equal(admitted.ReceivedAt()) || !bytes.Equal(event.Body, admitted.Body()) {
+		!event.ReceivedAt.Equal(admitted.ReceivedAt()) || !bytes.Equal(projectedBody, admitted.Body()) {
 		return absent, fmt.Errorf("operator setup requires the original onboarding capture")
 	}
 	request, err := trigger.AdmitSessionInput(ctx, admitted)
