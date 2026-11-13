@@ -76,6 +76,13 @@ func (l sdkDiagnosticLog) Errorf(format string, args ...any) {
 	l.owner.mu.Unlock()
 }
 
+func (o *clientOccurrence) observeKeepAlive(timeout bool) {
+	o.mu.Lock()
+	o.diagnostic.KeepAliveTimeout = o.diagnostic.KeepAliveTimeout || timeout
+	o.diagnostic.KeepAliveRestored = o.diagnostic.KeepAliveRestored || !timeout
+	o.mu.Unlock()
+}
+
 func (o *clientOccurrence) diagnosticSnapshot() SessionDiagnostic {
 	o.mu.Lock()
 	defer o.mu.Unlock()

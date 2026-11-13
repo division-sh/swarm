@@ -540,6 +540,13 @@ type channelDeliveryWorkerOptions struct {
 	diagnostics func(context.Context) error
 }
 
+func (options channelDeliveryWorkerOptions) observeSessionDiagnostics(ctx context.Context) error {
+	if options.diagnostics == nil {
+		return nil
+	}
+	return options.diagnostics(ctx)
+}
+
 func (options channelDeliveryWorkerOptions) observePass(ctx context.Context, scope runtimechanneldelivery.ReconcileDemand, start runtimechanneldelivery.ReconcileMark, err error) {
 	if err == nil && ctx.Err() == nil && options.passed != nil {
 		options.passed(runtimechanneldelivery.ReconcilePass{Scope: scope, Start: start})
@@ -591,10 +598,7 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 				return
 			}
 			if nativeDue || demand.Includes(runtimechanneldelivery.ReconcileNative) {
-				var diagnosticErr error
-				if options.diagnostics != nil {
-					diagnosticErr = options.diagnostics(workCtx)
-				}
+				diagnosticErr := options.observeSessionDiagnostics(workCtx)
 				err := errors.Join(diagnosticErr, dispatcher.reconcileNativeInboxSettings(workCtx))
 				if err != nil && workCtx.Err() == nil {
 					log.Printf("native inbox setting reconciliation: %v", err)
