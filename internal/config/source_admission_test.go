@@ -31,6 +31,8 @@ func TestPublicWebhookConfigUsesAdmittedDeploymentSource(t *testing.T) {
 		{"serve: {public_webhook: {hostname: hooks.example.test, email: ops@example.test}}", true},
 		{"serve: {public_webhook: null}", false},
 		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: null, private_key_file: null}}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: 123, private_key_file: 456}}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, email: false}}", false},
 		{"serve: {public_webhook: {}}", false},
 		{"serve: {public_webhook: {hostname: 'https://hooks.example.test'}}", false},
 		{"serve: {public_webhook: {hostname: 'hooks.example.test:443'}}", false},

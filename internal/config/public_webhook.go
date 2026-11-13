@@ -4,12 +4,8 @@ import (
 	"fmt"
 	"net"
 	"net/mail"
-	"reflect"
 	"regexp"
 	"strings"
-
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 type ServeConfig struct {
@@ -27,28 +23,6 @@ type PublicWebhookConfig struct {
 }
 
 var webhookHostname = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$`)
-
-func (c *PublicWebhookConfig) UnmarshalYAML(node *yaml.Node) error {
-	value := yamlsource.ValueFromNode(node)
-	if err := validateConfigSource(value, reflect.TypeFor[PublicWebhookConfig](), "serve.public_webhook"); err != nil {
-		return err
-	}
-	fields, err := value.Mapping()
-	if err != nil {
-		return err
-	}
-	for _, field := range fields {
-		scalar, err := field.Value.Scalar()
-		if err != nil || scalar.Tag != "!!str" {
-			return fmt.Errorf("serve.public_webhook.%s must be a string", field.Name)
-		}
-	}
-	type plain PublicWebhookConfig
-	if err := node.Decode((*plain)(c)); err != nil {
-		return err
-	}
-	return c.Validate()
-}
 
 func (c *PublicWebhookConfig) Validate() error {
 	if c == nil {
