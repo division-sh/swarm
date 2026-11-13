@@ -64,6 +64,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		return nil, err
 	}
 	for _, item := range registered {
+		if item.Fact.ConnectionID == "" && d.linkNotices == nil {
+			continue
+		}
 		operations = append(operations, item.Operation)
 		presentations[item.Operation.OperationID] = item.Account
 	}
@@ -72,17 +75,16 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		if ctx.Err() != nil {
 			return result, context.Cause(ctx)
 		}
-		err := d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery)
-		if d.linkNotices != nil {
-			d.linkNotices.observe(op, err)
-		}
-		result = errors.Join(result, err)
+		result = errors.Join(result, d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery))
 	}
 	return result, nil
 }
 
-func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.Context, op channelonboarding.Operation, presentation string, recovery func(context.Context, channelonboarding.Operation) (time.Time, bool, error)) error {
+func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.Context, op channelonboarding.Operation, presentation string, recovery func(context.Context, channelonboarding.Operation) (time.Time, bool, error)) (err error) {
 	at, connected, err := recovery(ctx, op)
+	if d.linkNotices != nil {
+		defer func() { d.linkNotices.observe(op, err, at) }()
+	}
 	if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
 		if d.sessionStates[op.OperationID] != "not_linked" {
 			fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)

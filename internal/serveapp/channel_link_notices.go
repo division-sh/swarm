@@ -73,13 +73,13 @@ func (n *serveLinkNotices) destination(ctx context.Context) (channelonboarding.R
 	if selected.Operation.Provider != n.hitl.Provider || account != n.hitl.Account || selected.Binding == nil || selected.Binding.Status != operatorchannel.BindingCurrent {
 		return channelonboarding.Result{}, nil
 	}
-	if n.hitl.Provider == "whatsapp" && d.sessionStates[selected.Operation.OperationID] != "connected" {
+	if n.hitl.Provider == "whatsapp" && (d.sessionStates[selected.Operation.OperationID] != "connected" || n.entries[selected.Operation.OperationID] != nil && n.entries[selected.Operation.OperationID].down) {
 		return channelonboarding.Result{}, nil
 	}
 	return selected, nil
 }
 
-func (n *serveLinkNotices) observe(op channelonboarding.Operation, observedErr error) {
+func (n *serveLinkNotices) observe(op channelonboarding.Operation, observedErr error, at time.Time) {
 	for _, item := range n.items {
 		if item.Operation.OperationID != op.OperationID || item.Operation.SessionConnectionID != op.SessionConnectionID || item.Operation.SessionAccount != op.SessionAccount {
 			continue
@@ -94,7 +94,7 @@ func (n *serveLinkNotices) observe(op channelonboarding.Operation, observedErr e
 		if !entry.valid {
 			return
 		}
-		if fact.Down || state == "disconnected" || state == "not_linked" {
+		if fact.Down || state == "disconnected" && !at.IsZero() || state == "not_linked" {
 			entry.observe(n.dispatcher.now(), false, fact.Stopped || state == "not_linked", fact.Cause())
 		}
 		if observedErr == nil && !fact.Down && state == "connected" {
@@ -104,7 +104,10 @@ func (n *serveLinkNotices) observe(op channelonboarding.Operation, observedErr e
 	}
 }
 
-func (n *serveLinkNotices) reconcile(ctx context.Context) error {
+func (n *serveLinkNotices) reconcile(ctx context.Context, readErr error) error {
+	if n == nil || readErr != nil {
+		return nil
+	}
 	d := n.dispatcher
 	selected, targetErr := n.destination(ctx)
 	result := targetErr

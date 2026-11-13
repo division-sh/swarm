@@ -57,12 +57,19 @@ func TestChannelNoticeLinkWorkerCustodyAndCurrentness(t *testing.T) {
 	mailbox := &linkNoticeMailbox{failure: errors.New("unknown commit response")}
 	n := &serveLinkNotices{dispatcher: d, hitl: channelonboarding.AccountReference{Provider: "telegram", Account: "420079"}, mailbox: mailbox,
 		entries: map[string]*linkNoticeEntry{}, items: []serveSessionDiagnostic{{Operation: op, Fact: sessionprovider.SessionDiagnostic{Down: true, Socket: "reset"}}}}
+	n.items[0].Fact.Down = false
+	d.sessionStates[op.OperationID] = "disconnected"
+	n.observe(op, nil, time.Time{})
+	if n.entries[op.OperationID].drops != 0 {
+		t.Fatal("presentation alone invented a drop")
+	}
+	n.items[0].Fact.Down = true
 	poll := func() error {
 		if !owner.connected && owner.failure == nil {
 			d.sessionStates[op.OperationID] = "disconnected"
 		}
-		n.observe(op, owner.failure)
-		return n.reconcile(t.Context())
+		n.observe(op, owner.failure, owner.at)
+		return n.reconcile(t.Context(), nil)
 	}
 	if poll() == nil || len(mailbox.requests) != 1 {
 		t.Fatal("unknown response lost", mailbox.requests)
@@ -114,5 +121,20 @@ func TestChannelNoticeLinkWorkerCustodyAndCurrentness(t *testing.T) {
 	n.capture(nil)
 	if n.entries[op.OperationID].valid {
 		t.Fatal("retired observation remained executable")
+	}
+	selected.Operation = op
+	selected.Operation.Provider, selected.Operation.AccountReference = "whatsapp", "+15550000000"
+	n.hitl = channelonboarding.AccountReference{Provider: "whatsapp", Account: "+15550000000"}
+	self := &linkNoticeEntry{valid: true}
+	n.entries[op.OperationID] = self
+	self.observe(now, false, true, "logged out")
+	d.sessionStates[op.OperationID] = "connected" // A terminal refusal leaves this old presentation behind.
+	if target, err := n.destination(t.Context()); err != nil || target.Binding != nil {
+		t.Fatal("failed self-link retained notice admission", err)
+	}
+	self.observe(now.Add(time.Second), true, false, "")
+	before = len(mailbox.requests)
+	if err := n.reconcile(t.Context(), nil); err != nil || len(mailbox.requests) != before || self.next(now) == nil || !self.lastBack.IsZero() || self.reported != 0 {
+		t.Fatal("R199 stub admitted, consumed quota or lost its summary", err)
 	}
 }

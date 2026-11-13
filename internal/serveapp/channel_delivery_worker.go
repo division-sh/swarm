@@ -600,10 +600,7 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 			}
 			if nativeDue || demand.Includes(runtimechanneldelivery.ReconcileNative) {
 				diagnosticErr := options.observeSessionDiagnostics(workCtx)
-				err := errors.Join(diagnosticErr, dispatcher.reconcileNativeInboxSettings(workCtx))
-				if dispatcher.linkNotices != nil && diagnosticErr == nil {
-					err = errors.Join(err, dispatcher.linkNotices.reconcile(workCtx))
-				}
+				err := errors.Join(diagnosticErr, dispatcher.reconcileNativeInboxSettings(workCtx), dispatcher.linkNotices.reconcile(workCtx, diagnosticErr))
 				if err != nil && workCtx.Err() == nil {
 					log.Printf("native inbox setting reconciliation: %v", err)
 				}
