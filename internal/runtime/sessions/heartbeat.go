@@ -33,15 +33,7 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 		}
 		return func() {}
 	}
-	var workLease *worklifetime.Lease
-	var err error
-	if accepted, ok := owner.(interface {
-		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
-	}); ok {
-		workLease, err = accepted.BeginAcceptedDescendant(ctx)
-	} else {
-		workLease, err = owner.Begin(ctx)
-	}
+	workLease, err := beginLeaseHeartbeatWork(ctx, owner)
 	if err != nil {
 		if onError != nil {
 			onError(fmt.Errorf("admit session lease heartbeat: %w", err))
@@ -83,6 +75,15 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 		once.Do(func() { close(stopCh) })
 		wg.Wait()
 	}
+}
+
+func beginLeaseHeartbeatWork(ctx context.Context, owner worklifetime.Occurrence) (*worklifetime.Lease, error) {
+	if accepted, ok := owner.(interface {
+		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+	}); ok {
+		return accepted.BeginAcceptedDescendant(ctx)
+	}
+	return owner.Begin(ctx)
 }
 
 func LeaseHeartbeatInterval(expiresAt time.Time) time.Duration {
