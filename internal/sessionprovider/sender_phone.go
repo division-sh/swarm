@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -31,7 +31,8 @@ func incomingSenderPhone(ctx context.Context, source types.MessageSource, lookup
 		}
 	}
 	phone := "+" + selected.User
-	if selected.Server != types.DefaultUserServer || (channelonboarding.AccountReference{Provider: "whatsapp", Account: phone}).Validate() != nil {
+	canonical, err := channelprovider.WhatsAppAccount(phone)
+	if selected.Server != types.DefaultUserServer || err != nil || canonical != phone {
 		diaglog.ProcessLog(diaglog.LevelError, "whatsapp", "sender phone evidence malformed", "category", "sender_phone_malformed")
 		return "", nil
 	}
