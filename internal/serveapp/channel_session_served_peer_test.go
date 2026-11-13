@@ -207,7 +207,7 @@ func newServeNativeProtocolPeer(t *testing.T, telegramHandler ...http.Handler) *
 	}
 	dial := &net.Dialer{}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		if telegram != nil && address == "api.telegram.org:443" {
+		if telegram != nil && (address == "api.telegram.org:443" || address == "hooks.channel-onboarding.test:443") {
 			return dial.DialContext(ctx, network, telegram.Listener.Addr().String())
 		}
 		if address == "web.whatsapp.com:443" {
