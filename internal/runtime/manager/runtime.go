@@ -159,19 +159,11 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
-	transition := am.lifecycle.prepareShutdownTransition(true)
+	transition := am.lifecycle.prepareShutdownTransitionWithGrace(true, grace)
 	if transition == nil {
 		// A joined run can retain exact activation cleanup after a failed settlement.
 		return am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext()))
 	}
-	drainErr := am.lifecycle.drainShutdownWork(drainCtx)
-	if errors.Is(drainErr, worklifetime.ErrRetired) {
-		drainErr = nil
-	}
-	if drainErr != nil && drainCtx.Err() != nil {
-		drainErr = fmt.Errorf("agent manager shutdown drain timed out after %s: %w", grace, drainErr)
-	}
-	am.lifecycle.requestShutdownTransition()
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
 		return err
@@ -179,7 +171,16 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if claimed {
 		go am.completeClaimedShutdownTransition(transition, executor)
 	}
-	return errors.Join(drainErr, waitForRuntimeLifecycleTransitionContext(drainCtx, transition, grace, "shutdown drain"))
+	waitErr := waitForRuntimeLifecycleTransitionContext(drainCtx, transition, grace, "shutdown drain")
+	drainErr := transition.drainErr
+	// Each caller retains its reporting budget, not another work-drain grace.
+	if drainErr == context.DeadlineExceeded && drainCtx.Err() == nil {
+		drainErr = nil
+	}
+	if drainErr != nil && drainCtx.Err() != nil {
+		drainErr = fmt.Errorf("agent manager shutdown drain timed out after %s: %w", grace, drainErr)
+	}
+	return errors.Join(drainErr, waitErr)
 }
 
 func waitForRuntimeLifecycleTransition(transition *runtimeLifecycleTransition, grace time.Duration, operation string) error {
@@ -1031,8 +1032,12 @@ func (am *AgentManager) startShutdownWatcher(runCtx context.Context, kind string
 	if err != nil {
 		return fmt.Errorf("admit %s: %w", strings.TrimSpace(kind), err)
 	}
+	requested := am.lifecycle.shutdownRequestSignal()
 	go func() {
-		<-runCtx.Done()
+		select {
+		case <-runCtx.Done():
+		case <-requested:
+		}
 		transition := am.lifecycle.requestShutdownTransition()
 		if !am.lifecycle.claimTransition(transition, runtimeLifecycleTransitionShutdown) {
 			_ = watchLease.Done()
@@ -1044,6 +1049,7 @@ func (am *AgentManager) startShutdownWatcher(runCtx context.Context, kind string
 }
 
 func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLifecycleTransition, executor *worklifetime.Lease) {
+	am.lifecycle.joinShutdownDrain(transition)
 	_, done := am.lifecycle.cancelShutdownWork()
 	for _, wait := range done {
 		<-wait
