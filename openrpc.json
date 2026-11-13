@@ -20661,6 +20661,60 @@
             "minimum": 0,
             "type": "integer"
           },
+          "read_wait": {
+            "description": "Native next-admission floor and actual observed read-failure age. Null for healthy in-flight work. A floor alone is not a failure observation; since, age_ms and failure remain null when unknown.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "age_ms": {
+                    "oneOf": [
+                      {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "failure": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/FailureEnvelope"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "not_before": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "since": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/Timestamp"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "not_before",
+                  "since",
+                  "age_ms",
+                  "failure"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "retry": {
             "oneOf": [
               {
@@ -20711,6 +20765,7 @@
           "next_chunk_size",
           "last_served_at",
           "retry",
+          "read_wait",
           "claim_owner",
           "claim_generation",
           "lease_expires_at",
@@ -20864,11 +20919,27 @@
             "minimum": 0,
             "type": "integer"
           },
+          "oldest_read_wait_ms": {
+            "description": "Oldest known failure age among waiting reads; null when no actual failure time is retained, never a claim-admission age.",
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "open": {
             "minimum": 0,
             "type": "integer"
           },
           "owed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "read_waiting": {
             "minimum": 0,
             "type": "integer"
           },
@@ -20919,7 +20990,9 @@
           "barrier_terminal",
           "min_next_chunk",
           "max_next_chunk",
-          "oldest_age_ms"
+          "oldest_age_ms",
+          "read_waiting",
+          "oldest_read_wait_ms"
         ],
         "type": "object"
       },

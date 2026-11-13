@@ -117,6 +117,30 @@ func (s *processLifecycleSupervisor) continueRunRuntime(ctx context.Context, req
 	}
 	result, err := current.RunControl.ContinueDeferred(ctx, req)
 	if err != nil {
+		if errors.Is(err, runcontrol.ErrNotPaused) {
+			if validateErr := s.validateContinuedRunTarget(ctx, req.RunID, availability.RootReference, currentSources.Revision); validateErr != nil {
+				return result, errors.Join(validateErr, lease.Done())
+			}
+			use, acquireErr := s.acquireLiveTargetRuntimeLocked(ctx, availability.RootReference)
+			if acquireErr != nil {
+				return result, errors.Join(acquireErr, lease.Done())
+			}
+			if use == nil {
+				return result, errors.Join(errors.New("handler resume did not acquire its exact runtime"), lease.Done())
+			}
+			if use.Runtime() == nil || use.Runtime().RunControl == nil {
+				return result, errors.Join(errors.New("handler resume runtime has no control owner"), use.Done(), lease.Done())
+			}
+			workCtx, cancel := context.WithCancel(use.WorkContext())
+			joined := make(chan struct{})
+			stop := context.AfterFunc(ctx, func() { defer close(joined); cancel() })
+			result, err = use.Runtime().RunControl.RecheckPausedFanOut(workCtx, req.RunID)
+			if !stop() {
+				<-joined
+			}
+			cancel()
+			return result, errors.Join(err, use.Done(), lease.Done())
+		}
 		return result, errors.Join(err, lease.Done())
 	}
 	id := uuid.NewString()

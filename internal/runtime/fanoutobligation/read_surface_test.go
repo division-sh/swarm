@@ -64,6 +64,10 @@ func TestFanOutReadbackStateAndUnavailableMetrics(t *testing.T) {
 		{"expired", "eligible", func(i *Intent) { i.ClaimOwner = "worker"; i.ClaimGeneration = 1; i.LeaseExpiresAt = now }},
 		{"retry", "retry_wait", func(i *Intent) { i.Retry = &RetryWait{ReadyAt: now.Add(time.Second), Failure: retry} }},
 		{"due", "eligible", func(i *Intent) { i.Retry = &RetryWait{ReadyAt: now, Failure: retry} }},
+		{"admitted_read_floor", "retry_wait", func(i *Intent) { i.ReadRetry = &ReadRetry{NotBefore: now.Add(time.Second), Delay: time.Second} }},
+		{"observed_read_wait", "retry_wait", func(i *Intent) {
+			i.ReadRetry = &ReadRetry{NotBefore: now.Add(time.Second), Delay: time.Second, Since: &now, Failure: &retry}
+		}},
 		{"blocked", "blocked", func(i *Intent) { i.Status = StatusBlocked; i.BlockedReason = string(blockedRaw) }},
 		{"closed", "closed", func(i *Intent) { i.Status = StatusClosed; i.Cursor = i.Request.Cardinality }},
 		{"canceled", "canceled", func(i *Intent) { i.Status = StatusCanceled; i.BlockedReason = "run_stopped" }},
@@ -80,6 +84,11 @@ func TestFanOutReadbackStateAndUnavailableMetrics(t *testing.T) {
 			}
 			if row.Runtime != UnavailableRuntimeReadback() {
 				t.Fatalf("fabricated runtime evidence: %+v", row.Runtime)
+			}
+			if intent.ReadRetry != nil {
+				if row.ReadWait == nil || (row.ReadWait.AgeMS == nil) != (intent.ReadRetry.Since == nil) {
+					t.Fatal("read wait lost observed/unknown age distinction")
+				}
 			}
 			if (intent.Status == StatusClosed || intent.Status == StatusCanceled) && row.Owed != 0 {
 				t.Fatalf("terminal owed=%d", row.Owed)

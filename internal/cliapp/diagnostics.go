@@ -1474,6 +1474,13 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		formatCLIHumanCount(result.FanOut.Canceled, "canceled item", "canceled items"),
 		formatCLIHumanCount(result.FanOut.Unsettled, "unsettled item", "unsettled items"),
 	)})
+	if result.FanOut.ReadWaiting > 0 {
+		age := "unavailable"
+		if result.FanOut.OldestReadWaitMS != nil {
+			age = fmt.Sprint(*result.FanOut.OldestReadWaitMS)
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "fan out reads", Value: fmt.Sprintf("waiting=%d oldest_observed_failure_age_ms=%s", result.FanOut.ReadWaiting, age)})
+	}
 	if layer := stringPointerValue(result.BlockingLayer); layer != "" {
 		value := formatCLIHumanCode(cliHumanCodeRunBlockingLayer, layer)
 		if reason := stringPointerValue(result.BlockingReason); reason != "" {

@@ -187,6 +187,7 @@ type IntentReadback struct {
 	NextChunkSize      int                       `json:"next_chunk_size"`
 	LastServedAt       *time.Time                `json:"last_served_at"`
 	Retry              *RetryWait                `json:"retry"`
+	ReadWait           *ReadWaitObservation      `json:"read_wait"`
 	ClaimOwner         string                    `json:"claim_owner"`
 	ClaimGeneration    uint64                    `json:"claim_generation"`
 	LeaseExpiresAt     *time.Time                `json:"lease_expires_at"`
@@ -195,6 +196,26 @@ type IntentReadback struct {
 	CreatedAt          time.Time                 `json:"created_at"`
 	UpdatedAt          time.Time                 `json:"updated_at"`
 	Runtime            RuntimeReadback           `json:"runtime"`
+}
+
+type ReadWaitObservation struct {
+	NotBefore time.Time                 `json:"not_before"`
+	Since     *time.Time                `json:"since"`
+	AgeMS     *int64                    `json:"age_ms"`
+	Failure   *runtimefailures.Envelope `json:"failure"`
+}
+
+func (r ReadWaitObservation) Validate(at time.Time) error {
+	if r.NotBefore.IsZero() || (r.Since == nil) != (r.AgeMS == nil) || (r.Since == nil) != (r.Failure == nil) {
+		return errors.New("read wait requires its exact floor and nullable observed-failure facts")
+	}
+	if r.Since != nil {
+		if r.Since.After(at) || *r.AgeMS != at.Sub(*r.Since).Milliseconds() {
+			return errors.New("read wait age disagrees with its observation")
+		}
+		return runtimefailures.ValidateEnvelope(*r.Failure)
+	}
+	return nil
 }
 
 type ListPage struct {
@@ -252,6 +273,14 @@ func (p ListPage) Validate(q ListQuery) error {
 		}
 		if row.Retry != nil {
 			if err := row.Retry.Validate(); err != nil {
+				return err
+			}
+		}
+		if row.ReadWait != nil {
+			if row.Status != StatusOpen {
+				return errors.New("read wait cannot belong to terminal or blocked work")
+			}
+			if err := row.ReadWait.Validate(p.ObservedAt); err != nil {
 				return err
 			}
 		}
@@ -326,6 +355,16 @@ func (i Intent) ReadbackAt(now time.Time) (IntentReadback, error) {
 	}
 	if i.Status == StatusOpen || i.Status == StatusBlocked {
 		row.Owed = i.Request.Cardinality - i.Cursor
+	}
+	if i.ReadRetry != nil && (i.ReadRetry.Failure != nil || state == ServingRetryWait) {
+		row.ReadWait = &ReadWaitObservation{NotBefore: i.ReadRetry.NotBefore, Since: i.ReadRetry.Since, Failure: i.ReadRetry.Failure}
+		if i.ReadRetry.Since != nil {
+			age := now.Sub(*i.ReadRetry.Since).Milliseconds()
+			row.ReadWait.AgeMS = &age
+		}
+		if err := row.ReadWait.Validate(now); err != nil {
+			return IntentReadback{}, err
+		}
 	}
 	if !i.LastServedAt.IsZero() {
 		at := i.LastServedAt

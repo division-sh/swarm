@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
@@ -98,6 +99,7 @@ type PostCommitRecovery struct {
 	Disposition RecoveryDisposition
 	Sweep       runtimepipelineobligation.SweepResult
 	Err         error
+	FanOut      *fanoutobligation.ResumeResult
 }
 
 type Store interface {
@@ -131,6 +133,7 @@ type Options struct {
 	Now                func() time.Time
 	ReleaseLimit       int
 	TimerCancellations TimerCancellationReconciler
+	ResumeFanOut       func(context.Context, string) (fanoutobligation.ResumeResult, error)
 }
 
 type Controller struct {
@@ -139,6 +142,7 @@ type Controller struct {
 	now                func() time.Time
 	releaseLimit       int
 	timerCancellations TimerCancellationReconciler
+	resumeFanOut       func(context.Context, string) (fanoutobligation.ResumeResult, error)
 }
 
 func NewController(store Store, queue QueueReleaser, opts Options) *Controller {
@@ -159,6 +163,7 @@ func NewController(store Store, queue QueueReleaser, opts Options) *Controller {
 		now:                now,
 		releaseLimit:       limit,
 		timerCancellations: opts.TimerCancellations,
+		resumeFanOut:       opts.ResumeFanOut,
 	}
 }
 
@@ -253,6 +258,9 @@ func (c *Controller) continueRun(ctx context.Context, req TransitionRequest, def
 	}
 	committed, err := c.store.ContinueRunControlOutcome(ctx, req)
 	if !committed.Acknowledged {
+		if !deferRecovery && errors.Is(err, ErrNotPaused) && c.resumeFanOut != nil {
+			return c.RecheckPausedFanOut(ctx, req.RunID)
+		}
 		if err == nil {
 			err = errors.New("run continue was not acknowledged")
 		}
@@ -266,10 +274,13 @@ func (c *Controller) continueRun(ctx context.Context, req TransitionRequest, def
 			Disposition: RecoveryNotConfigured,
 		},
 	}
-	if deferRecovery && c.queue != nil {
+	if deferRecovery && (c.queue != nil || c.resumeFanOut != nil) {
 		result.Recovery.Disposition = RecoveryPending
 	} else if c.queue != nil {
 		result.Recovery = c.releaseQueuedAfterContinue(ctx, state.RunID, true)
+	}
+	if !deferRecovery {
+		result.Recovery = c.resumeContinuedFanOut(context.WithoutCancel(ctx), state.RunID, result.Recovery)
 	}
 	if err != nil {
 		result.Recovery.Err = errors.Join(err, result.Recovery.Err)
@@ -286,13 +297,49 @@ func (c *Controller) continueRun(ctx context.Context, req TransitionRequest, def
 }
 
 func (c *Controller) RecoverContinuedRun(ctx context.Context, runID string) PostCommitRecovery {
-	if c == nil || c.queue == nil {
+	if c == nil {
 		return PostCommitRecovery{Disposition: RecoveryNotConfigured}
 	}
-	if err := c.queue.PreflightRunQueue(ctx, runID); err != nil {
-		return PostCommitRecovery{Disposition: RecoveryFailed, Err: err}
+	recovery := PostCommitRecovery{Disposition: RecoveryNotConfigured}
+	if c.queue != nil {
+		if err := c.queue.PreflightRunQueue(ctx, runID); err != nil {
+			return PostCommitRecovery{Disposition: RecoveryFailed, Err: err}
+		}
+		recovery = c.releaseQueuedAfterContinue(ctx, runID, false)
 	}
-	return c.releaseQueuedAfterContinue(ctx, runID, false)
+	return c.resumeContinuedFanOut(ctx, runID, recovery)
+}
+
+// RecheckPausedFanOut performs no lifecycle transition. Even an empty result
+// requires native admission by the exact currently loaded runtime.
+func (c *Controller) RecheckPausedFanOut(ctx context.Context, runID string) (TransitionResult, error) {
+	if c == nil || c.resumeFanOut == nil {
+		return TransitionResult{}, errors.New("paused handler recheck requires its live runtime owner")
+	}
+	result := TransitionResult{RunID: runID, Status: StatusRunning}
+	result.Recovery = c.resumeContinuedFanOut(ctx, runID, PostCommitRecovery{Disposition: RecoveryComplete})
+	if result.Recovery.FanOut == nil || !result.Recovery.FanOut.Admitted {
+		return TransitionResult{}, result.Recovery.Err
+	}
+	return result, nil
+}
+
+func (c *Controller) resumeContinuedFanOut(ctx context.Context, runID string, recovery PostCommitRecovery) PostCommitRecovery {
+	if c.resumeFanOut == nil || recovery.Err != nil {
+		return recovery
+	}
+	resumed, err := c.resumeFanOut(ctx, runID)
+	recovery.FanOut = &resumed
+	recovery.Err = err
+	if err != nil {
+		recovery.Disposition = RecoveryFailed
+		if resumed.Remaining != 0 {
+			recovery.Disposition = RecoveryBlocked
+		}
+	} else if recovery.Disposition == RecoveryNotConfigured {
+		recovery.Disposition = RecoveryComplete
+	}
+	return recovery
 }
 
 func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string, detachFirst bool) PostCommitRecovery {

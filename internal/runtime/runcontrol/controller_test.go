@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
@@ -166,6 +167,53 @@ func TestControllerContinueDrainsUntilExplicitExhaustion(t *testing.T) {
 	}
 	if queue.calls != 2 {
 		t.Fatalf("queue release calls = %d, want 2", queue.calls)
+	}
+}
+
+func TestControllerContinueRechecksHandlersWithoutReplayingLifecycle(t *testing.T) {
+	fault := errors.New("exact handler remains defective")
+	for _, tc := range []struct {
+		name    string
+		resumed fanoutobligation.ResumeResult
+		failure error
+	}{
+		{"empty", fanoutobligation.ResumeResult{Admitted: true}, nil},
+		{"reopened", fanoutobligation.ResumeResult{Admitted: true, Observed: 1, Reopened: 1}, nil},
+		{"partial", fanoutobligation.ResumeResult{Admitted: true, Observed: 2, Reopened: 1, Remaining: 1}, fault},
+		{"not_current", fanoutobligation.ResumeResult{}, fault},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeRunControlStore{continueUnack: true, continueErr: ErrNotPaused}
+			calls := 0
+			controller := NewController(store, nil, Options{ResumeFanOut: func(ctx context.Context, runID string) (fanoutobligation.ResumeResult, error) {
+				calls++
+				if runID != "run-1" || ctx.Err() != nil {
+					t.Fatal("recheck lost exact target/context")
+				}
+				return tc.resumed, tc.failure
+			}})
+			result, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"})
+			if !tc.resumed.Admitted {
+				if !errors.Is(err, fault) || result.RunID != "" {
+					t.Fatal("missing exact admission became success")
+				}
+				return
+			}
+			if calls != 1 || result.Recovery.FanOut == nil || *result.Recovery.FanOut != tc.resumed || err != nil || !errors.Is(result.Recovery.Err, tc.failure) {
+				t.Fatalf("result=%+v err=%v calls=%d", result, err, calls)
+			}
+			if store.onContinueCommit != nil {
+				t.Fatal("recheck fabricated lifecycle transition")
+			}
+			if tc.resumed.Remaining != 0 && result.Recovery.Disposition != RecoveryBlocked {
+				t.Fatal("partial result reported all resumed")
+			}
+			// Deferred callers must first restore the exact runtime. The primary
+			// controller cannot turn a live run into a successful empty recheck.
+			if _, err := controller.ContinueDeferred(context.Background(), TransitionRequest{RunID: "run-1"}); !errors.Is(err, ErrNotPaused) || calls != 1 {
+				t.Fatal("deferred continue bypassed target runtime acquisition")
+			}
+		})
 	}
 }
 

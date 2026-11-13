@@ -10,11 +10,12 @@ import (
 )
 
 type transactionFinalization struct {
-	rollbackErr      error
-	err              error
-	rolledBack       bool
-	connectionJoined bool
-	discard          bool
+	rollbackErr        error
+	err                error
+	rolledBack         bool
+	connectionJoined   bool
+	connectionReleased bool
+	discard            bool
 }
 
 func finalizeRollback(tx *sql.Tx, stopRollback func() bool, rollbackDone <-chan error, discard bool) transactionFinalization {
@@ -41,6 +42,7 @@ func (f transactionFinalization) closeConnection(conn *sql.Conn, write bool) tra
 	}
 	f.err = errors.Join(f.err, closeErr)
 	f.connectionJoined = !f.discard && closeErr == nil
+	f.connectionReleased = closeErr == nil
 	return f
 }
 

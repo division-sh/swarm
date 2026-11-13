@@ -106,6 +106,20 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 	return err
 }
 
+// RunReadTransactionObserved reports joined SQL-handle disposal, not a clean
+// rollback or successful transport close. The original error tree is unchanged.
+func (b *Backend) RunReadTransactionObserved(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx, err := b.inspectionTransaction(ctx); err != nil || tx != nil {
+		return false, b.RunReadTransaction(ctx, operation)
+	}
+	released := true
+	_, err := b.runTransactionOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, false, false, operation, &released)
+	return released, err
+}
+
 // The canceled-turn inventory takes native locks but emits no revision or
 // evidence. Inspection cannot adopt this transaction as mutation authority.
 func (b *Backend) RunLockingReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
@@ -113,7 +127,7 @@ func (b *Backend) RunLockingReadTransaction(ctx context.Context, operation func(
 	return err
 }
 
-func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain, construction bool, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions, drain, construction bool, operation func(context.Context, *sql.Tx) error, readReleased ...*bool) (committed bool, err error) {
 	if err := b.refuseInspectionMutation(ctx); err != nil {
 		return false, err
 	}
@@ -145,6 +159,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		return false, err
 	}
 	poolWait := time.Since(poolStarted)
+	if len(readReleased) != 0 {
+		*readReleased[0] = false
+	}
 	discard := false
 	serializationConflict := false
 	beginAttempted, commitAttempted := false, false
@@ -159,6 +176,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	defer func() { probe.Finish(err) }()
 	defer func() {
 		cleanupStarted := time.Now()
+		released := true
 		var cleanupErr error
 		rolledBack := false
 		if _, nested := CleanCancellationBeforeCommit(err); nested {
@@ -187,6 +205,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 				rawErr = nil
 			}
 			cleanupErr = errors.Join(cleanupErr, rawErr)
+			released = rawErr == nil
 		}
 		closeErr := conn.Close()
 		cleanClose := closeErr == nil && !discard
@@ -194,6 +213,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 			closeErr = nil
 		}
 		cleanupErr = errors.Join(cleanupErr, closeErr)
+		if len(readReleased) != 0 {
+			*readReleased[0] = released && closeErr == nil
+		}
 		if cleanupErr != nil {
 			slog.Error("postgres transaction cleanup failed", "error", cleanupErr)
 			err = errors.Join(err, cleanupErr)

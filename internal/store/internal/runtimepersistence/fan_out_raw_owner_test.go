@@ -88,6 +88,7 @@ func rawFanOutTestClaim(ctx context.Context, db *sql.DB, factory rawFanOutTestFa
 		var key fanoutobligation.IntentKey
 		err := db.QueryRowContext(ctx, `SELECT run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path FROM fan_out_intents
 			WHERE bundle_hash=$1 AND status='open' AND (claim_owner IS NULL OR lease_expires_at <= $2) AND (retry_ready_at IS NULL OR retry_ready_at <= $2)
+			AND (read_retry_not_before IS NULL OR read_retry_not_before <= $2)
 			ORDER BY COALESCE(last_served_at,created_at),created_at,run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path LIMIT 1`, request.BundleHash, now().UTC()).Scan(
 			&key.RunID, &key.TriggeringDeliveryID, &key.ElementRef.FlowPath, &key.ElementRef.Family, &key.ElementRef.SemanticPath)
 		if errors.Is(err, sql.ErrNoRows) {

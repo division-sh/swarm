@@ -4621,7 +4621,7 @@ handler_specification:
           remaining cardinality; a closed or zero-cardinality intent owes no work despite its positive stored budget.
           Every confirmed successful chunk restores the next budget to 32, regardless of elapsed duration. Only a typed
           retryable failure advances nothing and halves the budget with ceiling division, bounded by floor 1.
-          That release atomically records a validated safely retryable FailureEnvelope and retry_ready_at one second
+          For non-read failures that release atomically records a validated safely retryable FailureEnvelope and retry_ready_at one second
           after selected-store observation, with no retained claim. Before due it projects temporary retry wait, not
           permanent blocked status or serving eligibility. At due it is eligible through the ordinary serving owner;
           acquisition consumes the wait. Same-run restart preserves it; fork resets it with operational claim state.
@@ -4634,6 +4634,18 @@ handler_specification:
           preserves valid persisted tuning; fork resets operational tuning to 32 while preserving inherited cursor,
           outcomes and source evidence. Invalid persisted evidence fails closed, without migration or repair fallback.
           Chunk boundaries never change semantic output, claim fencing, fairness or atomic publication semantics.
+        read_failure_policy: >-
+          A read failure describes an attempt, not proof that the feed is defective. Native read ownership distinguishes
+          lost authority (yield), safely disposed infrastructure/timeout/unknown failures (retry without a budget),
+          disposal uncertainty (yield and reconcile), and positively proved immutable data/code defects (pause that
+          handler only). Preserve every independent error. Never infer a defect or safe disposal from a database
+          message, SQLSTATE, or cancellation sentinel. The same intent retains a conservative next-read floor before
+          evaluation; restart and claim consumption do not reset it. A confirmed chunk advance clears it. Actual
+          observed failure time and reason are separate from admission; an interrupted release has unknown failure age.
+          Proposed cadence defaults are merge-held pending user confirmation. Ordinary run continue rechecks one
+          bounded inventory of paused handler revisions through the exact live runtime. Each reopen is acknowledged
+          separately, preserving its source, current life, cursor and complete semantic prefix. Partial completion is
+          observable; reblocked revisions are not chased. Selected and inherited-cut controls remain refused.
         failure_isolation: >-
           Publication plans, outcomes, cursor advancement, closure, success-to-cap tuning, finite fairness position,
           claim release and fork-revision capture commit atomically. There is no separate successful-turn release writer.
@@ -20937,6 +20949,10 @@ platform_tables:
             lease_expires_at          TIMESTAMPTZ,
             retry_ready_at            TIMESTAMPTZ,
             retry_failure             JSONB,
+            read_retry_not_before     TIMESTAMPTZ,
+            read_retry_delay_ms       BIGINT,
+            read_retry_since          TIMESTAMPTZ,
+            read_retry_failure        JSONB,
             last_served_at            TIMESTAMPTZ,
             blocked_reason            TEXT,
             created_at                TIMESTAMPTZ NOT NULL,
@@ -20948,6 +20964,7 @@ platform_tables:
             CHECK ((status = 'open' AND cursor < cardinality AND blocked_reason IS NULL) OR (status = 'closed' AND cursor = cardinality AND blocked_reason IS NULL AND claim_owner IS NULL) OR (status = 'blocked' AND cursor < cardinality AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL) OR (status = 'canceled' AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL)),
             CHECK ((claim_owner IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND claim_generation > 0 AND lease_expires_at IS NOT NULL)),
             CHECK ((retry_ready_at IS NULL AND retry_failure IS NULL) OR (retry_ready_at IS NOT NULL AND retry_failure IS NOT NULL AND status = 'open' AND claim_owner IS NULL)),
+            CHECK ((read_retry_not_before IS NULL AND read_retry_delay_ms IS NULL AND read_retry_since IS NULL AND read_retry_failure IS NULL) OR (status = 'open' AND read_retry_not_before IS NOT NULL AND read_retry_delay_ms IS NOT NULL AND read_retry_delay_ms BETWEEN 1000 AND 60000 AND ((read_retry_since IS NULL AND read_retry_failure IS NULL) OR (read_retry_since IS NOT NULL AND read_retry_failure IS NOT NULL)))),
             CHECK ((source_kind = 'event_payload_field' AND source_event_id IS NOT NULL AND source_run_id IS NULL AND source_entity_id IS NULL AND source_mutation_id IS NULL AND NULLIF(source_field, '') IS NOT NULL AND source_resource_flow_path IS NULL AND source_resource_event_name IS NULL AND source_resource_version_id IS NULL) OR (source_kind = 'entity_field_revision' AND source_event_id IS NULL AND source_run_id IS NOT NULL AND source_entity_id IS NOT NULL AND source_mutation_id IS NOT NULL AND NULLIF(source_field, '') IS NOT NULL AND source_resource_flow_path IS NULL AND source_resource_event_name IS NULL AND source_resource_version_id IS NULL) OR (source_kind = 'resource_version' AND source_event_id IS NULL AND source_run_id IS NULL AND source_entity_id IS NULL AND source_mutation_id IS NULL AND source_field IS NULL AND source_resource_flow_path IS NOT NULL AND source_resource_event_name IS NOT NULL AND source_resource_version_id IS NOT NULL)),
             INDEX idx_fan_out_intents_work (status, last_served_at, created_at, run_id),
             INDEX idx_fan_out_intents_run (run_id, status)
@@ -32901,7 +32918,7 @@ api_specification:
       FanOutIntentReadback:
         type: object
         additionalProperties: false
-        required: [key, bundle_hash, status, durable_state, cardinality, cursor, owed, next_chunk_size, last_served_at, retry, claim_owner, claim_generation, lease_expires_at, failure, cancellation_reason, created_at, updated_at, runtime]
+        required: [key, bundle_hash, status, durable_state, cardinality, cursor, owed, next_chunk_size, last_served_at, retry, read_wait, claim_owner, claim_generation, lease_expires_at, failure, cancellation_reason, created_at, updated_at, runtime]
         properties:
           key: {$ref: '#/components/schemas/FanOutIntentKey'}
           bundle_hash: {$ref: '#/components/schemas/BundleHash'}
@@ -32925,6 +32942,21 @@ api_specification:
               properties:
                 ready_at: {$ref: '#/components/schemas/Timestamp'}
                 failure: {$ref: '#/components/schemas/FailureEnvelope'}
+          read_wait:
+            description: Native next-admission floor and actual observed read-failure age. Null for healthy in-flight work. A floor alone is not a failure observation; since, age_ms and failure remain null when unknown.
+            oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [not_before, since, age_ms, failure]
+              properties:
+                not_before: {$ref: '#/components/schemas/Timestamp'}
+                since:
+                  oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+                age_ms:
+                  oneOf: [{type: integer, minimum: 0}, {type: 'null'}]
+                failure:
+                  oneOf: [{$ref: '#/components/schemas/FailureEnvelope'}, {type: 'null'}]
           claim_owner: {type: string}
           claim_generation: {type: integer, minimum: 0}
           lease_expires_at:
@@ -32979,7 +33011,7 @@ api_specification:
         description: Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.
         type: object
         additionalProperties: false
-        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, semantic_rejected, semantic_rejection_sample, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, oldest_age_ms]
+        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, semantic_rejected, semantic_rejection_sample, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, oldest_age_ms, read_waiting, oldest_read_wait_ms]
         properties:
           run_id: {type: string}
           intents: {type: integer, minimum: 0}
@@ -33008,6 +33040,10 @@ api_specification:
           min_next_chunk: {type: integer, minimum: 0, maximum: 32}
           max_next_chunk: {type: integer, minimum: 0, maximum: 32}
           oldest_age_ms: {type: integer, minimum: 0}
+          read_waiting: {type: integer, minimum: 0}
+          oldest_read_wait_ms:
+            description: Oldest known failure age among waiting reads; null when no actual failure time is retained, never a claim-admission age.
+            oneOf: [{type: integer, minimum: 0}, {type: 'null'}]
       FanOutSemanticRejectionSample:
         description: Structured identity and exact persisted typed failure for one deterministic rejected fan-out ordinal.
         type: object

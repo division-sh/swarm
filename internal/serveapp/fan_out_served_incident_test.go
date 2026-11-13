@@ -132,6 +132,41 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			if after := issue2394SurfaceSnapshot(t, rt.DB, opened.RunID); !reflect.DeepEqual(before, after) {
 				t.Fatalf("served diagnostics changed blocked issuance: before=%v after=%v", before, after)
 			}
+			// Recheck this still-running run through the public control path.
+			// Its immutable bad input still fails on the next attempt; continue
+			// neither skips it nor replays any earlier ordinal or run transition.
+			issue2394SurfaceCLI(t, rt, "run", "continue", opened.RunID)
+			var resumed fanoutobligation.ListPage
+			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.fan_out.list", map[string]any{"run_id": opened.RunID}, &resumed)
+				if len(resumed.Intents) == 1 && resumed.Intents[0].ClaimGeneration > row.ClaimGeneration && resumed.Intents[0].Status == fanoutobligation.StatusBlocked {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if len(resumed.Intents) != 1 || resumed.Intents[0].Cursor != 0 || resumed.Intents[0].ClaimGeneration <= row.ClaimGeneration || resumed.Intents[0].Status != fanoutobligation.StatusBlocked || resumed.Intents[0].Key != row.Key {
+				t.Fatalf("continue lost exact paused handler/semantic prefix: %+v", resumed)
+			}
+			params := map[string]any{"run_id": opened.RunID, "idempotency_key": uuid.NewString()}
+			var first, replayed map[string]any
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.continue", params, &first)
+			previousGeneration := resumed.Intents[0].ClaimGeneration
+			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.fan_out.list", map[string]any{"run_id": opened.RunID}, &resumed)
+				if len(resumed.Intents) == 1 && resumed.Intents[0].ClaimGeneration > previousGeneration && resumed.Intents[0].Status == fanoutobligation.StatusBlocked {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if len(resumed.Intents) != 1 || resumed.Intents[0].Status != fanoutobligation.StatusBlocked || resumed.Intents[0].ClaimGeneration <= previousGeneration {
+				t.Fatalf("fresh keyed recheck did not complete one attempt: %+v", resumed)
+			}
+			generation := resumed.Intents[0].ClaimGeneration
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.continue", params, &replayed)
+			requireServedJSONRPCResult(t, rt.Endpoint, "run.fan_out.list", map[string]any{"run_id": opened.RunID}, &resumed)
+			if !reflect.DeepEqual(first, replayed) || len(resumed.Intents) != 1 || resumed.Intents[0].ClaimGeneration != generation || resumed.Intents[0].Status != fanoutobligation.StatusBlocked || resumed.Intents[0].Cursor != 0 {
+				t.Fatal("saved completion retried a newly blocked revision or changed the original command result")
+			}
 		})
 	}
 }

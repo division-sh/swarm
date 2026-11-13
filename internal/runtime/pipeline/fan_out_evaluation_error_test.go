@@ -67,12 +67,16 @@ func TestFanOutCompositeLoadPreservesJoinedFailureAndCleanup(t *testing.T) {
 		name      string
 		failure   error
 		wantBlock bool
+		wantRetry bool
 	}{
-		{"canceled", &FanOutEvaluationLoadError{Cause: context.Canceled}, false},
-		{"deadline", &FanOutEvaluationLoadError{Cause: context.DeadlineExceeded}, false},
-		{"joined_cancellation", errors.Join(&FanOutEvaluationLoadError{Cause: context.Canceled}, context.DeadlineExceeded), false},
-		{"independent_sibling", errors.Join(&FanOutEvaluationLoadError{Cause: context.Canceled}, sibling), true},
-		{"independent_hydration", &FanOutEvaluationLoadError{Cause: errors.Join(context.Canceled, hydration)}, true},
+		{"canceled", &FanOutEvaluationLoadError{Cause: context.Canceled, Disposition: FanOutReadYield}, false, false},
+		{"deadline", &FanOutEvaluationLoadError{Cause: context.DeadlineExceeded, Disposition: FanOutReadRetry}, false, true},
+		{"joined_cancellation", errors.Join(&FanOutEvaluationLoadError{Cause: context.Canceled}, context.DeadlineExceeded), false, false},
+		{"independent_sibling", errors.Join(&FanOutEvaluationLoadError{Cause: context.Canceled, Disposition: FanOutReadRetry}, sibling), false, false},
+		{"independent_hydration", &FanOutEvaluationLoadError{Cause: errors.Join(context.Canceled, hydration)}, false, false},
+		{"disposed_unknown", &FanOutEvaluationLoadError{Cause: hydration, Disposition: FanOutReadRetry}, false, true},
+		{"proved_defect", &FanOutEvaluationLoadError{Cause: hydration, Disposition: FanOutReadDefect}, true, false},
+		{"defect_with_unevidenced_cleanup", errors.Join(&FanOutEvaluationLoadError{Cause: hydration, Disposition: FanOutReadDefect}, sibling), false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			releases := 0
@@ -95,16 +99,27 @@ func TestFanOutCompositeLoadPreservesJoinedFailureAndCleanup(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			disposition, err := pc.claimAndServeFanOutTurn(ctx, owner, nil, time.Now())
-			if (len(owner.blocks) != 0) != test.wantBlock || (!test.wantBlock && disposition != fanOutTurnYielded) {
+			if (len(owner.blocks) != 0) != test.wantBlock || (!test.wantBlock && !test.wantRetry && disposition != fanOutTurnYielded) {
 				t.Errorf("disposition=%v blocks=%d wantBlock=%v", disposition, len(owner.blocks), test.wantBlock)
 			}
-			for _, cause := range []error{test.failure, closing, releasing} {
+			causes := []error{test.failure, closing}
+			if !test.wantRetry {
+				causes = append(causes, releasing)
+			}
+			for _, cause := range causes {
 				if !errors.Is(err, cause) {
 					t.Errorf("lost failure %v: %v", cause, err)
 				}
 			}
-			if releases != 1 || len(owner.retryRelease) != 0 || len(owner.commands) != 0 {
+			wantReleases, wantRetries := 1, 0
+			if test.wantRetry {
+				wantReleases, wantRetries = 0, 1
+			}
+			if releases != wantReleases || len(owner.retryRelease) != wantRetries || len(owner.commands) != 0 {
 				t.Fatalf("release=%d retry=%d commit=%d", releases, len(owner.retryRelease), len(owner.commands))
+			}
+			if test.wantRetry && (!owner.retryRelease[0].ReadEvaluation || disposition != fanOutTurnRetryWait) {
+				t.Fatal("safe read retry did not retain read-specific disposition")
 			}
 		})
 	}

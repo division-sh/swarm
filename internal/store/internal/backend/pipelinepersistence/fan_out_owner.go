@@ -33,11 +33,18 @@ const fanOutIntentColumns = `
 	source_kind, source_event_id, source_run_id, source_entity_id, source_field, source_mutation_id,
 	source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 	cardinality, cursor, status, next_chunk_size, last_served_at, created_at, updated_at,
-	claim_owner, claim_generation, lease_expires_at, blocked_reason, capsule, retry_ready_at, retry_failure`
+	claim_owner, claim_generation, lease_expires_at, blocked_reason, capsule, retry_ready_at, retry_failure,
+	read_retry_not_before, read_retry_delay_ms, read_retry_since, read_retry_failure`
 
 type rowScanner interface{ Scan(...any) error }
 
-func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
+func scanFanOutIntent(row rowScanner) (result fanoutobligation.Intent, scanErr error) {
+	decoded := false
+	defer func() {
+		if decoded && scanErr != nil {
+			scanErr = fanOutInvalidRead(scanErr)
+		}
+	}()
 	var (
 		runID, origin, bundleHash                                                             string
 		feedID, schemaDigest, deliveryID, flowPath, family, semanticPath, digest              sql.NullString
@@ -51,6 +58,9 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 		capsuleRaw                                                                            []byte
 		retryAtRaw                                                                            any
 		retryFailureRaw                                                                       []byte
+		readRetryAt, readRetrySince                                                           any
+		readRetryDelay                                                                        sql.NullInt64
+		readRetryFailure                                                                      []byte
 	)
 	if err := row.Scan(
 		&runID, &origin, &feedID, &schemaDigest,
@@ -59,9 +69,11 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 		&resourceFlowPath, &resourceEvent, &resourceVersion,
 		&cardinality, &cursor, &status, &nextChunk, &lastServedRaw, &createdAtRaw, &updatedAtRaw,
 		&claimOwner, &claimGeneration, &leaseRaw, &blockedReason, &capsuleRaw, &retryAtRaw, &retryFailureRaw,
+		&readRetryAt, &readRetryDelay, &readRetrySince, &readRetryFailure,
 	); err != nil {
 		return fanoutobligation.Intent{}, err
 	}
+	decoded = true
 	lastServed, _, err := sqliteTimeValue(lastServedRaw)
 	if err != nil {
 		return fanoutobligation.Intent{}, fmt.Errorf("decode fan-out last-served time: %w", err)
@@ -135,6 +147,10 @@ func scanFanOutIntent(row rowScanner) (fanoutobligation.Intent, error) {
 		}
 		intent.Retry = &fanoutobligation.RetryWait{ReadyAt: at, Failure: failure}
 	}
+	intent.ReadRetry, err = decodeFanOutReadRetry(readRetryAt, readRetryDelay, readRetrySince, readRetryFailure)
+	if err != nil {
+		return fanoutobligation.Intent{}, err
+	}
 	if err := intent.Validate(); err != nil {
 		return fanoutobligation.Intent{}, err
 	}
@@ -189,6 +205,7 @@ func (s *fanOutPostgresOwner) ClaimFanOutIntent(ctx context.Context, request run
 			row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=$1 AND (claim_owner IS NULL OR lease_expires_at <= clock_timestamp())
 			AND (retry_ready_at IS NULL OR retry_ready_at <= clock_timestamp())
+			AND (read_retry_not_before IS NULL OR read_retry_not_before <= clock_timestamp())
 			AND `+predicate+` FOR UPDATE SKIP LOCKED`, append([]any{request.BundleHash}, keyArgs...)...)
 			var scanErr error
 			result.intent, scanErr = scanFanOutIntent(row)
@@ -203,7 +220,7 @@ func (s *fanOutPostgresOwner) ClaimFanOutIntent(ctx context.Context, request run
 				return clockErr
 			}
 			result.found = true
-			return claimFanOutIntentRow(txctx, tx, request, admittedAt, &result.intent, &result.claim)
+			return claimFanOutIntentRow(txctx, tx, true, request, admittedAt, &result.intent, &result.claim)
 		})
 		return result, err
 	})
@@ -239,6 +256,7 @@ func (s *fanOutSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request runti
 			row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=$1 AND (claim_owner IS NULL OR lease_expires_at <= $2)
 			AND (retry_ready_at IS NULL OR retry_ready_at <= $3)
+			AND (read_retry_not_before IS NULL OR read_retry_not_before <= $3)
 			AND `+predicate, append([]any{request.BundleHash, admittedAt, admittedAt}, keyArgs...)...)
 			var scanErr error
 			result.intent, scanErr = scanFanOutIntent(row)
@@ -249,7 +267,7 @@ func (s *fanOutSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request runti
 				return scanErr
 			}
 			result.found = true
-			return claimFanOutIntentRow(txctx, tx, request, admittedAt, &result.intent, &result.claim)
+			return claimFanOutIntentRow(txctx, tx, false, request, admittedAt, &result.intent, &result.claim)
 		})
 		return result, err
 	})
@@ -266,7 +284,7 @@ type fanOutClaimResult struct {
 	found  bool
 }
 
-func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, request runtimepipeline.FanOutClaimRequest, admittedAt time.Time, intent *fanoutobligation.Intent, claim *fanoutobligation.Claim) error {
+func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, postgres bool, request runtimepipeline.FanOutClaimRequest, admittedAt time.Time, intent *fanoutobligation.Intent, claim *fanoutobligation.Claim) error {
 	state, err := intent.ServingAt(admittedAt)
 	if err != nil {
 		return err
@@ -276,11 +294,21 @@ func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, request runtimepipeli
 	}
 	lease := admittedAt.Add(request.Lease).UTC()
 	nextGeneration := intent.ClaimGeneration + 1
-	predicate, keyArgs := fanOutKeyPredicate("", intent.Request.Key, 5)
-	args := append([]any{request.Owner, nextGeneration, lease, admittedAt}, keyArgs...)
+	readRetry := intent.ReadRetry.NextAttempt(admittedAt)
+	since, failure, err := encodeFanOutReadFailure(readRetry)
+	if err != nil {
+		return err
+	}
+	predicate, keyArgs := fanOutKeyPredicate("", intent.Request.Key, 9)
+	args := append([]any{request.Owner, nextGeneration, lease, admittedAt, readRetry.NotBefore, readRetry.Delay.Milliseconds(), since, failure}, keyArgs...)
 	args = append(args, intent.ClaimGeneration)
-	result, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET claim_owner=$1,claim_generation=$2,lease_expires_at=$3,updated_at=$4,retry_ready_at=NULL,retry_failure=NULL
-		WHERE `+predicate+fmt.Sprintf(` AND status='open' AND claim_generation=$%d`, len(args)), args...)
+	query := `UPDATE fan_out_intents SET claim_owner=$1,claim_generation=$2,lease_expires_at=$3,updated_at=$4,retry_ready_at=NULL,retry_failure=NULL,
+		read_retry_not_before=$5,read_retry_delay_ms=$6,read_retry_since=$7,read_retry_failure=$8
+		WHERE ` + predicate + fmt.Sprintf(` AND status='open' AND claim_generation=$%d`, len(args))
+	if postgres {
+		query = strings.ReplaceAll(query, "read_retry_failure=$8", "read_retry_failure=$8::jsonb")
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -296,6 +324,7 @@ func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, request runtimepipeli
 	intent.LeaseExpiresAt = lease
 	intent.UpdatedAt = admittedAt
 	intent.Retry = nil
+	intent.ReadRetry = &readRetry
 	*claim = fanoutobligation.Claim{Key: intent.Request.Key, Owner: request.Owner, Generation: nextGeneration, LeaseUntil: lease}
 	return nil
 }
@@ -321,13 +350,14 @@ func (s *fanOutPostgresOwner) loadFanOutEvaluationIntent(ctx context.Context, cl
 		return err
 	}
 	var err error
+	readDisposed := false
 	if s.grant.SelectedFork != nil {
 		err = s.backend.RunTransaction(ctx, load)
 	} else {
-		err = s.backend.RunReadTransaction(ctx, load)
+		readDisposed, err = s.backend.RunReadTransactionObserved(ctx, load)
 	}
 	if err != nil {
-		return fanoutobligation.Intent{}, err
+		return fanoutobligation.Intent{}, fanOutReadFailure(ctx, "admit_read", err, readDisposed)
 	}
 	return intent, nil
 }
@@ -353,13 +383,14 @@ func (s *fanOutSQLiteOwner) loadFanOutEvaluationIntent(ctx context.Context, clai
 		return err
 	}
 	var err error
+	readDisposed := false
 	if s.grant.SelectedFork != nil {
 		err = s.backend.RunTransaction(ctx, "load selected fan-out claim", load)
 	} else {
-		err = s.backend.RunReadTransaction(ctx, load)
+		readDisposed, err = s.backend.RunReadTransactionObserved(ctx, load)
 	}
 	if err != nil {
-		return fanoutobligation.Intent{}, err
+		return fanoutobligation.Intent{}, fanOutReadFailure(ctx, "admit_read", err, readDisposed)
 	}
 	return intent, nil
 }
@@ -378,7 +409,7 @@ func admitAndLoadSelectedFanOutClaim(ctx context.Context, tx *sql.Tx, admission 
 func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resourceData *storedurabledata.Owner, intent fanoutobligation.Intent) (runtimepipeline.FanOutEvaluationInput, error) {
 	var input runtimepipeline.FanOutEvaluationInput
 	if err := intent.Validate(); err != nil {
-		return input, err
+		return input, fanOutInvalidRead(err)
 	}
 	var err error
 	if intent.Request.Deployment == nil {
@@ -388,11 +419,11 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 		} else {
 			triggers, err = hydrateSQLitePersistedReplayEvents(ctx, db, []string{intent.Request.Capsule.Lineage.ParentEventID})
 		}
-		if err != nil || len(triggers) != 1 || triggers[0].ReplayFailure != nil {
-			if err == nil {
-				err = fmt.Errorf("fan-out triggering event hydration produced %d canonical records", len(triggers))
-			}
+		if err != nil {
 			return input, err
+		}
+		if len(triggers) != 1 || triggers[0].ReplayFailure != nil {
+			return input, fanOutInvalidRead(fmt.Errorf("fan-out triggering event hydration produced %d canonical records", len(triggers)))
 		}
 		input.Trigger = triggers[0].Event
 		triggerInLineage, err := fanoutorigin.SourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, input.Trigger.RunID())
@@ -400,7 +431,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 			return input, err
 		}
 		if !triggerInLineage {
-			return input, fmt.Errorf("fan-out triggering event run %s is outside intent run %s fork lineage", input.Trigger.RunID(), intent.Request.Key.RunID)
+			return input, fanOutInvalidRead(fmt.Errorf("fan-out triggering event run %s is outside intent run %s fork lineage", input.Trigger.RunID(), intent.Request.Key.RunID))
 		}
 	}
 	input.StartOrdinal = intent.Cursor
@@ -408,11 +439,11 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 	var raw []byte
 	if intent.Request.Deployment != nil {
 		if resourceData == nil {
-			return input, fmt.Errorf("deployment feed requires pinned resource source owner")
+			return input, fanOutInvalidRead(fmt.Errorf("deployment feed requires pinned resource source owner"))
 		}
 		bundleHash, bundleErr := intent.Request.OriginBundleHash()
 		if bundleErr != nil {
-			return input, bundleErr
+			return input, fanOutInvalidRead(bundleErr)
 		}
 		source, sourceErr := resourceData.LoadFeedSource(ctx, intent.Request.Key.RunID, bundleHash, intent.Request.Key.DeploymentFeedID, intent.Source.Declaration)
 		if sourceErr != nil {
@@ -420,37 +451,46 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 		}
 		if source.VersionID != intent.Source.VersionID || source.RowCount != intent.Request.Cardinality ||
 			(intent.Request.Deployment != nil && source.SchemaDigest != intent.Request.Deployment.SchemaDigest) {
-			return input, fmt.Errorf("fan-out immutable resource source disagrees with committed intent")
+			return input, fanOutInvalidRead(fmt.Errorf("fan-out immutable resource source disagrees with committed intent"))
 		}
 		input.Items, err = resourceData.LoadPinnedRowsRange(ctx, intent.Request.Key.RunID, bundleHash, source, intent.Cursor, endOrdinal)
 	} else {
 		switch intent.Source.Kind {
 		case fanoutobligation.SourceEventPayloadField:
 			if input.Trigger.ID() != intent.Source.EventID {
-				return input, fmt.Errorf("fan-out payload source disagrees with triggering event")
+				return input, fanOutInvalidRead(fmt.Errorf("fan-out payload source disagrees with triggering event"))
 			}
 			input.Items, err = collectionFieldRangeFromJSON(input.Trigger.Payload(), intent.Request, intent.Cursor, endOrdinal)
+			if err != nil {
+				err = fanOutInvalidRead(err)
+			}
 		case fanoutobligation.SourceEntityField:
 			inLineage, lineageErr := fanoutorigin.SourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, intent.Source.RunID)
 			if lineageErr != nil {
 				return input, lineageErr
 			}
 			if !inLineage {
-				return input, fmt.Errorf("fan-out entity source run %s is outside intent run %s fork lineage", intent.Source.RunID, intent.Request.Key.RunID)
+				return input, fanOutInvalidRead(fmt.Errorf("fan-out entity source run %s is outside intent run %s fork lineage", intent.Source.RunID, intent.Request.Key.RunID))
 			}
 			if err := db.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`, intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&raw); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return input, fanOutInvalidRead(err)
+				}
 				return input, err
 			}
 			input.Items, err = collectionRangeFromJSON(raw, intent.Request, intent.Cursor, endOrdinal)
+			if err != nil {
+				err = fanOutInvalidRead(err)
+			}
 		default:
-			return input, fmt.Errorf("unsupported handler fan-out source kind %q", intent.Source.Kind)
+			return input, fanOutInvalidRead(fmt.Errorf("unsupported handler fan-out source kind %q", intent.Source.Kind))
 		}
 	}
 	if err != nil {
 		return input, err
 	}
 	if err := input.Validate(intent); err != nil {
-		return input, err
+		return input, fanOutInvalidRead(err)
 	}
 	return input, nil
 }
@@ -548,7 +588,8 @@ func releaseFanOutRetryable(ctx context.Context, attempt *mutationprotocol.Attem
 		if err := admit(txctx, tx); err != nil {
 			return err
 		}
-		if _, err := lockClaimedFanOutIntent(txctx, tx, postgres, request.Claim, observeNow); err != nil {
+		intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, request.Claim, observeNow)
+		if err != nil {
 			return err
 		}
 		now, err := fanOutAdmissionTime(txctx, tx, postgres, observeNow)
@@ -559,17 +600,35 @@ func releaseFanOutRetryable(ctx context.Context, attempt *mutationprotocol.Attem
 		if err != nil {
 			return err
 		}
-		predicate, keyArgs := fanOutKeyPredicate("", request.Claim.Key, 4)
-		args := append([]any{now, now.Add(time.Second), string(failure)}, keyArgs...)
+		var pacingAt, pacingDelay, pacingSince, pacingFailure any
+		var retryAt, retryFailure any = now.Add(time.Second), string(failure)
+		if request.ReadEvaluation {
+			if intent.ReadRetry == nil {
+				return errors.New("read retry requires its admitted attempt pacing")
+			}
+			if err := intent.ReadRetry.ObserveFailure(now, request.Failure); err != nil {
+				return err
+			}
+			retryAt, retryFailure = nil, nil
+			pacingAt, pacingDelay = intent.ReadRetry.NotBefore, intent.ReadRetry.Delay.Milliseconds()
+			pacingSince, pacingFailure, err = encodeFanOutReadFailure(*intent.ReadRetry)
+			if err != nil {
+				return err
+			}
+		}
+		predicate, keyArgs := fanOutKeyPredicate("", request.Claim.Key, 8)
+		args := append([]any{now, retryAt, retryFailure, pacingAt, pacingDelay, pacingSince, pacingFailure}, keyArgs...)
 		ownerPosition := len(args) + 1
 		args = append(args, request.Claim.Owner, request.Claim.Generation)
 		query := `UPDATE fan_out_intents
 			SET claim_owner=NULL,lease_expires_at=NULL,last_served_at=$1,updated_at=$1,
 				next_chunk_size=CASE WHEN next_chunk_size <= 1 THEN 1 ELSE (next_chunk_size + 1) / 2 END,
-				retry_ready_at=$2,retry_failure=$3
+				retry_ready_at=$2,retry_failure=$3,read_retry_not_before=$4,read_retry_delay_ms=$5,
+				read_retry_since=$6,read_retry_failure=$7
 			WHERE ` + predicate + fmt.Sprintf(` AND claim_owner=$%d AND claim_generation=$%d`, ownerPosition, ownerPosition+1)
 		if postgres {
 			query = strings.ReplaceAll(query, "retry_failure=$3", "retry_failure=$3::jsonb")
+			query = strings.ReplaceAll(query, "read_retry_failure=$7", "read_retry_failure=$7::jsonb")
 		}
 		result, err := tx.ExecContext(txctx, query, args...)
 		if err != nil {
@@ -605,7 +664,8 @@ func blockFanOutClaim(ctx context.Context, tx *sql.Tx, postgres bool, observeNow
 	args := append([]any{string(failure), now}, keyArgs...)
 	ownerPosition := len(args) + 1
 	args = append(args, request.Claim.Owner, request.Claim.Generation)
-	query := `UPDATE fan_out_intents SET status='blocked',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,last_served_at=$2,updated_at=$2
+	query := `UPDATE fan_out_intents SET status='blocked',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,last_served_at=$2,updated_at=$2,
+		read_retry_not_before=NULL,read_retry_delay_ms=NULL,read_retry_since=NULL,read_retry_failure=NULL
 		WHERE ` + predicate + fmt.Sprintf(` AND status='open' AND claim_owner=$%d AND claim_generation=$%d`, ownerPosition, ownerPosition+1)
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -833,7 +893,8 @@ func commitFanOutChunk(
 			updateArgs := append([]any{nextCursor, string(status), servedAt}, keyArgs...)
 			ownerPosition := len(updateArgs) + 1
 			updateArgs = append(updateArgs, command.Claim.Owner, command.Claim.Generation, fanoutobligation.MaxChunkSize)
-			update, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET cursor=$1,status=$2,updated_at=$3,last_served_at=$3,next_chunk_size=`+fmt.Sprintf(`$%d`, len(updateArgs))+`,claim_owner=NULL,lease_expires_at=NULL WHERE `+predicate+fmt.Sprintf(` AND claim_owner=$%d AND claim_generation=$%d AND status='open'`, ownerPosition, ownerPosition+1), updateArgs...)
+			update, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET cursor=$1,status=$2,updated_at=$3,last_served_at=$3,next_chunk_size=`+fmt.Sprintf(`$%d`, len(updateArgs))+`,claim_owner=NULL,lease_expires_at=NULL,
+				read_retry_not_before=NULL,read_retry_delay_ms=NULL,read_retry_since=NULL,read_retry_failure=NULL WHERE `+predicate+fmt.Sprintf(` AND claim_owner=$%d AND claim_generation=$%d AND status='open'`, ownerPosition, ownerPosition+1), updateArgs...)
 			if err != nil {
 				return err
 			}
@@ -851,6 +912,7 @@ func commitFanOutChunk(
 			intent.Cursor, intent.Status, intent.UpdatedAt = nextCursor, status, servedAt
 			intent.LastServedAt, intent.NextChunkSize = servedAt, fanoutobligation.MaxChunkSize
 			intent.ClaimOwner, intent.LeaseExpiresAt = "", time.Time{}
+			intent.ReadRetry = nil
 			result.Intent = intent
 			if status == fanoutobligation.StatusClosed {
 				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
@@ -1098,7 +1160,8 @@ func cancelRunFanOut(ctx context.Context, postgres bool, effects interface {
 	for _, intent := range intents {
 		predicate, keyArgs := fanOutKeyPredicate("", intent.Request.Key, 3)
 		args := append([]any{reason, at.UTC()}, keyArgs...)
-		update := `UPDATE fan_out_intents SET status='canceled',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,retry_ready_at=NULL,retry_failure=NULL,updated_at=$2 WHERE ` + predicate + ` AND status IN ('open','blocked')`
+		update := `UPDATE fan_out_intents SET status='canceled',blocked_reason=$1,claim_owner=NULL,lease_expires_at=NULL,retry_ready_at=NULL,retry_failure=NULL,
+			read_retry_not_before=NULL,read_retry_delay_ms=NULL,read_retry_since=NULL,read_retry_failure=NULL,updated_at=$2 WHERE ` + predicate + ` AND status IN ('open','blocked')`
 		result, err := tx.ExecContext(ctx, update, args...)
 		if err != nil {
 			return fanOutCancellationFailure("cancel_intents", err)
@@ -1158,9 +1221,20 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if summary.RunID == "" || now.IsZero() {
 		return summary, fmt.Errorf("fan-out summary requires run and observation time")
 	}
-	var oldestRaw any
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0),MIN(CASE WHEN status IN ('open','blocked') THEN created_at END) FROM fan_out_intents WHERE run_id=$1`, summary.RunID).Scan(&summary.Intents, &summary.Open, &summary.Blocked, &summary.Cardinality, &summary.Cursor, &summary.Owed, &summary.MinNextChunk, &summary.MaxNextChunk, &oldestRaw); err != nil {
+	var oldestRaw, oldestReadRaw any
+	waiting := `status='open' AND (claim_owner IS NULL OR lease_expires_at<=$2) AND (read_retry_since IS NOT NULL OR read_retry_not_before>$2)`
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN status='open' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0),COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0),MIN(CASE WHEN status IN ('open','blocked') THEN created_at END),
+		COALESCE(SUM(CASE WHEN `+waiting+` THEN 1 ELSE 0 END),0),MIN(CASE WHEN `+waiting+` THEN read_retry_since END)
+		FROM fan_out_intents WHERE run_id=$1`, summary.RunID, now.UTC()).Scan(&summary.Intents, &summary.Open, &summary.Blocked, &summary.Cardinality, &summary.Cursor, &summary.Owed, &summary.MinNextChunk, &summary.MaxNextChunk, &oldestRaw, &summary.ReadWaiting, &oldestReadRaw); err != nil {
 		return summary, err
+	}
+	oldestRead, knownRead, err := sqliteTimeValue(oldestReadRaw)
+	if err != nil || knownRead && oldestRead.After(now) {
+		return summary, errors.New("fan-out read wait summary has invalid observed failure time")
+	}
+	if knownRead {
+		age := now.Sub(oldestRead).Milliseconds()
+		summary.OldestReadWaitMS = &age
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN outcome_kind IN ('committed','continued') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN outcome_kind='semantic_rejected' THEN 1 ELSE 0 END),0) FROM fan_out_outcomes WHERE run_id=$1`, summary.RunID).Scan(&summary.Committed, &summary.SemanticRejected); err != nil {
 		return summary, err
