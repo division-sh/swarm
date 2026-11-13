@@ -308,7 +308,11 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, fixtureRegistration(factory)); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
 					t.Fatalf("public account-list exit=%d err=%s", code, listErr.String())
 				}
-				op := listing.Accounts[0].Operation
+				selected, found := fixtureRegistration(factory).Select(listing.Accounts[0].Operation.Provider)
+				if !found {
+					t.Fatal("listed operation has no exact installed provider facts")
+				}
+				op := listing.Accounts[0].Operation.WithProviderFacts(selected.Facts)
 				if op.OperationID != pairing.Operation.OperationID || op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.AccountReference != "+15551234567" || op.IdentityOperationID != "" {
 					t.Fatal("first connect replaced its device/operation or failed to register the approved receptionist account")
 				}
