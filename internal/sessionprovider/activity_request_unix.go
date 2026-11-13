@@ -41,6 +41,9 @@ func (c *RuntimeConnection) ValidateActivityRequestAccount(ctx context.Context, 
 	}
 	current, release, err := occurrence.acquire(work.Context())
 	if err != nil {
+		if cause := context.Cause(work.Context()); cause != nil {
+			return errors.Join(err, cause)
+		}
 		if occurrence.transientAdmissionRefusal(err) {
 			return nil
 		}
