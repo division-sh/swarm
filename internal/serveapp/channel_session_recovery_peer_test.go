@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -422,7 +425,10 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 		for _, kind := range []string{"replacement", "ban"} {
 			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
 				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, nil)
-				peer := newServeNativeProtocolPeer(t, h.provider)
+				mux := http.NewServeMux()
+				mux.Handle("/", h.provider)
+				mux.Handle("/webhooks/_swarm_probe/", httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: h.opts.PublicWebhookListen}))
+				peer := newServeNativeProtocolPeer(t, mux)
 				h.opts.SwarmDir, h.opts.SwarmDirSet = filepath.Join(t.TempDir(), "native"), true
 				body, err := os.ReadFile(h.opts.ConfigPath)
 				if err != nil {
@@ -474,7 +480,10 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 				peer.disconnect()
 				waitSessionRecovery(t, func() bool {
 					reads, _ := h.provider.CommandReadbackCounts()
-					return healthy(second) && reads > readsBefore && strings.Contains(diagnostics.String(), terminalErr.Error())
+					peer.mu.Lock()
+					reconnected := peer.connections == before+1
+					peer.mu.Unlock()
+					return reconnected && healthy(second) && reads > readsBefore && strings.Contains(diagnostics.String(), terminalErr.Error())
 				}, h.process.outputString)
 				peer.mu.Lock()
 				after, sent := peer.connections, peer.acceptedSends
