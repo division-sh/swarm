@@ -287,19 +287,19 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 							if observed.err != nil {
 								t.Fatal("optional notice made public readback fail after disconnect", observed.err)
 							}
-							if observed.view.State != "disconnected" {
+							if observed.view.State != "error" {
 								continue
 							}
-							if observed.view.Reason != "connection rejected by WhatsApp" || !observed.view.Linked || observed.view.ClaimCodeNotice != nil ||
+							if observed.view.Reason != "connection rejected by WhatsApp" || observed.view.Cause != "connection rejected" || !observed.view.Linked || observed.view.ClaimCodeNotice != nil ||
 								observed.operation.OperationID != before.operation.OperationID || observed.operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
-								t.Fatal("public disconnected state/reason changed with optional notice", observed)
+								t.Fatal("public error state/reason/cause changed with optional notice", observed)
 							}
 							break readDisconnected
 						case code := <-done:
 							joined = true
-							t.Fatal("public wait failed rather than observing the disconnected account", code, errOut.String())
+							t.Fatal("public wait failed rather than observing the fenced account", code, errOut.String())
 						case <-ctx.Done():
-							t.Fatal("public disconnected readback was not observed")
+							t.Fatal("public error readback was not observed")
 						}
 					}
 				}

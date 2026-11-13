@@ -163,14 +163,14 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		down = issue3011RegisteredStatus(t, opts, endpoint, op)
-		if down.Status.Health == "disconnected" && down.Status.Reason != "" {
+		if down.Status.Health == "error" && down.Status.Reason != "" && down.Status.Cause != "" {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	record["down"] = down
-	if down.Status.Health != "disconnected" || down.Status.Reason == "" {
-		t.Fatal("socket cut did not produce the required disconnected state")
+	if down.Status.Health != "error" || down.Status.Reason == "" || down.Status.Cause == "" {
+		t.Fatal("socket cut did not produce the required error state with reason and cause")
 	}
 	peer.mu.Lock()
 	record["peer_after_cut"] = map[string]int{"accepts": peer.connections, "closed": peer.disconnected, "post_logins": peer.postLogins}
