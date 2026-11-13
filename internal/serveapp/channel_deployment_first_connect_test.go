@@ -41,7 +41,7 @@ func requireLiveDeploymentChannelList(t *testing.T, config, endpoint string, op 
 		if format != "" {
 			args = append(args, "--"+format)
 		}
-		if code := cliapp.Execute(t.Context(), args, &out, &diagnostic, nil, nil, OpenChannelRegistration); code != 0 {
+		if code := cliapp.Execute(t.Context(), args, &out, &diagnostic, nil, nil, ChannelRegistrations()); code != 0 {
 			t.Fatalf("channel list %s exit=%d: %s", format, code, diagnostic.String())
 		}
 		if format == "" {

@@ -113,14 +113,15 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 }
 
 func readDeploymentTransportRegistrations(ctx context.Context, root cliapp.InvocationRoot, config string, stores *selected.Owner, control func(context.Context, channelonboarding.Operation) (*cliapp.DeploymentChannelControl, error)) ([]serveDeploymentRegistration, error) {
-	loaded, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: config})
+	loaded, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: config, ChannelRegistration: ChannelRegistrations()})
 	if err != nil {
 		return nil, err
 	}
 	if loaded.Config.Channels.HITL == nil {
 		return nil, nil
 	}
-	op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), *loaded.Config.Channels.HITL)
+	facts, _ := installedChannelFactsFor(loaded.Config.Channels.HITL.Provider)
+	op, err := channelonboarding.RegisteredAccount(ctx, stores.DeploymentChannels(), *loaded.Config.Channels.HITL, facts)
 	if errors.Is(err, channelonboarding.ErrNotFound) {
 		return nil, nil
 	}
