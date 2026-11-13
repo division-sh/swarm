@@ -36,6 +36,7 @@ import (
 )
 
 type serveChannelDeliveryDispatcher struct {
+	worker             *serveChannelDeliveryWorker
 	deployment         *serveDeploymentTransport
 	store              runtimechanneldelivery.Store
 	native             runtimechannelnative.Store
@@ -594,13 +595,24 @@ func validateChannelDispatch(candidate runtimechanneldelivery.Candidate, prepare
 	return nil
 }
 
-func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
+func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) (result error) {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil ||
 		!d.posture.Valid() || strings.TrimSpace(d.runtimeInstanceID) == "" || d.now == nil {
 		return fmt.Errorf("channel delivery dispatcher is incomplete")
 	}
 	if err := validateChannelDispatch(candidate, prepared, operation, previousReference); err != nil {
 		return err
+	}
+	if d.worker != nil {
+		lease, err := d.worker.beginSend(ctx)
+		if err != nil {
+			return err
+		}
+		ctx = lease.Context()
+		defer func() {
+			result = errors.Join(result, lease.Done())
+			d.worker.err = errors.Join(d.worker.err, result)
+		}()
 	}
 	if selected, plan, deployment, err := d.deploymentDelivery(ctx, candidate); deployment || err != nil {
 		if err != nil {

@@ -1138,6 +1138,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 	httpServersStarted := false
 	var publicExposure *runtimepublicingress.Controller
 	var storyFollower *serveAuthorActivityFollower
+	var channelWorker *serveChannelDeliveryWorker
 	defer func() {
 		cancelServe()
 		stopBootCancellation()
@@ -1146,6 +1147,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
 		shutdownErr := publicExposure.Stop(shutdownCtx)
+		shutdownErr = errors.Join(shutdownErr, channelWorker.Drain(shutdownCtx))
 		if !httpServersStarted {
 			// Before Serve owns the listeners, startup failure still needs to
 			// release them. Active listeners belong exclusively to HTTP shutdown.
@@ -2066,7 +2068,8 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		channelDispatcher.linkNotices = &serveLinkNotices{dispatcher: channelDispatcher, hitl: *cfg.Channels.HITL, mailbox: stores.Mailbox(), entries: map[string]*linkNoticeEntry{}}
 		noticeObservers = append(noticeObservers, channelDispatcher.linkNotices.capture)
 	}
-	if err := startServeChannelDelivery(ctx, processWorkOwner, channelDispatcher, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, runtimeReady: channelWorkerReady, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose, noticeObservers...)}); err != nil {
+	channelWorker, err = startServeChannelDelivery(ctx, processWorkOwner, channelDispatcher, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, runtimeReady: channelWorkerReady, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose, noticeObservers...), drainContext: runtimeCtx})
+	if err != nil {
 		presenter.runtimeFailure("channel_delivery", err)
 		return 1
 	}

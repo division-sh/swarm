@@ -539,6 +539,37 @@ type channelDeliveryWorkerOptions struct {
 
 	runtimeReady <-chan struct{}
 	diagnostics  func(context.Context) error
+	drainContext context.Context
+}
+
+type serveChannelDeliveryWorker struct {
+	owner   *worklifetime.Process
+	workCtx context.Context
+	cancel  context.CancelFunc
+	done    chan struct{}
+	err     error
+}
+
+func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifetime.Lease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return w.owner.Begin(w.workCtx)
+}
+
+func (w *serveChannelDeliveryWorker) Drain(ctx context.Context) error {
+	if w == nil {
+		return nil
+	}
+	defer w.cancel()
+	select {
+	case <-w.done:
+		return w.err
+	case <-ctx.Done():
+		w.cancel()
+		<-w.done
+		return errors.Join(ctx.Err(), w.err)
+	}
 }
 
 func (options channelDeliveryWorkerOptions) observeSessionDiagnostics(ctx context.Context) error {
@@ -554,14 +585,14 @@ func (options channelDeliveryWorkerOptions) observePass(ctx context.Context, sco
 	}
 }
 
-func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher, options channelDeliveryWorkerOptions) error {
+func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher, options channelDeliveryWorkerOptions) (*serveChannelDeliveryWorker, error) {
 	if owner == nil || dispatcher == nil || dispatcher.store == nil {
-		return fmt.Errorf("channel delivery worker requires process and dispatcher")
+		return nil, fmt.Errorf("channel delivery worker requires process and dispatcher")
 	}
 	ordinary := options.cadence.Ordinary
 	native := options.cadence.Native
 	if ordinary < 0 || native < 0 {
-		return fmt.Errorf("channel delivery observation cadence must be positive")
+		return nil, fmt.Errorf("channel delivery observation cadence must be positive")
 	}
 	if ordinary == 0 {
 		ordinary = time.Second
@@ -571,21 +602,30 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 	}
 	lease, err := owner.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("admit channel delivery worker: %w", err)
+		return nil, fmt.Errorf("admit channel delivery worker: %w", err)
 	}
 	subscription, err := dispatcher.store.SubscribeChannelReconciliation(lease.Context())
 	if err != nil {
 		// Check before Done cancels the lease: only its own stop is graceful.
 		if err == context.Canceled && lease.Context().Err() == context.Canceled {
-			return lease.Done()
+			return nil, lease.Done()
 		}
-		return errors.Join(fmt.Errorf("subscribe channel delivery worker: %w", err), lease.Done())
+		return nil, errors.Join(fmt.Errorf("subscribe channel delivery worker: %w", err), lease.Done())
 	}
+	drainContext := options.drainContext
+	if drainContext == nil {
+		drainContext = ctx
+	}
+	workCtx, cancel := context.WithCancel(drainContext)
+	worker := &serveChannelDeliveryWorker{owner: owner, workCtx: workCtx, cancel: cancel, done: make(chan struct{})}
+	dispatcher.worker = worker
 	if options.started != nil {
 		options.started(dispatcher.store, subscription.Mark)
 	}
 	go func() {
-		defer func() { _ = lease.Done() }()
+		defer close(worker.done)
+		defer cancel()
+		defer func() { worker.err = errors.Join(worker.err, lease.Done()) }()
 		defer subscription.Close()
 		workCtx := lease.Context()
 		ticker := time.NewTicker(ordinary)
@@ -619,7 +659,7 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 			}
 		}
 	}()
-	return nil
+	return worker, nil
 }
 
 func (options channelDeliveryWorkerOptions) waitForRuntimeLoad(ctx context.Context, dispatcher *serveChannelDeliveryDispatcher, ticks <-chan time.Time) bool {
