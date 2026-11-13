@@ -112,6 +112,11 @@ func releaseE2EImportAllowed(file, name, alias string) bool {
 			name == "github.com/division-sh/swarm/internal/store/storetest") {
 		return true
 	}
+	if alias == "" && (file == "compiled_retained_state_test.go" && name == "github.com/division-sh/swarm/tests/support/testutil/llmapi" ||
+		(file == "compiled_retained_state_test.go" || file == "compiled_retained_setup_test.go") && name == "github.com/division-sh/swarm/tests/support/testutil/telegramapi" ||
+		file == "compiled_retained_setup_test.go" && name == "github.com/division-sh/swarm/tests/support/testutil/testprocess") {
+		return true
+	}
 	if name == "github.com/division-sh/swarm/tests/support/testpostgres" && alias == "" &&
 		(file == "golden_agent_workload_test.go" || file == "postgres_capacity_admission_test.go") {
 		return true
@@ -181,6 +186,13 @@ func TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning(t *testing.T)
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/internal/operatorread", "", false},
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/tests/support/testutil/llmapi", ".", false},
 		{"provider_stop_handoff_test.go", "github.com/division-sh/swarm/tests/support/testutil/llmapi/other", "", false},
+		{"compiled_retained_state_test.go", "github.com/division-sh/swarm/tests/support/testutil/llmapi", "", true},
+		{"compiled_retained_state_test.go", "github.com/division-sh/swarm/tests/support/testutil/telegramapi", "", true},
+		{"compiled_retained_setup_test.go", "github.com/division-sh/swarm/tests/support/testutil/telegramapi", "", true},
+		{"compiled_retained_setup_test.go", "github.com/division-sh/swarm/tests/support/testutil/testprocess", "", true},
+		{"other_test.go", "github.com/division-sh/swarm/tests/support/testutil/telegramapi", "", false},
+		{"compiled_retained_setup_test.go", "github.com/division-sh/swarm/tests/support/testutil/telegramapi", "other", false},
+		{"compiled_retained_setup_test.go", "github.com/division-sh/swarm/internal/serveapp", "", false},
 	} {
 		t.Run(tc.file+"/"+tc.name+"/"+tc.alias, func(t *testing.T) {
 			if got := releaseE2EImportAllowed(tc.file, tc.name, tc.alias); got != tc.allowed {
