@@ -269,12 +269,26 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 		t.Fatal("restart replaced the retained memory session")
 	}
 	turns := s.memoryTurns()
-	if len(turns) != 3 || turns[0] != s.firstTurn {
-		t.Fatalf("memory prefix was lost/replaced: %+v", turns)
+	triggers := []string{first, second, third}
+	if arm == "kill" {
+		triggers = []string{first, second, second, third}
 	}
-	for i, eventID := range []string{first, second, third} {
-		if turns[i].Ordinal != i+1 || turns[i].TriggerEventID != eventID || !turns[i].ParseOK || turns[i].Failure != nil {
-			t.Fatalf("memory turn %d lost exact trigger/outcome: %+v", i, turns[i])
+	if len(turns) != len(triggers) || turns[0] != s.firstTurn {
+		t.Fatalf("memory turn history differs: %s", joinedJSON(turns))
+	}
+	for i, eventID := range triggers {
+		turn := turns[i]
+		if turn.Ordinal != i+1 || turn.TriggerEventID != eventID || turn.TriggerEventType != "work.requested" {
+			t.Fatalf("memory turn %d lost exact trigger/ordinal: %s", i, joinedJSON(turn))
+		}
+		if arm == "kill" && i == 1 {
+			f := turn.Failure
+			if turn.ParseOK || f == nil || f.SchemaVersion != "platform.failure/v1" || f.Class != "platform.outcome_uncertain" ||
+				f.Component != "external-effects" || f.Operation != "startup_reconcile" || f.Detail.Code != "effect_recovery_outcome_unconfirmed" {
+				t.Fatalf("interrupted turn lost its exact recovery history: %s", joinedJSON(turn))
+			}
+		} else if !turn.ParseOK || turn.Failure != nil {
+			t.Fatalf("business turn failed: %s", joinedJSON(turn))
 		}
 	}
 	if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
