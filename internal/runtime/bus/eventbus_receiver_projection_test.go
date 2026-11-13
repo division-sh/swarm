@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -143,7 +144,7 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	if err := owner.Fence(); err != nil {
 		t.Fatalf("fence receiver owner: %v", err)
 	}
-	readLease, err := beginAcceptedRuntimeWork(owner, acceptedCtx)
+	_, readLease, err := eventBus.beginRuntimeWork(acceptedCtx)
 	if err != nil {
 		t.Fatalf("accepted run-origin read after fence: %v", err)
 	}
@@ -184,6 +185,86 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	if _, err := process.Join(context.Background()); err != nil {
 		t.Fatalf("join receiver process: %v", err)
 	}
+	t.Run("manager_companion", func(t *testing.T) {
+		process := worklifetime.NewProcess()
+		t.Cleanup(func() { process.Retire(); _, _ = process.Join(context.Background()) })
+		owner := newReceiverProjectionRuntimeOwner(t, process, "manager-drain")
+		t.Cleanup(func() { _, _ = owner.RetireAndWait(context.Background()) })
+		manager, err := worklifetime.NewManagerRunOccurrence(context.Background(), owner, worklifetime.ManagerRunIdentity{Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = manager.RetireAndWait(context.Background()) })
+		parent, err := manager.Begin(hostilePublisherContext(t), owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = parent.Done() })
+		foreign, err := owner.Begin(hostilePublisherContext(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = foreign.Done() })
+		standing, err := owner.BeginStanding(hostilePublisherContext(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = standing.Done() })
+		bus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner.CloseDispatch()
+		if err := errors.Join(owner.Fence(), manager.Fence()); err != nil {
+			t.Fatal(err)
+		}
+		for _, ctx := range []context.Context{hostilePublisherContext(t), standing.Context()} {
+			if _, err := owner.BeginContinuationDispatch(ctx); !errors.Is(err, worklifetime.ErrDispatchClosed) {
+				t.Fatalf("fresh/standing dispatch crossed shutdown seal: %v", err)
+			}
+		}
+		if _, err := owner.BeginDispatch(parent.Context()); !errors.Is(err, worklifetime.ErrDispatchClosed) {
+			t.Fatalf("ordinary dispatch inherited accepted admission: %v", err)
+		}
+		projection, ok := worklifetime.OccurrenceFromContext(parent.Context())
+		if !ok {
+			t.Fatal("manager admission lost its occurrence")
+		}
+		for _, ctx := range []context.Context{
+			worklifetime.WithOccurrence(hostilePublisherContext(t), projection),
+			worklifetime.CarryAcceptedLease(parent.Context(), foreign.Context()),
+		} {
+			if _, _, err := bus.beginRuntimeWork(ctx); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("absent/foreign manager lease crossed shutdown fence: %v", err)
+			}
+		}
+		_, child, err := bus.beginRuntimeWork(parent.Context())
+		if err != nil {
+			t.Fatalf("accepted manager publication refused during drain: %v", err)
+		}
+		t.Cleanup(func() { _ = child.Done() })
+		if err := parent.Done(); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := bus.beginRuntimeWork(parent.Context()); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			t.Fatalf("settled manager lease crossed shutdown fence: %v", err)
+		}
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := manager.WaitForQuiescence(canceled); !errors.Is(err, context.Canceled) {
+			t.Fatalf("manager forgot retained publication child: %v", err)
+		}
+		if err := child.Done(); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.WaitForQuiescence(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		manager.Retire()
+		if _, _, err := bus.beginRuntimeWork(child.Context()); !errors.Is(err, worklifetime.ErrRetired) {
+			t.Fatalf("retired manager admitted a descendant: %v", err)
+		}
+	})
 }
 
 func TestAcceptedReceiverDispatchRetainsChannelExecutionAuthority(t *testing.T) {

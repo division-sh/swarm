@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -154,14 +155,14 @@ func TestHandleEmitToolRetainsAcknowledgedStageOnDispatchError(t *testing.T) {
 	}
 	private := "credential-value /private/native-error https://private.invalid/secret"
 	native := failures.New(failures.ClassInternalFailure, "unclassified_runtime_error", "native-publication", "feedback.commit", map[string]any{"password": private})
-	publisher.fault = errors.Join(context.Canceled, fmt.Errorf("private wrapper %s: %w", private, native), emitDiagnosticStateError{errors.New(private)})
+	publisher.fault = errors.Join(context.Canceled, worklifetime.ErrAdmissionFenced, fmt.Errorf("private wrapper %s: %w", private, native), emitDiagnosticStateError{errors.New(private)})
 	captured.Reset()
 	_, err = executor.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_done", map[string]any{})
 	if !errors.Is(err, context.Canceled) || !errors.Is(err, native) {
 		t.Fatalf("capture changed independent publication causes: %v", err)
 	}
 	diagnostic()
-	for _, required := range []string{`"sentinel":"context canceled"`, `"component":"native-publication"`, `"operation":"feedback.commit"`, `"sqlstate":"57014"`, `"opaque":true`, `"message_sha256":`} {
+	for _, required := range []string{`"sentinel":"context canceled"`, `"sentinel":"work admission is fenced"`, `"component":"native-publication"`, `"operation":"feedback.commit"`, `"sqlstate":"57014"`, `"opaque":true`, `"message_sha256":`} {
 		if !strings.Contains(captured.String(), required) {
 			t.Fatalf("native branch evidence lost %s: %s", required, captured.String())
 		}
