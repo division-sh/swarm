@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -131,10 +132,15 @@ func proveProviderTranscriptSettlement(t *testing.T, backend, adapter string) {
 	identity := sqliteAgentUsageIdentityForRun(t, runID, "chat-transcript")
 	at := time.Now().UTC().Truncate(time.Second)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Hour)})
-	storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: runtimeactors.AgentConfig{
+	config := runtimeactors.AgentConfig{
 		ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: mode,
 		ResolvedLLMBackend: configuredBackend, FlowPath: identity.FlowInstance(), Intent: apiTestResolvedIntent(t, identity.AgentID(), "Show the selected reply."),
-	}, Status: "active", StartedAt: at.Add(-time.Minute)})
+	}
+	if adapter == "mock_python" {
+		source := []byte("def handle(input):\n    return {\"text\": \"fixture reply\"}\n")
+		config.Mock = mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/transcript.py", SourcePath: "mocks/transcript.py", Source: source, Digest: "sha256:" + effects.Fingerprint(source)}
+	}
+	storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: config, Status: "active", StartedAt: at.Add(-time.Minute)})
 	turnIDs := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 	// Tied timestamps retain the public ordinal contract by sorting the IDs.
 	sort.Strings(turnIDs)
