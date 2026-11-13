@@ -25,8 +25,8 @@ release approval or a promise of old-store migration.
   it again; a healthy start does not reconstruct an earlier recovery. These
   notices are one `Swarm Notice:` line, with no acknowledgement or reference.
   They do not prove that the operator read them. If the operator link itself
-  is down, no down notice is created for later delivery. Its recovery formatter
-  remains pending R199 and currently creates no notice or quota consumption.
+  is down, no down notice is created for later delivery. On return, its single
+  recovery notice adds the observed diagnostic cause to the back sentence.
 
 - Retained WhatsApp transports reconnect on the same stored device after a
   positively identified transient drop, including registered accounts. Retries
