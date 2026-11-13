@@ -261,6 +261,7 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 			t.Fatal(err)
 		}
 		manager.Retire()
+		owner.Retire()
 		if _, _, err := bus.beginRuntimeWork(child.Context()); !errors.Is(err, worklifetime.ErrRetired) {
 			t.Fatalf("retired manager admitted a descendant: %v", err)
 		}
