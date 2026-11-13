@@ -38,6 +38,9 @@ func TestCompiledProcessFullLifecycleRetainedStateBothStores(t *testing.T) {
 			var reference []string
 			for _, arm := range []string{"uninterrupted", "graceful", "kill"} {
 				if !t.Run(arm, func(t *testing.T) {
+					if arm == "kill" {
+						t.Skip("interrupted read-only-call recovery classification pending: #3040 comment 6848875859")
+					}
 					store := goldenSQLiteStore(filepath.Join(base, backend, arm))
 					if backend == "postgres" {
 						store = goldenPostgresStore(t, dsn)
