@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
 
@@ -60,6 +61,11 @@ func TestAuthenticatedAccountSelectsOnlyItsConstructedHolder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			projection, err := packadmission.FromBundle(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle.PackAdmission = projection.WithProviderFacts(channelfixture.For(provider))
 			source := semanticview.Wrap(bundle)
 			runID := eventtest.UUID("account-selection:" + provider)
 			root := flowidentity.Stored(source, ".", runID, runID, runID, "")

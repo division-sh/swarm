@@ -379,7 +379,7 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 		op := channelonboarding.Operation{DeploymentRegistration: true, AccountConfirmed: true,
 			OperationID: uuid.NewString(), Revision: 3, Provider: "telegram", AccountReference: "420079",
 			Posture: channelonboarding.ActivationWebhookRegistration, Phase: channelonboarding.PhaseSucceeded,
-			CredentialAdmissions: activation.CredentialAdmissions}
+			CredentialAdmissions: activation.CredentialAdmissions}.WithProviderFacts(candidate.ProviderFacts())
 		registered, err := channelonboarding.CompileRegisteredActivation(candidate, op)
 		if err != nil {
 			t.Fatal(err)
