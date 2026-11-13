@@ -19,9 +19,8 @@ func receiverOwnerConstructorBudget() map[string]int {
 		"runtime/bus::publicationTargetOwnerEvidence.admitAgentTarget":                   2,
 		"runtime/bus::publicationTargetOwnerEvidence.plannedAgentConstructionDependency": 1,
 		// Native and historical branches reuse the same exact captured-life owner.
-		"runtime/bus::admitObservedAgentConstructionDependency":        1,
-		"runtime/bus::publicationTargetOwnerEvidence.replyOriginOwner": 2,
-		"runtime/pipeline::SelectDeliveryTargetOwner":                  2,
+		"runtime/bus::admitObservedAgentConstructionDependency": 1,
+		"runtime/pipeline::selectDeliveryTargetOwner":           3,
 		// Approved #2433 fork projection preserves the three admitted target kinds;
 		// it does not elect a new receiver from producer context.
 		"store/internal/backend/runforkpersistence::projectRunForkFanOutExecutionOwnership": 3,

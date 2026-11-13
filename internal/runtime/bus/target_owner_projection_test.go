@@ -13,12 +13,17 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
+	ephemeral, err := NewEphemeralEventBus(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rootRunID := eventtest.UUID("selected-root-run")
 	rootOwner := eventtest.UUID("selected-root-owner")
 	staticOwner := eventtest.UUID("selected-static-owner")
@@ -101,13 +106,51 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 	for _, required := range []bool{false, true} {
 		t.Run(fmt.Sprintf("observed absence required=%t", required), func(t *testing.T) {
 			origin := events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: staticOwner}
-			owner, err := (publicationTargetOwnerEvidence{required: required}).replyOriginOwner(origin)
+			candidate := publicationTargetOwnerEvidence{required: required}
+			if !required {
+				candidate.replyOrigins = ephemeral.deliveryPlanner.recipientPolicy.replyOrigins
+			}
+			owner, err := candidate.replyOriginOwner(origin)
 			if required {
 				if err == nil || !owner.Empty() {
 					t.Fatalf("required origin manufactured an absent owner: owner=%+v err=%v", owner, err)
 				}
 			} else if err != nil || !owner.ExistingEntity() || owner.Route() != origin {
 				t.Fatalf("ephemeral observed-absence behavior changed: owner=%+v err=%v", owner, err)
+			}
+		})
+	}
+	for _, constructor := range []struct {
+		name string
+		open func() (*EventBus, error)
+	}{
+		{"default", func() (*EventBus, error) { return NewEphemeralEventBus(nil) }},
+		{"options", func() (*EventBus, error) {
+			return NewEphemeralEventBusWithOptions(nil, EventBusOptions{ReceiverExecution: eventreceiver.NormalExecution()})
+		}},
+	} {
+		t.Run("ephemeral constructor "+constructor.name, func(t *testing.T) {
+			bus, err := constructor.open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			inbound := eventtest.RuntimeControl(eventtest.UUID("ephemeral-reply-origin"), "work.ready", "", "", nil, 0, rootRunID, "", events.EventEnvelope{}, time.Time{})
+			ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
+			candidate, err := bus.deliveryPlanner.recipientPolicy.loadPublicationTargetOwners(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entity := range []string{"", staticOwner} {
+				origin := events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: entity}
+				owner, err := candidate.replyOriginOwner(origin)
+				if err != nil || owner.Route() != origin || owner.Life() != 1 || owner.EntitylessReceiver() != (entity == "") {
+					t.Fatalf("constructor-bound origin changed: owner=%+v err=%v", owner, err)
+				}
+			}
+			candidate.context = context.Background()
+			candidate.candidates = []runtimepipeline.DeliveryTargetOwnerCandidate{{}}
+			if owner, err := candidate.replyOriginOwner(events.RouteIdentity{}); err != nil || !owner.Empty() {
+				t.Fatalf("empty origin reached candidate admission: owner=%+v err=%v", owner, err)
 			}
 		})
 	}
@@ -169,6 +212,10 @@ func TestSelectedTargetOwnerNeverUsesParentDescriptor(t *testing.T) {
 }
 
 func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
+	ephemeral, err := NewEphemeralEventBus(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	blueprint := events.RouteIdentity{FlowID: "portfolio", FlowInstance: "portfolio"}
 	basePlan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient:       events.MustNodeDeliveryRecipient(testRootNode(t, "portfolio-collector")),
@@ -252,6 +299,9 @@ func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if strings.HasPrefix(test.name, "ephemeral ") {
+				test.projection.replyOrigins = ephemeral.deliveryPlanner.recipientPolicy.replyOrigins
+			}
 			plan := basePlan
 			plan.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), basePlan.DeliveryIntents...)
 			if test.name == "disagreeing" {

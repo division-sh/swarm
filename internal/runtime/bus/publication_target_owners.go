@@ -39,6 +39,7 @@ type publicationTargetOwnerEvidence struct {
 	targetsAvailable   bool
 	source             semanticview.Source
 	required           bool
+	replyOrigins       pipeline.ReplyOriginTargetAdmission
 }
 
 func (p *publicationTargetOwnerEvidence) replacePlanningEvidence(next publicationTargetOwnerEvidence) {
@@ -170,40 +171,18 @@ func (p *publicationTargetOwnerEvidence) returnOwner(ctx context.Context, event 
 }
 
 func (p publicationTargetOwnerEvidence) replyOriginOwner(origin events.RouteIdentity) (events.DeliveryTargetOwnership, error) {
-	origin = origin.Normalized()
-	if err := p.prospective.ValidateTarget(origin); err != nil {
-		return events.DeliveryTargetOwnership{}, err
-	}
-	if origin.Empty() {
-		if !p.required {
-			return events.DeliveryTargetOwnership{}, nil
-		}
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint is required")
-	}
-	candidates, err := p.decisionTargetCandidates(origin)
+	lookup, err := p.replyOrigins.Admit(origin, p.prospective)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	// An explicit reply origin narrows candidates; node admission instead treats
-	// a contradictory entity at its exact instance as an error.
-	matching := make([]pipeline.DeliveryTargetOwnerCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if origin.FlowInstance != "" && candidate.Route.FlowInstance != origin.FlowInstance || origin.EntityID != "" && candidate.Route.EntityID != origin.EntityID {
-			continue
-		}
-		matching = append(matching, candidate)
+	if lookup.Coordinate().Empty() {
+		return pipeline.ClassifyReplyOriginTargetOwnership(p.source, lookup, nil)
 	}
-	owner, found, err := pipeline.SelectDeliveryTargetOwner(p.source, origin, matching)
-	if err != nil || found {
-		return owner, err
+	candidates, err := p.decisionTargetCandidates(lookup.Coordinate())
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, err
 	}
-	if !p.required {
-		if origin.EntityID != "" {
-			return events.NewExistingEntityTarget(origin)
-		}
-		return events.NewEntitylessReceiverTarget(origin)
-	}
-	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", origin.FlowInstance)
+	return pipeline.ClassifyReplyOriginTargetOwnership(p.source, lookup, candidates)
 }
 
 func (p publicationTargetOwnerEvidence) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
@@ -422,7 +401,7 @@ func (p deliveryRecipientPolicy) loadPublicationTargetOwners(ctx context.Context
 		if err := p.runProposal.Validate(event.RunID(), fact); err != nil {
 			return publicationTargetOwnerEvidence{}, err
 		}
-		return publicationTargetOwnerEvidence{prospective: p.prospective, runProposal: p.runProposal, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, targetsAvailable: true}, nil
+		return publicationTargetOwnerEvidence{prospective: p.prospective, runProposal: p.runProposal, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, replyOrigins: p.replyOrigins, targetsAvailable: true}, nil
 	}
 	agents, agentsAvailable, err := p.loadActiveAgentDescriptors(ctx)
 	if err != nil {
@@ -446,7 +425,7 @@ func (p deliveryRecipientPolicy) loadPublicationTargetOwners(ctx context.Context
 		instances:   p.instances,
 		agents:      agents, agentsAvailable: agentsAvailable,
 		candidates: ordered.candidates, targetsAvailable: targetsAvailable,
-		source: p.semanticSource, required: p.requireTargetOwners,
+		source: p.semanticSource, required: p.requireTargetOwners, replyOrigins: p.replyOrigins,
 	}
 	if projection.required {
 		if err := projection.validatePlanningShape(); err != nil {
