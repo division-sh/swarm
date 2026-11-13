@@ -173,10 +173,36 @@ func parseGenericProviderObject(obj map[string]any) []TurnBlock {
 			blocks = append(blocks, parseBlocksFromContent(content)...)
 		}
 	}
+	outputText := ""
+	if output, ok := obj["output"].([]any); ok {
+		var parts []string
+		for _, entry := range output {
+			item, _ := entry.(map[string]any)
+			kind, _ := item["type"].(string)
+			if strings.TrimSpace(kind) != "message" {
+				continue
+			}
+			content, _ := item["content"].([]any)
+			for _, entry := range content {
+				part, _ := entry.(map[string]any)
+				if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
+					parts = append(parts, strings.TrimSpace(text))
+				}
+			}
+		}
+		if text := strings.Join(parts, "\n"); text != "" {
+			blocks = append(blocks, TurnBlock{Kind: "assistant_text", Text: text})
+		}
+	} else {
+		outputText = asString(obj["output"])
+	}
+	if text, ok := obj["text"].(string); ok && strings.TrimSpace(text) != "" {
+		blocks = append(blocks, TurnBlock{Kind: "assistant_text", Text: strings.TrimSpace(text)})
+	}
 	if text := strings.TrimSpace(firstReadableString(
 		asString(obj["result"]),
 		asString(obj["assistant_text"]),
-		asString(obj["output"]),
+		outputText,
 	)); text != "" {
 		blocks = append(blocks, TurnBlock{Kind: "assistant_text", Text: text})
 		blocks = append(blocks, TurnBlock{Kind: "outcome", Text: text})
