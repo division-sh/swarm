@@ -694,7 +694,8 @@ func (p *mutatingProbeEventPublisher) PublishInMutation(ctx context.Context, evt
 	return p.Publish(ctx, evt)
 }
 
-func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt events.Event, routes []events.DeliveryRoute) error {
+func (p *mutatingProbeEventPublisher) PublishRecordedReplay(_ context.Context, evt events.Event, selection operatorread.ReplaySelection) error {
+	routes := selection.Routes()
 	if p.directErr != nil {
 		return p.directErr
 	}
@@ -721,7 +722,8 @@ func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt
 	return nil
 }
 
-func (p *mutatingProbeEventPublisher) CheckDirectRoutes(_ context.Context, _ events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
+func (p *mutatingProbeEventPublisher) CheckRecordedReplay(_ context.Context, _ events.Event, selection operatorread.ReplaySelection) (runtimebus.ExactDirectRouteStatus, error) {
+	routes := selection.Routes()
 	status := runtimebus.ExactDirectRouteStatus{Requested: events.NormalizeDeliveryRoutes(routes)}
 	if p.checkErr != nil {
 		return status, p.checkErr

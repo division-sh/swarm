@@ -3,13 +3,52 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
+
+func recordedReplaySelectionForTest(t testing.TB, original events.Event, routes []events.DeliveryRoute) (events.Event, operatorread.ReplaySelection) {
+	t.Helper()
+	view, err := operatorread.NewOperatorEventFull(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(routes))
+	for _, route := range routes {
+		id, err := runtimedelivery.DeliveryID(original.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+		view.Deliveries = append(view.Deliveries, operatorread.OperatorEventDelivery{
+			DeliveryID: id, SubscriberID: route.Recipient.ID(), Status: "delivered", Route: route,
+		})
+	}
+	selection, err := operatorread.SelectReplayDeliveries(view, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := events.NewReplayEvent(events.ReplayEventInput{
+		Facts: events.EventFacts{ID: eventtest.UUID(fmt.Sprintf("replay-%s", original.ID())), Type: original.Type(),
+			Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
+			TaskID:   original.TaskID(), Payload: original.Payload(), ChainDepth: original.ChainDepth() + 1,
+			RoutingSource: original.RoutingSource(), Envelope: original.Envelope(), CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode()},
+		Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return replay, selection
+}
 
 type preparedPublishEventReaderFunc func(context.Context, string) (PreparedPublishEvent, bool, error)
 

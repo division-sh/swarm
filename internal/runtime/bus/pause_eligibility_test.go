@@ -10,11 +10,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -480,7 +478,7 @@ func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 			if err := generation.coordinator.Synchronize(ctx); err != nil {
 				t.Fatal(err)
 			}
-			event := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(uuid.NewString(), f.event.Type(), f.event.Producer(), f.event.TaskID(), f.event.Payload(), f.event.ChainDepth()+1, f.event.RunID(), f.event.ID(), f.event.Envelope(), time.Now().UTC()), executionmode.Mock)
+			event, selection := f.recordedReplay(t, ctx)
 			id, err := runtimedelivery.DeliveryID(event.ID(), route)
 			if err != nil {
 				t.Fatal(err)
@@ -494,7 +492,7 @@ func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 			controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
 			f.bus.SetRunDispatchGate(controller)
 			published := make(chan error, 1)
-			go func() { published <- f.bus.PublishDirectRoutes(ctx, event, []events.DeliveryRoute{route}) }()
+			go func() { published <- f.bus.PublishRecordedReplay(ctx, event, selection) }()
 			select {
 			case <-gate.entered:
 			case err := <-published:

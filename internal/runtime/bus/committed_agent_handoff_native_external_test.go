@@ -8,12 +8,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
@@ -102,11 +100,10 @@ func TestCommittedAgentTransitionNativePublicationBothStores(t *testing.T) {
 				}))
 				deliveries := f.subscribe(t, f.event.Type())
 				defer bustest.UnsubscribeIdentity(f.bus, f.identity)
-				event := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(uuid.NewString(), f.event.Type(), f.event.Producer(), f.event.TaskID(), f.event.Payload(),
-					f.event.ChainDepth()+1, f.event.RunID(), f.event.ID(), f.event.Envelope(), time.Now().UTC()), executionmode.Mock)
+				event, selection := f.recordedReplay(t, ctx)
 				// This invokes native COMMIT, shared consequence finalization and its
 				// existing publication settlement, not a pre-settled delivery fixture.
-				publishErr := f.bus.PublishDirectRoutes(ctx, event, []events.DeliveryRoute{route})
+				publishErr := f.bus.PublishRecordedReplay(ctx, event, selection)
 				id, err := deliverylifecycle.DeliveryID(event.ID(), route)
 				if err != nil {
 					t.Fatal(err)

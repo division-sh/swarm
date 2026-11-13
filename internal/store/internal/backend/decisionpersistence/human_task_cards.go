@@ -199,6 +199,34 @@ func (s *DecisionSQLiteOwner) LoadHumanTaskContinuation(ctx context.Context, car
 	return loadHumanTaskContinuation(ctx, s.backend, cardID, false, false)
 }
 
+func (s *DecisionPostgresOwner) ValidateHumanTaskReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, binding decisioncard.HumanTaskReturn) error {
+	return validateHumanTaskReturnTx(ctx, attempt, binding, true)
+}
+
+func (s *DecisionSQLiteOwner) ValidateHumanTaskReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, binding decisioncard.HumanTaskReturn) error {
+	return validateHumanTaskReturnTx(ctx, attempt, binding, false)
+}
+
+func validateHumanTaskReturnTx(ctx context.Context, attempt *mutationprotocol.Attempt, binding decisioncard.HumanTaskReturn, postgres bool) error {
+	if binding.Empty() {
+		return fmt.Errorf("human-task publication requires its native return binding")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireActiveDecisionCardRunTx(ctx, tx, binding.CardID(), postgres); err != nil {
+			return err
+		}
+		card, err := loadDecisionCard(ctx, tx, binding.CardID(), postgres, true)
+		if err != nil {
+			return err
+		}
+		continuation, err := loadHumanTaskContinuation(ctx, tx, binding.CardID(), postgres, true)
+		if err != nil {
+			return err
+		}
+		return binding.ValidateNative(card, continuation)
+	})
+}
+
 func (s *DecisionPostgresOwner) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
 	result := postgresDecisionMutation(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.HumanTaskContinuation, error) {
 		var continuation decisioncard.HumanTaskContinuation

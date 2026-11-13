@@ -476,9 +476,6 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 	writers := map[string]func(context.Context, events.Event) error{
 		"publish":              eb.Publish,
 		"publish_acknowledged": eb.PublishAcknowledged,
-		"publish_direct": func(ctx context.Context, event events.Event) error {
-			return eb.PublishDirect(ctx, event, []string{"agent-expansion"})
-		},
 	}
 	assertPhase := func(t *testing.T) {
 		t.Helper()
@@ -569,9 +566,6 @@ func assertEventBusDiagnosticDirectRefusal(
 	writers := map[string]func(context.Context, events.Event) error{
 		"publish":              eb.Publish,
 		"publish_acknowledged": eb.PublishAcknowledged,
-		"publish_direct": func(ctx context.Context, evt events.Event) error {
-			return eb.PublishDirect(ctx, evt, []string{"agent-1"})
-		},
 	}
 	for _, eventType := range events.DiagnosticDirectEventTypes() {
 		eventType := eventType
@@ -617,9 +611,6 @@ func assertEventBusTerminalRunRefusal(
 	writers := map[string]func(context.Context, events.Event) error{
 		"publish":              eb.Publish,
 		"publish_acknowledged": eb.PublishAcknowledged,
-		"publish_direct": func(ctx context.Context, evt events.Event) error {
-			return eb.PublishDirect(ctx, evt, []string{"agent-1"})
-		},
 	}
 	for name, publish := range writers {
 		name, publish := name, publish
@@ -1638,7 +1629,7 @@ func TestEventBusPublishDirect_PayloadAdmitterFailureAbortsPublish(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
+	err = eb.PublishRecordedReplay(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), operatorread.ReplaySelection{})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload admission failure, got %v", err)
 	}
@@ -1658,10 +1649,20 @@ func TestEventBusCheckDirectRoutes_PayloadAdmitterFailureAbortsBeforeRecipientPl
 	}
 
 	identity := runtimebustest.Identity(t, "agent-a", "review/inst-1")
-	status, err := eb.CheckDirectRoutes(
+	original := eventtest.RunCreatingRootIngress(uuid.NewString(), "task.completed", "", "", []byte(`{}`), 0, identity.RunID, "", events.EventEnvelope{}, time.Time{})
+	view, err := operatorread.NewOperatorEventFull(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view.Deliveries = []operatorread.OperatorEventDelivery{{DeliveryID: "source-delivery", SubscriberID: "agent-a", Status: "delivered", Route: events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}}}
+	selection, err := operatorread.SelectReplayDeliveries(view, []string{"source-delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := eb.CheckRecordedReplay(
 		context.Background(),
-		eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}},
+		original,
+		selection,
 	)
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload admission failure, got %v", err)
@@ -1715,7 +1716,7 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		t.Fatalf("NewEventBus: %v", err)
 	}
 
-	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress(
+	intent := requesterReturnIntentForTest(t, eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("custom.direct"),
 		"",
@@ -1726,8 +1727,11 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
-	),
-		[]string{"agent-a"})
+	), "agent-a", events.DeliveryContext{})
+	err = commitEnginePublicationsForTest(context.Background(), eb, store, []runtimeengine.EmitIntent{intent})
+	if err == nil {
+		err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})
+	}
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassTargetUnreachable || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" {
 		t.Fatalf("PublishDirect failure = %#v, want authoritative delivery incomplete", failure)
@@ -1747,7 +1751,7 @@ func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *tes
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:direct-context"}}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
 
-	if err := eb.PublishDirect(ctx, eventtest.RunCreatingRootIngress(
+	intent := requesterReturnIntentForTest(t, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("custom.direct"),
 		"",
@@ -1758,8 +1762,13 @@ func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *tes
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),
-	), []string{"agent-a"}); err != nil {
-		t.Fatalf("PublishDirect: %v", err)
+	), "agent-a", deliveryContext)
+	eventID = intent.Event.ID()
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("prepare requester return: %v", err)
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("dispatch requester return: %v", err)
 	}
 	got := requireBusEvent(t, ch, "context-carrying direct delivery")
 	if got.DeliveryContext().ReplyContextID() != deliveryContext.ReplyContextID() {
@@ -1789,7 +1798,7 @@ func TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata(t *
 	matchCh := runtimebustest.Subscribe(t, eb, "reviewer-ent-1")
 	otherCh := runtimebustest.Subscribe(t, eb, "reviewer-ent-2")
 
-	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress(
+	original := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("custom.direct"),
 		"",
@@ -1800,10 +1809,13 @@ func TestEventBusPublishDirect_RejectsAnyExplicitRecipientFilteredByMetadata(t *
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
 		time.Now().UTC(),
-	),
-		[]string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"})
-	if err == nil || !strings.Contains(err.Error(), "direct delivery rejected recipients: reviewer-ent-2, missing-agent") {
-		t.Fatalf("PublishDirect error = %v, want exact filtered-recipient rejection", err)
+	)
+	for _, requester := range []string{"reviewer-ent-2", "missing-agent"} {
+		intent := requesterReturnIntentForTest(t, original, requester, events.DeliveryContext{})
+		_, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{intent})
+		if err == nil || !strings.Contains(err.Error(), "human-task requester is missing, unavailable or ambiguous") {
+			t.Fatalf("requester-return error = %v, want exact unavailable-requester rejection", err)
+		}
 	}
 	requireNoBusEvent(t, controlCh, "rejected direct delivery to control-plane")
 	requireNoBusEvent(t, matchCh, "rejected direct delivery to matching entity-scoped reviewer")
@@ -3159,14 +3171,15 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 		t.Fatalf("seed direct recipient: %v", err)
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: "agent-a", FlowPath: "bundle-source-test",
+		AgentID: "agent-a", FlowPath: "bundle-source-test", Subscriptions: []string{string(eventType)},
+		LocalEvents: map[string]struct{}{string(eventType): {}},
 	})
 	if err != nil {
 		t.Fatalf("admit direct recipient: %v", err)
 	}
 	runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
-	if err := eb.PublishDirect(ctx, evt, []string{"agent-a"}); err != nil {
-		t.Fatalf("PublishDirect: %v", err)
+	if err := eb.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 	bundleHash, err := storetest.ReadSelectedForkRunBundleHash(ctx, pg, runID)
 	if err != nil {

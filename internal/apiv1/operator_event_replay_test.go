@@ -208,6 +208,60 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	if len(targets) != 2 || targets[0].DeliveryID != delivered.DeliveryID || targets[1].DeliveryID != failed.DeliveryID {
 		t.Fatalf("terminal route targets = %#v, want both exact delivery rows", targets)
 	}
+
+	originalEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "scan.requested", "source", "", []byte(`{}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: runtimebustest.IdentityForRun(t, operatorReplayRunID, "agent-a", ""),
+		Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}}}
+	deliveryID, err := runtimedelivery.DeliveryID(originalEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := operatorread.NewOperatorEventFull(originalEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.Deliveries = []operatorread.OperatorEventDelivery{{DeliveryID: deliveryID, SubscriberID: "agent-a", Route: route, Status: "delivered"}}
+	selection, err := operatorread.SelectReplayDeliveries(original, []string{deliveryID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ids := range [][]string{nil, {deliveryID, deliveryID}, {"foreign-delivery"}} {
+		if _, err := operatorread.SelectReplayDeliveries(original, ids); err == nil {
+			t.Fatalf("invalid original delivery selection accepted: %v", ids)
+		}
+	}
+	for _, status := range []string{"pending", "processing", "unknown"} {
+		pendingView := original
+		pendingView.Deliveries = append([]operatorread.OperatorEventDelivery(nil), original.Deliveries...)
+		pendingView.Deliveries[0].Status = status
+		if _, err := operatorread.SelectReplayDeliveries(pendingView, []string{deliveryID}); err == nil {
+			t.Fatalf("non-replayable original delivery accepted: %s", status)
+		}
+	}
+	tampered := selection.Routes()
+	tampered[0].Context.Reply.ID = "caller-substituted"
+	if selection.Routes()[0].Context.ReplyContextID() != "original-reply" {
+		t.Fatal("caller mutated the frozen replay selection")
+	}
+	if err := selection.ValidateRecorded(originalEvent, tampered); err == nil {
+		t.Fatal("replay selection accepted substituted native route context")
+	}
+	wrongID := original
+	wrongID.Deliveries = append([]operatorread.OperatorEventDelivery(nil), original.Deliveries...)
+	wrongID.Deliveries[0].DeliveryID = "substituted-delivery"
+	forged, err := operatorread.SelectReplayDeliveries(wrongID, []string{"substituted-delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forged.ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err == nil {
+		t.Fatal("replay publication lost its exact native delivery identity")
+	}
+	if err := (operatorread.ReplaySelection{}).ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err == nil {
+		t.Fatal("zero replay evidence accepted native rows")
+	}
 }
 
 type completeOperatorReplayProofStore interface {
@@ -901,16 +955,16 @@ type diagnosingReplayPublisher struct {
 	t *testing.T
 }
 
-func (p diagnosingReplayPublisher) PublishDirectRoutes(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
-	err := p.eventReplayPublisher.PublishDirectRoutes(ctx, event, routes)
+func (p diagnosingReplayPublisher) PublishRecordedReplay(ctx context.Context, event events.Event, selection operatorread.ReplaySelection) error {
+	err := p.eventReplayPublisher.PublishRecordedReplay(ctx, event, selection)
 	if err != nil {
 		p.t.Logf("direct replay publication: %v", err)
 	}
 	return err
 }
 
-func (p diagnosingReplayPublisher) CheckDirectRoutes(ctx context.Context, event events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
-	status, err := p.eventReplayPublisher.CheckDirectRoutes(ctx, event, routes)
+func (p diagnosingReplayPublisher) CheckRecordedReplay(ctx context.Context, event events.Event, selection operatorread.ReplaySelection) (runtimebus.ExactDirectRouteStatus, error) {
+	status, err := p.eventReplayPublisher.CheckRecordedReplay(ctx, event, selection)
 	if err != nil {
 		p.t.Logf("direct replay admission: %v", err)
 	}
@@ -1245,7 +1299,7 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	}
 	ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
-	fillAgentChannel(t, ctx, bus, "agent-a", cap(ch))
+	fillAgentChannel(t, ctx, pg, bus, "agent-a", cap(ch))
 	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
 	handler := eventReplayTestHandler(t, pg, bus)
 	body := eventReplayBody(original.EventID, nil, "idem-direct-fanout-failure")
@@ -1699,12 +1753,12 @@ func (p *failOnceAuditEventPublisher) Publish(ctx context.Context, evt events.Ev
 	return p.inner.Publish(ctx, evt)
 }
 
-func (p *failOnceAuditEventPublisher) PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error {
-	return p.inner.PublishDirectRoutes(ctx, evt, routes)
+func (p *failOnceAuditEventPublisher) PublishRecordedReplay(ctx context.Context, evt events.Event, selection operatorread.ReplaySelection) error {
+	return p.inner.PublishRecordedReplay(ctx, evt, selection)
 }
 
-func (p *failOnceAuditEventPublisher) CheckDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
-	return p.inner.CheckDirectRoutes(ctx, evt, routes)
+func (p *failOnceAuditEventPublisher) CheckRecordedReplay(ctx context.Context, evt events.Event, selection operatorread.ReplaySelection) (runtimebus.ExactDirectRouteStatus, error) {
+	return p.inner.CheckRecordedReplay(ctx, evt, selection)
 }
 
 func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher) *Handler {
@@ -1826,11 +1880,23 @@ func assertNoReplayEvent(t *testing.T, ch <-chan *runtimebus.LocalDelivery) {
 	requireNoAPIV1RuntimeBusEvent(t, ch, "replay assertion")
 }
 
-func fillAgentChannel(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, agentID string, count int) {
+func fillAgentChannel(t *testing.T, ctx context.Context, pg *store.PostgresStore, bus *runtimebus.EventBus, agentID string, count int) {
 	t.Helper()
+	original := seedReplayableOperatorEvent(t, ctx, pg, "filler.event", []string{agentID}, runtimedelivery.StatusDelivered)
+	ids := make([]string, 0, len(original.Deliveries))
+	for _, row := range original.Deliveries {
+		ids = append(ids, row.DeliveryID)
+	}
+	selection, err := operatorread.SelectReplayDeliveries(original, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < count; i++ {
-		err := bus.PublishDirect(ctx, eventtest.ExistingRunRootIngress(uuid.NewString(),
-			events.EventType("filler.event"), "", "", []byte(`{"ok":true}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC()), []string{agentID})
+		event, err := replayEventFromOriginal(original, uuid.NewString(), time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = bus.PublishRecordedReplay(ctx, event, selection)
 		if err != nil {
 			t.Fatalf("fill agent channel publish %d: %v", i, err)
 		}

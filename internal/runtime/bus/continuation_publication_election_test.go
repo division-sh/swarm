@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -15,14 +14,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil/runlifecyclefixture"
-	"github.com/google/uuid"
 )
 
 type gatedPublicationElection struct {
@@ -106,13 +103,7 @@ func TestPublicationAndStartupElectOneExactCarrierBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				evt := eventtest.ChildForProducerWithRoutingSource(
-					uuid.NewString(), f.event.Type(), f.event.Producer(), f.event.TaskID(), f.event.Payload(),
-					f.event.ChainDepth()+1,
-					events.EventLineage{RunID: f.event.RunID(), ParentEventID: f.event.ID(), TaskID: f.event.TaskID(), ExecutionMode: executionmode.Mock},
-					events.EnvelopeForSourceRoute(f.event.Envelope(), events.RouteIdentity{EntityID: identity.EntityID}),
-					eventtest.RootRoutingSource(identity.EntityID), time.Now().UTC(),
-				)
+				evt, selection := f.recordedReplay(t, ctx)
 				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
 					t.Fatal(err)
@@ -138,7 +129,7 @@ func TestPublicationAndStartupElectOneExactCarrierBothStores(t *testing.T) {
 				deliveries := f.subscribe(t, evt.Type())
 				defer runtimebustest.UnsubscribeIdentity(f.bus, f.identity)
 				published := make(chan error, 1)
-				go func() { published <- f.bus.PublishDirectRoutes(ctx, evt, []events.DeliveryRoute{route}) }()
+				go func() { published <- f.bus.PublishRecordedReplay(ctx, evt, selection) }()
 				select {
 				case <-gate.entered:
 				case err := <-published:

@@ -17,9 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/notifyallchildren"
 	"github.com/google/uuid"
 )
@@ -196,7 +198,15 @@ func TestOrdinaryPublicationPlanningPoolBoundariesBothStores(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
 			defer cancel()
-			if err := direct.PublishDirect(ctx, event, []string{agents[0].Identity.AgentID()}); !errors.Is(err, refusal) {
+			intent := decisioncardtest.RequesterReturn(t, event, agents[0].Identity.AgentID(), events.DeliveryContext{})
+			plans, err := direct.PrepareEnginePublications(ctx, []engine.EmitIntent{intent})
+			if err == nil && len(plans) == 1 {
+				_, err = boundedStore.CommitPublication(ctx, plans[0].(bus.EnginePublicationPlan).PublicationCommand())
+			}
+			if releaseErr := direct.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); releaseErr != nil {
+				t.Fatal(releaseErr)
+			}
+			if !errors.Is(err, refusal) {
 				t.Fatalf("direct publication requires a second pool connection: %v", err)
 			}
 			if boundedStore.passes != 1 {

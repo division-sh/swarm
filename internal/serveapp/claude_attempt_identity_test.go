@@ -890,8 +890,14 @@ func publishClaudeAttemptProofEvent(t *testing.T, backend claudeAttemptProofBack
 	eventID := uuid.NewString()
 	evt := eventtest.ExistingRunRootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, claudeAttemptProofRuntimeID, events.EventEnvelope{}, time.Now().UTC())
 	cfg := claudeAttemptProofAgentConfig(surface)
-	if err := eventBus.PublishDirectRoutes(backend.context(), evt, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}); err != nil {
-		t.Fatalf("publish Claude proof event: %v", err)
+	storetest.CommitSemanticEventWithRoutes(t, backend.context(), backend.store, evt,
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}, runtimepipelineobligation.ScopeSubscribed)
+	coordinator, ok := eventBus.DeliveryContinuationOwner().(interface{ Synchronize(context.Context) error })
+	if !ok {
+		t.Fatal("Claude proof requires its native delivery coordinator")
+	}
+	if err := coordinator.Synchronize(backend.context()); err != nil {
+		t.Fatalf("dispatch recorded Claude proof input: %v", err)
 	}
 	return eventID
 }

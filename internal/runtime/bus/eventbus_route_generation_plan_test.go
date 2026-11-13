@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 )
 
 type routeGenerationPlanBarrier struct {
@@ -166,7 +167,9 @@ func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *te
 	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.identity_route")))
 	evt := routeGenerationTestEvent("identity-route-generation", "test.identity_route")
-	plan, err := eb.deliveryPlanner.PlanDirect(context.Background(), evt, []string{agentID})
+	intent := decisioncardtest.RequesterReturn(t, evt, agentID, events.DeliveryContext{})
+	evt = intent.Event
+	plan, err := eb.routeTable.requesterReturn.bind(context.Background(), eb.deliveryPlanner, evt, intent.RequesterReturn)
 	if err != nil {
 		t.Fatalf("PlanDirect: %v", err)
 	}

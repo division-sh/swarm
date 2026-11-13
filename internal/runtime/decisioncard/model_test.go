@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -682,6 +683,69 @@ func TestHumanTaskSourceOwnerRequiresExactRequesterRoute(t *testing.T) {
 				if err := validateHumanTaskSourceOwner(anchor, HumanTaskContinuation{RequesterRoute: hostile}); err == nil {
 					t.Fatalf("foreign requester route accepted: %#v", hostile)
 				}
+			}
+			runID, cardID, parentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			operation, err := NewHumanTaskOperationID(runID, parentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := HumanTaskAnchor{RequesterAgentID: "requester", OperationID: operation, Category: "review", Scope: Scope{Kind: ScopeGlobal}, Source: tc.source}
+			nativeAnchor, err := NewHumanTaskAnchor(owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			at := CanonicalTimestamp(time.Now().UTC())
+			card := Card{CardID: cardID, RunID: runID, Anchor: nativeAnchor, Status: StatusDecided, Verdict: "approve", DecisionEventID: parentID}
+			full := HumanTaskContinuation{CardID: cardID, RunID: runID, RequesterRoute: tc.source.Route(), ReplyContextID: "native-reply",
+				SourceEventID: parentID, DeadlineAt: at.Add(time.Hour), CreatedAt: at, UpdatedAt: at, BudgetBundleHash: "native-bundle",
+				BudgetWindowStart: at, BudgetWindowEnd: at.Add(time.Hour), State: HumanTaskContinuationDecisionCommitted, OutcomeEventID: parentID}
+			product := eventtest.ChildForProducerWithRoutingSource(HumanTaskOutcomeEventID(cardID, parentID), "human_task.approved",
+				eventtest.Producer(events.EventProducerPlatform, "workflow-runtime"), "", []byte(`{}`), 1,
+				events.EventLineage{RunID: runID, ParentEventID: parentID}, events.EnvelopeForTargetRoute(events.EventEnvelope{}, tc.source.Route()), tc.source, at)
+			binding, err := BindHumanTaskReturn(card, full, product)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := binding.ValidateNative(card, full); err != nil {
+				t.Fatal(err)
+			}
+			if err := binding.ValidateEvent(product, binding.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := binding.ValidateCommand(cardID, parentID, at, true); err != nil {
+				t.Fatal(err)
+			}
+			for _, command := range []struct {
+				card, event string
+				at          time.Time
+				terminal    bool
+			}{
+				{"foreign-card", parentID, at, true}, {cardID, "foreign-event", at, true},
+				{cardID, parentID, at.Add(time.Second), true}, {cardID, parentID, at, false},
+			} {
+				if err := binding.ValidateCommand(command.card, command.event, command.at, command.terminal); err == nil {
+					t.Fatal("native requester binding accepted a foreign command")
+				}
+			}
+			if err := binding.ValidateEvent(product, events.DeliveryContext{}); err == nil {
+				t.Fatal("native requester binding lost its reply reference")
+			}
+			other := owner
+			other.RequesterAgentID = "sibling"
+			foreign := card
+			foreign.Anchor, err = NewHumanTaskAnchor(other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			forged, err := BindHumanTaskReturn(foreign, full, product)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := forged.ValidateNative(card, full); err == nil {
+				t.Fatal("copied card identifiers substituted the native requester")
+			}
+			if err := (HumanTaskReturn{}).ValidateEvent(product, binding.Context()); err == nil {
+				t.Fatal("zero requester binding granted a return")
 			}
 		})
 	}
