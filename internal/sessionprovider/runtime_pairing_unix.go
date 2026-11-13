@@ -194,33 +194,37 @@ func (c *RuntimeConnection) AccountPresentation(ctx context.Context) (phone, nam
 
 // DisconnectionReason is display-only; it grants no session execution authority.
 func (c *RuntimeConnection) DisconnectionReason() string {
+	reason, _ := c.FailureReport()
+	return reason
+}
+
+// FailureReport snapshots the legacy reason and reporting cause together.
+func (c *RuntimeConnection) FailureReport() (reason, cause string) {
 	if c == nil || c.state == nil {
-		return ""
+		return "", ""
 	}
 	occurrence := c.state.currentOccurrence()
 	if occurrence == nil {
-		return ""
+		return "", ""
 	}
 	occurrence.mu.Lock()
 	defer occurrence.mu.Unlock()
-	if occurrence.failureReason == "" && occurrence.startFailure {
-		return "network unreachable"
+	reason = occurrence.failureReason
+	if reason == "" && occurrence.startFailure {
+		reason = "network unreachable"
 	}
-	return occurrence.failureReason
+	fact := occurrence.diagnostic
+	fact.Down, fact.fenced = occurrence.fenced && occurrence.authenticated, occurrence.fenced
+	if fact.Failed() {
+		cause = fact.Cause()
+	}
+	return reason, cause
 }
 
 // FailureCause is reporting only, independent of the legacy control reason.
 func (c *RuntimeConnection) FailureCause() string {
-	if c == nil || c.state == nil {
-		return ""
-	}
-	if occurrence := c.state.currentOccurrence(); occurrence != nil {
-		fact := occurrence.diagnosticSnapshot()
-		if fact.Failed() {
-			return fact.Cause()
-		}
-	}
-	return ""
+	_, cause := c.FailureReport()
+	return cause
 }
 
 // Complete old-source input before the existing owner reopens the same pairing
