@@ -18,6 +18,9 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
@@ -43,11 +46,13 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				var deliveryReader servedRunDeliveryReader
 				var receiverReader receiverProofStateReader
 				var sourceReader sourceArtifactReader
+				var cards decisioncard.Store
 				var nativeRead func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 					deliveryReader = p.deps.DeliveryStore.SummarizeRun
 					receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
 					sourceReader = p.sourceReader
+					cards = p.deps.DecisionCards
 					if reader, ok := p.channelOnboarding.(interface {
 						ReadNativeInboxQualificationParent(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)
 					}); ok {
@@ -60,7 +65,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if nativeRead == nil {
 						t.Fatal("registered lifecycle lacks the native qualification owner")
 					}
-					runRegisteredSourceLifecycle(t, h, observation, backend, &sourceReader, hash, operation, receiverReader, deliveryReader,
+					runRegisteredSourceLifecycle(t, h, observation, backend, &sourceReader, hash, operation, receiverReader, deliveryReader, cards,
 						func(ctx context.Context, parent channelnative.TransportParent) (channelnative.Qualification, error) {
 							return nativeRead(ctx, parent)
 						})
@@ -449,7 +454,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	}
 }
 
-func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, observation storetest.ChannelObservation, backend servedparity.Backend, sourceReader *sourceArtifactReader, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader, nativeRead func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)) {
+func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, observation storetest.ChannelObservation, backend servedparity.Backend, sourceReader *sourceArtifactReader, hash, operation string, receiverReader receiverProofStateReader, deliveryReader servedRunDeliveryReader, cards decisioncard.Store, nativeRead func(context.Context, channelnative.TransportParent) (channelnative.Qualification, error)) {
 	t.Helper()
 	command := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 	initialNative := waitRegisteredSourceQualification(t, h, observation, nativeRead)
@@ -603,6 +608,20 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		waitObservedChannelRejectedCallback(t, observation, rejectedToken)
 		waitObservedChannelSendsSettled(t, observation)
 		preserved := readChannelPreservedHistory(t, observation)
+		originalCards := map[string]decisioncard.Card{}
+		if clear {
+			items, next, err := cards.ListDecisionCards(t.Context(), decisioncard.ListOptions{Status: decisioncard.StatusPending, AnchorKind: string(decisioncard.AnchorKindStageGate), Limit: 200})
+			if err != nil || next != "" {
+				t.Fatalf("original card inventory: cursor=%s err=%v", next, err)
+			}
+			for _, item := range items {
+				original, err := cards.GetDecisionCard(t.Context(), item.CardID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				originalCards[item.CardID] = original
+			}
+		}
 		params := map[string]any{"include_source_artifacts": clear, "idempotency_key": "cli-source-reset"}
 		dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{"dry_run": true, "include_source_artifacts": clear, "idempotency_key": "cli-source-dry"})
 		if dry.Error != nil || readRegisteredChannelCard(t, h, card).Status != before.Status || readChannelNativeHistory(t, observation) != nativeHistory || readChannelPreservedHistory(t, observation) != preserved {
@@ -655,14 +674,25 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			}
 			waitObservedChannelSendsSettled(t, observation)
 		}
-		requireChannelPreservedHistory(t, observation, preserved, successorPlans...)
+		checkHistory := func() {
+			if !clear {
+				requireChannelPreservedHistory(t, observation, preserved, successorPlans...)
+				return
+			}
+			actual := readChannelPreservedHistory(t, observation, successorPlans...)
+			normalized, err := channelHistoryWithoutResetRenders(preserved, actual, originalCards, backend == servedparity.BackendExplicitPostgres)
+			if err != nil || normalized != preserved {
+				t.Fatalf("reset altered preserved history: %v", err)
+			}
+		}
+		checkHistory()
 		if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil {
 			t.Fatal(replay.Error)
 		}
 		if readChannelNativeHistory(t, observation) != nativeHistory || len(h.provider.CommandWrites()) != writes {
 			t.Fatal("reset replay changed deployment-owned native authority")
 		}
-		requireChannelPreservedHistory(t, observation, preserved, successorPlans...)
+		checkHistory()
 		status := postChannelSourceControl(t, callback, signing, card, token, messageID)
 		t.Logf("registered reset old callback backend=%s operation=%s HTTP=%d", backend, operation, status)
 		if status == http.StatusOK || status == http.StatusAccepted {
@@ -843,7 +873,151 @@ func channelHistoryWithoutSuccessorPlan(history, successorPlan string) (string, 
 	return string(body), err
 }
 
+func channelHistoryWithoutResetRenders(beforeHistory, afterHistory string, cards map[string]decisioncard.Card, postgres bool) (string, error) {
+	var before, after [][][]json.RawMessage
+	if json.Unmarshal([]byte(beforeHistory), &before) != nil || json.Unmarshal([]byte(afterHistory), &after) != nil || len(before) != 15 || len(after) != 15 {
+		return "", errors.New("reset history is malformed")
+	}
+	originals, seen := map[string]bool{}, map[string]bool{}
+	for _, row := range before[7] {
+		if len(row) != 7 {
+			return "", errors.New("original render is malformed")
+		}
+		originals[string(row[0])] = true
+	}
+	var retained [][]json.RawMessage
+	for _, row := range after[7] {
+		if len(row) != 7 || seen[string(row[0])] {
+			return "", errors.New("invalid or duplicated render")
+		}
+		seen[string(row[0])] = true
+		if originals[string(row[0])] {
+			retained = append(retained, row)
+			continue
+		}
+		allowed := false
+		for _, prior := range before[7] {
+			if !bytes.Equal(prior[1], row[1]) {
+				continue
+			}
+			decodeInput := func(value json.RawMessage) ([]byte, error) {
+				var input []byte
+				var text string
+				var err error
+				if postgres {
+					err = json.Unmarshal(value, &input)
+				} else {
+					err = json.Unmarshal(value, &text)
+					input = []byte(text)
+				}
+				if err != nil {
+					return nil, err
+				}
+				// Match native render readback: PostgreSQL JSONB is not stored canonically.
+				return canonicaljson.Canonicalize(input)
+			}
+			input, err := decodeInput(prior[4])
+			var hash string
+			var revision int64
+			if err != nil || json.Unmarshal(prior[5], &hash) != nil || json.Unmarshal(row[2], &revision) != nil {
+				continue
+			}
+			original, err := channeldelivery.Decode(input, hash)
+			card, found := cards[original.SourceID]
+			if err != nil || !found || original.SourceKind != "card" || card.Status != decisioncard.StatusPending || card.Anchor.Kind() != decisioncard.AnchorKindStageGate || revision <= original.Revision || original.ActionPage == nil {
+				continue
+			}
+			card.Status, card.SupersededReason = decisioncard.StatusSuperseded, "run_cancelled"
+			expected, err := channeldelivery.FreezeCard(card, revision, "", original.Audience, channeldelivery.DraftPrompt{})
+			if err == nil {
+				expected, err = channeldelivery.WithPresentation(expected, original.Bounds, original.ActionPage.Index)
+			}
+			actualInput, decodeErr := decodeInput(row[4])
+			if err != nil || decodeErr != nil || !bytes.Equal(actualInput, expected.Input) {
+				continue
+			}
+			want := append([]json.RawMessage(nil), prior...)
+			// Retain physical JSONB bytes only after checking the canonical owner output.
+			want[0], want[2], want[4], want[6] = row[0], row[2], row[4], row[6]
+			want[5], _ = json.Marshal(expected.Hash)
+			encoded, _ := json.Marshal(want)
+			actual, _ := json.Marshal(row)
+			if bytes.Equal(encoded, actual) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed || seen[string(row[1])+string(row[5])] {
+			return "", errors.New("additional render is not the exact original card supersession")
+		}
+		seen[string(row[1])+string(row[5])] = true
+	}
+	after[7] = retained
+	body, err := json.Marshal(after)
+	return string(body), err
+}
+
 func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
+	t.Run("superseded_renders", func(t *testing.T) {
+		card := newCursorMailboxFixture(t, servedparity.BackendDefaultSQLite).base
+		cards := map[string]decisioncard.Card{card.CardID: card}
+		audience := channeldelivery.Audience{PrincipalID: uuid.NewString(), InterfaceKey: "history", DeliveryEpoch: 1, ExternalAccountRef: "account", ConversationRef: "room", ConversationScope: "direct"}
+		bounds := packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}
+		old, e1 := channeldelivery.FreezeCard(card, 1, "", audience, channeldelivery.DraftPrompt{})
+		old, e2 := channeldelivery.WithPresentation(old, bounds, 0)
+		card.Status, card.SupersededReason = decisioncard.StatusSuperseded, "run_cancelled"
+		terminal, e3 := channeldelivery.FreezeCard(card, 2, "", audience, channeldelivery.DraftPrompt{})
+		terminal, e4 := channeldelivery.WithPresentation(terminal, bounds, 0)
+		if err := errors.Join(e1, e2, e3, e4); err != nil {
+			t.Fatal(err)
+		}
+		plan := uuid.NewString()
+		row := func(id string, f channeldelivery.Frozen) []any {
+			return []any{id, plan, f.Revision, channeldelivery.ProjectionVersion, string(f.Input), f.Hash, "2026-11-13T00:00:00Z"}
+		}
+		before := make([]any, 15)
+		before[7] = [][]any{row("original", old)}
+		baseline, _ := json.Marshal(before)
+		for _, change := range []string{"none", "original_changed", "original_deleted", "duplicate", "plan", "hash", "projection", "revision", "execution", "source_id", "audience", "choices", "full_text"} {
+			t.Run(change, func(t *testing.T) {
+				after := append([]any(nil), before...)
+				rows := [][]any{row("original", old), row("terminal", terminal)}
+				switch change {
+				case "original_changed":
+					rows[0][5] = "changed"
+				case "original_deleted":
+					rows = rows[1:]
+				case "duplicate":
+					rows = append(rows, rows[1])
+				case "plan":
+					rows[1][1] = uuid.NewString()
+				case "hash":
+					rows[1][5] = "sha256:wrong"
+				case "projection":
+					rows[1][3] = "wrong-version"
+				case "revision":
+					rows[1][2] = 1
+				case "execution":
+					after[13] = [][]string{{"unexpected-effect"}}
+				case "source_id", "audience", "choices", "full_text":
+					var projection map[string]any
+					_ = json.Unmarshal(terminal.Input, &projection)
+					projection[change] = map[string]any{"source_id": uuid.NewString(), "audience": map[string]any{"principal_id": audience.PrincipalID, "interface_key": "foreign", "delivery_epoch": 1, "external_account": "account", "conversation_reference": "room", "conversation_scope": "direct"}, "choices": []any{map[string]any{"verdict": "approve", "label": "Approve", "fields": []any{}}}, "full_text": "forged terminal text"}[change]
+					input, err := canonicaljson.Encode(projection)
+					if err != nil {
+						t.Fatal(err)
+					}
+					rows[1][4], rows[1][5] = string(input), canonicaljson.HashBytes(input)
+				}
+				after[7] = rows
+				body, _ := json.Marshal(after)
+				normalized, err := channelHistoryWithoutResetRenders(string(baseline), string(body), cards, false)
+				if (err == nil && normalized == string(baseline)) != (change == "none") {
+					t.Fatalf("history admitted %s: %v", change, err)
+				}
+			})
+		}
+	})
 	t.Run("inspection_absence", func(t *testing.T) {
 		for _, tc := range []struct {
 			err  error
