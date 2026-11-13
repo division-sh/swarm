@@ -127,7 +127,8 @@ type Source struct {
 
 func (e Event) Validate() error {
 	if e.SenderPhone != "" {
-		if err := (channelonboarding.AccountReference{Provider: "whatsapp", Account: e.SenderPhone}).Validate(e.ProviderFacts()); err != nil {
+		canonical, err := channelprovider.WhatsAppAccount(e.SenderPhone)
+		if err != nil || canonical != e.SenderPhone {
 			return fmt.Errorf("WhatsApp capture has invalid sender phone evidence")
 		}
 	}
