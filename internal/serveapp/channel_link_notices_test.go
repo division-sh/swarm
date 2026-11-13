@@ -115,8 +115,12 @@ func TestChannelNoticeLinkWorkerCustodyAndCurrentness(t *testing.T) {
 	if err := poll(); err != nil || len(mailbox.requests) != before || n.entries[op.OperationID].valid {
 		t.Fatal("caller cancellation became a notice")
 	}
-	if got := linkNoticeText(linkNoticeEvent{kind: "back"}, true); got != "" {
-		t.Fatal("R199 user choice was invented", got)
+	back := linkNoticeEvent{kind: "back", since: now, upAt: now.Add(4 * time.Minute), extra: 2, cause: "connection reset"}
+	if got := linkNoticeText(back, true); got != "Swarm Notice: WhatsApp link back after 4m0s, 2 more drops in between; cause: connection reset" {
+		t.Fatal("R199 self-link cause form changed", got)
+	}
+	if got := linkNoticeText(back, false); got != "Swarm Notice: WhatsApp link back after 4m0s, 2 more drops in between" {
+		t.Fatal("R199 changed the ordinary back form", got)
 	}
 	n.capture(nil)
 	if n.entries[op.OperationID].valid {
@@ -132,9 +136,17 @@ func TestChannelNoticeLinkWorkerCustodyAndCurrentness(t *testing.T) {
 	if target, err := n.destination(t.Context()); err != nil || target.Binding != nil {
 		t.Fatal("failed self-link retained notice admission", err)
 	}
-	self.observe(now.Add(time.Second), true, false, "")
+	now = now.Add(time.Second)
+	self.observe(now, true, false, "")
+	mailbox.failure = nil
 	before = len(mailbox.requests)
-	if err := n.reconcile(t.Context(), nil); err != nil || len(mailbox.requests) != before || self.next(now) == nil || !self.lastBack.IsZero() || self.reported != 0 {
-		t.Fatal("R199 stub admitted, consumed quota or lost its summary", err)
+	if err := n.reconcile(t.Context(), nil); err != nil || len(mailbox.requests) != before+1 || self.next(now) != nil || self.lastBack != now || self.reported != 1 {
+		t.Fatal("R199 summary was not admitted exactly once after recovery", err)
+	}
+	if got := mailbox.requests[before].Summary; got != "Swarm Notice: WhatsApp link back after 1s, 0 more drops in between; cause: logged out" {
+		t.Fatal("R199 lost the captured cause", got)
+	}
+	if err := n.reconcile(t.Context(), nil); err != nil || len(mailbox.requests) != before+1 {
+		t.Fatal("R199 repeated the same recovery notice", err)
 	}
 }
