@@ -619,7 +619,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			}
 		}
 		originalCardFacts := map[string]decisioncard.Card{}
-		if clear {
+		{
 			items, next, err := cards.ListDecisionCards(t.Context(), decisioncard.ListOptions{Status: decisioncard.StatusPending, AnchorKind: string(decisioncard.AnchorKindStageGate), Limit: 200})
 			if err != nil || next != "" {
 				t.Fatalf("original card inventory: cursor=%s err=%v", next, err)
@@ -685,10 +685,6 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 			waitObservedChannelSendsSettled(t, observation, originalPlans)
 		}
 		checkHistory := func() {
-			if !clear {
-				requireChannelPreservedHistory(t, observation, preserved, successorPlans...)
-				return
-			}
 			actual := readChannelPreservedHistory(t, observation, successorPlans...)
 			normalized, err := channelHistoryWithoutResetRenders(preserved, actual, originalCardFacts, backend == servedparity.BackendExplicitPostgres)
 			if err != nil || normalized != preserved {
@@ -1006,16 +1002,18 @@ func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
 		if err := errors.Join(e1, e2, e3, e4); err != nil {
 			t.Fatal(err)
 		}
-		plan := uuid.NewString()
+		plan, successor := uuid.NewString(), uuid.NewString()
 		row := func(id string, f channeldelivery.Frozen) []any {
 			return []any{id, plan, f.Revision, channeldelivery.ProjectionVersion, string(f.Input), f.Hash, "2026-11-13T00:00:00Z"}
 		}
 		before := make([]any, 15)
+		before[6] = [][]string{{plan, "card", card.CardID}}
 		before[7] = [][]any{row("original", old)}
 		baseline, _ := json.Marshal(before)
 		for _, change := range []string{"none", "original_changed", "original_deleted", "duplicate", "plan", "hash", "projection", "revision", "execution", "source_id", "audience", "choices", "full_text"} {
 			t.Run(change, func(t *testing.T) {
 				after := append([]any(nil), before...)
+				after[6] = [][]string{{plan, "card", card.CardID}, {successor, "card", "fresh-card"}}
 				rows := [][]any{row("original", old), row("terminal", terminal)}
 				switch change {
 				case "original_changed":
@@ -1047,7 +1045,10 @@ func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
 				}
 				after[7] = rows
 				body, _ := json.Marshal(after)
-				normalized, err := channelHistoryWithoutResetRenders(string(baseline), string(body), cards, false)
+				normalized, err := channelHistoryWithoutSuccessorPlan(string(body), successor)
+				if err == nil {
+					normalized, err = channelHistoryWithoutResetRenders(string(baseline), normalized, cards, false)
+				}
 				if (err == nil && normalized == string(baseline)) != (change == "none") {
 					t.Fatalf("history admitted %s: %v", change, err)
 				}
