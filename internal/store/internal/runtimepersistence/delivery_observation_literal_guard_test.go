@@ -18,13 +18,6 @@ type reviewedDeliveryObservation struct {
 // Reviewer-a #642/6202927132 admits only these declarations and literal uses.
 var reviewedDeliveryObservations = []reviewedDeliveryObservation{
 	{
-		"internal/store/internal/runtimepersistence/test_pipeline_storage_observation.go",
-		"ReadSelectedFanOutOutcomeCorrespondenceForTest",
-		"e17afeaade9082bae101f8b0cd447e5bd9ced67eec5249c0eaf775067e4cddc2",
-		"9a160829a4c1293420b34e4fa58afed63e51ecde1c9409d5b8e960d7981b2fc3",
-		[]string{"2db2449750c63f011603169fba0e0c559dba63bb857cfdeb3ac19a8eea3ebc06"},
-	},
-	{
 		"internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
 		"ReadSelectedDeploymentResourceWaitForTest",
 		"cc3ccbefef8379863820615d14216e63c08a91a4c6d715c99d5a434b1bbf4d2e",
