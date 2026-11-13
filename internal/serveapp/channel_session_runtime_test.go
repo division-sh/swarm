@@ -30,7 +30,7 @@ import (
 func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 	// The loaded source has no session ingress. A valid runtime coordinate alone
 	// must not install a caller-supplied channel/trigger at that source.
-	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		t.Fatal(err)
 	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "reception", artifact)
-	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), rooted, runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repoRootForTest(), rooted, runtimePlatformSpecPath(t), contracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
