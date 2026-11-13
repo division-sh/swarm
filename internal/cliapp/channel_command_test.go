@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/tests/support/channelfixture"
@@ -79,7 +80,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		control := &DeploymentChannelControl{remote: remote, provider: "telegram", expectedAccount: "420079"}
+		control := &DeploymentChannelControl{remote: remote, provider: channelfixture.For("telegram"), expectedAccount: "420079"}
 		for _, method := range methods {
 			var result map[string]any
 			if err := control.call(t.Context(), method, map[string]any{}, &result); err != nil {
@@ -88,6 +89,29 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 		if calls != len(methods) {
 			t.Fatalf("selected remote calls = %d, want %d", calls, len(methods))
+		}
+	})
+	t.Run("list facts require an exact admitted interface", func(t *testing.T) {
+		identity := operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
+			ChannelPackID: "different-from-provider", ChannelPackVersion: "1", ChannelManifestHash: "sha256:" + strings.Repeat("a", 64),
+			SemanticGeneration: "exact-list-interface"}.Normalized()
+		result := channelListResult{Channels: []channelReadbackResult{{
+			Identity:   operatorchannel.Readback{Interface: identity},
+			Activation: &channelonboarding.ConnectedChannelActivation{Provider: "whatsapp", Interface: identity},
+		}}}
+		bindChannelReadbackFacts(&result, channelRegistrationFixture{}, channelfixture.For("telegram"))
+		if !result.facts[0].MatchesProvider("whatsapp") {
+			t.Fatal("admitted activation lost its exact provider relation")
+		}
+		result.Channels[0].Activation.Interface.ChannelManifestHash = "sha256:" + strings.Repeat("b", 64)
+		bindChannelReadbackFacts(&result, channelRegistrationFixture{}, channelfixture.For("telegram"))
+		if result.facts[0].Provider() != "" {
+			t.Fatal("foreign activation supplied provider facts")
+		}
+		result.Channels[0].Activation = nil
+		bindChannelReadbackFacts(&result, channelRegistrationFixture{}, channelfixture.For("telegram"))
+		if result.facts[0].Provider() != "" {
+			t.Fatal("identity-only row inferred a provider")
 		}
 	})
 	t.Run("deployment idle hints", func(t *testing.T) {
@@ -229,7 +253,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 				row["connection"] = map[string]any{"state": "disconnected", "linked": true, "reason": reason}
 				return result
 			})
-			out, errOut, code := runOperatorChannelCLI(t, server, "channel", "list")
+			out, errOut, code := runOperatorChannelCLIWithBinding(t, server, channelfixture.For("whatsapp"), "", "channel", "list")
 			if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: disconnected") || !strings.Contains(out, "WhatsApp disconnected: "+reason) ||
 				reason != "network unreachable" && strings.Contains(out, "network unreachable") {
 				t.Fatal("native health lost or invented its disconnected reason", code, out, errOut)
@@ -685,9 +709,14 @@ func runOperatorChannelCLI(t *testing.T, server *httptest.Server, args ...string
 }
 
 func runOperatorChannelCLIWithInput(t *testing.T, server *httptest.Server, input string, args ...string) (string, string, int) {
+	return runOperatorChannelCLIWithBinding(t, server, channelfixture.For("telegram"), input, args...)
+}
+
+func runOperatorChannelCLIWithBinding(t *testing.T, server *httptest.Server, facts channelprovider.Binding, input string, args ...string) (string, string, int) {
 	t.Helper()
 	setCLIAPITestToken(t, operatorChannelCLIToken)
 	opts := testRootCommandOptions(server)
+	opts.channelReadbackFact = facts
 	opts.channelConnectPoll = time.Millisecond
 	opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 	opts.input = strings.NewReader(input)

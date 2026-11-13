@@ -414,17 +414,7 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 	if err := json.Unmarshal(raw, target); err != nil {
 		return err
 	}
-	switch value := target.(type) {
-	case *channelonboarding.Result:
-		*value = value.WithProviderFacts(c.provider)
-	case *map[string][]channelonboarding.Result:
-		for key, rows := range *value {
-			for i, row := range rows {
-				rows[i] = row.WithProviderFacts(c.provider)
-			}
-			(*value)[key] = rows
-		}
-	}
+	bindChannelReadbackFacts(target, nil, c.provider)
 	return nil
 }
 
