@@ -219,11 +219,11 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, ctx := range []context.Context{hostilePublisherContext(t), standing.Context()} {
-			if _, err := owner.BeginContinuationDispatch(ctx); !errors.Is(err, worklifetime.ErrDispatchClosed) {
+			if _, err := owner.BeginContinuationDispatch(ctx); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 				t.Fatalf("fresh/standing dispatch crossed shutdown seal: %v", err)
 			}
 		}
-		if _, err := owner.BeginDispatch(parent.Context()); !errors.Is(err, worklifetime.ErrDispatchClosed) {
+		if _, err := owner.BeginDispatch(parent.Context()); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 			t.Fatalf("ordinary dispatch inherited accepted admission: %v", err)
 		}
 		projection, ok := worklifetime.OccurrenceFromContext(parent.Context())
