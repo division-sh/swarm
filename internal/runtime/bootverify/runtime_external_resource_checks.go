@@ -159,11 +159,13 @@ func InspectStaticCredentialRequirements(ctx context.Context, source semanticvie
 				if err != nil {
 					return nil, staticCredentialInspectionError(key, err)
 				}
-				if admitted {
+				if admitted != NoAdmittedCredential {
 					descriptor := observed.Descriptor()
 					descriptor.RequiredBy = []runtimecredentials.Requirement{use.Requirement}
 					out = append(out, descriptor)
-					continue
+					if admitted == FullyAdmittedCredential {
+						continue
+					}
 				}
 			}
 			if !slices.Contains(requirements, use.Requirement) {
