@@ -33,7 +33,7 @@ func writeJoinedRetainedSource(t *testing.T, root string) string {
 	source := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), numericScatterSource), source)
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/full_lifecycle/standing_telegram/telegram"), filepath.Join(source, "telegram"))
-	writeReleaseFile(t, filepath.Join(source, "schema.yaml"), `stages: {done: {final: true}}
+	writeReleaseFile(t, filepath.Join(source, "schema.yaml"), `stages: {waiting: {}}
 schedules:
   continuity-clock: {every: 24h, emit: continuity.tick}
 inputs: [item.registered, control.seed, control.review, control.finish, work.requested, retry.requested, dead.requested]
