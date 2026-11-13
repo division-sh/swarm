@@ -62,6 +62,13 @@ func (c *PublicWebhookConfig) Validate() error {
 		(strings.TrimSpace(*c.CertificateFile) == "" || strings.TrimSpace(*c.PrivateKeyFile) == "") {
 		return fmt.Errorf("serve.public_webhook requires both nonblank certificate_file and private_key_file, or neither")
 	}
+	if c.CertificateFile != nil {
+		for _, reference := range []string{*c.CertificateFile, *c.PrivateKeyFile} {
+			if strings.ContainsAny(reference, "\x00\r\n") || strings.Contains(reference, "-----BEGIN") {
+				return fmt.Errorf("serve.public_webhook requires file references, not inline certificate or key material")
+			}
+		}
+	}
 	if c.Email != "" {
 		address, err := mail.ParseAddress(c.Email)
 		if err != nil || address.Address != c.Email {
