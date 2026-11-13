@@ -496,8 +496,12 @@ func serveDeclaredRegistrationEnabled(ctx context.Context, manager *runtime.Runt
 	return err == nil, err
 }
 
-func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController, published func() error, deployment ...*serveDeploymentTransport) error {
+func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController, published func() error, sessions serveSessionBootstrapOwner, live bool, deployment ...*serveDeploymentTransport) error {
 	snapshot, err := compileServeChannelActivationSnapshot(ctx, manager, store, identities, credentials)
+	if err != nil {
+		return err
+	}
+	snapshot, err = filterServeSessionActivationSnapshot(ctx, snapshot, sessions, live)
 	if err != nil {
 		return err
 	}
@@ -1306,14 +1310,26 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 	if err != nil {
 		return err
 	}
-	if owner, ok := r.sessions.(interface {
+	snapshot, err = filterServeSessionActivationSnapshot(ctx, snapshot, r.sessions, r.ingress.RuntimeLoad())
+	if err != nil {
+		return err
+	}
+	changed, err := publishServeChannelActivationSnapshot(ctx, r.manager, snapshot)
+	if changed && r.published != nil {
+		err = errors.Join(err, r.published())
+	}
+	return err
+}
+
+func filterServeSessionActivationSnapshot(ctx context.Context, snapshot serveChannelActivationSnapshot, sessions serveSessionBootstrapOwner, live bool) (serveChannelActivationSnapshot, error) {
+	if owner, ok := sessions.(interface {
 		sessionPublicationCurrent(context.Context, channelonboarding.CompiledActivation, bool) (bool, error)
 	}); ok {
 		current := snapshot.Activations[:0]
 		for _, activation := range snapshot.Activations {
-			admit, err := owner.sessionPublicationCurrent(ctx, activation, r.ingress.RuntimeLoad())
+			admit, err := owner.sessionPublicationCurrent(ctx, activation, live)
 			if err != nil {
-				return err
+				return serveChannelActivationSnapshot{}, err
 			}
 			if admit {
 				current = append(current, activation)
@@ -1321,11 +1337,7 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 		}
 		snapshot.Activations = current
 	}
-	changed, err := publishServeChannelActivationSnapshot(ctx, r.manager, snapshot)
-	if changed && r.published != nil {
-		err = errors.Join(err, r.published())
-	}
-	return err
+	return snapshot, nil
 }
 
 func publishServeChannelActivationSnapshot(ctx context.Context, manager *runtime.RuntimeContextManager, snapshot serveChannelActivationSnapshot) (bool, error) {
