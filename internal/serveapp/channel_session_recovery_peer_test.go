@@ -421,8 +421,8 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, kind := range []string{"replacement", "ban"} {
 			if !t.Run(string(backend)+"/"+kind, func(t *testing.T) {
-				peer := newServeNativeProtocolPeer(t)
 				h := prepareChannelAnchorPublicJourney(t, backend, "bot-token", false, 0, nil)
+				peer := newServeNativeProtocolPeer(t, h.provider)
 				h.opts.SwarmDir, h.opts.SwarmDirSet = filepath.Join(t.TempDir(), "native"), true
 				body, err := os.ReadFile(h.opts.ConfigPath)
 				if err != nil {
