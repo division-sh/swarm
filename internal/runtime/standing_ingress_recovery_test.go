@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,6 +81,7 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				}
 				bootProof := role == "provider" && state == "current"
 				if bootProof {
+					members["tools.yaml"] = []byte("root_probe:\n  handler_type: http\n  credentials: [telegram.telegram_bot_token]\n  http: {method: GET, url: 'https://unused.example.test'}\n")
 					members["coordinator/policy.yaml"] = []byte("operator_account: '420079'\n")
 					members["coordinator/nodes.yaml"] = []byte("independent:\n  platform.boot:\n    activity:\n      id: independent_notice\n      tool: telegram.send_message\n      input: {chat_id: '1234', text: 'notice'}\n")
 				}
@@ -237,9 +239,22 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 									t.Fatal(err)
 								}
 							case "independent":
-								missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, runtimebootverify.Options{Credentials: file, AdmittedCredentials: inspect})
+								identify, err := registration.Operation(packs.RegistrationOperationIdentify)
+								if err != nil {
+									t.Fatal(err)
+								}
+								overlay, err := semanticview.WithRuntimeTools(source, map[string]runtimecontracts.ToolSchemaEntry{"runtime_probe": identify.Tool()})
+								if err != nil {
+									t.Fatal(err)
+								}
+								missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, overlay, runtimebootverify.Options{Credentials: file, AdmittedCredentials: inspect})
 								if err != nil || len(missing) != 1 || missing[0].Key != use.Role {
 									t.Fatalf("independent same-key use lost static refusal: %v %v", missing, err)
+								}
+								for _, name := range []string{"root_probe", "runtime_probe", "telegram.send_message"} {
+									if !slices.Contains(missing[0].RequiredBy, runtimecredentials.Requirement{Kind: "tool", Name: name}) {
+										t.Fatalf("root/overlay/independent requirement lost: %s", name)
+									}
 								}
 								return
 							}
