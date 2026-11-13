@@ -13,10 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -76,6 +78,11 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 					"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
 					"coordinator/schema.yaml":   []byte("stages: []\ninputs: [inbound.telegram.raw]\n"),
 				}
+				bootProof := role == "provider" && state == "current"
+				if bootProof {
+					members["coordinator/policy.yaml"] = []byte("operator_account: '420079'\n")
+					members["coordinator/nodes.yaml"] = []byte("independent:\n  platform.boot:\n    activity:\n      id: independent_notice\n      tool: telegram.send_message\n      input: {chat_id: '1234', text: 'notice'}\n")
+				}
 				if state == "healthy_same_service_sibling" {
 					members["coordinator/schema.yaml"] = []byte("stages: []\ninputs: [inbound.telegram.raw, inbound.partner.raw.issues]\n")
 				}
@@ -102,6 +109,19 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 				source := semanticview.Wrap(bundle)
 				fact := sourceartifactfixture.FactFor(rooted.Artifact())
+				if bootProof {
+					admitted, err := packadmission.FromBundle(bundle)
+					if err != nil {
+						t.Fatal(err)
+					}
+					admitted = admitted.WithProviderFacts(channelfixture.For("telegram"))
+					bundle.PackAdmission = admitted
+					effective, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: source, SourceArtifactFact: fact, ChannelPlans: admitted.ChannelPlans})
+					if err != nil {
+						t.Fatal(err)
+					}
+					source = effective.Source()
+				}
 				providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 				if err != nil {
 					t.Fatal(err)
@@ -154,6 +174,82 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				registration, ok := plan.Registration()
 				if !ok || len(registration.ProviderCredentials()) != 1 {
 					t.Fatal("fixture requires exact provider and signing registration roles")
+				}
+				if bootProof {
+					for _, scenario := range []string{"learned", "independent", "wrong_flow", "wrong_account", "wrong_role", "stale", "incomplete", "frozen_operation", "frozen_receipt"} {
+						t.Run("boot_selector/"+scenario, func(t *testing.T) {
+							file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "boot.json"))
+							if err != nil {
+								t.Fatal(err)
+							}
+							owner, err := runtimecredentials.NewSnapshotOwner(file)
+							if err != nil {
+								t.Fatal(err)
+							}
+							op := channelonboarding.Operation{OperationID: uuid.NewString(), Revision: 1, PrincipalID: "fixture-principal", Provider: "telegram", Interface: identity,
+								DeploymentRegistration: true, AccountConfirmed: true, AccountReference: "420079", Posture: channelonboarding.ActivationWebhookRegistration, Phase: channelonboarding.PhaseSucceeded}.WithProviderFacts(channelfixture.For("telegram"))
+							for _, credentialRole := range append(registration.ProviderCredentials(), registration.SigningCredential()) {
+								key := "learned." + credentialRole
+								if _, err := file.AdmitWithReceipt(ctx, key, "original", "receipt-"+credentialRole); err != nil {
+									t.Fatal(err)
+								}
+								seal, err := owner.SealCurrentValue(ctx, key)
+								if err != nil {
+									t.Fatal(err)
+								}
+								op.CredentialAdmissions = append(op.CredentialAdmissions, channelonboarding.CredentialAdmission{Role: credentialRole, StoreKey: key, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + credentialRole, ValueSeal: seal.Seal})
+								if scenario != "independent" && scenario != "learned" {
+									if err := file.Set(ctx, credentialRole, "declaration-default"); err != nil {
+										t.Fatal(err)
+									}
+								}
+							}
+							store := &standingRegisteredCredentialStore{standingLearnedCredentialStore: standingLearnedCredentialStore{operations: []channelonboarding.Operation{op}}}
+							apply, err := registration.Operation(packs.RegistrationOperationApply)
+							if err != nil {
+								t.Fatal(err)
+							}
+							use := runtimecredentials.RequirementUse{Requirement: runtimecredentials.Requirement{Kind: "tool", Name: apply.ToolID()}, FlowID: "coordinator", Role: registration.ProviderCredentials()[0], Entry: apply.Tool()}
+							inspect := bootAdmittedCredentials(source, store, file, []packs.SatisfactionPlan{plan})
+							if strings.HasPrefix(scenario, "frozen_") {
+								if observed, extent, err := inspect(ctx, use); err != nil || extent != runtimebootverify.FullyAdmittedCredential || observed.Key != op.CredentialAdmissions[0].StoreKey {
+									t.Fatalf("initial exact learned admission: extent=%v err=%v", extent, err)
+								}
+							}
+							switch scenario {
+							case "wrong_flow":
+								use.FlowID = "."
+							case "wrong_account":
+								store.operations[0].AccountReference = "420080"
+							case "wrong_role":
+								store.operations[0].CredentialAdmissions = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
+								store.operations[0].CredentialAdmissions[0].Role = "unadmitted"
+							case "incomplete":
+								store.operations[0].CredentialAdmissions = op.CredentialAdmissions[:1]
+							case "frozen_operation":
+								store.operations[0].OperationID = uuid.NewString()
+							case "stale", "frozen_receipt":
+								value, receipt := "replacement", "replacement-receipt"
+								if scenario == "frozen_receipt" {
+									value = "original"
+								}
+								if _, err := file.AdmitWithReceipt(ctx, op.CredentialAdmissions[0].StoreKey, value, receipt); err != nil {
+									t.Fatal(err)
+								}
+							case "independent":
+								missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, runtimebootverify.Options{Credentials: file, AdmittedCredentials: inspect})
+								if err != nil || len(missing) != 1 || missing[0].Key != use.Role {
+									t.Fatalf("independent same-key use lost static refusal: %v %v", missing, err)
+								}
+								return
+							}
+							observed, extent, err := inspect(ctx, use)
+							wantError := scenario == "wrong_role" || scenario == "incomplete" || scenario == "stale" || strings.HasPrefix(scenario, "frozen_")
+							if (err != nil) != wantError || !wantError && ((extent == runtimebootverify.FullyAdmittedCredential) != (scenario == "learned")) || scenario == "learned" && observed.Key != op.CredentialAdmissions[0].StoreKey {
+								t.Fatalf("actual boot selector: scenario=%s extent=%v err=%v", scenario, extent, err)
+							}
+						})
+					}
 				}
 				file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 				if err != nil {
