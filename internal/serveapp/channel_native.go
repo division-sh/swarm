@@ -99,26 +99,33 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx contex
 	if err != nil {
 		return err
 	}
-	if err := d.reconcileSessionConnections(ctx, activations); err != nil {
-		return err
+	result, err := d.reconcileSessionConnections(ctx, activations)
+	if err != nil {
+		return errors.Join(result, err)
 	}
 	for _, activation := range activations {
+		if ctx.Err() != nil {
+			return errors.Join(result, context.Cause(ctx))
+		}
 		if err := d.reconcileNativeInboxActivation(ctx, activation); err != nil {
-			return fmt.Errorf("native inbox activation %s: %w", activation.ActivationID, err)
+			result = errors.Join(result, fmt.Errorf("native inbox activation %s: %w", activation.ActivationID, err))
 		}
 	}
 	if d.deployment != nil && d.deployment.registrations != nil {
 		registered, err := d.deployment.registrations(ctx)
 		if err != nil {
-			return err
+			return errors.Join(result, err)
 		}
 		for _, selected := range registered {
+			if ctx.Err() != nil {
+				return errors.Join(result, context.Cause(ctx))
+			}
 			if err := d.reconcileDeploymentNativeInbox(ctx, selected.result, selected.plan); err != nil {
-				return err
+				result = errors.Join(result, err)
 			}
 		}
 	}
-	return nil
+	return result
 }
 
 func (d *serveChannelDeliveryDispatcher) resolveInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
