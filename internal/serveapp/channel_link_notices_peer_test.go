@@ -60,8 +60,15 @@ func TestChannelNoticeLinkRegisteredBothStores(t *testing.T) {
 				messageID := waitLinkNoticeReceipt(t, reader, notice.MailboxID, h.process.outputString)
 				message := h.provider.Delivery(messageID - 1)
 				text := fmt.Sprint(message["text"])
-				if fmt.Sprint(message["chat_id"]) != "1001" || strings.Contains(text, "\n") || message["reply_markup"] != nil {
+				if fmt.Sprint(message["chat_id"]) != "1001" || strings.Contains(text, "\n") {
 					t.Fatal("notice wire changed recipient/body/controls", message)
+				}
+				if raw := message["reply_markup"]; raw != nil {
+					markup, ok := raw.(map[string]any)
+					keyboard, typed := markup["inline_keyboard"].([]any)
+					if !ok || len(markup) != 1 || !typed || len(keyboard) != 0 {
+						t.Fatal("notice acquired controls or unknown markup", message)
+					}
 				}
 				for _, kind := range []string{"down:", "back after"} {
 					if strings.HasPrefix(text, "Swarm Notice: WhatsApp link "+kind) {
