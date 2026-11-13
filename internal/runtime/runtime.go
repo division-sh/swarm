@@ -2460,8 +2460,8 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 // Join their producer before the manager leaves its runnable lifecycle phase.
 func (rt *Runtime) drainAndJoinDeliveryContinuations(ctx context.Context, grace time.Duration) (error, error) {
 	var result error
-	if rt.workOccurrence != nil {
-		if err := rt.workOccurrence.WaitForQuiescence(ctx); err != nil {
+	if rt.Manager != nil {
+		if err := rt.Manager.WaitForQuiescence(ctx); err != nil {
 			result = fmt.Errorf("agent manager shutdown: agent manager shutdown drain timed out after %s: %w", grace, err)
 		}
 	}

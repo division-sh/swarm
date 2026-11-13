@@ -211,6 +211,9 @@ func (am *AgentManager) Count() int {
 
 func (am *AgentManager) IsRunning() bool {
 	_, _, running := am.lifecycle.runSnapshot()
+	if running && am.runtimeShutdownAdmissionClosed != nil && am.runtimeShutdownAdmissionClosed() {
+		return false
+	}
 	return running
 }
 
