@@ -214,7 +214,7 @@ func (s *processLifecycleSupervisor) shutdownDependentRuntimesLocked(ctx, drainC
 			s.stopRunStalled()
 			s.stopRunStalled = nil
 		}
-		for _, result := range manager.DeactivateAllWithOptions(runtime.RuntimeContextCauseUnavailable, opts) {
+		for _, result := range manager.ShutdownAllWithOptions(drainCtx, runtime.RuntimeContextCauseUnavailable, opts) {
 			shutdownErr = errors.Join(shutdownErr, result.ShutdownErr)
 		}
 		// Construction can fail before a candidate is registered. The
