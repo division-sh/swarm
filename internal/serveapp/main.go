@@ -317,7 +317,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, packBase)
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, packBase, ChannelRegistrations().AdmitInventory)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}

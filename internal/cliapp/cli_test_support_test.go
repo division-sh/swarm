@@ -39,7 +39,7 @@ func executeRootCommand(ctx context.Context, root string, args []string, out, er
 }
 
 func executeRootCommandWithOptions(ctx context.Context, root string, args []string, out, errOut io.Writer, opts rootCommandOptions) int {
-	if opts.channelRegistration == nil {
+	if opts.channelRegistration == nil && opts.channelReadbackFact.Provider() == "" {
 		opts.channelRegistration = channelRegistrationFixture{}
 	}
 	return executeRootCommandAtInvocation(ctx, mustInvocationRootForTest(root), args, out, errOut, opts)
@@ -50,7 +50,7 @@ func newRootCommand(ctx context.Context, root string, out, errOut io.Writer) *co
 }
 
 func newRootCommandWithOptions(ctx context.Context, root string, out, errOut io.Writer, opts rootCommandOptions) *cobra.Command {
-	if opts.channelRegistration == nil {
+	if opts.channelRegistration == nil && opts.channelReadbackFact.Provider() == "" {
 		opts.channelRegistration = channelRegistrationFixture{}
 	}
 	return newRootCommandAtInvocation(ctx, mustInvocationRootForTest(root), out, errOut, opts)
