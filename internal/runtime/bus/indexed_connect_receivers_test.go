@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/decisioncardtest"
 )
 
 type unscopedConnectIndexTestReader struct {
@@ -128,9 +129,10 @@ func TestDirectPlanningPropagatesScopedIndexFailures(t *testing.T) {
 			loadTargetOwnerCandidates: bus.targetOwnerCandidates,
 		},
 	}
+	intent := decisioncardtest.RequesterReturn(t, event, "requester", events.DeliveryContext{})
 	for _, failure := range []error{context.Canceled, errors.New("direct index failure"), errors.Join(context.Canceled, errors.New("independent direct index failure"))} {
 		reader.err = failure
-		if _, err := planner.PlanDirect(ctx, event, []string{"requester"}); !errors.Is(err, failure) {
+		if _, err := (requesterReturnRelation{compiled: true}).bind(ctx, planner, intent.Event, intent.RequesterReturn); !errors.Is(err, failure) {
 			t.Fatalf("direct planning bypassed scoped index admission: got=%v want=%v", err, failure)
 		}
 	}

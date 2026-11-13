@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -67,6 +68,26 @@ func (p EnginePublicationPlan) ValidateDurablePublicationPlan() error {
 }
 
 func (p EnginePublicationPlan) PublicationCommand() PublicationCommand { return p.command }
+
+func (p EnginePublicationPlan) HumanTaskReturnBinding() decisioncard.HumanTaskReturn {
+	return p.intent.RequesterReturn
+}
+
+func (p EnginePublicationPlan) ValidateHumanTaskReturnCommand(cardID, routeEventID string, occurredAt time.Time, terminal bool) error {
+	binding := p.intent.RequesterReturn
+	if err := binding.ValidateCommand(cardID, routeEventID, occurredAt, terminal); err != nil {
+		return err
+	}
+	if err := binding.ValidateEvent(p.admittedSource.Event(), p.intent.Context); err != nil {
+		return err
+	}
+	routes := p.prepared.plan.DeliveryRoutes()
+	if len(routes) != 1 || !routes[0].Recipient.IsAgent() || routes[0].Recipient.ID() != binding.RequesterID() ||
+		routes[0].AgentIdentity.RunID != p.intent.Event.RunID() || routes[0].Context.ReplyContextID() != binding.Context().ReplyContextID() {
+		return errors.New("human-task return publication requires the exact requester delivery")
+	}
+	return nil
+}
 
 // ValidatePreparedFanOutEvent binds the canonical planner's input to its output.
 // Routing may project receiver facts, but cannot substitute the admitted source.
@@ -215,9 +236,13 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 			}
 			publication.publicationClaim = &pipelinePublicationClaim{bus: eb, eventID: intent.Event.ID(), claim: claim}
 		}
-		if len(intent.Recipients) > 0 {
+		if !intent.RequesterReturn.Empty() {
+			if err := intent.RequesterReturn.ValidateEvent(intent.Event, intent.Context); err != nil {
+				release()
+				return nil, err
+			}
 			publication.direct = true
-			publication.directRecipients = append([]string(nil), intent.Recipients...)
+			publication.requesterReturn = intent.RequesterReturn
 		}
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, publication)
 		if err != nil {
@@ -735,7 +760,7 @@ func (d engineDispatcher) dispatchIntentWithBoundary(ctx context.Context, intent
 	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
 		return false, runtimepipelineobligation.Continue(), err
 	} else if reason != "" {
-		d.bus.logDispatchQueued(ctx, reason, intent.Event, len(intent.Recipients), len(intent.Recipients) > 0, false)
+		d.bus.logDispatchQueued(ctx, reason, intent.Event, 0, !intent.RequesterReturn.Empty(), false)
 		return true, runtimepipelineobligation.Continue(), nil
 	}
 	deliveryRoutes, err := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())
@@ -761,7 +786,7 @@ func (d engineDispatcher) dispatchIntentWithBoundary(ctx context.Context, intent
 	}
 	defer func() { err = errors.Join(err, closeDispatch()) }()
 	nodePassthrough := true
-	if intent.Recipients == nil {
+	if intent.RequesterReturn.Empty() {
 		var interception deliveryRouteInterception
 		interception, err = d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
 		if err != nil && !interception.Outcome.Committed && interception.Outcome.ContinueDispatch() {
@@ -794,10 +819,10 @@ func (d engineDispatcher) dispatchIntentWithBoundary(ctx context.Context, intent
 	}
 	recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID())
 	if err != nil {
-		if intent.Recipients == nil || !errors.Is(err, ErrAuthoritativeRecipientManifestUnavailable) {
+		if intent.RequesterReturn.Empty() || !errors.Is(err, ErrAuthoritativeRecipientManifestUnavailable) {
 			return false, runtimepipelineobligation.Continue(), err
 		}
-		recipients = uniqueStrings(intent.Recipients)
+		recipients = deliveryRouteAgentRecipientIDs(deliveryRoutes)
 	}
 	if !nodePassthrough {
 		d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
@@ -926,7 +951,6 @@ func (eb *EventBus) stageCommittedOutboxOperationWithAgentHandoff(intent runtime
 		return
 	}
 	intent.Event = clonePostCommitPublish(intent.Event)
-	intent.Recipients = append([]string(nil), intent.Recipients...)
 	eventID := strings.TrimSpace(intent.Event.ID())
 	if eventID == "" {
 		return

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
@@ -104,8 +105,8 @@ func TestEveryGenericPublicationSurfaceRejectsClosedEventClasses(t *testing.T) {
 	}{
 		{name: "publish", run: eb.Publish},
 		{name: "acknowledged", run: eb.PublishAcknowledged},
-		{name: "direct", run: func(ctx context.Context, event events.Event) error {
-			return eb.PublishDirect(ctx, event, []string{"agent-a"})
+		{name: "recorded replay", run: func(ctx context.Context, event events.Event) error {
+			return eb.PublishRecordedReplay(ctx, event, operatorread.ReplaySelection{})
 		}},
 		{name: "deferred", run: eb.publishDeferred},
 		{name: "engine_publication", run: func(ctx context.Context, event events.Event) error {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -74,6 +75,41 @@ type completeEventDispatchFixture struct {
 	identity         agentidentity.Identity
 	source           semanticview.Source
 	rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
+}
+
+func (f completeEventDispatchFixture) recordedReplay(t testing.TB, ctx context.Context) (events.Event, operatorread.ReplaySelection) {
+	t.Helper()
+	reader := f.store.(interface {
+		LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	})
+	original, err := reader.LoadOperatorEvent(ctx, f.event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(original.Deliveries))
+	for _, row := range original.Deliveries {
+		if row.Route.AgentIdentity == f.identity {
+			ids = append(ids, row.DeliveryID)
+		}
+	}
+	selection, err := operatorread.SelectReplayDeliveries(original, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := original.EventSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := events.NewReplayEvent(events.ReplayEventInput{
+		Facts: events.EventFacts{ID: uuid.NewString(), Type: snapshot.Type(), Producer: events.ProducerClaim{Type: snapshot.ProducerType(), ID: snapshot.SourceAgent()},
+			TaskID: snapshot.TaskID(), Payload: snapshot.Payload(), ChainDepth: snapshot.ChainDepth() + 1, RoutingSource: snapshot.RoutingSource(),
+			Envelope: snapshot.Envelope(), CreatedAt: time.Now().UTC(), ExecutionMode: snapshot.ExecutionMode()},
+		Lineage: events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event, selection
 }
 
 type completeEventDispatchGeneration struct {

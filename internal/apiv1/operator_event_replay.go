@@ -30,8 +30,8 @@ const (
 
 type eventReplayPublisher interface {
 	EventPublisher
-	PublishDirectRoutes(context.Context, events.Event, []events.DeliveryRoute) error
-	CheckDirectRoutes(context.Context, events.Event, []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error)
+	PublishRecordedReplay(context.Context, events.Event, operatorread.ReplaySelection) error
+	CheckRecordedReplay(context.Context, events.Event, operatorread.ReplaySelection) (runtimebus.ExactDirectRouteStatus, error)
 }
 
 type EventReplayOwner interface {
@@ -289,6 +289,14 @@ func performEventReplay(
 	if err != nil {
 		return eventReplayPerformed{}, err
 	}
+	deliveryIDs := make([]string, 0, len(originalDeliveries))
+	for _, delivery := range originalDeliveries {
+		deliveryIDs = append(deliveryIDs, delivery.DeliveryID)
+	}
+	selection, err := operatorread.SelectReplayDeliveries(original, deliveryIDs)
+	if err != nil {
+		return eventReplayPerformed{}, err
+	}
 	replayEventID := uuid.NewString()
 	replayEvent, err := replayEventFromOriginal(original, replayEventID, now)
 	if err != nil {
@@ -304,7 +312,7 @@ func performEventReplay(
 	if err != nil {
 		return eventReplayPerformed{}, err
 	}
-	status, err := publisher.CheckDirectRoutes(ctx, replayEvent, selectedRoutes)
+	status, err := publisher.CheckRecordedReplay(ctx, replayEvent, selection)
 	if err != nil {
 		return eventReplayPerformed{}, eventReplayPublishError(original.EventName, err)
 	}
@@ -318,7 +326,7 @@ func performEventReplay(
 		})
 	}
 	var replayPublishErr error
-	if err := publisher.PublishDirectRoutes(ctx, replayEvent, selectedRoutes); err != nil {
+	if err := publisher.PublishRecordedReplay(ctx, replayEvent, selection); err != nil {
 		persisted, loadErr := eventReplayEvidencePersisted(ctx, opts, replayEventID)
 		if loadErr != nil {
 			return eventReplayPerformed{}, loadErr

@@ -281,7 +281,7 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), evt.CreatedAt(), false)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, card, continuation, evt.ID(), evt.CreatedAt(), false)
 	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
@@ -331,7 +331,7 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, card, continuation, evt.ID(), card.DecidedAt, true)
 	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
@@ -472,16 +472,15 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, card, continuation, evt.ID(), card.DecidedAt, true)
 	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
 func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	ctx context.Context,
 	product events.Event,
-	recipients []string,
-	replyContextID string,
-	cardID string,
+	card decisioncard.Card,
+	continuation decisioncard.HumanTaskContinuation,
 	routeEventID string,
 	occurredAt time.Time,
 	completeOutcome bool,
@@ -493,10 +492,11 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	if !ok {
 		return false, fmt.Errorf("human-task route requires the publication planner")
 	}
-	intent := runtimeengine.EmitIntent{Event: product, Recipients: append([]string(nil), recipients...)}
-	if strings.TrimSpace(replyContextID) != "" {
-		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: strings.TrimSpace(replyContextID)}}
+	binding, err := decisioncard.BindHumanTaskReturn(card, continuation, product)
+	if err != nil {
+		return false, err
 	}
+	intent := runtimeengine.EmitIntent{Event: product, Context: binding.Context(), RequesterReturn: binding}
 	plans, err := planner.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
 	if err != nil {
 		return false, err
@@ -508,11 +508,11 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	var committed CommittedHumanTaskRoute
 	if completeOutcome {
 		committed, err = pc.workflowStore.decisionRoutes.CommitHumanTaskOutcomeRoute(ctx, HumanTaskOutcomeRouteCommand{
-			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
+			CardID: card.CardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
 		})
 	} else {
 		committed, err = pc.workflowStore.decisionRoutes.CommitHumanTaskDeferredRoute(ctx, HumanTaskDeferredRouteCommand{
-			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
+			CardID: card.CardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
 		})
 	}
 	if committed.Publication == nil {
