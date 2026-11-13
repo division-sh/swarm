@@ -30,7 +30,7 @@ func debtExcludedFixtureControlSource(t *testing.T, path, source string) *ast.Fi
 func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	classified := 0
-	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go"} {
+	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go", "internal/serveapp/channel_provider_construction_unsupported.go"} {
 		current := path
 		if path == "internal/testutil/testprocess/process_darwin.go" {
 			current = "tests/support/testutil/testprocess/process_darwin.go"
@@ -65,14 +65,14 @@ func TestPersistenceAuthorityDebtReviewedExcludedExactDelta(t *testing.T) {
 			t.Fatal("restored historical findings no longer enter the ratchet")
 		}
 	}
-	if classified != 9 {
-		t.Fatalf("classified %d declarations, want three retained and both exact three-declaration Darwin homes", classified)
+	if classified != 15 {
+		t.Fatalf("classified %d declarations, want three retained, both exact three-declaration Darwin homes and six unsupported constructors", classified)
 	}
 }
 
 func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go"} {
+	for _, path := range []string{"internal/serveapp/issue642_future_provider_test.go", "internal/serveapp/lifecycle_template_race_enabled_test.go", "internal/testutil/testprocess/process_darwin.go", "tests/support/testutil/testprocess/process_darwin.go", "internal/serveapp/channel_provider_construction_unsupported.go"} {
 		current := path
 		if path == "internal/testutil/testprocess/process_darwin.go" {
 			current = "tests/support/testutil/testprocess/process_darwin.go"
@@ -86,6 +86,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 				candidate, source := path, string(data)
 				provider := strings.Contains(path, "future_provider")
 				darwin := strings.HasSuffix(path, "process_darwin.go")
+				unsupported := strings.HasSuffix(path, "channel_provider_construction_unsupported.go")
 				want := 1
 				if provider {
 					want = 2
@@ -93,9 +94,17 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 				if darwin {
 					want = 3
 				}
+				if unsupported {
+					want = 6
+				}
 				uncertain := 0
 				switch mutation {
 				case "old-body":
+					if unsupported {
+						source = strings.Replace(source, "native channel registration requires Linux or macOS", "unreviewed refusal", 1)
+						want--
+						uncertain = 1
+					}
 					if provider {
 						source = strings.Replace(source, `"idempotency_key": "future-provider-start-cut"`, `"allow_source_freeze": true, "idempotency_key": "future-provider-start-cut"`, 1)
 						want--
@@ -107,7 +116,9 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 						uncertain = 1
 					}
 				case "body", "helper-body":
-					if darwin {
+					if unsupported {
+						source = strings.Replace(source, "native channel registration requires Linux or macOS", "unreviewed refusal", 1)
+					} else if darwin {
 						if mutation == "helper-body" {
 							source = strings.Replace(source, "return nil }", "return errors.New(\"unreviewed\") }", 1)
 						} else {
@@ -125,7 +136,13 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 					want--
 					uncertain = 1
 				case "binding", "import-alias":
-					if darwin {
+					if unsupported {
+						binding := `"example.invalid/packs"`
+						if mutation == "import-alias" {
+							binding = `foreign "github.com/division-sh/swarm/internal/packs"`
+						}
+						source = strings.Replace(source, `"github.com/division-sh/swarm/internal/packs"`, binding, 1)
+					} else if darwin {
 						binding := `"example.invalid/unix"`
 						if mutation == "import-alias" {
 							binding = `foreign "golang.org/x/sys/unix"`
@@ -153,6 +170,9 @@ func TestPersistenceAuthorityDebtReviewedExcludedHostileContexts(t *testing.T) {
 					uncertain, want = want, 0
 				case "foreign-declaration":
 					name := "lifecycleTemplateRaceBuild"
+					if unsupported {
+						name = "qualifyWhatsAppPlan"
+					}
 					if provider {
 						name = "TestIssue642FutureProviderConstructsAfterEmptyCatalogBothStores"
 					}
