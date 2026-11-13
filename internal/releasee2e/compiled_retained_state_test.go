@@ -3,6 +3,7 @@ package releasee2e
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -148,17 +149,23 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 			t.Logf("joined process evidence:\n%s", s.process.output.String())
 		}
 	})
-	s.runID = waitForFullLifecycleStandingRun(t, s.process.rpc, "", "").RunID
 	joinedRegisterTelegram(t, s)
+	// Registered Telegram pickup is common setup, before business work or an arm.
+	if err := s.process.stopAndWait(goldenShutdownGrace); err != nil {
+		t.Fatalf("registration setup shutdown: %v", err)
+	}
+	s.start()
+	s.runID = waitForFullLifecycleStandingRun(t, s.process.rpc, "", "").RunID
+	owner := base64.RawURLEncoding.EncodeToString([]byte("control")) + "." + base64.RawURLEncoding.EncodeToString([]byte("owner"))
 	s.seedID = s.publish("control.seed", "memory", "seed")
-	s.waitReceiver(s.seedID, "owner", "node", "delivered")
+	s.waitReceiver(s.seedID, owner, "node", "delivered")
 	reviewSeed := s.publish("control.seed", "review", "seed-review")
-	s.waitReceiver(reviewSeed, "owner", "node", "delivered")
+	s.waitReceiver(reviewSeed, owner, "node", "delivered")
 	s.publish("control.review", "review", "open-card")
 	finishedSeed := s.publish("control.seed", "finished", "seed-finished")
-	s.waitReceiver(finishedSeed, "owner", "node", "delivered")
+	s.waitReceiver(finishedSeed, owner, "node", "delivered")
 	finished := s.publish("control.finish", "finished", "finish")
-	s.waitReceiver(finished, "owner", "node", "delivered")
+	s.waitReceiver(finished, owner, "node", "delivered")
 	s.card = waitForFullLifecycleCard(t, s.process.rpc, s.runID, "continuity")
 	first := s.publish("work.requested", "memory", "memory-first")
 	s.waitDelivery(first, "worker", "delivered")
@@ -382,11 +389,13 @@ func (s *joinedRetainedScenario) waitDelivery(eventID, subscriber, status string
 
 func (s *joinedRetainedScenario) waitReceiver(eventID, subscriber, kind, status string) {
 	s.t.Helper()
+	var last goldenEvent
 	if err := pollReleaseCondition(s.ctx, 10*time.Millisecond, func() (bool, error) {
 		var event goldenEvent
 		if err := s.process.rpc.call(s.ctx, "event.get", map[string]any{"event_id": eventID}, &event); err != nil {
 			return false, err
 		}
+		last = event
 		for _, delivery := range event.Deliveries {
 			if delivery.SubscriberID == subscriber && delivery.SubscriberType == kind {
 				if delivery.Terminal && delivery.Status != status {
@@ -397,7 +406,7 @@ func (s *joinedRetainedScenario) waitReceiver(eventID, subscriber, kind, status 
 		}
 		return false, nil
 	}); err != nil {
-		s.t.Fatalf("delivery %s/%s/%s: %v\n%s", eventID, subscriber, status, err, s.process.output.String())
+		s.t.Fatalf("delivery %s/%s/%s: %v; last=%+v\n%s", eventID, subscriber, status, err, last, s.process.output.String())
 	}
 }
 
