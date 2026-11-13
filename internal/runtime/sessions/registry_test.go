@@ -177,15 +177,25 @@ func TestLeaseHeartbeatCannotRenewSameOwnerReplacement(t *testing.T) {
 		stopRetained()
 		fresh := worklifetime.WithOccurrence(context.Background(), runtime)
 		StartLeaseHeartbeatWithErrorHandler(fresh, registry, second, func(err error) { failures <- err })()
-		if err := <-failures; !errors.Is(err, worklifetime.ErrAdmissionFenced) {
-			t.Fatalf("fresh heartbeat after fence=%v", err)
+		select {
+		case err := <-failures:
+			if !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("fresh heartbeat after fence=%v", err)
+			}
+		default:
+			t.Fatal("fresh heartbeat was admitted after fence")
 		}
 		if err := work.Done(); err != nil {
 			t.Fatal(err)
 		}
 		StartLeaseHeartbeatWithErrorHandler(ctx, registry, second, func(err error) { failures <- err })()
-		if err := <-failures; !errors.Is(err, worklifetime.ErrAdmissionFenced) {
-			t.Fatalf("settled parent opened heartbeat after fence: %v", err)
+		select {
+		case err := <-failures:
+			if !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+				t.Fatalf("settled parent opened heartbeat after fence: %v", err)
+			}
+		default:
+			t.Fatal("settled parent opened heartbeat after fence")
 		}
 	})
 }
