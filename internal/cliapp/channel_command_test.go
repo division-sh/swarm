@@ -56,6 +56,38 @@ func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T
 }
 
 func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
+	t.Run("selected deployment remote omits caller authority", func(t *testing.T) {
+		methods := []string{"channel.onboarding_select", "channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry", "channel.confirm", "channel.list", "channel.logout"}
+		calls := 0
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, index int) map[string]any {
+			calls++
+			if request.Method != methods[index] || request.Params["scope"] != "deployment" || request.Params["provider"] != "telegram" {
+				t.Fatal("selected remote lost its method or deployment selector", request)
+			}
+			if _, exists := request.Params["holder"]; exists {
+				t.Fatal("selected remote sent caller authority", request)
+			}
+			if request.Method == "channel.onboarding_start" && request.Params["account"] != "420079" {
+				t.Fatal("selected remote lost its exact expected account", request)
+			}
+			return map[string]any{}
+		})
+		setCLIAPITestToken(t, operatorChannelCLIToken)
+		remote, err := newCLIAPIClient(testRootCommandOptions(server))
+		if err != nil {
+			t.Fatal(err)
+		}
+		control := &DeploymentChannelControl{remote: remote, provider: "telegram", expectedAccount: "420079"}
+		for _, method := range methods {
+			var result map[string]any
+			if err := control.call(t.Context(), method, map[string]any{}, &result); err != nil {
+				t.Fatal(method, err)
+			}
+		}
+		if calls != len(methods) {
+			t.Fatalf("selected remote calls = %d, want %d", calls, len(methods))
+		}
+	})
 	t.Run("deployment idle hints", func(t *testing.T) {
 		for _, linked := range []bool{false, true} {
 			var out bytes.Buffer

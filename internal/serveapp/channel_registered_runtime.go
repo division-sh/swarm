@@ -63,7 +63,7 @@ func whatsAppAccountMismatch(contexts []runtime.BundleContext, operations []chan
 	return false, nil
 }
 
-func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboarding.Operation, read apiv1.MethodHandler, holder any) ([]channelonboarding.AccountStatus, error) {
+func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboarding.Operation, read apiv1.MethodHandler) ([]channelonboarding.AccountStatus, error) {
 	var rows []channelonboarding.AccountStatus
 	for _, op := range operations {
 		if !op.DeploymentRegistration || !op.AccountConfirmed || op.Phase == channelonboarding.PhaseRetired || op.Phase == channelonboarding.PhaseFailed {
@@ -73,7 +73,7 @@ func serveReadyDeploymentAccounts(ctx context.Context, operations []channelonboa
 			return nil, err
 		}
 		value, err := read(ctx, apiv1.Request{Method: "channel.list", Params: map[string]any{
-			"provider": op.Provider, "account": op.AccountReference, "holder": holder,
+			"provider": op.Provider, "account": op.AccountReference,
 		}})
 		if err != nil {
 			return nil, err

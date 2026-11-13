@@ -58,8 +58,11 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550300", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
 	}, func(_ context.Context, request apiv1.Request) (any, error) {
 		reads++
-		if request.Method != "channel.list" || request.Params["provider"] != "whatsapp" || request.Params["holder"] != "current holder" {
-			t.Fatalf("account readiness bypassed the existing holder/status read: %+v", request)
+		if request.Method != "channel.list" || request.Params["provider"] != "whatsapp" {
+			t.Fatalf("account readiness bypassed the existing status read: %+v", request)
+		}
+		if _, exists := request.Params["holder"]; exists {
+			t.Fatalf("account readiness sent caller holder evidence: %+v", request)
 		}
 		for _, row := range accountRows {
 			if row.Account == request.Params["account"] {
@@ -67,7 +70,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 			}
 		}
 		return nil, errors.New("unknown account")
-	}, "current holder")
+	})
 	if err != nil || reads != 3 || !reflect.DeepEqual(observed, accountRows) {
 		t.Fatalf("per-account readiness rows=%+v reads=%d err=%v", observed, reads, err)
 	}

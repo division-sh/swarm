@@ -146,7 +146,7 @@ func readDeploymentTransportRegistrations(ctx context.Context, root cliapp.Invoc
 }
 
 func dispatchDeploymentControl(ctx context.Context, req apiv1.Request, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, capability startupownership.ProcessCapability, factory cliapp.ChannelRegistrationFactory, runtimeOptions deploymentRuntimeOptions, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex) (any, error) {
-	if err := requireDeploymentHolder(ctx, capability, req.Params["holder"]); err != nil {
+	if err := capability.ProveCurrent(ctx); err != nil {
 		return nil, err
 	}
 	var err error
@@ -347,19 +347,6 @@ func closeDeploymentControls(clients map[string]*cliapp.DeploymentChannelControl
 		}
 	}
 	return err
-}
-
-func requireDeploymentHolder(ctx context.Context, capability startupownership.ProcessCapability, supplied any) error {
-	var expected startupownership.Authority
-	raw, err := json.Marshal(supplied)
-	if err != nil || json.Unmarshal(raw, &expected) != nil || expected.Validate() != nil {
-		return channelonboarding.ErrInvalidRequest
-	}
-	actual, err := capability.Evidence()
-	if err != nil || actual != expected {
-		return errors.Join(channelonboarding.ErrConflict, err)
-	}
-	return capability.ProveCurrent(ctx)
 }
 
 // OpenChannelRegistration composes an invocation, not Run or a runtime target.

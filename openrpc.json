@@ -1981,13 +1981,6 @@
           }
         },
         {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
-          }
-        },
-        {
           "name": "provider",
           "required": false,
           "schema": {
@@ -2359,13 +2352,6 @@
           }
         },
         {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
-          }
-        },
-        {
           "name": "provider",
           "required": false,
           "schema": {
@@ -2466,13 +2452,6 @@
           "schema": {
             "const": "deployment",
             "type": "string"
-          }
-        },
-        {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
           }
         },
         {
@@ -2712,13 +2691,6 @@
           }
         },
         {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
-          }
-        },
-        {
           "name": "provider",
           "required": false,
           "schema": {
@@ -2795,13 +2767,6 @@
           "schema": {
             "const": "deployment",
             "type": "string"
-          }
-        },
-        {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
           }
         },
         {
@@ -3113,13 +3078,6 @@
           }
         },
         {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
-          }
-        },
-        {
           "name": "verb",
           "required": true,
           "schema": {
@@ -3321,13 +3279,6 @@
           "schema": {
             "const": "deployment",
             "type": "string"
-          }
-        },
-        {
-          "name": "holder",
-          "required": false,
-          "schema": {
-            "$ref": "#/components/schemas/DeploymentChannelHolder"
           }
         },
         {
@@ -19359,41 +19310,6 @@
           "identity_ceremony",
           "provider_credential_role",
           "confirmation_operation"
-        ],
-        "type": "object"
-      },
-      "DeploymentChannelHolder": {
-        "additionalProperties": false,
-        "properties": {
-          "authority_generation": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "authority_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "backend": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "boot_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "owner_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "runtime_instance_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          }
-        },
-        "required": [
-          "authority_id",
-          "authority_generation",
-          "owner_id",
-          "boot_id",
-          "runtime_instance_id",
-          "backend"
         ],
         "type": "object"
       },

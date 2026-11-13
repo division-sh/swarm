@@ -25,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -653,7 +652,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	var preRestartDeliveries int
 	if scenario == "inbox_restart" && deploymentTransport {
-		requireDeploymentLocaleRevisionRPC(t, process, endpoint+"/v1/rpc", registered)
+		requireDeploymentLocaleRevisionRPC(t, endpoint+"/v1/rpc", registered)
 	}
 	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {
 		deadline := time.Now().Add(15 * time.Second)
@@ -1148,16 +1147,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 }
 
-func requireDeploymentLocaleRevisionRPC(t *testing.T, process *serveRuntimeTestProcess, endpoint string, registered channelonboarding.Operation) {
+func requireDeploymentLocaleRevisionRPC(t *testing.T, endpoint string, registered channelonboarding.Operation) {
 	t.Helper()
-	rt := servedTestProcessRuntime(t, process)
-	stamp, found := rt.Options.ProcessWorkOwner.OriginalProcess()
-	if !found {
-		t.Fatal("locale fixture lost the actual serve's original process evidence")
-	}
-	holder := startupownership.AuthorityFromLease(stamp)
 	params := func(language string, revision any) map[string]any {
-		return map[string]any{"scope": "deployment", "holder": holder, "provider": "telegram", "operation_id": registered.OperationID,
+		return map[string]any{"scope": "deployment", "provider": "telegram", "operation_id": registered.OperationID,
 			"client_language": language, "expected_locale_revision": revision}
 	}
 	for _, invalid := range []struct {
@@ -1181,7 +1174,7 @@ func requireDeploymentLocaleRevisionRPC(t *testing.T, process *serveRuntimeTestP
 		t.Fatal("served deployment did not retain the exact stale-locale refusal", stale.Error)
 	}
 	var unchanged channelonboarding.Result
-	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"scope": "deployment", "holder": holder,
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"scope": "deployment",
 		"provider": "telegram", "operation_id": registered.OperationID}, &unchanged)
 	if unchanged.Operation.ClientLanguage != "en" || unchanged.Operation.ClientLocaleRevision != english.Operation.ClientLocaleRevision || unchanged.Operation.Revision != registered.Revision {
 		t.Fatal("stale locale revision changed current deployment state", unchanged.Operation)

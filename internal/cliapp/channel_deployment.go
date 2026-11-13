@@ -46,7 +46,6 @@ type DeploymentChannelControl struct {
 	operatorTrigger providertriggers.InboundAdmissionPlan
 	borrowed        bool
 	remote          *cliAPIClient
-	holder          *startupownership.Authority
 }
 
 type registrationHolder struct {
@@ -226,7 +225,7 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 			if err != nil {
 				return nil, err
 			}
-			return &DeploymentChannelControl{remote: remote, holder: observed.Authority, provider: provider}, nil
+			return &DeploymentChannelControl{remote: remote, provider: provider}, nil
 		}
 	}
 	c.store, err = selected.OpenRuntime(ctx, selected.RuntimeRequest{Selection: selection, PostgresDSN: request.PostgresDSN})
@@ -317,7 +316,7 @@ func (c *DeploymentChannelControl) call(ctx context.Context, method string, para
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.remote != nil {
-		params["scope"], params["holder"], params["provider"] = "deployment", c.holder, c.provider
+		params["scope"], params["provider"] = "deployment", c.provider
 		if method == "channel.onboarding_start" && c.expectedAccount != "" {
 			params["account"] = c.expectedAccount
 		}

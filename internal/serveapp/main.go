@@ -2024,12 +2024,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(22, "channel_registration", err)
 		return 1
 	}
-	holder, err := processCapability.Evidence()
-	if err != nil {
-		presenter.fail(22, "channel_registration", err)
-		return 1
-	}
-	accountRows, err := serveReadyDeploymentAccounts(ctx, registeredOperations, deploymentChannels, holder)
+	accountRows, err := serveReadyDeploymentAccounts(ctx, registeredOperations, deploymentChannels)
 	if err != nil {
 		presenter.fail(22, "channel_registration", err)
 		return 1
