@@ -549,6 +549,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	validationOpts.ProviderCredentials = req.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = providerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
+	validationOpts.ChannelOnboardingStore = req.Stores.channelOnboarding
 	declaredChannelPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(req.ChannelBindings)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("compile declared-only channel activation publication: %w", err)
