@@ -20,7 +20,9 @@ func (channelRegistrationFixture) Providers() []channelprovider.Binding {
 	return []channelprovider.Binding{channelfixture.For("telegram"), channelfixture.For("whatsapp")}
 }
 
-func (channelRegistrationFixture) NativeFacts() channelprovider.FactsLookup { return channelfixture.Facts }
+func (channelRegistrationFixture) NativeFacts() channelprovider.FactsLookup {
+	return channelfixture.Facts
+}
 
 func (channelRegistrationFixture) AdmitInventory(rooted sourceartifact.RootedSource, inventory *packartifact.EffectivePackInventory, spec contracts.PlatformSpecDocument) (contracts.PackAdmissionProjection, error) {
 	value, err := packadmission.AdmitInventory(rooted, inventory, spec)
