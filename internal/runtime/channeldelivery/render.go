@@ -18,6 +18,7 @@ import (
 )
 
 const ProjectionVersion = "channel-render-v3"
+const LinkNoticeType = "whatsapp_link_status"
 
 type ActionPage struct {
 	Index    int `json:"index"`
@@ -58,6 +59,7 @@ type Frozen struct {
 	SourceID           string
 	Revision           int64
 	NoticeAcknowledged bool
+	NoticeType         string
 	Audience           Audience
 	Input              json.RawMessage
 	Hash               string
@@ -117,6 +119,7 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 		SourceID        string           `json:"source_id"`
 		SourceRevision  int64            `json:"source_revision"`
 		Acknowledged    bool             `json:"acknowledged"`
+		ItemType        string           `json:"item_type"`
 		FullText        string           `json:"full_text"`
 		Page            *ResponsePage    `json:"page"`
 		DraftPrompt     *DraftPrompt     `json:"draft_prompt"`
@@ -150,7 +153,7 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 	}
 	frozen := Frozen{
 		SourceKind: wire.SourceKind, SourceID: wire.SourceID, Revision: wire.SourceRevision,
-		NoticeAcknowledged: wire.Acknowledged,
+		NoticeAcknowledged: wire.Acknowledged, NoticeType: wire.ItemType,
 		Audience: Audience{PrincipalID: wire.Audience.PrincipalID, InterfaceKey: wire.Audience.InterfaceKey,
 			DeliveryEpoch: wire.Audience.DeliveryEpoch, ExternalAccountRef: wire.Audience.ExternalAccountRef,
 			ConversationRef: wire.Audience.ConversationRef, ConversationScope: wire.Audience.ConversationScope},
@@ -171,6 +174,7 @@ type frozenProjectionIndex struct {
 	SourceID          string `json:"source_id"`
 	SourceRevision    int64  `json:"source_revision"`
 	Acknowledged      bool   `json:"acknowledged"`
+	ItemType          string `json:"item_type"`
 	Audience          struct {
 		PrincipalID        string `json:"principal_id"`
 		InterfaceKey       string `json:"interface_key"`
@@ -220,6 +224,9 @@ func (f Frozen) Validate() error {
 }
 
 func (f Frozen) validateFrozenIdentity(index frozenProjectionIndex) error {
+	if (index.ItemType == LinkNoticeType) != (f.NoticeType == LinkNoticeType) || f.NoticeType == LinkNoticeType && (f.SourceKind != "notice" || !ValidLinkNoticeText(f.FullText)) {
+		return fmt.Errorf("link notice discriminator or text contradicts frozen input")
+	}
 	if index.ProjectionVersion != ProjectionVersion || index.SourceKind != f.SourceKind ||
 		index.SourceID != f.SourceID || index.SourceRevision != f.Revision || index.FullText != f.FullText ||
 		index.Acknowledged != f.NoticeAcknowledged || (f.NoticeAcknowledged && f.SourceKind != "notice") ||
@@ -639,6 +646,12 @@ func FreezeNotice(notice Notice, audience Audience) (Frozen, error) {
 		lines = append(lines, "Acknowledged")
 	}
 	fullText := strings.Join(lines, "\n")
+	if notice.Type == LinkNoticeType {
+		if !ValidLinkNoticeText(notice.Summary) {
+			return Frozen{}, fmt.Errorf("link notice must be one prefixed line")
+		}
+		fullText = notice.Summary
+	}
 	revision := int64(1)
 	if notice.Acknowledged {
 		revision = 2
@@ -649,6 +662,10 @@ func FreezeNotice(notice Notice, audience Audience) (Frozen, error) {
 		"scope": scope, "acknowledged": notice.Acknowledged, "full_text": fullText,
 	}
 	return freeze(input, "notice", notice.ID, revision, audience, fullText)
+}
+
+func ValidLinkNoticeText(text string) bool {
+	return strings.HasPrefix(text, "Swarm Notice: WhatsApp link ") && !strings.ContainsAny(text, "\r\n")
 }
 
 func FreezeSummary(firstOperationID string, count int64, audience Audience) (Frozen, error) {

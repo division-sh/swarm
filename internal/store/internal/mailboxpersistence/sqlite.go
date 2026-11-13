@@ -45,6 +45,11 @@ func (s *MailboxSQLiteOwner) InsertMailboxItem(ctx context.Context, item runtime
 	var changed bool
 	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "sqlite mailbox insert", func(txctx context.Context, tx *sql.Tx) error {
 		changed = false
+		if item.Type == render.LinkNoticeType {
+			created, cause := channeldelivery.AdmitLinkNoticeTx(txctx, tx, item.ID, item.Summary, false)
+			changed = created
+			return cause
+		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO mailbox (
 				item_id, entity_id, flow_instance, scope, item_type, source_event_id,

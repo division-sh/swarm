@@ -9,6 +9,10 @@ import (
 // PresentationText bounds the provider message while leaving Frozen.Input and
 // its hash as the complete immutable source for authenticated View full pages.
 func PresentationText(f Frozen) (string, bool, error) {
+	if f.NoticeType == LinkNoticeType {
+		text, err := TextReplyPresentation(f, nil)
+		return text, false, err
+	}
 	if err := f.Validate(); err != nil {
 		return "", false, err
 	}
@@ -28,6 +32,12 @@ func TextReplyPresentation(f Frozen, actions []Action) (string, error) {
 	}
 	if err := f.Bounds.Validate(); err != nil {
 		return "", err
+	}
+	if f.NoticeType == LinkNoticeType {
+		if len(actions) != 0 || len([]rune(f.FullText)) > f.Bounds.TextRunes {
+			return "", fmt.Errorf("link notice cannot have controls or overflow")
+		}
+		return f.FullText, nil
 	}
 	if len(actions) > f.Bounds.Actions {
 		return "", fmt.Errorf("text/reply controls exceed admitted page capacity")
