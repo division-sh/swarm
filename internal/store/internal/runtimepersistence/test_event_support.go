@@ -79,16 +79,14 @@ func ReadActivityForkRequestPayloadStorageForTest(ctx context.Context, selected 
 			return nil, err
 		}
 	}
-	var out []byte
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.ReadActivityForkRequestPayloadStorageTx(ctx, tx, runID, eventID)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadActivityForkRequestPayloadStorageForTest(ctx, runID, eventID)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadActivityForkRequestPayloadStorageForTest(ctx, runID, eventID)
+	default:
+		return nil, fmt.Errorf("activity fork request read requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadActivityForkResultStorageForTest(ctx context.Context, selected any, runID, eventID string) (ActivityForkResultStorage, error) {
@@ -97,16 +95,14 @@ func ReadActivityForkResultStorageForTest(ctx context.Context, selected any, run
 			return ActivityForkResultStorage{}, err
 		}
 	}
-	var out ActivityForkResultStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.ReadActivityForkResultStorageTx(ctx, tx, runID, eventID)
-		return err
-	})
-	if err != nil {
-		return ActivityForkResultStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadActivityForkResultStorageForTest(ctx, runID, eventID)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadActivityForkResultStorageForTest(ctx, runID, eventID)
+	default:
+		return ActivityForkResultStorage{}, fmt.Errorf("activity fork result read requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadActivityForkAttemptStorageForTest(ctx context.Context, selected any, requestID string) (ActivityForkAttemptStorage, error) {
@@ -168,16 +164,14 @@ func CountRunNamedEventStorageForTest(ctx context.Context, selected any, runID, 
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
 		return 0, err
 	}
-	var out int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.CountRunNamedEventStorageTx(ctx, tx, runID, eventName)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.CountRunNamedEventStorageForTest(ctx, runID, eventName)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.CountRunNamedEventStorageForTest(ctx, runID, eventName)
+	default:
+		return 0, fmt.Errorf("named event read requires the original native owner")
 	}
-	return out, nil
 }
 
 // Fixed physical witnesses retain the predecessor/fork/global scopes of the
@@ -482,39 +476,14 @@ func readLatestRuntimeLogRecordForTest(ctx context.Context, selected any, startu
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return empty, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	query := `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
-	if startupDecision {
-		query = `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' AND json_extract(payload,'$.details.component')='runtime' AND json_extract(payload,'$.details.action')='startup_recovery_decision' ORDER BY created_at DESC LIMIT 1`
-		if postgres {
-			query = `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' AND payload->'details'->>'component'='runtime' AND payload->'details'->>'action'='startup_recovery_decision' ORDER BY created_at DESC LIMIT 1`
-		}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadLatestRuntimeLogRecordForTest(ctx, startupDecision)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadLatestRuntimeLogRecordForTest(ctx, startupDecision)
+	default:
+		return empty, fmt.Errorf("runtime log read requires the original native owner")
 	}
-	var record eventrecord.Record
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var id string
-		if err := tx.QueryRowContext(ctx, query).Scan(&id); err != nil {
-			return err
-		}
-		var found bool
-		var err error
-		record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, postgres, id)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("selected runtime log %s is absent from its original read snapshot", id)
-		}
-		return nil
-	})
-	if err != nil {
-		return empty, err
-	}
-	admitted, err := record.Decode()
-	if err != nil {
-		return empty, err
-	}
-	return admitted.Event(), nil
 }
 
 func readFixtureEventLineageStorage(ctx context.Context, selected any, tx *sql.Tx, eventID string) (string, string, error) {
@@ -533,22 +502,14 @@ func ReadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID 
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return empty, false, err
 	}
-	var record eventrecord.Record
-	var found bool
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		_, postgres := selected.(*PostgresStore)
-		record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, postgres, eventID)
-		return err
-	})
-	if err != nil || !found {
-		return empty, false, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.eventPostgresOwner.ReadCanonicalEventRecordForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.eventSQLiteOwner.ReadCanonicalEventRecordForTest(ctx, eventID)
+	default:
+		return empty, false, fmt.Errorf("canonical event read requires the original native owner")
 	}
-	admitted, err := record.Decode()
-	if err != nil {
-		return empty, false, fmt.Errorf("decode canonical event record %s: %w", eventID, err)
-	}
-	return admitted.Event(), true, nil
 }
 
 func InsertCanonicalEventRecordForTest(ctx context.Context, selected any, record eventrecord.Record) (bool, error) {
