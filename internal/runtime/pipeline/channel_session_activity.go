@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	channelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
@@ -58,19 +59,9 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	if !object || !supplied {
 		return intent, nil, fmt.Errorf("authored session activity requires account: state.operator_account or policy.operator_account")
 	}
-	bundle, _ := semanticview.Bundle(pc.SemanticSource())
-	providers, err := packadmission.ProviderSourceForBundle(bundle)
+	facts, ref, err := pc.sessionActivityAccount(intent.ExecutionFlowID.String(), nativeTarget.Provider(), account)
 	if err != nil {
 		return intent, nil, err
-	}
-	scope, err := providers.Scope(intent.ExecutionFlowID.String())
-	if err != nil {
-		return intent, nil, err
-	}
-	facts := scope.ProviderFacts(nativeTarget.Provider())
-	ref, err := channelonboarding.CanonicalAccount(facts.ForProvider(nativeTarget.Provider()), account)
-	if err != nil {
-		return intent, nil, fmt.Errorf("session activity account: %w", err)
 	}
 	if intent.NativeSessionTarget != "" && account != ref.Account {
 		return intent, nil, fmt.Errorf("frozen session activity account is not canonical")
@@ -118,6 +109,24 @@ func (pc *PipelineCoordinator) prepareSessionActivityIntent(ctx context.Context,
 	intent.PlanGeneration = private.Generation()
 	intent.ChannelActivationGeneration = lease.Generation()
 	return intent, lease, nil
+}
+
+func (pc *PipelineCoordinator) sessionActivityAccount(flowID, provider, account string) (channelprovider.Binding, channelonboarding.AccountReference, error) {
+	bundle, _ := semanticview.Bundle(pc.SemanticSource())
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
+	if err != nil {
+		return channelprovider.Binding{}, channelonboarding.AccountReference{}, err
+	}
+	scope, err := providers.Scope(flowID)
+	if err != nil {
+		return channelprovider.Binding{}, channelonboarding.AccountReference{}, err
+	}
+	facts := scope.ProviderFacts(provider)
+	ref, err := channelonboarding.CanonicalAccount(facts.ForProvider(provider), account)
+	if err != nil {
+		return facts, ref, fmt.Errorf("session activity account: %w", err)
+	}
+	return facts, ref, nil
 }
 
 func (pc *PipelineCoordinator) compileAuthoredSessionActivity(ctx context.Context, intent engine.ActivityIntent,
