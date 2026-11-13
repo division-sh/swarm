@@ -138,10 +138,10 @@ func (n *serveLinkNotices) reconcile(ctx context.Context, readErr error) error {
 }
 
 func linkNoticeText(event linkNoticeEvent, self bool) string {
-	if event.kind == "back" {
-		if self {
-			return ""
-		} // R199: self-operator causal recovery wording awaits the user.
+	switch {
+	case event.kind == "back" && self:
+		return fmt.Sprintf("Swarm Notice: WhatsApp link back after %s, %d more drops in between; cause: %s", event.upAt.Sub(event.since).Round(time.Second), event.extra, event.cause)
+	case event.kind == "back":
 		return fmt.Sprintf("Swarm Notice: WhatsApp link back after %s, %d more drops in between", event.upAt.Sub(event.since).Round(time.Second), event.extra)
 	}
 	kind := "down"
