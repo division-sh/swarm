@@ -32,6 +32,7 @@ const debtPortableGlobalRoleCollectorTo = "19b3a4ce5b9c7baa7cbb66980ae2b66ab522d
 const debtPortableAgentFixtureCollectorTo = "90e301f3d5080732c31703c1a9cfa7377cc9175e86e185aec924003858ab93b9"
 const debtW2DeliveryEvidenceCollectorTo = "0f8b0b73cf2634a5d0d3780795bd73a8e059731621746baa1a852402552c251d"
 const debtChannelCrashPreparationCollectorTo = "3acef74e89c4bf99f03cc63649c398e3706fb3b833240ecbfe21b40655dbb041"
+const debtR130ProviderBindingCollectorTo = "1de1f84eb6ab81f1ee4c6e1d213a502f39d49255c9537d33fc3173bbf5ccd350"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -50,6 +51,50 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
 	old, current := debtRunFixtureTransitionStates()
+	t.Run("r130-constructor-signatures", func(t *testing.T) {
+		before, after := debtControlSet(), debtControlSet()
+		pairs := debtR130ConstructorSignatureTransitions()
+		families := map[string]int{}
+		for _, pair := range pairs {
+			before[pair[0].identity()], after[pair[1].identity()] = pair[0], pair[1]
+			if pair[0].Kind != pair[1].Kind || pair[0].File != pair[1].File || pair[0].Declaration != pair[1].Declaration ||
+				pair[0].Operation != pair[1].Operation || pair[0].Family != pair[1].Family ||
+				pair[0].Replacement != pair[1].Replacement || pair[0].Multiplicity != 1 || pair[1].Multiplicity != 1 {
+				t.Fatal("R130 constructor signature changed counted authority or ownership")
+			}
+			families[pair[0].Family]++
+		}
+		if len(before) != 10 || len(after) != 10 || authorityDebtCount(before) != 10 || authorityDebtCount(after) != 10 ||
+			families["unowned-authority"] != 6 || families["lifecycle"] != 4 {
+			t.Fatal("R130 constructor comparison must retain six unowned and four lifecycle occurrences")
+		}
+		originalBefore, originalAfter := maps.Clone(before), maps.Clone(after)
+		for _, source := range []map[string]authorityDebtSite{before, after} {
+			for _, head := range []map[string]authorityDebtSite{before, after} {
+				if failures := authorityDebtRatchet(after, head, before, source); len(failures) != 0 {
+					t.Fatal(failures)
+				}
+			}
+		}
+		if failures := authorityDebtRatchet(before, before, after, after); len(failures) == 0 {
+			t.Fatal("reverse R130 constructor correspondence admitted")
+		}
+		if failures := authorityDebtRatchet(after, after, before, debtControlSet()); len(failures) == 0 {
+			t.Fatal("R130 constructor correspondence admitted without its exact source")
+		}
+		for _, pair := range pairs {
+			for _, landed := range []bool{false, true} {
+				name := "predecessor/" + pair[0].Declaration + "/" + pair[0].Operation
+				if landed {
+					name = "landed/" + pair[0].Declaration + "/" + pair[0].Operation
+				}
+				t.Run(name, func(t *testing.T) { debtRunFixtureSignatureHostileControls(t, pair, before, after, landed) })
+			}
+		}
+		if !maps.Equal(before, originalBefore) || !maps.Equal(after, originalAfter) {
+			t.Fatal("R130 constructor correspondence mutated trusted maps")
+		}
+	})
 	t.Run("channel-crash-preparation-signatures", func(t *testing.T) {
 		before, after := debtControlSet(), debtControlSet()
 		pairs := debtChannelCrashPreparationSignatureTransitions()
@@ -662,6 +707,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			{debtPortableGlobalRoleCollectorTo, debtPortableAgentFixtureCollectorTo},
 			{debtPortableAgentFixtureCollectorTo, debtW2DeliveryEvidenceCollectorTo},
 			{debtW2DeliveryEvidenceCollectorTo, debtChannelCrashPreparationCollectorTo},
+			{debtChannelCrashPreparationCollectorTo, debtR130ProviderBindingCollectorTo},
 		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
