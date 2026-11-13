@@ -329,11 +329,14 @@ func (c *Controller) resumeContinuedFanOut(ctx context.Context, runID string, re
 		return recovery
 	}
 	resumed, err := c.resumeFanOut(ctx, runID)
+	if !resumed.Admitted && err == nil {
+		err = errors.New("fan-out handler recheck did not acknowledge native admission")
+	}
 	recovery.FanOut = &resumed
 	recovery.Err = err
 	if err != nil {
 		recovery.Disposition = RecoveryFailed
-		if resumed.Remaining != 0 {
+		if resumed.Remaining != 0 && resumed.Unresolved == 0 {
 			recovery.Disposition = RecoveryBlocked
 		}
 	} else if recovery.Disposition == RecoveryNotConfigured {

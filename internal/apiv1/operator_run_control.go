@@ -162,7 +162,7 @@ func runControlTransitionCompletion(result runtimeruncontrol.TransitionResult, a
 	if action == "stop" || (action == "continue" && result.Recovery.Disposition != "") {
 		recovery := &runControlRecoveryResult{Status: result.Recovery.Disposition}
 		if resumed := result.Recovery.FanOut; resumed != nil && resumed.Admitted {
-			recovery.Diagnostic = fmt.Sprintf("handlers observed=%d reopened=%d still_paused=%d changed=%d", resumed.Observed, resumed.Reopened, resumed.Remaining, resumed.Changed)
+			recovery.Diagnostic = fmt.Sprintf("handlers observed=%d reopened=%d still_paused=%d changed=%d unresolved=%d", resumed.Observed, resumed.Reopened, resumed.Remaining, resumed.Changed, resumed.Unresolved)
 		}
 		if result.Recovery.Err != nil {
 			if recovery.Diagnostic != "" {

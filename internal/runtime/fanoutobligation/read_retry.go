@@ -64,9 +64,10 @@ func (r *ReadRetry) ObserveFailure(now time.Time, failure runtimefailures.Envelo
 }
 
 type ResumeResult struct {
-	Admitted  bool
-	Observed  int
-	Reopened  int
-	Remaining int
-	Changed   int
+	Admitted   bool
+	Observed   int
+	Reopened   int
+	Remaining  int
+	Changed    int
+	Unresolved int
 }

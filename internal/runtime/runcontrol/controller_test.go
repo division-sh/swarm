@@ -180,7 +180,9 @@ func TestControllerContinueRechecksHandlersWithoutReplayingLifecycle(t *testing.
 		{"empty", fanoutobligation.ResumeResult{Admitted: true}, nil},
 		{"reopened", fanoutobligation.ResumeResult{Admitted: true, Observed: 1, Reopened: 1}, nil},
 		{"partial", fanoutobligation.ResumeResult{Admitted: true, Observed: 2, Reopened: 1, Remaining: 1}, fault},
+		{"interrupted_partial", fanoutobligation.ResumeResult{Admitted: true, Observed: 3, Reopened: 1, Remaining: 1, Unresolved: 1}, fault},
 		{"not_current", fanoutobligation.ResumeResult{}, fault},
+		{"missing_native_ack", fanoutobligation.ResumeResult{}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &fakeRunControlStore{continueUnack: true, continueErr: ErrNotPaused}
@@ -194,7 +196,7 @@ func TestControllerContinueRechecksHandlersWithoutReplayingLifecycle(t *testing.
 			}})
 			result, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"})
 			if !tc.resumed.Admitted {
-				if !errors.Is(err, fault) || result.RunID != "" {
+				if err == nil || result.RunID != "" {
 					t.Fatal("missing exact admission became success")
 				}
 				return
@@ -205,8 +207,11 @@ func TestControllerContinueRechecksHandlersWithoutReplayingLifecycle(t *testing.
 			if store.onContinueCommit != nil {
 				t.Fatal("recheck fabricated lifecycle transition")
 			}
-			if tc.resumed.Remaining != 0 && result.Recovery.Disposition != RecoveryBlocked {
+			if tc.resumed.Remaining != 0 && tc.resumed.Unresolved == 0 && result.Recovery.Disposition != RecoveryBlocked {
 				t.Fatal("partial result reported all resumed")
+			}
+			if tc.resumed.Unresolved != 0 && result.Recovery.Disposition != RecoveryFailed {
+				t.Fatal("unresolved transition reported only known paused handlers")
 			}
 			// Deferred callers must first restore the exact runtime. The primary
 			// controller cannot turn a live run into a successful empty recheck.

@@ -53,6 +53,7 @@ func resumeRunFanOut(ctx context.Context, runID string, postgres bool, grant sta
 		return result, errors.Join(err, unacknowledgedFanOutResume(acknowledged))
 	}
 	result.Observed, result.Admitted = len(inventory), true
+	result.Unresolved = len(inventory)
 	var refusals error
 	for _, observed := range inventory {
 		if err := ctx.Err(); err != nil {
@@ -66,6 +67,7 @@ func resumeRunFanOut(ctx context.Context, runID string, postgres bool, grant sta
 			return err
 		})
 		if acknowledged {
+			result.Unresolved--
 			switch {
 			case state.refusal != nil:
 				result.Remaining++
@@ -80,6 +82,7 @@ func resumeRunFanOut(ctx context.Context, runID string, postgres bool, grant sta
 			changed, readErr := observeUnacknowledgedFanOutResume(ctx, postgres, admission, grant, observed, transaction)
 			if changed {
 				result.Changed++
+				result.Unresolved--
 			}
 			err = errors.Join(err, readErr, unacknowledgedFanOutResume(false))
 		}
