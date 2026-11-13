@@ -72,6 +72,7 @@ type joinedRetainedScenario struct {
 	firstTurn  goldenTurn
 	events     map[string]string
 	memoryFlow string
+	timerDue   time.Time
 	model      *llmapi.Server
 	telegram   *telegramapi.Double
 	unblock    func()
@@ -506,28 +507,7 @@ func (s *joinedRetainedScenario) stableCheckpoint(retry, dead string) []string {
 	if !stages["waiting"] || !stages["review"] || !stages["done"] {
 		s.t.Fatalf("several stages including finished are not retained: %v", stages)
 	}
-	var diagnosis struct {
-		Instances []struct {
-			FlowInstance string `json:"flow_instance"`
-			Work         struct {
-				Timers int `json:"timers"`
-			} `json:"work"`
-			NextWakeAt *time.Time `json:"next_wake_at"`
-		} `json:"instances"`
-	}
-	if err := s.process.rpc.call(s.ctx, "run.diagnose", map[string]any{"run_id": s.runID}, &diagnosis); err != nil {
-		s.t.Fatal(err)
-	}
-	timers := 0
-	for _, instance := range diagnosis.Instances {
-		if s.memoryFlow != "" && instance.FlowInstance == s.memoryFlow && instance.Work.Timers > 0 && instance.NextWakeAt != nil {
-			timers++
-			rows = append(rows, joinedJSON(instance))
-		}
-	}
-	if timers == 0 {
-		s.t.Fatal("armed workflow-timer witness unavailable while paused")
-	}
+	rows = append(rows, joinedJSON(s.memoryTimer()))
 	for _, id := range []string{retry, dead} {
 		var event goldenEvent
 		if err := s.process.rpc.call(s.ctx, "event.get", map[string]any{"event_id": id}, &event); err != nil {
@@ -550,7 +530,7 @@ func (s *joinedRetainedScenario) stableCheckpoint(retry, dead string) []string {
 
 func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 	s.t.Helper()
-	rows := []string{"memory:cedar-731:3", "clock:24h:active", "run:paused", "card:continuity:approve"}
+	rows := []string{joinedJSON([]any{"memory", s.memoryTranscript()}), "clock:24h:active", "run:paused", "card:continuity:approve"}
 	identities := map[string]string{s.runID: "run", s.card.CardID: "card:continuity", s.session.SessionID: "memory-session"}
 	entities := listGoldenEntities(s.t, s.ctx, s.process.rpc, s.runID)
 	fields := map[string]any{}
@@ -651,6 +631,10 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 	if header.Status != "paused" || len(header.ClockSchedules) != 1 || header.ClockSchedules[0]["every"] != "24h0m0s" || header.ClockSchedules[0]["status"] != "active" {
 		s.t.Fatalf("final recurring-clock/run state changed: %+v", header)
 	}
+	timer := s.memoryTimer()
+	due := timer.NextWakeAt.UTC().Format(time.RFC3339Nano)
+	identities[due] = "memory-workflow-original-due"
+	rows = append(rows, joinedJSON(joinedNormalize([]any{"workflow_timer", timer.FlowInstance, timer.Stage, timer.Work.Timers, timer.Work.DueTimers, due}, identities)))
 	_, sends := s.telegram.Counts()
 	acknowledgements := 0
 	for i := 0; i < sends; i++ {
@@ -664,6 +648,87 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 	rows = append(rows, fmt.Sprintf("channel:telegram:420079:registered:ack=1:other_sends=%d", sends-acknowledgements))
 	sort.Strings(rows)
 	return rows
+}
+
+type joinedMemoryTimer struct {
+	FlowInstance string `json:"flow_instance"`
+	Stage        string `json:"stage"`
+	Work         struct {
+		Timers    int `json:"timers"`
+		DueTimers int `json:"due_timers"`
+	} `json:"work"`
+	NextWakeAt *time.Time `json:"next_wake_at"`
+}
+
+func (s *joinedRetainedScenario) memoryTimer() joinedMemoryTimer {
+	s.t.Helper()
+	var diagnosis struct {
+		Instances []joinedMemoryTimer `json:"instances"`
+	}
+	if err := s.process.rpc.call(s.ctx, "run.diagnose", map[string]any{"run_id": s.runID}, &diagnosis); err != nil {
+		s.t.Fatal(err)
+	}
+	for _, timer := range diagnosis.Instances {
+		if s.memoryFlow == "" || timer.FlowInstance != s.memoryFlow {
+			continue
+		}
+		if timer.Stage != "waiting" || timer.Work.Timers != 1 || timer.Work.DueTimers != 0 || timer.NextWakeAt == nil || !timer.NextWakeAt.After(time.Now()) {
+			s.t.Fatalf("memory-instance workflow timer changed: %+v", timer)
+		}
+		if s.timerDue.IsZero() {
+			s.timerDue = *timer.NextWakeAt
+		}
+		if !s.timerDue.Equal(*timer.NextWakeAt) {
+			s.t.Fatalf("memory workflow due changed: before=%s after=%s", s.timerDue, *timer.NextWakeAt)
+		}
+		return timer
+	}
+	s.t.Fatal("armed memory-instance workflow-timer witness unavailable while paused")
+	return joinedMemoryTimer{}
+}
+
+func (s *joinedRetainedScenario) memoryTranscript() []any {
+	s.t.Helper()
+	var transcript []any
+	for _, turn := range s.memoryTurns() {
+		if !turn.ParseOK {
+			continue
+		} // The caller separately asserts the exact kill-only failed attempt.
+		var detail struct {
+			Turn struct {
+				TurnID  string `json:"turn_id"`
+				Ordinal int    `json:"ordinal"`
+				Output  string `json:"assistant_visible_output"`
+			} `json:"turn"`
+			Rendering struct {
+				Status string `json:"status"`
+				Source string `json:"source"`
+				Input  []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"input"`
+			} `json:"provider_rendering"`
+		}
+		if err := s.process.rpc.call(s.ctx, "conversation.get_turn", map[string]any{"session_id": s.session.SessionID, "turn_id": turn.TurnID}, &detail); err != nil {
+			s.t.Fatal(err)
+		}
+		if detail.Turn.TurnID != turn.TurnID || detail.Turn.Ordinal != turn.Ordinal || detail.Turn.Output != "Remembered cedar-731." || detail.Rendering.Status != "recorded" || detail.Rendering.Source != "recorded_provider_request" || len(detail.Rendering.Input) != 1 || detail.Rendering.Input[0].Role != "user" {
+			s.t.Fatalf("public logical transcript missing/changed: %s", joinedJSON(detail))
+		}
+		input := joinedDecode(s.t, json.RawMessage(detail.Rendering.Input[0].Content))
+		note := "Recall the marker from the previous conversation."
+		if len(transcript) == 0 {
+			note = "Remember cedar-731."
+		}
+		if !reflect.DeepEqual(input, map[string]any{"key": "memory", "note": note}) {
+			s.t.Fatalf("persisted user content changed: %s", joinedJSON(input))
+		}
+		transcript = append(transcript, []any{len(transcript) + 1, s.events[turn.TriggerEventID], "user", input, "assistant", detail.Turn.Output})
+	}
+	if len(transcript) != 3 {
+		s.t.Fatalf("logical transcript length=%d, want 3", len(transcript))
+	}
+	return transcript
 }
 
 func joinedDecode(t *testing.T, raw json.RawMessage) any {
