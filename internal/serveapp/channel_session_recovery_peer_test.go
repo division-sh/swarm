@@ -446,6 +446,13 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 				h.start(t)
 				t.Cleanup(func() { h.stop(t) })
 				ctx := servedRuntimeProofAuthorActivityContext(t, h.runtime, h.runtime.Options.SourceArtifactFact.BundleHash())
+				registered, err := read().registeredSessionConnections(ctx)
+				peer.mu.Lock()
+				wire, before, sends := peer.accountWires[15551234567], peer.connections, peer.acceptedSends
+				peer.mu.Unlock()
+				if err != nil || len(registered) != 2 || registered[0].Operation.OperationID != first.OperationID || registered[1].Operation.OperationID != second.OperationID || wire == nil {
+					t.Fatal("terminal-first exact registration order or owned socket unavailable", err)
+				}
 				healthy := func(op channelonboarding.Operation) bool {
 					connection := read().connection(op.OperationID)
 					if connection == nil {
@@ -454,14 +461,7 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 					_, ready, err := connection.SessionRecovery(ctx, op)
 					return err == nil && ready
 				}
-				waitSessionRecovery(t, func() bool { return healthy(first) && healthy(second) }, h.process.outputString)
-				registered, err := read().registeredSessionConnections(ctx)
-				peer.mu.Lock()
-				wire, before, sends := peer.accountWires[15551234567], peer.connections, peer.acceptedSends
-				peer.mu.Unlock()
-				if err != nil || len(registered) != 2 || registered[0].Operation.OperationID != first.OperationID || registered[1].Operation.OperationID != second.OperationID || wire == nil {
-					t.Fatal("terminal-first exact registration order or owned socket unavailable", err)
-				}
+				waitSessionRecovery(t, func() bool { return healthy(registered[0].Operation) && healthy(registered[1].Operation) }, h.process.outputString)
 				node := waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"}, Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "replaced"}}}}
 				if kind == "ban" {
 					node = waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": "402", "code": "101", "expire": "60"}}
@@ -473,7 +473,7 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 				var terminalErr error
 				waitSessionRecovery(t, func() bool {
 					fact, _, factErr := firstConnection.SessionDiagnostic(ctx)
-					_, _, terminalErr = firstConnection.SessionRecovery(ctx, first)
+					_, _, terminalErr = firstConnection.SessionRecovery(ctx, registered[0].Operation)
 					return factErr == nil && fact.Lifecycle == map[string]string{"replacement": "session replaced by another connection", "ban": "account temporarily banned"}[kind] && terminalErr != nil && !channelonboarding.SessionUnavailableOnly(terminalErr)
 				}, h.process.outputString)
 				readsBefore, _ := h.provider.CommandReadbackCounts()
@@ -483,12 +483,12 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 					peer.mu.Lock()
 					reconnected := peer.connections == before+1
 					peer.mu.Unlock()
-					return reconnected && healthy(second) && reads > readsBefore && strings.Contains(diagnostics.String(), terminalErr.Error())
+					return reconnected && healthy(registered[1].Operation) && reads > readsBefore && strings.Contains(diagnostics.String(), terminalErr.Error())
 				}, h.process.outputString)
 				peer.mu.Lock()
 				after, sent := peer.connections, peer.acceptedSends
 				peer.mu.Unlock()
-				_, _, refused := firstConnection.SessionRecovery(ctx, first)
+				_, _, refused := firstConnection.SessionRecovery(ctx, registered[0].Operation)
 				if after != before+1 || sent != sends || read().connection(first.OperationID) != firstConnection || refused == nil || channelonboarding.SessionUnavailableOnly(refused) {
 					t.Fatal("terminal account retried/sent, lost refusal, or sibling failed genuine single recovery", before, after, sends, sent, refused)
 				}
