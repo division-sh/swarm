@@ -56,6 +56,7 @@ type ManagedAgentTurnFixture struct {
 	DeliveryRoute     *events.DeliveryRoute
 	DeliveryCommitted bool
 	TurnBlocks        []runtimellm.TurnBlock
+	ResponsePayload   json.RawMessage
 	ParseOK           bool
 	Latency           time.Duration
 	CreatedAt         time.Time
@@ -213,6 +214,10 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if err != nil {
 		t.Fatalf("marshal managed turn fixture blocks: %v", err)
 	}
+	response := fixture.ResponsePayload
+	if len(response) == 0 {
+		response = []byte(`{}`)
+	}
 	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "storetest-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
@@ -223,7 +228,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 			TriggerEventID: fixture.Event.ID(), TriggerEventType: string(fixture.Event.Type()), TaskID: fixture.TaskID,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: capabilityJSON,
 			ToolCalls: []byte(`[]`), EmittedEvents: []byte(`[]`), RequestPayload: []byte(`{"fixture":"managed-turn"}`),
-			ResponsePayload: []byte(`{}`), TurnBlocks: turnBlocks, ParseOK: fixture.ParseOK,
+			ResponsePayload: response, TurnBlocks: turnBlocks, ParseOK: fixture.ParseOK,
 			LatencyMS: int(fixture.Latency / time.Millisecond),
 		},
 		Spend: runtimeeffects.CompletionSpend{

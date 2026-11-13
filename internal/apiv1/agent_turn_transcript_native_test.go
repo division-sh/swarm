@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/llm"
@@ -31,9 +34,13 @@ type transcriptNativeStore interface {
 	sessions.Registry
 	operatorread.ConversationReader
 	operatorread.AgentReader
+	ListAuthorActivity(context.Context, authoractivity.ListOptions) (authoractivity.ListResult, error)
 }
 
 func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/chat_reply", func(t *testing.T) { proveChatTranscriptSettlement(t, backend) })
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, memory := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/memory_%t", backend, memory), func(t *testing.T) {
@@ -105,6 +112,122 @@ func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func proveChatTranscriptSettlement(t *testing.T, backend string) {
+	t.Helper()
+	opened, reopen := completion2270HistoryStore(t, backend)
+	selected := opened.(transcriptNativeStore)
+	ctx := originalAPIFixtureContext(t, context.Background(), selected)
+	runID, sessionID := uuid.NewString(), uuid.NewString()
+	identity := sqliteAgentUsageIdentityForRun(t, runID, "chat-transcript")
+	at := time.Now().UTC().Truncate(time.Second)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Hour)})
+	storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: runtimeactors.AgentConfig{
+		ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+		ResolvedLLMBackend: "openai_compatible", FlowPath: identity.FlowInstance(), Intent: apiTestResolvedIntent(t, identity.AgentID(), "Show the selected reply."),
+	}, Status: "active", StartedAt: at.Add(-time.Minute)})
+	turnIDs := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
+	// Tied timestamps retain the public ordinal contract by sorting the IDs.
+	sort.Strings(turnIDs)
+	var rawReplies []json.RawMessage
+	for i, turnID := range turnIDs {
+		raw := json.RawMessage(fmt.Sprintf(`{"choices":[{"message":{"content":"message-%d","reasoning_content":"private reasoning"}},{"message":{"content":"unselected"}}]}`, i+1))
+		rawReplies = append(rawReplies, raw)
+		prefix := []llm.TurnBlock{{Kind: "tool_use", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-1"}`)},
+			{Kind: "tool_result", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-1"}`)},
+			{Kind: "tool_use", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-2"}`)},
+			{Kind: "tool_result", ToolName: "read_flow_data", Data: []byte(`{"tool_use_id":"call-2"}`)}}
+		if i != 0 { // First row models already-recorded blocks: raw reply present, no text block.
+			prefix = append(prefix, llm.BuildTurnBlocks(llm.AgentTurnRecord{ResponseRaw: raw})...)
+		}
+		blocks := llm.BuildTurnBlocks(llm.AgentTurnRecord{TurnBlocks: prefix})
+		event := eventtest.ExistingRunRootIngress(uuid.NewString(), "task.in", "chat-proof", "", nil, 0, runID, events.EventEnvelope{}, at)
+		storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, pipelineobligation.ScopeSubscribed)
+		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: selected, Selected: selected, Identity: identity,
+			RunID: runID, SessionID: sessionID, TurnID: turnID, Event: event, TurnBlocks: blocks, ResponsePayload: raw,
+			Adapter: "openai_compatible", ParseOK: true, CreatedAt: at, Latency: time.Millisecond})
+	}
+	page, err := selected.ListAuthorActivity(ctx, authoractivity.ListOptions{RunID: runID, Limit: 500})
+	if err != nil || len(page.Occurrences) >= 500 {
+		t.Fatalf("settlement activity read: %+v %v", page, err)
+	}
+	var reference []authoractivity.Draft
+	for _, turnID := range turnIDs {
+		var drafts []authoractivity.Draft
+		for _, occurrence := range page.Occurrences {
+			if occurrence.Projection.TurnID != turnID {
+				continue
+			}
+			suffix, key := ":completed", "turn:"
+			if occurrence.Kind == authoractivity.KindTurnToolCompleted {
+				suffix, key = ":block:1", "turn-tool:"
+				if occurrence.Projection.ToolUseID == "call-2" {
+					suffix = ":block:3"
+				}
+			}
+			if occurrence.SourceIdentity != turnID+suffix || occurrence.DedupKey != key+turnID+suffix {
+				t.Fatalf("settlement tool ordinal/draft identity changed: %+v", occurrence)
+			}
+			projection := occurrence.Projection
+			projection.TurnID = "same-turn"
+			drafts = append(drafts, authoractivity.Draft{Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
+				SourceOwner: occurrence.SourceOwner, SourceIdentity: suffix, DedupKey: key + suffix, OccurredAt: occurrence.OccurredAt,
+				RunID: occurrence.RunID, EntityID: occurrence.EntityID, AgentID: occurrence.AgentID, FlowID: occurrence.FlowID, Projection: projection, Failure: occurrence.Failure})
+		}
+		if len(drafts) != 3 || drafts[0].Kind != authoractivity.KindTurnLifecycle || drafts[1].SourceIdentity != ":block:1" || drafts[2].SourceIdentity != ":block:3" {
+			t.Fatalf("settlement drafts=%+v", drafts)
+		}
+		if reference == nil {
+			reference = drafts
+		} else if !reflect.DeepEqual(reference, drafts) {
+			t.Fatalf("reply altered settlement drafts: before=%+v after=%+v", reference, drafts)
+		}
+	}
+	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(before["agent_turns"])
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("raw turn snapshot: rows=%d err=%v", len(rows), err)
+	}
+	for _, row := range rows {
+		id, err := row["turn_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, turnID := range turnIDs {
+			if id != turnID {
+				continue
+			}
+			response, err := row["response_payload"].Text()
+			var actual, expected any
+			if err != nil || json.Unmarshal([]byte(response), &actual) != nil || json.Unmarshal(rawReplies[i], &expected) != nil || !reflect.DeepEqual(actual, expected) {
+				t.Fatalf("raw reply changed: %s %v", response, err)
+			}
+		}
+	}
+	for _, owner := range []transcriptNativeStore{selected, reopen().(transcriptNativeStore)} {
+		provePublicTranscriptReadback(t, owner, runID, identity.AgentID(), sessionID, turnIDs)
+		for i, id := range turnIDs {
+			turn, err := owner.LoadOperatorPublicConversationTurn(ctx, sessionID, id)
+			want := ""
+			if i != 0 {
+				want = fmt.Sprintf("message-%d", i+1)
+			}
+			if err != nil || turn.Turn.AssistantVisibleOutput != want || turn.Turn.Outcome != want {
+				t.Fatalf("fresh/legacy reply: %+v %v", turn, err)
+			}
+			if strings.Contains(fmt.Sprint(turn.Turn.Activity), "private reasoning") || strings.Contains(fmt.Sprint(turn.Turn.Activity), "unselected") {
+				t.Fatal("private/unselected content escaped")
+			}
+		}
+	}
+	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("reading legacy/fresh turns rewrote stored history: %v", err)
 	}
 }
 
