@@ -634,7 +634,7 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 		}
 	}
 	header := readPublicClockRun(s.t, s.process, s.runID)
-	if header.Status != "paused" || len(header.ClockSchedules) != 1 || header.ClockSchedules[0]["every"] != "24h" || header.ClockSchedules[0]["status"] != "active" {
+	if header.Status != "paused" || len(header.ClockSchedules) != 1 || header.ClockSchedules[0]["every"] != "24h0m0s" || header.ClockSchedules[0]["status"] != "active" {
 		s.t.Fatalf("final recurring-clock/run state changed: %+v", header)
 	}
 	_, sends := s.telegram.Counts()
