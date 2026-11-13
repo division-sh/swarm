@@ -59,7 +59,7 @@ func replayLinkNotice(ctx context.Context, tx *sql.Tx, id, text string, binding 
 	var kind, summary, payload string
 	var saved Default
 	err := tx.QueryRowContext(ctx, query+argument+` GROUP BY m.item_id,m.item_type,m.summary,m.payload`, id).Scan(&kind, &summary, &payload, &count, &saved.PrincipalID, &saved.InterfaceKey, &saved.BindingRevision, &saved.ExternalAccountRef, &saved.ConversationRef, &saved.ConversationScope)
-	if errors.Is(err, sql.ErrNoRows) {
+	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil || count != 1 || kind != render.LinkNoticeType || summary != text || payload != "{}" || saved.PrincipalID != binding.PrincipalID || saved.InterfaceKey != binding.Interface.Key() || saved.BindingRevision != binding.Revision || saved.ExternalAccountRef != binding.ExternalAccountRef || saved.ConversationRef != binding.ConversationRef || saved.ConversationScope != binding.ConversationScope {
