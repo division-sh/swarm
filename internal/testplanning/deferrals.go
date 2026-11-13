@@ -99,6 +99,10 @@ func deferredRootReason(unit ProofUnit, root TestRoot, build BuildContext) (reas
 			if unit.WorkloadProfile != ProfileFull {
 				return "N=10 race bursts require full tier", true
 			}
+		case "TestCompiledProcessFullLifecycleRetainedStateBothStores":
+			if unit.WorkloadProfile != ProfileFull {
+				return "joined three-arm retained-state comparison requires full tier", true
+			}
 		}
 	}
 	const module = "github.com/division-sh/swarm/"
