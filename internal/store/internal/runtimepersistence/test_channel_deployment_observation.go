@@ -16,9 +16,17 @@ import (
 type ChannelControlCounts struct{ Total, Nonmutating, OriginalRefused int }
 
 func inspectChannelObservation(ctx context.Context, selected any, read func(context.Context, *sql.Tx) error) error {
-	return inspectChannelOwnedObservation(ctx, selected, func(ctx context.Context) error {
-		return readServedDeliveryObservation(ctx, selected, read)
-	})
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	inspect := func(ctx context.Context) error { return readServedDeliveryObservation(ctx, selected, read) }
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.InspectSnapshot(ctx, inspect)
+	case *SQLiteRuntimeStore:
+		return owner.InspectSnapshot(ctx, inspect)
+	}
+	return fmt.Errorf("channel observation requires its original native owner")
 }
 
 func inspectChannelOwnedObservation(ctx context.Context, selected any, read func(context.Context) error) error {
