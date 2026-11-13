@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -182,10 +183,8 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 						}
 					}
 					binaryDir := t.TempDir()
-					build := exec.Command("go", "build", "-modcacherw", "-o", filepath.Join(binaryDir, "swarm"), "./cmd/swarm")
-					build.Dir = repoRootForTest()
-					if output, err := build.CombinedOutput(); err != nil {
-						t.Fatalf("build public CLI: %v\n%s", err, output)
+					if err := testplanning.BuildGoProduct(t.Context(), repoRootForTest(), os.Getenv("SWARM_TEST_BUILD_CACHE"), filepath.Join(binaryDir, "swarm"), os.Getenv("SWARM_TEST_PROOF_PROFILE"), "build", "./cmd/swarm"); err != nil {
+						t.Fatalf("build public CLI: %v", err)
 					}
 					before, err := os.ReadFile(sqlitePath)
 					if err != nil {
