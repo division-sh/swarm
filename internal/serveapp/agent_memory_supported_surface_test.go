@@ -269,7 +269,7 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), sourceRoot, []string{
 		"verify", sourceRoot, "--config", configPath, "--json",
-	}, &verifyOut, &verifyErr, Run); code != 0 {
+	}, &verifyOut, &verifyErr, Run, ChannelRegistrations()); code != 0 {
 		t.Fatalf("explicit live graduation verify exit=%d\nstdout:\n%s\nstderr:\n%s", code, verifyOut.String(), verifyErr.String())
 	}
 	var admission struct {
