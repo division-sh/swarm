@@ -162,7 +162,7 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	transition := am.lifecycle.prepareShutdownTransitionWithGrace(true, grace)
 	if transition == nil {
 		var dependencyErr error
-		if am.lifecycle.shutdownJoin != nil {
+		if am.lifecycle.shutdownJoin != nil && am.runtimeShutdownAdmissionClosed != nil && am.runtimeShutdownAdmissionClosed() {
 			dependencyErr = am.lifecycle.shutdownJoin.JoinManagerShutdownDependencies(drainCtx)
 		}
 		// A joined run can retain exact activation cleanup after a failed settlement.
