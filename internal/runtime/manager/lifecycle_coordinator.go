@@ -1423,6 +1423,12 @@ func (c *agentLifecycleCoordinator) joinShutdownDrain(transition *runtimeLifecyc
 	if transition == nil || transition.kind != runtimeLifecycleTransitionShutdown {
 		return
 	}
+	c.mu.Lock()
+	current := c.transition == transition && !transition.complete
+	c.mu.Unlock()
+	if !current {
+		return
+	}
 	transition.drainOnce.Do(func() {
 		if transition.drainAccepted {
 			transition.drainErr = c.drainShutdownWork(transition.drainCtx)
