@@ -230,15 +230,17 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	var down channelonboarding.Result
 	if registered {
 		down = issue3011RegisteredStatus(t, opts, endpoint, operation())
-		if down.Status.Health != "disconnected" || down.Status.Reason == "" || len(down.Status.Holders) != 1 {
+		if down.Status.Health != "error" || down.Status.Reason == "" || down.Status.Cause != "connection attempt failed" || len(down.Status.Holders) != 1 {
 			t.Fatal("deferred registered status lost its exact live holder/reason", down.Status)
 		}
-		wait(func() bool { return strings.Contains(process.outputString(), "ERROR WhatsApp disconnected: ") })
+		wait(func() bool {
+			return strings.Contains(process.outputString(), "ERROR WhatsApp: connection attempt failed\n")
+		})
 	} else {
 		requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &down)
 	}
-	if down.Operation.OperationID != id || down.Connection == nil || down.Connection.State != "disconnected" || (!registered && down.Connection.Reason == "") {
-		t.Fatal("deferred public readback lost disconnected/reason", down)
+	if down.Operation.OperationID != id || down.Connection == nil || down.Connection.State != "error" || down.Connection.Cause != "connection attempt failed" || (!registered && down.Connection.Reason == "") {
+		t.Fatal("deferred public readback lost error/reason/cause", down)
 	}
 	lease, currentPublication := runtime.ChannelActivations.AcquirePresentation()
 	if !currentPublication {
@@ -285,6 +287,9 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 		t.Fatal("recovery lacks live publication or fresh account presentation", process.outputString())
 	}
 	if registered && strings.Count(process.outputString(), "ERROR WhatsApp disconnected: ") != 1 {
+		t.Fatal("failed login did not produce one operator disconnect ERROR", process.outputString())
+	}
+	if registered && strings.Count(process.outputString(), "ERROR WhatsApp: connection attempt failed\n") != 1 {
 		t.Fatal("failed retries repeated the operator boot ERROR", process.outputString())
 	}
 	_, _, accepted = counts()
