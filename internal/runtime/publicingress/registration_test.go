@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/google/uuid"
@@ -1357,7 +1358,8 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 		PlanGeneration: planGeneration,
 	}
 	pair := RegistrationPair{
-		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		ProviderFacts: channelfixture.For(parsed.Provider),
+		BindingID:     bindingID, PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram.telegram_bot_token": "bot"},
 		Target: RegistrationTarget{

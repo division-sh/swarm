@@ -51,9 +51,10 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		{Provider: "whatsapp", Account: "+15550200", State: "refused", Reason: "registration_not_current"},
 	}
 	reads := 0
+	facts, _ := installedChannelFactsFor("whatsapp")
 	observed, err := serveReadyDeploymentAccounts(t.Context(), []channelonboarding.Operation{
-		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550200", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
-		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550100", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
+		(channelonboarding.Operation{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550200", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded}).WithProviderFacts(facts),
+		(channelonboarding.Operation{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550100", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded}).WithProviderFacts(facts),
 	}, func(_ context.Context, request apiv1.Request) (any, error) {
 		reads++
 		if request.Method != "channel.list" || request.Params["provider"] != "whatsapp" || request.Params["holder"] != "current holder" {

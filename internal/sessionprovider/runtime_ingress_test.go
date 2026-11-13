@@ -332,7 +332,7 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				if !c.state.currentOccurrence().callbacks.receive(message) {
 					t.Fatal("optional phone fenced valid input", source)
 				}
-				capture, err := captureSDKMessage(f.scope, f.source, uuid.NewString(), message, captureFixture(t).ReceivedAt)
+				capture, err := captureSDKMessage(f.scope, f.source, uuid.NewString(), message, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 				if err != nil {
 					t.Fatal(err)
 				}
