@@ -585,6 +585,9 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 		if strings.HasPrefix(event.EventName, "platform.") {
 			continue
 		}
+		if event.SourceEventID != "" && identities[event.SourceEventID] == "" {
+			s.t.Fatalf("event has an unobserved causal predecessor: %+v", event)
+		}
 		var exact struct {
 			Payload json.RawMessage `json:"payload"`
 		}
@@ -604,10 +607,16 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 		s.t.Fatalf("final recurring-clock/run state changed: %+v", header)
 	}
 	_, sends := s.telegram.Counts()
-	if sends != 1 {
-		s.t.Fatalf("registered channel acknowledgement sends=%d, want 1 without restart resend", sends)
+	acknowledgements := 0
+	for i := 0; i < sends; i++ {
+		if s.telegram.Delivery(i)["text"] == "Swarm operator successfully connected" {
+			acknowledgements++
+		}
 	}
-	rows = append(rows, "channel:telegram:420079:registered:one-ack")
+	if acknowledgements != 1 {
+		s.t.Fatalf("registered channel acknowledgement sends=%d, want 1 without restart resend", acknowledgements)
+	}
+	rows = append(rows, fmt.Sprintf("channel:telegram:420079:registered:ack=1:other_sends=%d", sends-acknowledgements))
 	sort.Strings(rows)
 	return rows
 }
