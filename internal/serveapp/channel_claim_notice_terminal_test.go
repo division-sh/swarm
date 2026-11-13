@@ -25,7 +25,7 @@ func requireServedClaimCodeNoticeTerminal(t *testing.T, endpoint, operationID st
 	out, diagnostic := &lockedBuffer{}, &lockedBuffer{}
 	done := make(chan int, 1)
 	go func() {
-		done <- cliapp.Execute(ctx, []string{"channel", "resume", operationID, "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"), "--api-token-file", token}, out, diagnostic, nil, nil)
+		done <- cliapp.Execute(ctx, []string{"channel", "resume", operationID, "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"), "--api-token-file", token}, out, diagnostic, nil, nil, ChannelRegistrations())
 	}()
 	joined := false
 	defer func() {
