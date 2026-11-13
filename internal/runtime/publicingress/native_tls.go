@@ -28,7 +28,7 @@ func NativeTLSConfig(settings *config.PublicWebhookConfig, stateDir string) (*tl
 	host := strings.TrimSpace(settings.Hostname)
 	if settings.CertificateFile == nil {
 		configuration := nativeCertificateManager(host, stateDir, settings.Email).TLSConfig()
-		// HostPolicy governs issuance, not certificates already in the cache.
+		// ACME challenge-token selection precedes the manager's HostPolicy check.
 		configuration.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 			if !strings.EqualFold(hello.ServerName, host) {
 				return nil, fmt.Errorf("public webhook TLS server name is not configured")

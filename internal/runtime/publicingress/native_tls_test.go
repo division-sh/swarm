@@ -112,7 +112,7 @@ func TestNativeTLSAutomaticManagerUsesOneNameAndMockCA(t *testing.T) {
 		t.Fatalf("automatic TLS configuration: %v", err)
 	}
 	if _, err := cfg.GetConfigForClient(&tls.ClientHelloInfo{ServerName: "other.example.test"}); err == nil {
-		t.Fatal("an old cached name must not bypass configured-name restriction")
+		t.Fatal("unconfigured SNI must refuse before certificate or challenge selection")
 	}
 	if _, err := os.Stat(filepath.Join(root, "public-webhook-certs")); !os.IsNotExist(err) {
 		t.Fatalf("configuration admission must not issue or create the cache: %v", err)
