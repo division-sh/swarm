@@ -2250,28 +2250,9 @@ func (m *RuntimeContextManager) deactivateBundleHashForStop(bundleHash, cause st
 		return result
 	}
 	result.Found = true
-	state := entry.state
-	if state == "" {
-		state = RuntimeContextStateLoaded
-	}
-	if state != RuntimeContextStateLoaded {
-		result.State = state
-		if strings.TrimSpace(entry.cause) != "" {
-			result.Cause = strings.TrimSpace(entry.cause)
-		}
-	} else if !graceful {
-		if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-			entry: entry, state: RuntimeContextStateUnloaded, cause: result.Cause,
-		}); err != nil {
-			result.State = RuntimeContextStateLoaded
-			result.Cause = strings.TrimSpace(entry.cause)
-			result.ShutdownErr = err
-			m.mu.Unlock()
-			return result
-		}
-		result.Changed = true
-	} else {
-		result.State = RuntimeContextStateLoaded
+	if !m.prepareContextStopVisibilityLocked(entry, graceful, &result) {
+		m.mu.Unlock()
+		return result
 	}
 	if entry.context != nil {
 		runtimeToShutdown = entry.runtime
@@ -2327,6 +2308,32 @@ func (m *RuntimeContextManager) deactivateBundleHashForStop(bundleHash, cause st
 		}
 	}
 	return result
+}
+
+func (m *RuntimeContextManager) prepareContextStopVisibilityLocked(entry *runtimeContextEntry, graceful bool, result *RuntimeContextDeactivationResult) bool {
+	state := entry.state
+	if state == "" {
+		state = RuntimeContextStateLoaded
+	}
+	if state != RuntimeContextStateLoaded {
+		result.State = state
+		if strings.TrimSpace(entry.cause) != "" {
+			result.Cause = strings.TrimSpace(entry.cause)
+		}
+	} else if !graceful {
+		if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+			entry: entry, state: RuntimeContextStateUnloaded, cause: result.Cause,
+		}); err != nil {
+			result.State = RuntimeContextStateLoaded
+			result.Cause = strings.TrimSpace(entry.cause)
+			result.ShutdownErr = err
+			return false
+		}
+		result.Changed = true
+	} else {
+		result.State = RuntimeContextStateLoaded
+	}
+	return true
 }
 
 func (m *RuntimeContextManager) finishGracefulContextVisibility(entry *runtimeContextEntry, result *RuntimeContextDeactivationResult) {
