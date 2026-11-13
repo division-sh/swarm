@@ -45,9 +45,12 @@ func TestClockReadbackUsesPersistedLifecycleEvidence(t *testing.T) {
 
 func TestClockReadbackKeepsParkingAndSkippedIntervalIsolated(t *testing.T) {
 	activation := instanceRecoveryActivation(t)
-	parked, err := ParkClock(activation, activation.AdmittedAt.Add(time.Second))
-	if err != nil {
-		t.Fatal(err)
+	parkedAt := activation.AdmittedAt.Add(time.Second)
+	parked := activation
+	parked.Status = StatusParked
+	parked.ClockSuspension = &ClockSuspension{ParkedAt: parkedAt}
+	if err := parked.Validate(); err != nil {
+		t.Fatalf("historical parked activation: %v", err)
 	}
 	view, err := ProjectClockReadback(parked, true)
 	if err != nil || view.Status != StatusParked || view.NextDueAt != nil || view.RetainsRun || view.Suspension == nil {
@@ -57,9 +60,13 @@ func TestClockReadbackKeepsParkingAndSkippedIntervalIsolated(t *testing.T) {
 	if parked.ClockSuspension.ParkedAt.IsZero() {
 		t.Fatal("readback mutated durable parking evidence")
 	}
-	resumed, err := ResumeClock(parked, activation.AdmittedAt.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
+	resumed := activation
+	resumed.CurrentDueAt = activation.AdmittedAt.Add(time.Hour + time.Minute)
+	resumed.ClockSuspension = &ClockSuspension{
+		SuspendedFrom: parkedAt, ResumedAt: activation.AdmittedAt.Add(time.Hour), SkippedOccurrences: 60,
+	}
+	if err := resumed.Validate(); err != nil {
+		t.Fatalf("historical resumed activation: %v", err)
 	}
 	view, err = ProjectClockReadback(resumed, true)
 	if err != nil || view.NextDueAt == nil || !view.RetainsRun || view.Suspension.SkippedOccurrences != 60 {

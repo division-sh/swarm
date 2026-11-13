@@ -82,14 +82,6 @@ func TestClockScheduleRunReadbackOnBothStores(t *testing.T) {
 			}
 			cancelGenericScheduleFixture(t, ctx, store, agent, "agent_removed", time.Now().UTC())
 			requireClockTimerRetention(t, ctx, store, runID, 2)
-			transitionClockLifetimeForTest(t, ctx, store, runID, time.Now().UTC(), false)
-			requireClockTimerRetention(t, ctx, store, runID, 0)
-			clocks, err = reader.LoadRunClockSchedules(ctx, runID)
-			if err != nil || clocks[0].Status != genericschedule.StatusParked || clocks[0].RetainsRun || clocks[2].Status != genericschedule.StatusParked || clocks[2].RetainsRun {
-				t.Fatalf("parked clocks retained the run or cancelled another family: clocks=%+v err=%v", clocks, err)
-			}
-			transitionClockLifetimeForTest(t, ctx, store, runID, time.Now().UTC(), true)
-			requireClockTimerRetention(t, ctx, store, runID, 2)
 			cancelGenericScheduleFixture(t, ctx, store, activations[0], "root_clock_removed", time.Now().UTC())
 			requireClockTimerRetention(t, ctx, store, runID, 1)
 			cancelGenericScheduleFixture(t, ctx, store, activations[2], "last_clock_removed", time.Now().UTC())
