@@ -351,7 +351,7 @@ func (s *serveSessionBootstrap) operationsFor(op channelonboarding.Operation) (c
 }
 
 func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboarding.Operation, connection *sessionprovider.RuntimeConnection) error {
-	if !op.DeploymentRegistration || connection == nil || connection.ConnectionID() != op.SessionConnectionID {
+	if !op.DeploymentRegistration || connection == nil || connection.Closed() || connection.ConnectionID() != op.SessionConnectionID {
 		return channelonboarding.ErrInvalidRequest
 	}
 	s.mu.Lock()
@@ -360,7 +360,7 @@ func (s *serveSessionBootstrap) registerDeploymentConnection(op channelonboardin
 		if prior.connection == connection {
 			return nil
 		}
-		if !prior.connection.Closed() || prior.operation.OperationID != op.OperationID ||
+		if prior.connection == nil && !sessionNotLinkedOnly(prior.err) || prior.connection != nil && !prior.connection.Closed() || prior.operation.OperationID != op.OperationID ||
 			prior.operation.SessionConnectionID != op.SessionConnectionID || prior.operation.PrincipalID != op.PrincipalID ||
 			prior.operation.Provider != op.Provider || prior.operation.Interface.Normalized() != op.Interface.Normalized() ||
 			prior.operation.Coordinate != op.Coordinate || prior.operation.RequestHash != op.RequestHash {
