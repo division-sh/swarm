@@ -117,9 +117,6 @@ func (pc *PipelineCoordinator) compileAuthoredSessionActivity(ctx context.Contex
 	if pc == nil || pc.SemanticSource() == nil || lease == nil || !declared {
 		return absent, fmt.Errorf("session activity requires its exact declaration and held original publication")
 	}
-	if err := lease.ValidateAdmission(ctx); err != nil {
-		return absent, err
-	}
 	site, err := channelonboarding.ResolveSessionActivitySite(pc.SemanticSource(), node, intent.HandlerEventKey, intent.Tool, intent.ActivityID)
 	if err != nil {
 		return absent, err
@@ -134,7 +131,15 @@ func (pc *PipelineCoordinator) compileAuthoredSessionActivity(ctx context.Contex
 	}
 	input, _ := intent.Input.ObjectMap()
 	account, _ := input["account"].String()
-	return channelonboarding.CompileSessionActivityTarget(pc.SemanticSource(), intent.BundleHash, site, publication, trigger, account)
+	projection, err := channelonboarding.CompileSessionActivityTarget(pc.SemanticSource(), intent.BundleHash, site, publication, trigger, account)
+	if err != nil {
+		return absent, err
+	}
+	selected, found := pc.channelActivations.BorrowActivityOperation(lease, projection.PrivateTarget().ToolID(), lease.Generation())
+	if !found {
+		return absent, fmt.Errorf("session activity lost its exact held operation")
+	}
+	return projection, selected.ValidateActivityRequest(ctx)
 }
 
 func (pc *PipelineCoordinator) validateAuthoredSessionActivity(ctx context.Context, intent engine.ActivityIntent,

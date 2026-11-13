@@ -58,6 +58,14 @@ func (rt *Runtime) bindChannelSessionAdmission(binding *channelSessionAdmission)
 }
 
 func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, publication channelonboarding.ChannelActivationPublication) error {
+	return rt.validateChannelPublication(ctx, publication, rt.validateLearnedChannelPublication)
+}
+
+func (rt *Runtime) validateChannelActivityRequestPublication(ctx context.Context, publication channelonboarding.ChannelActivationPublication) error {
+	return rt.validateChannelPublication(ctx, publication, rt.validateChannelActivityRequest)
+}
+
+func (rt *Runtime) validateChannelPublication(ctx context.Context, publication channelonboarding.ChannelActivationPublication, validate func(context.Context, channelonboarding.CompiledActivation) error) error {
 	var owner *credentials.SnapshotOwner
 	var err error
 	if rt.Options.ProviderCredentials != nil {
@@ -78,7 +86,7 @@ func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, pub
 			}
 		}
 		if activation.Source == channelonboarding.ActivationSourceLearned || activation.Source == channelonboarding.ActivationSourceRegistered {
-			if err := rt.validateLearnedChannelPublication(ctx, activation); err != nil {
+			if err := validate(ctx, activation); err != nil {
 				return err
 			}
 		}
@@ -98,6 +106,16 @@ func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, pub
 }
 
 func (rt *Runtime) validateLearnedChannelPublication(ctx context.Context, activation channelonboarding.CompiledActivation) error {
+	if err := rt.validateChannelResponsibility(ctx, activation); err != nil {
+		return err
+	}
+	if activation.Plan.Transport() == packs.ChannelTransportSession {
+		return rt.validateNativeChannelPublication(ctx, activation)
+	}
+	return nil
+}
+
+func (rt *Runtime) validateChannelResponsibility(ctx context.Context, activation channelonboarding.CompiledActivation) error {
 	responsibility, err := activation.AdmissionResponsibility()
 	if err != nil {
 		return err
@@ -109,10 +127,27 @@ func (rt *Runtime) validateLearnedChannelPublication(ctx context.Context, activa
 	if !current {
 		return fmt.Errorf("%w: learned channel publication lost its exact admission responsibility", channelonboarding.ErrRevisionConflict)
 	}
-	if activation.Plan.Transport() == packs.ChannelTransportSession {
-		return rt.validateNativeChannelPublication(ctx, activation)
-	}
 	return nil
+}
+
+func (rt *Runtime) validateChannelActivityRequest(ctx context.Context, activation channelonboarding.CompiledActivation) error {
+	if activation.Plan.Transport() != packs.ChannelTransportSession {
+		return rt.validateLearnedChannelPublication(ctx, activation)
+	}
+	if err := rt.validateChannelResponsibility(ctx, activation); err != nil {
+		return err
+	}
+	binding := rt.channelSessions.Load()
+	if binding == nil {
+		return &operatorchannel.SessionProviderUnavailableError{Provider: activation.SessionAccount.Provider}
+	}
+	owner, ok := binding.owner.(interface {
+		ValidateActivityRequestAccount(context.Context, operatorchannel.SessionAccountAdmission, string, int64) error
+	})
+	if !ok {
+		return &operatorchannel.SessionProviderUnavailableError{Provider: activation.SessionAccount.Provider}
+	}
+	return owner.ValidateActivityRequestAccount(ctx, activation.SessionAccount, activation.OnboardingOperationID, activation.OnboardingRevision)
 }
 
 func (rt *Runtime) validateNativeChannelPublication(ctx context.Context, activation channelonboarding.CompiledActivation) error {

@@ -10,6 +10,42 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
+// Invariant: request validation cannot install a down publication or authorize its launch.
+func TestActivityRequestAdmissionIsSeparateFromPublicationAndLaunch(t *testing.T) {
+	publication := testEmptyPublication(t)
+	owner, err := NewOwner(publication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	down := errors.New("launch unavailable")
+	var launchErr error
+	admit := func(context.Context, channelonboarding.ChannelActivationPublication) error { return launchErr }
+	request := func(context.Context, channelonboarding.ChannelActivationPublication) error { return nil }
+	launchErr = down
+	if err := owner.ReplaceWithActivityRequestAdmission(context.Background(), publication, admit, request); !errors.Is(err, down) {
+		t.Fatal("request callback installed a down publication", err)
+	}
+	launchErr = nil
+	if err := owner.ReplaceAdmittedContext(context.Background(), publication, admit); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.ReplaceWithActivityRequestAdmission(context.Background(), publication, admit, request); err != nil {
+		t.Fatal(err)
+	}
+	lease, _ := owner.AcquirePresentation()
+	launchErr = down
+	if err := lease.ValidateActivityRequest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.ValidateAdmission(context.Background()); !errors.Is(err, down) {
+		t.Fatal("request admission replaced launch permission", err)
+	}
+	lease.Release()
+	if err := lease.ValidateActivityRequest(context.Background()); err == nil {
+		t.Fatal("released request lease admitted")
+	}
+}
+
 func TestOwnerPublishesWholeExecutableSnapshot(t *testing.T) {
 	owner, err := NewOwner(testEmptyPublication(t))
 	if err != nil {

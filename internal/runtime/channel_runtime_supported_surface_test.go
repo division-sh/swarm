@@ -214,6 +214,15 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			}
 			privateToolID := privateIdentity.ToolID()
 			activationOwner := testAdmittedChannelActivationOwner(t, credentialStore, binding)
+			var requestChecks atomic.Int32
+			admit := func(context.Context, channelonboarding.ChannelActivationPublication) error { return nil }
+			requestAdmission := func(context.Context, channelonboarding.ChannelActivationPublication) error {
+				requestChecks.Add(1)
+				return nil
+			}
+			if err := activationOwner.ReplaceWithActivityRequestAdmission(ctx, testAdmittedChannelActivationPublication(t, credentialStore, binding), admit, requestAdmission); err != nil {
+				t.Fatal(err)
+			}
 			coordinator = newExternalRuntimeTestActivityCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
@@ -265,7 +274,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			}
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
-			executor := configuredChannelExecutor(source, activationOwner, credentialStore, coordinator, coordinator)
+			executor := configuredChannelExecutor(source, activationOwner, credentialStore, channelRequestBoundaryProbe{coordinator, &requestChecks}, coordinator)
 			input := map[string]any{
 				"presentation": map[string]any{"text": "Approve deployment?"},
 				"actions":      []any{map[string]any{"label": "Approve", "token": "approve_1"}},
@@ -283,6 +292,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("provider called before provider-neutral admission: %d", calls.Load())
 			}
 			callCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "call-1")
+			requestChecks.Store(0)
 			result, err := executor.Execute(callCtx, "channel.ops.deliver", input)
 			if err != nil {
 				t.Fatalf("configured channel execute: %v (cause=%v)", err, errors.Unwrap(err))
@@ -653,6 +663,19 @@ func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coord
 type channelAckLossExecutor struct {
 	delegate *runtimepipeline.PipelineCoordinator
 	failNext atomic.Bool
+}
+
+type channelRequestBoundaryProbe struct {
+	delegate runtimetools.DurableActivityExecutor
+	checks   *atomic.Int32
+}
+
+// This existing HTTP fixture proves the agent handoff boundary, not a native socket outcome.
+func (p channelRequestBoundaryProbe) ExecuteDurableActivity(ctx context.Context, intent runtimeengine.ActivityIntent) (runtimepipeline.ActivityAttemptRecord, error) {
+	if p.checks.Load() == 0 {
+		return runtimepipeline.ActivityAttemptRecord{}, errors.New("agent skipped request-only admission before journal handoff")
+	}
+	return p.delegate.ExecuteDurableActivity(ctx, intent)
 }
 
 func (e *channelAckLossExecutor) ExecuteDurableActivity(ctx context.Context, intent runtimeengine.ActivityIntent) (runtimepipeline.ActivityAttemptRecord, error) {

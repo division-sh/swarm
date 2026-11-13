@@ -85,7 +85,7 @@ func TestRunServeSessionRecoveryRegisteredBothStores(t *testing.T) {
 				}
 				process := startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
-				exerciseServedSessionRecovery(t, opts, process, peer, op.OperationID, true, read)
+				exerciseServedSessionRecovery(t, opts, process, peer, op.OperationID, true, read, "")
 			}) {
 				t.Fatal("first registered backend failed")
 			}
@@ -116,7 +116,7 @@ func waitSessionRecovery(t *testing.T, check func() bool, detail func() string) 
 	}
 }
 
-func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, process *serveRuntimeTestProcess, peer *serveNativeProtocolPeer, id string, registered bool, read func() *serveSessionBootstrap) {
+func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, process *serveRuntimeTestProcess, peer *serveNativeProtocolPeer, id string, registered bool, read func() *serveSessionBootstrap, location string) {
 	t.Helper()
 	operation := func() channelonboarding.Operation {
 		t.Helper()
@@ -160,6 +160,17 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	old := read().connection(id)
 	connections, logins, sends := counts()
 	peer.disconnect()
+	if !registered {
+		wait(func() bool {
+			runtime := servedTestProcessRuntime(t, process)
+			ctx := servedRuntimeProofAuthorActivityContext(t, runtime, runtime.Options.SourceArtifactFact.BundleHash())
+			_, healthy, err := old.SessionRecovery(ctx, original)
+			return err == nil && !healthy
+		})
+		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+		input := issue3011PublishAndSettle(t, endpoint, "learned-down", map[string]any{})
+		issue3011ActivityOutcome(t, endpoint, input, opts.StoreMode, location, "")
+	}
 	wait(func() bool { n, l, _ := counts(); return n > connections && l > logins && healthy() })
 	n, l, accepted := counts()
 	current := operation()
