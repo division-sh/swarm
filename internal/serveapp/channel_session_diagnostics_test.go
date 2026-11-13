@@ -5,6 +5,7 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,15 +26,39 @@ import (
 
 type diagnosticReadFixture struct {
 	serveSessionBootstrapOwner
-	items []serveSessionDiagnostic
+	items       []serveSessionDiagnostic
+	recoveryAt  time.Time
+	recoveryErr error
 }
 
 func (f *diagnosticReadFixture) sessionDiagnostics(context.Context) ([]serveSessionDiagnostic, error) {
 	return f.items, nil
 }
 
+func (f *diagnosticReadFixture) sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error) {
+	return f.recoveryAt, false, f.recoveryErr
+}
+
 // Invariant: all eleven lines are fixed, operator-only; duplicate views print once.
 func TestServeSessionDiagnosticFixedOutput(t *testing.T) {
+	for _, failedRead := range []bool{false, true} {
+		item := serveSessionDiagnostic{Operation: channelonboarding.Operation{Provider: "whatsapp"}, Account: "+15551234567",
+			Fact: sessionprovider.SessionDiagnostic{ConnectionID: uuid.NewString(), OccurrenceID: uuid.NewString()}}
+		owner := &diagnosticReadFixture{items: []serveSessionDiagnostic{item}, recoveryAt: time.Now()}
+		if failedRead {
+			owner.recoveryErr = errors.New("boot recovery read refused")
+		}
+		var out, errOut bytes.Buffer
+		poll := serveSessionDiagnostics(owner, &channelonboarding.AccountReference{Provider: "whatsapp", Account: item.Account}, &out, &errOut, false)
+		err := poll(t.Context())
+		if failedRead {
+			if !errors.Is(err, owner.recoveryErr) || out.Len() != 0 {
+				t.Fatal("boot fallback suppressed its owner read failure", err, out.String())
+			}
+		} else if err != nil || out.String() != "ERROR WhatsApp disconnected: cause unknown\n" {
+			t.Fatal("boot recovery fallback lost its disconnect form", err, out.String())
+		}
+	}
 	for _, cell := range []struct{ socket, lifecycle, cause string }{
 		{"peer_close", "", "closed by the other side"}, {"reset", "", "connection reset"},
 		{"unreachable", "", "network path unavailable"}, {"timeout", "", "connection timed out"},
