@@ -4,6 +4,7 @@ package serveapp
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 		peer.mu.Unlock()
 	}
 	var customer, customerLID types.JID
+	var cut []servedNativeActivityCut
 	if len(messageIDs) == 0 {
 		customer, customerLID = peer.customer(text, "SERVED_AUTHORED_CUSTOMER")
 	} else {
@@ -51,6 +53,7 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 			t.Fatal("post-boot customer aliases a bound role")
 		}
 		sender, _, _ := peer.senderFrom(customer, customerLID)
+		cut = append(cut, servedNativeActivityCut{servedNativeActivityLedger(t, endpoint), messageIDs[0]})
 		peer.sendEncrypted(sender.EncryptText(t, text, messageIDs[0]), messageIDs[0])
 	}
 	deadline := time.After(5 * time.Second)
@@ -66,7 +69,7 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 			if sent.Body.GetConversation() != text || sent.ID == "" {
 				t.Fatal("authored activity changed the admitted customer input", sent.ID, sent.Body)
 			}
-			requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), text, uncertain)
+			requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), text, uncertain, cut...)
 			return sent
 		case <-deadline:
 			logServedNativeActivityFailure(t, endpoint)
@@ -75,16 +78,16 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 	}
 }
 
-func requireServedNativeActivityResult(t *testing.T, endpoint, messageID, destination, text string, uncertain bool) {
+func requireServedNativeActivityResult(t *testing.T, endpoint, messageID, destination, text string, uncertain bool, cut ...servedNativeActivityCut) {
 	t.Helper()
 	code := ""
 	if uncertain {
 		code = "native_activity_acknowledgment_invalid"
 	}
-	requireServedNativeActivityOutcome(t, endpoint, messageID, destination, text, code)
+	requireServedNativeActivityOutcome(t, endpoint, messageID, destination, text, code, cut...)
 }
 
-func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, destination, text, failureCode string) {
+func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, destination, text, failureCode string, cut ...servedNativeActivityCut) {
 	t.Helper()
 	var runs struct {
 		Runs []operatorread.RunHeader `json:"runs"`
@@ -100,13 +103,16 @@ func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, desti
 				if request.Payload["tool"] != "whatsapp.send_text" {
 					continue
 				}
+				if len(cut) != 0 && strings.ReplaceAll(request.EventID, "-", "") != messageID {
+					continue
+				}
 				target, _ := request.Payload["native_session_target"].(string)
 				input, _ := request.Payload["input"].(map[string]any)
 				if !strings.HasPrefix(target, contracts.PrivateChannelActivityPrefix) || request.Payload["plan_generation"] == nil ||
 					request.Payload["channel_activation_generation"] == nil || request.Payload["bundle_hash"] == "" ||
 					request.Payload["workflow_version"] == "" || input["destination"] != destination || input["text"] != text ||
-					strings.ReplaceAll(request.EventID, "-", "") != messageID || len(requests.Events) != 1 {
-					t.Fatal("served native request lost its immutable source/target/input", request.Payload)
+					strings.ReplaceAll(request.EventID, "-", "") != messageID || (len(cut) == 0 && len(requests.Events) != 1) {
+					t.Fatal("served native request lost its immutable source/target/input", messageID, len(requests.Events), request)
 				}
 				outcome := request.Payload["success_event"]
 				if failureCode != "" {
@@ -119,7 +125,10 @@ func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, desti
 					if result.Payload["activity_id"] != request.Payload["activity_id"] {
 						continue
 					}
-					if result.SourceEventID != request.Payload["source_event_id"] || len(results.Events) != 1 || result.Payload["tool"] != "whatsapp.send_text" {
+					if len(cut) != 0 && result.SourceEventID != request.Payload["source_event_id"] {
+						continue
+					}
+					if result.SourceEventID != request.Payload["source_event_id"] || (len(cut) == 0 && len(results.Events) != 1) || result.Payload["tool"] != "whatsapp.send_text" {
 						t.Fatal("native activity outcome lost its original request", result)
 					}
 					if failureCode != "" {
@@ -134,6 +143,9 @@ func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, desti
 							t.Fatal("authored result adopted channel receipt semantics or changed the observed acknowledgment", result.Payload)
 						}
 					}
+					if len(cut) != 0 {
+						requireServedNativeActivityDelta(t, endpoint, cut[0], request, result, messageID)
+					}
 					return
 				}
 			}
@@ -141,7 +153,66 @@ func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, desti
 		time.Sleep(10 * time.Millisecond)
 	}
 	logServedNativeActivityFailure(t, endpoint)
-	t.Fatal("genuine native reply did not settle its original activity request/result")
+	t.Fatal("genuine native reply did not settle its original activity request/result", messageID, destination, cut)
+}
+
+type servedNativeActivityCut struct {
+	before  map[string]operatorread.OperatorEventFull
+	inputID string
+}
+
+func servedNativeActivityLedger(t *testing.T, endpoint string) map[string]operatorread.OperatorEventFull {
+	t.Helper()
+	var runs struct {
+		Runs       []operatorread.RunHeader `json:"runs"`
+		NextCursor string                   `json:"next_cursor"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 10}, &runs)
+	if runs.NextCursor != "" {
+		t.Fatal("activity ledger run list truncated", runs)
+	}
+	ledger := make(map[string]operatorread.OperatorEventFull)
+	for _, run := range runs.Runs {
+		for _, name := range []string{"inbound.whatsapp.message", "platform.activity_requested", "customer_reply.succeeded", "customer_reply.failed"} {
+			var events operatorread.OperatorEventListResult
+			requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": run.RunID, "event_name": name}, "limit": 50}, &events)
+			if events.NextCursor != "" {
+				t.Fatal("activity ledger event list truncated", run.RunID, name, events)
+			}
+			for _, event := range events.Events {
+				if _, duplicate := ledger[event.EventID]; event.EventID == "" || duplicate || event.RunID != run.RunID || event.EventName != name {
+					t.Fatal("activity ledger identity mismatch/duplicate", run.RunID, name, event, ledger)
+				}
+				event.Deliveries, event.NoDelivery, event.DeadLetters = nil, nil, nil
+				ledger[event.EventID] = event
+			}
+		}
+	}
+	return ledger
+}
+
+func requireServedNativeActivityDelta(t *testing.T, endpoint string, cut servedNativeActivityCut, request, result operatorread.OperatorEventFull, messageID string) {
+	t.Helper()
+	after := servedNativeActivityLedger(t, endpoint)
+	delta := make(map[string]operatorread.OperatorEventFull)
+	for id, before := range cut.before {
+		if current, found := after[id]; !found || !reflect.DeepEqual(before, current) {
+			t.Fatal("activity ledger lost/changed baseline", id, before, current, cut.before, after)
+		}
+	}
+	for id, event := range after {
+		if _, existed := cut.before[id]; !existed {
+			delta[id] = event
+		}
+	}
+	sourceID, _ := request.Payload["source_event_id"].(string)
+	source := delta[sourceID]
+	if len(delta) != 3 || delta[request.EventID].EventID == "" || delta[result.EventID].EventID == "" ||
+		source.EventName != "inbound.whatsapp.message" || source.Payload["provider_message_reference"] != cut.inputID ||
+		source.RunID != request.RunID || result.RunID != request.RunID || result.SourceEventID != source.EventID ||
+		strings.ReplaceAll(request.EventID, "-", "") != messageID {
+		t.Fatal("activity ledger did not add exactly its input/request/result", messageID, cut.inputID, request, result, cut.before, after, delta)
+	}
 }
 
 func logServedNativeActivityFailure(t *testing.T, endpoint string) {
