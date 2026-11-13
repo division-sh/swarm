@@ -213,6 +213,7 @@ func requireServedNativeActivityDelta(t *testing.T, endpoint string, cut servedN
 		strings.ReplaceAll(request.EventID, "-", "") != messageID {
 		t.Fatal("activity ledger did not add exactly its input/request/result", messageID, cut.inputID, request, result, cut.before, after, delta)
 	}
+	t.Logf("closed recovery activity ledger input=%s source=%s request=%s result=%s outbound=%s baseline=%d delta=%d", cut.inputID, source.EventID, request.EventID, result.EventID, messageID, len(cut.before), len(delta))
 }
 
 func logServedNativeActivityFailure(t *testing.T, endpoint string) {
