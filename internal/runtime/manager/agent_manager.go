@@ -222,6 +222,10 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		opts.PersistenceRoles.LifecycleEffects,
 	)
 	lifecycle.baseContext = opts.BaseContext
+	lifecycle.shutdownJoin = opts.ShutdownDependencies
+	if lifecycle.shutdownJoin == nil {
+		lifecycle.shutdownJoin = standaloneShutdownDependencies{}
+	}
 	if opts.PersistenceRoles.LifecycleOutcome != nil {
 		lifecycle.outcomeReader = opts.PersistenceRoles.LifecycleOutcome
 	}

@@ -1613,6 +1613,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			}
 		},
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		ShutdownDependencies:           rt,
 		WorkOwner:                      workOccurrence,
 		ReceiverExecution:              eventreceiver.NormalExecution(),
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
@@ -2344,22 +2345,6 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	shutdownErr := rt.drainAdmittedIngress(drainCtx, grace)
-	// Continuation dispatch may finalize agent readiness. Join that producer
-	// before manager teardown invalidates its lifecycle dependency.
-	if rt.deliveryContinuations != nil {
-		if err := rt.deliveryContinuations.Retire(drainCtx); err != nil {
-			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
-			if err := rt.deliveryContinuations.Retire(context.Background()); err != nil {
-				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator join: %w", err))
-			}
-		}
-	}
-	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil && drainCtx.Err() != nil {
-			shutdownErr = errors.Join(shutdownErr,
-				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, context.Cause(drainCtx)))
-		}
-	}
 	if rt.Manager != nil {
 		deadline, _ := drainCtx.Deadline()
 		remaining := time.Until(deadline)
@@ -2369,6 +2354,8 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 		if err := rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining}); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", err))
 		}
+	} else {
+		shutdownErr = errors.Join(shutdownErr, rt.JoinManagerShutdownDependencies(drainCtx))
 	}
 	if rt.ToolExecutor != nil {
 		if err := rt.ToolExecutor.Close(drainCtx); err != nil {
@@ -2434,11 +2421,6 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 			_, _ = rt.workOccurrence.RetireAndWait(context.Background())
 		}
 	}
-	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Wait(context.Background()); err != nil {
-			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("run lifecycle executor joined diagnostics: %w", err))
-		}
-	}
 	if rt.runLifecycleRegistration != nil {
 		rt.runLifecycleRegistration.Release()
 		rt.runLifecycleRegistration = nil
@@ -2464,6 +2446,35 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	rt.lifecycleMu.Unlock()
 	rt.releaseAuthorActivityCatalog()
 	return shutdownErr
+}
+
+// The manager's transition joins these producers after accepted work drains,
+// before its terminal cleanup removes the readiness dependency they use.
+func (rt *Runtime) JoinManagerShutdownDependencies(ctx context.Context) error {
+	if rt == nil || !rt.shutdownAdmissionClosed() {
+		return nil
+	}
+	var result error
+	if rt.deliveryContinuations != nil {
+		if err := rt.deliveryContinuations.Retire(ctx); err != nil {
+			result = errors.Join(result, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
+			if ctx.Err() != nil && err == ctx.Err() {
+				if err := rt.deliveryContinuations.Retire(context.Background()); err != nil {
+					result = errors.Join(result, fmt.Errorf("delivery continuation coordinator join: %w", err))
+				}
+			}
+		}
+	}
+	if rt.runLifecycleExecutor != nil {
+		// Wait reports the executor's retained settlement evidence once.
+		_ = rt.runLifecycleExecutor.Retire(ctx)
+		if err := rt.runLifecycleExecutor.Wait(ctx); !runtimerunlifecycle.CompletionJoinSucceeded(err) {
+			result = errors.Join(result, err, rt.runLifecycleExecutor.Wait(context.Background()))
+		} else {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 
 func (rt *Runtime) Wait(ctx context.Context) {
