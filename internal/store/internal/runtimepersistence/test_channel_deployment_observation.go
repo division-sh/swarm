@@ -16,27 +16,42 @@ import (
 type ChannelControlCounts struct{ Total, Nonmutating, OriginalRefused int }
 
 func inspectChannelObservation(ctx context.Context, selected any, read func(context.Context, *sql.Tx) error) error {
+	return inspectChannelOwnedObservation(ctx, selected, func(ctx context.Context) error {
+		return readServedDeliveryObservation(ctx, selected, read)
+	})
+}
+
+func inspectChannelOwnedObservation(ctx context.Context, selected any, read func(context.Context) error) error {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return err
 	}
-	inspect := func(ctx context.Context) error { return readServedDeliveryObservation(ctx, selected, read) }
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		return owner.InspectSnapshot(ctx, inspect)
+		return owner.InspectSnapshot(ctx, read)
 	case *SQLiteRuntimeStore:
-		return owner.InspectSnapshot(ctx, inspect)
+		return owner.InspectSnapshot(ctx, read)
 	}
 	return fmt.Errorf("channel observation requires its original native owner")
 }
 
+func inspectChannelBackendObservation(ctx context.Context, selected any, read func(context.Context, any) error) error {
+	return inspectChannelOwnedObservation(ctx, selected, func(ctx context.Context) error {
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			return read(ctx, owner.backend)
+		case *SQLiteRuntimeStore:
+			return read(ctx, owner.backend)
+		}
+		return fmt.Errorf("channel observation requires its original native owner")
+	})
+}
+
 func ReadChannelNativeConsumerForTest(ctx context.Context, selected any, operation string, currentOnly bool) (channelnative.TransportParent, error) {
 	var raw []byte
-	query := `SELECT parent_evidence FROM channel_native_setting_consumers WHERE activation_id=$1 AND parent_kind='deployment_registration'`
-	if currentOnly {
-		query += ` AND state='current'`
-	}
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, query, operation).Scan(&raw)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		raw, err = channeldelivery.ReadChannelNativeConsumerEvidenceForTest(ctx, backend, operation, currentOnly)
+		return err
 	})
 	if err != nil {
 		return channelnative.TransportParent{}, err
@@ -46,78 +61,85 @@ func ReadChannelNativeConsumerForTest(ctx context.Context, selected any, operati
 
 func ReadChannelNativeHistoryForTest(ctx context.Context, selected any) ([8]string, error) {
 	var row [8]string
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT s.setting_id,CAST(s.generation AS TEXT),s.install_operation_id,s.state,
-			COALESCE(s.readback_hash,''),CAST(s.desired_commands AS TEXT),c.activation_id,c.state
-			FROM channel_native_settings s JOIN channel_native_setting_consumers c ON c.setting_id=s.setting_id
-			ORDER BY c.updated_at LIMIT 1`).Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7])
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		row, err = channeldelivery.ReadChannelNativeHistoryForTest(ctx, backend)
+		return err
 	})
 	return row, err
 }
 
 func ReadChannelFrozenCardHistoryForTest(ctx context.Context, selected any, card string) (string, error) {
-	var render, receipt string
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT CAST(r.render_input AS TEXT),CAST(c.provider_reference AS TEXT)
-			FROM channel_delivery_plans p JOIN channel_delivery_receipts c ON c.delivery_id=p.delivery_id
-			JOIN channel_delivery_renders r ON r.render_id=c.render_id
-			WHERE p.source_id=$1 AND c.state='sent' ORDER BY c.settled_at LIMIT 1`, card).Scan(&render, &receipt)
+	out := "\n"
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		out, err = channeldelivery.ReadChannelFrozenCardHistoryForTest(ctx, backend, card)
+		return err
 	})
-	return render + "\n" + receipt, err
+	return out, err
 }
 
 func ReadChannelHistoricalReceiptForTest(ctx context.Context, selected any, card string) (string, error) {
 	var receipt string
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT CAST(r.provider_reference AS TEXT) FROM channel_delivery_receipts r
-			JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id
-			WHERE p.source_id=$1 AND r.state='sent' ORDER BY r.settled_at LIMIT 1`, card).Scan(&receipt)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		receipt, err = channeldelivery.ReadChannelHistoricalReceiptForTest(ctx, backend, card)
+		return err
 	})
 	return receipt, err
 }
 
 func ReadChannelGenerationZeroSentPlanForTest(ctx context.Context, selected any, card string) (string, error) {
 	var plan string
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT p.delivery_id FROM channel_delivery_plans p
-			JOIN channel_delivery_receipts r ON r.effect_operation_id=p.current_receipt_operation_id
-			WHERE p.source_kind='card' AND p.source_id=$1 AND p.resend_generation=0
-			AND r.state='sent' AND r.delivery_id=p.delivery_id AND r.render_id=p.current_render_id`, card).Scan(&plan)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		plan, err = channeldelivery.ReadChannelGenerationZeroSentPlanForTest(ctx, backend, card)
+		return err
 	})
 	return plan, err
 }
 
 func ReadChannelControlCountsForTest(ctx context.Context, selected any, token string) (ChannelControlCounts, error) {
 	var result ChannelControlCounts
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*),
-			COALESCE(SUM(CASE WHEN state='settled' AND disposition IN ('stale','rejected') THEN 1 ELSE 0 END),0),
-			COALESCE(SUM(CASE WHEN state='settled' AND disposition='rejected' AND CAST(fact AS TEXT) NOT LIKE '%restored-source-%' THEN 1 ELSE 0 END),0)
-			FROM operator_channel_action_intents WHERE CAST(fact AS TEXT) LIKE $1`, "%"+token+"%").Scan(&result.Total, &result.Nonmutating, &result.OriginalRefused)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		result.Total, result.Nonmutating, result.OriginalRefused, err = channeldelivery.ReadChannelControlCountsForTest(ctx, backend, token)
+		return err
 	})
 	return result, err
 }
 
 func CountChannelSourceCardsForTest(ctx context.Context, selected any, run, source string) (int, error) {
 	var count int
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM decision_cards WHERE run_id=$1 AND bundle_hash=$2`, run, source).Scan(&count)
+	err := inspectChannelOwnedObservation(ctx, selected, func(ctx context.Context) error {
+		var err error
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			count, err = owner.decisionPostgresOwner.CountChannelSourceCardsForTest(ctx, run, source)
+		case *SQLiteRuntimeStore:
+			count, err = owner.decisionSQLiteOwner.CountChannelSourceCardsForTest(ctx, run, source)
+		}
+		return err
 	})
 	return count, err
 }
 
 func CountChannelEntryIntentsForTest(ctx context.Context, selected any) (int, error) {
 	var count int
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_channel_text_intents WHERE state='settled' AND disposition='entry'`).Scan(&count)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		count, err = channeldelivery.CountChannelEntryIntentsForTest(ctx, backend)
+		return err
 	})
 	return count, err
 }
 
 func CountChannelRejectedEntriesForTest(ctx context.Context, selected any, event string) (int, error) {
 	var count int
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id=$1 AND state='settled' AND disposition='entry_rejected'`, event).Scan(&count)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		count, err = channeldelivery.CountChannelRejectedEntriesForTest(ctx, backend, event)
+		return err
 	})
 	return count, err
 }
@@ -125,8 +147,10 @@ func CountChannelRejectedEntriesForTest(ctx context.Context, selected any, event
 func ReadChannelProviderActionForTest(ctx context.Context, selected any, event string) (int, string, string, error) {
 	var count int
 	var state, disposition string
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(state),''),COALESCE(MIN(disposition),'') FROM operator_channel_action_intents WHERE provider_event_id=$1`, event).Scan(&count, &state, &disposition)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		count, state, disposition, err = channeldelivery.ReadChannelProviderActionForTest(ctx, backend, event)
+		return err
 	})
 	return count, state, disposition, err
 }
@@ -139,8 +163,15 @@ func CountChannelObservedEventsForTest(ctx context.Context, selected any, run, e
 		return 0, fmt.Errorf("lifecycle event cardinality requires an exact event name")
 	}
 	var count int
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, run, event).Scan(&count)
+	err := inspectChannelOwnedObservation(ctx, selected, func(ctx context.Context) error {
+		var err error
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			count, err = owner.eventPostgresOwner.CountChannelObservedEventsForTest(ctx, run, event)
+		case *SQLiteRuntimeStore:
+			count, err = owner.eventSQLiteOwner.CountChannelObservedEventsForTest(ctx, run, event)
+		}
+		return err
 	})
 	return count, err
 }
@@ -161,18 +192,25 @@ func ReadChannelRegistrationIndexForTest(ctx context.Context, selected any) (str
 
 func ReadChannelRegistrationCountsForTest(ctx context.Context, selected any) (int, int, int, error) {
 	var total, current, retired int
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*),SUM(CASE WHEN account_confirmed AND phase<>'retired' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN phase='retired' AND logout_completed THEN 1 ELSE 0 END)
-			FROM deployment_channel_operations WHERE provider='telegram'`).Scan(&total, &current, &retired)
+	err := inspectChannelOwnedObservation(ctx, selected, func(ctx context.Context) error {
+		var err error
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			total, current, retired, err = owner.channelOnboardingPostgresOwner.ReadChannelRegistrationCountsForTest(ctx)
+		case *SQLiteRuntimeStore:
+			total, current, retired, err = owner.channelOnboardingSQLiteOwner.ReadChannelRegistrationCountsForTest(ctx)
+		}
+		return err
 	})
 	return total, current, retired, err
 }
 
 func ReadChannelDeliveryDefaultStateForTest(ctx context.Context, selected any) (string, error) {
 	var state string
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT state FROM channel_delivery_defaults WHERE singleton_id=1`).Scan(&state)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		state, err = channeldelivery.ReadChannelDeliveryDefaultStateForTest(ctx, backend)
+		return err
 	})
 	return state, err
 }
@@ -180,11 +218,10 @@ func ReadChannelDeliveryDefaultStateForTest(ctx context.Context, selected any) (
 func CountUnsettledChannelResponsibilitiesForTest(ctx context.Context, selected any) (int, error) {
 	_, postgres := selected.(*PostgresStore)
 	var count int
-	err := inspectChannelObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		query := `SELECT COUNT(*) FROM channel_delivery_plans p WHERE
-			(p.state IN ('planned','rendered') AND ` + channeldelivery.SendEligibilityPredicate + `)
-			OR ` + channeldelivery.AcceptedEffectPredicate(postgres)
-		return tx.QueryRowContext(ctx, query).Scan(&count)
+	err := inspectChannelBackendObservation(ctx, selected, func(ctx context.Context, backend any) error {
+		var err error
+		count, err = channeldelivery.CountUnsettledChannelResponsibilitiesForTest(ctx, backend, postgres)
+		return err
 	})
 	return count, err
 }
