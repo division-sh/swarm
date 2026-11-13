@@ -592,18 +592,7 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		defer ticker.Stop()
 		defer nativeTicker.Stop()
 		nativeDue := true
-		for {
-			if dispatcher.ingress != nil && !dispatcher.ingress.RuntimeLoad() {
-				if err := options.observeSessionDiagnostics(workCtx); err != nil && workCtx.Err() == nil {
-					log.Printf("native session diagnostics: %v", err)
-				}
-				select {
-				case <-workCtx.Done():
-					return
-				case <-ticker.C:
-				}
-				continue
-			}
+		for options.waitForRuntimeLoad(workCtx, dispatcher, ticker.C) {
 			demand, start := subscription.BeginPass()
 			if start.Subscription == 0 {
 				return
@@ -630,6 +619,20 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		}
 	}()
 	return nil
+}
+
+func (options channelDeliveryWorkerOptions) waitForRuntimeLoad(ctx context.Context, dispatcher *serveChannelDeliveryDispatcher, ticks <-chan time.Time) bool {
+	for dispatcher.ingress != nil && !dispatcher.ingress.RuntimeLoad() {
+		if err := options.observeSessionDiagnostics(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("native session diagnostics: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticks:
+		}
+	}
+	return true
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileOrdinaryChannelWork(ctx context.Context) error {
