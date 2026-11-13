@@ -340,6 +340,7 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		DeliveryID: deliveryID, Event: continuationEvent, Disposition: runtimedelivery.ClaimAcquired,
 		Snapshot: runtimedelivery.Snapshot{DeliveryID: deliveryID, Route: route, Status: runtimedelivery.StatusPending, Authority: deliveryStore.authority},
 	}}
+	page.Store = deliveryStore
 	coordinator, err = runtimedeliverycontinuation.New(page, deliveryStore.authority, workOwner, dispatcher, nil)
 	if err != nil {
 		t.Fatal(err)
