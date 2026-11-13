@@ -204,14 +204,8 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 			old := previous[key]
 			next[key] = fact
 			previous[key] = fact // One owner can appear in both learned and registered views.
-			if hitl != nil && hitl.Provider == item.Operation.Provider && hitl.Account == item.Account {
-				down, err := sessionDiagnosticDown(ctx, sessions, item, old, boot)
-				if err != nil {
-					return err
-				}
-				if down {
-					fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
-				}
+			if err := writeSessionDiagnosticDown(ctx, sessions, item, old, boot, hitl, out); err != nil {
+				return err
 			}
 			if verbose && fact != old && (fact.Down || fact.Socket != "" || fact.Lifecycle != "") {
 				fmt.Fprintf(errOut, "ERROR whatsapp occurrence=%s socket=%s errno=%d close_status=%d lifecycle=%q\n", fact.OccurrenceID, fact.Socket, fact.Errno, fact.CloseStatus, fact.Lifecycle)
@@ -228,7 +222,10 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 	}
 }
 
-func sessionDiagnosticDown(ctx context.Context, sessions serveSessionBootstrapOwner, item serveSessionDiagnostic, old sessionprovider.SessionDiagnostic, boot bool) (bool, error) {
+func writeSessionDiagnosticDown(ctx context.Context, sessions serveSessionBootstrapOwner, item serveSessionDiagnostic, old sessionprovider.SessionDiagnostic, boot bool, hitl *channelonboarding.AccountReference, out io.Writer) error {
+	if hitl == nil || hitl.Provider != item.Operation.Provider || hitl.Account != item.Account {
+		return nil
+	}
 	fact := item.Fact
 	down := fact.Down && !old.Down
 	if boot && !fact.Down && old.OccurrenceID == "" {
@@ -237,10 +234,13 @@ func sessionDiagnosticDown(ctx context.Context, sessions serveSessionBootstrapOw
 		}); ok {
 			at, connected, err := owner.sessionRecovery(ctx, item.Operation)
 			if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
-				return false, err
+				return err
 			}
 			down = err == nil && !connected && !at.IsZero()
 		}
 	}
-	return down, nil
+	if down {
+		fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
+	}
+	return nil
 }
