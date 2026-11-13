@@ -45,12 +45,16 @@ func (s *shutdownContinuationPage) ScanDeliveryContinuations(context.Context, ru
 type shutdownBlockedDispatcher struct {
 	entered, canceled, release chan struct{}
 	ctx                        context.Context
+	onCancel                   func(context.Context)
 }
 
 func (d *shutdownBlockedDispatcher) DispatchDeliveryContinuation(ctx context.Context, _ events.Event, _ events.DeliveryRoute) runtimedeliverycontinuation.DispatchResult {
 	d.ctx = ctx
 	close(d.entered)
 	<-ctx.Done()
+	if d.onCancel != nil {
+		d.onCancel(ctx)
+	}
 	close(d.canceled)
 	<-d.release
 	return runtimedeliverycontinuation.Fatal(ctx.Err())
@@ -325,6 +329,10 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	defer releaseDispatch()
 	continuationEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-continuation"), "test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission")}
+	readinessAtJoin := make(chan error, 1)
+	dispatcher.onCancel = func(ctx context.Context) {
+		readinessAtJoin <- am.FinalizeCommittedAgentReadiness(context.WithoutCancel(ctx), continuationEvent, []events.DeliveryRoute{route})
+	}
 	handoffEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-accepted-handoff"), "test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	handoffEvent = fixture.PublishDelivery(fixture.Context, handoffEvent, []events.DeliveryRoute{route}, deliveryStore.authority)
 	proof, err := deliveryStore.ProveHandoff(fixture.Context, handoffEvent.ID(), route)
@@ -423,6 +431,9 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	case <-dispatcher.canceled:
 	case <-time.After(time.Second):
 		t.Fatal("continuation producer not retired after accepted manager drain")
+	}
+	if err := <-readinessAtJoin; err != nil {
+		t.Fatalf("continuation producer lost exact manager readiness before join: %v", err)
 	}
 	releaseDispatch()
 	select {
