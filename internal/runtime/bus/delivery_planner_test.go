@@ -727,8 +727,8 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 	)
 	untargetedIntent := decisioncardtest.RequesterReturn(t, untargeted, "requester", events.DeliveryContext{})
 	if _, err := relation.bind(context.Background(), planner, untargetedIntent.Event, untargetedIntent.RequesterReturn); err == nil ||
-		!strings.Contains(err.Error(), "human-task requester is missing, unavailable or ambiguous") {
-		t.Fatalf("untargeted same-slug PlanDirect error = %v, want ambiguity rejection", err)
+		!strings.Contains(err.Error(), "target disagrees with exact agent identity instance") {
+		t.Fatalf("root-bound same-slug return error = %v, want exact instance refusal", err)
 	}
 	ambiguous := descriptorB
 	ambiguous.Identity.Name, err = agentidentity.RuntimeName("requester", "independent-requester-owner")
