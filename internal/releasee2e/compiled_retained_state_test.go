@@ -125,7 +125,7 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	source := writeJoinedRetainedSource(t, root)
 	config := filepath.Join(root, ".swarm", "swarm.yaml")
 	writeReleaseFile(t, config, strings.Replace(goldenRuntimeConfig(store), "  backend: claude_cli\n",
-		fmt.Sprintf("  backend: openai_compatible\n  openai_compatible: {base_url: %q}\n  models:\n    memory: {openai_compatible: memory}\n    retry: {openai_compatible: retry}\n    dead: {openai_compatible: dead}\n", model.URL+"/v1"), 1)+
+		fmt.Sprintf("  backend: openai_compatible\n  openai_compatible: {base_url: %q}\n  models:\n    memory: {openai_compatible: memory}\n    retry: {openai_compatible: retry}\n    dead: {openai_compatible: dead}\n    regular: {openai_compatible: unused-investigator}\n", model.URL+"/v1"), 1)+
 		"connection:\n  api_token_file: api-token\nchannels:\n  hitl: {provider: telegram, account: '420079'}\n")
 	writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 	env := append(goldenProcessEnv(t, root, store.passwordEnv, 0), proxyEnv...)
