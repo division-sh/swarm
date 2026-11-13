@@ -70,6 +70,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1":                               ownerManagedAgent,
 	"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1":                                ownerManagedAgent,
 	"internal/runtime/llm/runtime_resolver.go:get:http_do:1":                                                ownerRuntimeDependency,
+	"internal/runtime/manager/lifecycle_coordinator.go:joinShutdownDrain:http_do:1":                         ownerRuntimeDependency, // sync.Once drain/dependency join, not HTTP.
 	"internal/runtime/managedcredentials/store.go:exchange:http_do:1":                                       ownerManagedAgent,
 	"internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1":                  ownerManagedAgent,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:1":                           ownerCredentialLifecycle,
