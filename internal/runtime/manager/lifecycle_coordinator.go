@@ -57,10 +57,19 @@ type runtimeLifecycleTransition struct {
 	drainAccepted bool
 	drainOnce     sync.Once
 	drainErr      error
+	dependencyErr error
 }
 
-func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind) *runtimeLifecycleTransition {
-	return &runtimeLifecycleTransition{kind: kind, done: make(chan struct{})}
+func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind, grace ...time.Duration) *runtimeLifecycleTransition {
+	transition := &runtimeLifecycleTransition{kind: kind, done: make(chan struct{})}
+	if kind == runtimeLifecycleTransitionShutdown {
+		budget, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+		if len(grace) != 0 {
+			budget = grace[0]
+		}
+		transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), budget)
+	}
+	return transition
 }
 
 type agentLifecycleCell struct {
@@ -381,6 +390,7 @@ type agentLifecycleCoordinator struct {
 	watcherExpected     bool
 	shutdownRequested   chan struct{}
 	shutdownRequestSent bool
+	shutdownJoin        ShutdownDependencies
 	transition          *runtimeLifecycleTransition
 	pendingReset        *runtimeLifecycleTransition
 	retryDone           <-chan struct{}
@@ -1376,8 +1386,7 @@ func (c *agentLifecycleCoordinator) prepareShutdownTransitionWithGrace(drain boo
 	var transition *runtimeLifecycleTransition
 	switch c.phase {
 	case runtimeLifecycleRunning:
-		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
-		transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), grace)
+		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown, grace)
 		transition.drainAccepted = drain
 		c.transition = transition
 		c.phase = runtimeLifecycleShuttingDown
@@ -1388,8 +1397,7 @@ func (c *agentLifecycleCoordinator) prepareShutdownTransitionWithGrace(drain boo
 		hasRunOwner := c.runOwner != nil
 		c.workMu.Unlock()
 		if hasRunOwner {
-			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
-			transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), grace)
+			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown, grace)
 			transition.drainAccepted = drain
 			c.transition = transition
 			c.phase = runtimeLifecycleShuttingDown
@@ -1421,6 +1429,13 @@ func (c *agentLifecycleCoordinator) joinShutdownDrain(transition *runtimeLifecyc
 			if errors.Is(transition.drainErr, worklifetime.ErrRetired) {
 				transition.drainErr = nil
 			}
+			if transition.drainErr != nil {
+				c.retireWorkAdmissionAs(true)
+				c.cancelShutdownWork()
+			}
+		}
+		if c.shutdownJoin != nil {
+			transition.dependencyErr = c.shutdownJoin.JoinManagerShutdownDependencies(transition.drainCtx)
 		}
 	})
 }
@@ -1548,7 +1563,7 @@ func (c *agentLifecycleCoordinator) completeShutdownTransition(transition *runti
 	if c.transitionExecutor != nil {
 		result = errors.Join(result, c.transitionExecutor.Done())
 	}
-	transition.result = result
+	transition.result = errors.Join(transition.dependencyErr, result)
 	if transition.drainCancel != nil {
 		transition.drainCancel()
 	}

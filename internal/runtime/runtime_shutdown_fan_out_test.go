@@ -144,7 +144,8 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 		CarryMutationContext: startupownership.CarryMutationAuthority,
 		ExecutionPosture:     executionposture.Live, SemanticSource: runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed, WorkOwner: rt.workOccurrence,
-		LifecycleStore: lifecycle, DeliveryStore: store, PersistenceRoles: busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
+		ShutdownDependencies: rt,
+		LifecycleStore:       lifecycle, DeliveryStore: store, PersistenceRoles: busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, &runtimeShutdownManagerStore{})
 	bindRuntimeShutdownAgentReadinessFinalizer(bus)
 	if err := registerRuntimeTestAgent(rt.Manager, runtimeTestAgentConfig(t, actors.AgentConfig{

@@ -1304,6 +1304,7 @@ func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTes
 		SemanticSource:                 module.SemanticSource(),
 		WorkflowInstances:              readinessStore,
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		ShutdownDependencies:           rt,
 		WorkOwner:                      rt.WorkOccurrence(),
 		PersistenceRoles:               managerRoles,
 		ReceiverExecution:              eventreceiver.NormalExecution(),

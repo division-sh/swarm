@@ -245,6 +245,16 @@ type PersistenceRoles struct {
 
 type StrategicContext = json.RawMessage
 
+type ShutdownDependencies interface {
+	JoinManagerShutdownDependencies(context.Context) error
+}
+
+type standaloneShutdownDependencies struct{}
+
+func (standaloneShutdownDependencies) JoinManagerShutdownDependencies(context.Context) error {
+	return nil
+}
+
 type AgentManagerOptions struct {
 	LifecycleDiagnosticOrigin      runfork.LifecycleDiagnosticOrigin
 	ExecutionPosture               executionposture.Posture
@@ -268,6 +278,7 @@ type AgentManagerOptions struct {
 	Budget                         BudgetGuard
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool
+	ShutdownDependencies           ShutdownDependencies
 	WorkOwner                      worklifetime.Occurrence
 	ReceiverExecution              eventreceiver.ExecutionVariant
 	RuntimeIngressSafetyPause      func(context.Context, string, *runtimefailures.Envelope) error
