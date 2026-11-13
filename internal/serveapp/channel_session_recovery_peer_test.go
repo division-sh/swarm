@@ -260,15 +260,18 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	if time.Now().Before(failedAt.Add(10 * time.Second)) {
 		t.Fatal("SDK dial-start and later login failure did not share one schedule")
 	}
-	lease, currentPublication = runtime.ChannelActivations.AcquirePresentation()
-	if !currentPublication {
-		t.Fatal("recovered publication absent")
-	}
 	published := false
-	for _, activation := range lease.Activations() {
-		published = published || activation.OnboardingOperationID == id
-	}
-	lease.Release()
+	wait(func() bool {
+		lease, currentPublication = runtime.ChannelActivations.AcquirePresentation()
+		if !currentPublication {
+			t.Fatal("recovered publication absent")
+		}
+		for _, activation := range lease.Activations() {
+			published = published || activation.OnboardingOperationID == id
+		}
+		lease.Release()
+		return published
+	})
 	if !published || strings.Contains(process.outputString(), "WhatsApp: reconnected ()") {
 		t.Fatal("recovery lacks live publication or fresh account presentation", process.outputString())
 	}
