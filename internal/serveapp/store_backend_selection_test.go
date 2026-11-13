@@ -276,7 +276,7 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	}
 	inspection, err := storeselected.OpenAdmissionInspection(ctx, storeselected.AuthorityRequest{Selection: storebackend.Selection{
 		Backend: storebackend.BackendSQLite, SQLitePath: path,
-	}})
+	}, ProviderFacts: installedChannelFactsFor})
 	if err != nil {
 		t.Fatal(err)
 	}

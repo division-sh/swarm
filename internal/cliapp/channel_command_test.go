@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 const (
@@ -41,6 +42,7 @@ func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T
 					State: state, ClientLanguage: language, LocaleRevision: 2, Reason: "exact owner evidence",
 				}},
 			}
+			result = result.WithProviderFacts(channelfixture.For("telegram"))
 			var output bytes.Buffer
 			writeChannelNativeQualification(&output, result)
 			text := output.String()

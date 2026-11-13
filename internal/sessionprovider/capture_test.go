@@ -56,7 +56,7 @@ func captureFixture(t *testing.T) capturedEvent {
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "source:test", PackInventoryGeneration: "inventory:test",
 			PlanGeneration: generation, RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1},
 			CatalogGeneration: triggergeneration.FromCanonicalBytes([]byte(`{"fixture":"capture"}`))},
-	}
+	}.WithProviderFacts(channelfixture.For("whatsapp"))
 }
 
 func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
@@ -112,6 +112,7 @@ func TestWhatsAppCaptureProcessDeathBeforeAndAfterCommit(t *testing.T) {
 		if err := json.Unmarshal([]byte(os.Getenv("SWARM_WHATSAPP_CAPTURE_TEST_EVENT")), &event); err != nil {
 			t.Fatal(err)
 		}
+		event = event.WithProviderFacts(channelfixture.For("whatsapp"))
 		_, store := openCaptureFixture(t, os.Getenv("SWARM_WHATSAPP_CAPTURE_TEST_PATH"), event.Scope.Session.ConnectionID)
 		if mode == "after_commit" {
 			if err := store.capture(context.Background(), event); err != nil {

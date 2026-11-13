@@ -42,6 +42,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -780,7 +781,7 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	selected, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn})
+	selected, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, ProviderFacts: channelfixture.Facts})
 	if err != nil {
 		t.Fatal(err)
 	}

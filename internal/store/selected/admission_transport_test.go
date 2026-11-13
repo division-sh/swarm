@@ -9,6 +9,7 @@ import (
 	"time"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 func TestAdmissionInspectionBoundsSilentPostgresHandshake(t *testing.T) {
@@ -43,7 +44,7 @@ func TestAdmissionInspectionBoundsSilentPostgresHandshake(t *testing.T) {
 			go func() {
 				inspection, err := OpenAdmissionInspection(ctx, AuthorityRequest{
 					Selection:   storebackend.Selection{Backend: storebackend.BackendPostgres},
-					PostgresDSN: "host=127.0.0.1 port=" + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port) + " dbname=probe user=probe sslmode=disable",
+					PostgresDSN: "host=127.0.0.1 port=" + strconv.Itoa(listener.Addr().(*net.TCPAddr).Port) + " dbname=probe user=probe sslmode=disable", ProviderFacts: channelfixture.Facts,
 				})
 				if inspection != nil {
 					err = errors.Join(err, inspection.Close(), errors.New("silent peer admitted a selected store"))

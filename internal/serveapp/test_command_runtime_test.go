@@ -708,7 +708,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 				t.Fatal("public mock approval fixture selected another backend")
 			}
 			stores, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: postgresDSN, SessionLockTTL: runtimeSessionLockTTL(cfg),
+				Selection: selection, PostgresDSN: postgresDSN, SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor,
 			})
 		} else {
 			stores, err = oldBuildStores(ctx, selection, cfg)

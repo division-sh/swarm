@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -212,6 +213,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					operator = &channelonboarding.AccountReference{Provider: "whatsapp", Account: "+15550100123"}
 				}
 				service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: operator, Store: f.store,
+					ProviderFacts: channelfixture.For("whatsapp"), OperatorAccountFacts: channelfixture.For("whatsapp"),
 					Operations: operations, Identities: f.channels, Credentials: f.writer, Sessions: f,
 					Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil }})
 				if err != nil {
