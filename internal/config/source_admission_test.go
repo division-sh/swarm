@@ -37,6 +37,7 @@ func TestPublicWebhookConfigUsesAdmittedDeploymentSource(t *testing.T) {
 		{"serve: {public_webhook: {hostname: '127.0.0.1'}}", false},
 		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: cert.pem}}", false},
 		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: '', private_key_file: key.pem}}", false},
+		{"serve: {public_webhook: {hostname: hooks.example.test, certificate_file: cert.pem, private_key_file: '-----BEGIN PRIVATE KEY-----'}}", false},
 		{"serve: {public_webhook: {hostname: hooks.example.test, key: key.pem}}", false},
 	} {
 		t.Run(row.source, func(t *testing.T) {
