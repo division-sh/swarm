@@ -2461,19 +2461,22 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 func (rt *Runtime) drainAndJoinDeliveryContinuations(ctx context.Context, grace time.Duration) (error, error) {
 	var result error
 	if rt.Manager != nil {
-		if err := rt.Manager.WaitForQuiescence(ctx); err != nil {
-			if ctx.Err() != nil {
-				result = fmt.Errorf("agent manager shutdown: agent manager shutdown drain timed out after %s: %w", grace, err)
-			} else {
-				result = fmt.Errorf("agent manager shutdown: %w", err)
-			}
+		result = rt.Manager.WaitForQuiescence(ctx)
+	}
+	if ctx.Err() != nil {
+		if !errors.Is(result, ctx.Err()) {
+			result = errors.Join(result, ctx.Err())
 		}
+		return fmt.Errorf("agent manager shutdown: agent manager shutdown drain timed out after %s: %w", grace, result), nil
+	}
+	if result != nil {
+		result = fmt.Errorf("agent manager shutdown: %w", result)
 	}
 	if rt.deliveryContinuations != nil {
 		if err := rt.deliveryContinuations.Retire(ctx); err != nil {
 			if ctx.Err() != nil && err == ctx.Err() {
 				result = errors.Join(result, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
-				return result, rt.deliveryContinuations.Retire(context.Background())
+				return result, nil
 			}
 			return result, err
 		}
