@@ -1122,7 +1122,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	sourceRoot := scaffoldConformanceArchetype(t, archetype)
 	defer unchangedPrivateTestDeployment(t, sourceRoot)()
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--portable"}, &verifyOut, &verifyErr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--portable"}, &verifyOut, &verifyErr, nil, ChannelRegistrations()); code != 0 {
 		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe
@@ -1169,7 +1169,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	started := time.Now()
 	code := executeCLIFromWithRunners(context.Background(), sourceRoot, []string{
 		"test", sourceRoot, "tests/smoke.yaml", "--timeout", "30s", "--poll-interval", "25ms",
-	}, &stdout, &stderr, nil, runner)
+	}, &stdout, &stderr, nil, runner, ChannelRegistrations())
 	if code != 0 {
 		t.Fatalf("%s scenario code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
 	}
