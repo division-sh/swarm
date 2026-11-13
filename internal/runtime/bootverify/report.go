@@ -166,7 +166,15 @@ func (r Report) DiscoveredToolAdmission() (map[string]runtimemcp.DiscoveredTool,
 	return maps.Clone(r.mcpTools), nil
 }
 
-type AdmittedCredentialInspector func(context.Context, runtimecredentials.RequirementUse) (runtimecredentials.AdmittedSnapshot, bool, error)
+type CredentialAdmissionExtent uint8
+
+const (
+	NoAdmittedCredential CredentialAdmissionExtent = iota
+	PartiallyAdmittedCredential
+	FullyAdmittedCredential
+)
+
+type AdmittedCredentialInspector func(context.Context, runtimecredentials.RequirementUse) (runtimecredentials.AdmittedSnapshot, CredentialAdmissionExtent, error)
 
 type Options struct {
 	ExecutionPosture        executionposture.Posture
