@@ -150,6 +150,23 @@ func awaitLifecycleCall(t *testing.T, result <-chan error, operation string) {
 }
 
 func ProveNativeManagerWatcherAndExplicitShutdownJoinOneTransition(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	t.Run("ordinary_request_preserves_accepted_drain", func(t *testing.T) {
+		native := newNativeDelivery(t)
+		eventBus := newLifecycleTransitionEventBus(t)
+		fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
+		runCtx, _, _ := fixture.manager.lifecycle.runSnapshot()
+		transition := fixture.manager.lifecycle.prepareShutdownTransition(true)
+		if got := fixture.manager.lifecycle.requestShutdownTransition(); got != transition {
+			t.Fatal("ordinary request replaced the draining transition")
+		}
+		if err := runCtx.Err(); err != nil {
+			t.Fatalf("ordinary request bypassed accepted drain: %v", err)
+		}
+		fixture.unblock()
+		if err := fixture.manager.Shutdown(); err != nil {
+			t.Fatalf("join accepted drain: %v", err)
+		}
+	})
 	native := newNativeDelivery(t)
 	eventBus := newLifecycleTransitionEventBus(t)
 	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
