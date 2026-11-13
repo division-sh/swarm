@@ -72,6 +72,9 @@
 # serve:
 #   api_listen_addr: "127.0.0.1:8081" # API listener address; defaults to loopback.
 #   mcp_listen_addr: "127.0.0.1:8082" # MCP listener address; defaults to loopback.
+#   public_webhook:
+#     email: ops@example.com # Optional contact email for automatic public certificates.
+#     hostname: hooks.example.com # Native HTTPS webhook hostname; omit the public_webhook block to keep existing ingress behavior.
 # store:
 #   backend: sqlite # Runtime store backend.
 #   sqlite:
@@ -93,3 +96,6 @@
 #   password_secret_key: postgres_password # Database password key in the Swarm secrets store.
 # serve:
 #   api_token_file: .swarm/serve-api-token # Serve API bearer-token file reference; never inline the token.
+#   public_webhook:
+#     certificate_file: /etc/swarm/tls/fullchain.pem # Supplied certificate path; relative paths resolve from the invocation directory. Omit both certificate paths for automatic certificates.
+#     private_key_file: /etc/swarm/tls/privkey.pem # Supplied private-key path; relative paths resolve from the invocation directory. Restart serve to replace the supplied pair.
