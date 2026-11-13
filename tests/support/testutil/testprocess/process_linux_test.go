@@ -13,6 +13,20 @@ import (
 	"unsafe"
 )
 
+var startupParentDeath struct {
+	signal   int32
+	errno    syscall.Errno
+	pid, tid int
+}
+
+func init() {
+	if os.Getenv("SWARM_TEST_PROCESS_SIGNAL_ROOT") != "" {
+		// Go runs init on the exec/startup thread, before test goroutines migrate.
+		startupParentDeath.pid, startupParentDeath.tid = os.Getpid(), syscall.Gettid()
+		_, _, startupParentDeath.errno = syscall.Syscall6(syscall.SYS_PRCTL, syscall.PR_GET_PDEATHSIG, uintptr(unsafe.Pointer(&startupParentDeath.signal)), 0, 0, 0, 0)
+	}
+}
+
 func TestNativeLauncherCreatingThreadMayExit(t *testing.T) {
 	root := t.TempDir()
 	command := fixtureCommand(t, fixture{Mode: "writer", Root: root})
@@ -47,10 +61,8 @@ func TestNativeLauncherCreatingThreadMayExit(t *testing.T) {
 
 func TestNativeParentDeathSignalDoesNotPretendToCoverForkedChildren(t *testing.T) {
 	if root := os.Getenv("SWARM_TEST_PROCESS_SIGNAL_ROOT"); root != "" {
-		var signal int32
-		_, _, errno := syscall.Syscall6(syscall.SYS_PRCTL, syscall.PR_GET_PDEATHSIG, uintptr(unsafe.Pointer(&signal)), 0, 0, 0, 0)
-		if errno != 0 {
-			t.Fatal(errno)
+		if startupParentDeath.errno != 0 || startupParentDeath.pid != os.Getpid() || startupParentDeath.tid != startupParentDeath.pid {
+			t.Fatalf("parent-death observation is not the exec task: %+v", startupParentDeath)
 		}
 		name := "native-signal"
 		if os.Getenv("SWARM_TEST_PROCESS_SIGNAL_CHILD") == "1" {
@@ -64,7 +76,7 @@ func TestNativeParentDeathSignalDoesNotPretendToCoverForkedChildren(t *testing.T
 				t.Fatalf("finite fork observation: %s %v", raw, err)
 			}
 		}
-		if err := os.WriteFile(filepath.Join(root, name), []byte(strconv.Itoa(int(signal))), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(strconv.Itoa(int(startupParentDeath.signal))), 0600); err != nil {
 			t.Fatal(err)
 		}
 		return
