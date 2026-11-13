@@ -22,7 +22,8 @@ release approval or a promise of old-store migration.
   Only fixed, positively observed causes are reported; otherwise it says
   `cause unknown`. Existing learned-account journey messages remain. (#3011)
   `--verbose` adds sanitized socket/lifecycle facts on the error-output sink,
-  without forwarding raw SDK errors, identifiers, message bodies or keys.
+  including a local occurrence correlation ID. Provider and account identifiers,
+  raw SDK errors, message bodies and keys are excluded.
   SDK keepalive timeout/restoration observations are verbose-only, not health
   changes or evidence of a disconnect cause. This adds no reconnect behavior.
   Output is written by the existing joined worker, not SDK cleanup callbacks;
