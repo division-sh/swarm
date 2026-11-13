@@ -230,12 +230,13 @@ func joinedRegisterTelegram(t *testing.T, s *joinedRetainedScenario) {
 	select {
 	case err := <-done:
 		complete = true
-		if err != nil || !strings.Contains(output.String(), "READY") {
+		if err != nil {
 			t.Fatalf("public deployment registration: %v\n%s", err, output.String())
 		}
 	case <-s.ctx.Done():
 		t.Fatal("public deployment registration did not complete")
 	}
+	joinedChannelReadback(t, s)
 }
 
 func joinedChannelReadback(t *testing.T, s *joinedRetainedScenario) string {
