@@ -90,7 +90,7 @@ func stateCertificatePath(stateDir, reference string) (string, error) {
 	return path, nil
 }
 
-func freshTLSProbeClient(base *http.Client) (*http.Client, func(), error) {
+func freshTLSProbeClient(base *http.Client) (*http.Client, error) {
 	client := *base
 	underlying := base.Transport
 	if underlying == nil {
@@ -98,17 +98,17 @@ func freshTLSProbeClient(base *http.Client) (*http.Client, func(), error) {
 	}
 	transport, ok := underlying.(*http.Transport)
 	if !ok {
-		return nil, nil, fmt.Errorf("native TLS probe requires an HTTP transport with verified TLS")
+		return nil, fmt.Errorf("native TLS probe requires an HTTP transport with verified TLS")
 	}
 	transport = transport.Clone()
 	transport.DisableKeepAlives = true
 	if transport.TLSClientConfig != nil {
 		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
 		if transport.TLSClientConfig.InsecureSkipVerify {
-			return nil, nil, fmt.Errorf("native TLS probe cannot skip certificate verification")
+			return nil, fmt.Errorf("native TLS probe cannot skip certificate verification")
 		}
 		transport.TLSClientConfig.ClientSessionCache = nil
 	}
 	client.Transport = transport
-	return &client, transport.CloseIdleConnections, nil
+	return &client, nil
 }
