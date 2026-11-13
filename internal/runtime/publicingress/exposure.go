@@ -463,11 +463,11 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 	request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 	client := c.httpClient()
 	if c.opts.Mode == ModeNativeTLS {
-		fresh, closeIdle, err := freshTLSProbeClient(client)
+		fresh, err := freshTLSProbeClient(client)
 		if err != nil {
 			return err
 		}
-		defer closeIdle()
+		defer fresh.CloseIdleConnections()
 		client = fresh
 	}
 	response, err := client.Do(request)

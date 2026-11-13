@@ -254,7 +254,7 @@ func TestNativeTLSProbeUsesFreshVerifiedHandshakeAndRevokesExpiry(t *testing.T) 
 		roundTripFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unverified probe dispatched"); return nil, nil }),
 		&http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	} {
-		if _, _, err := freshTLSProbeClient(&http.Client{Transport: unsafe}); err == nil {
+		if _, err := freshTLSProbeClient(&http.Client{Transport: unsafe}); err == nil {
 			t.Fatal("native TLS probe accepted an unverifiable transport")
 		}
 	}
