@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 )
 
 func TestIssue2567SelectedStoreAbsenceIsTypedAndNonCreating(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent", "store.db")
-	inspection, err := OpenAdmissionInspection(context.Background(), AuthorityRequest{Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path}})
+	inspection, err := OpenAdmissionInspection(context.Background(), AuthorityRequest{Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path}, ProviderFacts: channelfixture.Facts})
 	var absent *AbsentSQLiteStore
 	if inspection != nil || !errors.As(err, &absent) || absent.Path != path {
 		t.Fatalf("inspection=%v cause=%v", inspection, err)
@@ -25,7 +26,7 @@ func TestIssue2567SelectedStoreAbsenceIsTypedAndNonCreating(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
 		t.Fatal(err)
 	}
-	_, err = OpenAdmissionInspection(context.Background(), AuthorityRequest{Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(link, "store.db")}})
+	_, err = OpenAdmissionInspection(context.Background(), AuthorityRequest{Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(link, "store.db")}, ProviderFacts: channelfixture.Facts})
 	if err == nil || errors.As(err, &absent) {
 		t.Fatalf("dangling parent minted absence: %v", err)
 	}

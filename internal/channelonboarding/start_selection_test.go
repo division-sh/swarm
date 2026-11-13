@@ -57,7 +57,7 @@ func TestOnboardingSelectionHasNoCredentialOrExecutionEffects(t *testing.T) {
 	// credential fallback available to an explicitly selected runtime slot.
 	candidate = Candidate{DeploymentRegistration: true, Provider: candidate.Provider, Interface: candidate.Interface,
 		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAccountLink, ProviderCredentialRole: candidate.ProviderCredentialRole,
-		SigningCredentialRole: candidate.SigningCredentialRole}
+		SigningCredentialRole: candidate.SigningCredentialRole}.WithProviderFacts(candidate.ProviderFacts())
 	if err := candidate.ValidateDeclaration(); err != nil {
 		t.Fatal(err)
 	}

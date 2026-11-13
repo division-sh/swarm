@@ -14,6 +14,7 @@ import (
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/google/uuid"
 )
 
@@ -51,6 +52,7 @@ func TestWhatsAppHistoricalPublicationProcessDeathBothStores(t *testing.T) {
 		if err := json.Unmarshal([]byte(os.Getenv(eventKey)), &event); err != nil {
 			t.Fatal(err)
 		}
+		event = event.WithProviderFacts(channelfixture.For("whatsapp"))
 		var reader publicationReader
 		if os.Getenv(backendKey) == "sqlite" {
 			selected, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), os.Getenv(locationKey))
