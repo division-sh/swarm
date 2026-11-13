@@ -99,7 +99,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 func assertLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *testing.T) {
 	t.Helper()
 	for path, function := range map[string]string{
-		"channel_activation_admission.go":   "validateLearnedChannelPublication",
+		"channel_activation_admission.go":   "validateChannelResponsibility",
 		"../serveapp/channel_onboarding.go": "compileServeLearnedChannelActivations",
 	} {
 		t.Run(function, func(t *testing.T) {
@@ -108,9 +108,23 @@ func assertLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *tes
 				t.Fatal(err)
 			}
 			found, calls := false, 0
+			users := map[string]int{"validateLearnedChannelPublication": 0, "validateChannelActivityRequest": 0}
 			for _, declaration := range parsed.Decls {
 				fn, ok := declaration.(*ast.FuncDecl)
-				if !ok || fn.Name.Name != function {
+				if !ok {
+					continue
+				}
+				if _, tracked := users[fn.Name.Name]; path == "channel_activation_admission.go" && tracked {
+					ast.Inspect(fn.Body, func(node ast.Node) bool {
+						if call, ok := node.(*ast.CallExpr); ok {
+							if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "validateChannelResponsibility" {
+								users[fn.Name.Name]++
+							}
+						}
+						return true
+					})
+				}
+				if fn.Name.Name != function {
 					continue
 				}
 				found = true
@@ -127,6 +141,13 @@ func assertLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *tes
 					}
 					return true
 				})
+			}
+			if path == "channel_activation_admission.go" {
+				for name, count := range users {
+					if count != 1 {
+						t.Errorf("%s must validate complete responsibility exactly once, got %d", name, count)
+					}
+				}
 			}
 			if !found || calls != 1 {
 				t.Fatal("activation consumer stopped using the complete canonical projection", found, calls)
@@ -172,11 +193,11 @@ func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 		"internal/runtime/decisioncard/proposed_effect.go":                             {"NativeSessionTarget", "PlanGeneration.Valid()", "ChannelActivationGeneration.Valid()"},
 		"internal/runtime/mcp/gateway.go":                                              {"AcquireToolDefinitionsForActorInContext", "acquireTurnPresentation"},
 		"internal/runtime/mcp/context.go":                                              {"BindPresentation", "revokePresentation", "Presentation.Close"},
-		"internal/runtime/tools/channel_runtime.go":                                    {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation"},
-		"internal/runtime/pipeline/coordinator.go":                                     {"AcquireActivityOperation", "BorrowActivityOperation"},
+		"internal/runtime/tools/channel_runtime.go":                                    {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation", "lease.ValidateActivityRequest"},
+		"internal/runtime/pipeline/coordinator.go":                                     {"AcquireActivityOperation", "BorrowActivityOperation", "lease.ValidateActivityRequest"},
 		"internal/runtime/pipeline/activity_engine.go":                                 {"ChannelActivationGeneration", "WithoutExecutionLease"},
 		"internal/runtime/pipeline/channel_native_activity.go":                         {"withNativeChannelActivityLaunch", "value.lease.ValidateAdmission", "ConsumeNativeChannelActivity", "AdmissionResponsibility", "MatchesBusinessBinding"},
-		"internal/runtime/pipeline/channel_session_activity.go":                        {"ResolveSessionActivitySite", "lease.ValidateAdmission", "NewChannelActivationPublication", "projection.PublicationGeneration()"},
+		"internal/runtime/pipeline/channel_session_activity.go":                        {"ResolveSessionActivitySite", "selected.ValidateActivityRequest", "NewChannelActivationPublication", "projection.PublicationGeneration()"},
 		"internal/runtime/pipeline/workflow_gate_decision.go":                          {"continuation.NativeSessionTarget", "continuation.PlanGeneration", "continuation.ChannelActivationGeneration"},
 		"internal/runtime/channel_activation_admission.go":                             {"validateLearnedChannelPublication(ctx, activation)", "binding.owner", "owner.ChannelExecution(ctx, op)"},
 		"internal/runtime/tools/executor.go":                                           {"AcquireToolDefinitionsForActorInContext", "AcquirePresentationForContext"},
