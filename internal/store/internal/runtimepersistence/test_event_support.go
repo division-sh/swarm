@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
@@ -627,23 +628,20 @@ func InsertRevisionedExistingRunRootEventForTest(ctx context.Context, selected a
 	envelope events.EventEnvelope, createdAt time.Time,
 ) (events.Event, error) {
 	var rejected events.Event
-	if _, err := eventFixtureDialectForTest(selected); err != nil {
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
 		return rejected, err
 	}
-	switch store := selected.(type) {
-	case *PostgresStore:
-		if store.eventPostgresOwner == nil {
-			return rejected, fmt.Errorf("event fixture selected store %T is not initialized", selected)
-		}
-		return store.eventPostgresOwner.InsertRevisionedExistingRunRootEventForTest(ctx, eventID, runID, eventType, producer, payload, envelope, createdAt)
-	case *SQLiteRuntimeStore:
-		if store.eventSQLiteOwner == nil {
-			return rejected, fmt.Errorf("event fixture selected store %T is not initialized", selected)
-		}
-		return store.eventSQLiteOwner.InsertRevisionedExistingRunRootEventForTest(ctx, eventID, runID, eventType, producer, payload, envelope, createdAt)
-	default:
-		return rejected, fmt.Errorf("event fixture store %T is unsupported", selected)
+	var event events.Event
+	err = runEventFixtureMutationForTest(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		event, err = eventfixture.ExistingRunRoot(txctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
+		return err
+	})
+	if err != nil {
+		return rejected, err
 	}
+	return event, nil
 }
 
 func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, error) {
