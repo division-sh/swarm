@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/tests/support/testutil"
-	"go.mau.fi/whatsmeow/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -303,11 +302,12 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	if err != nil {
 		t.Fatal(err)
 	}
-	jid, err := types.ParseJID(current.SessionAccount.AccountRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	device, err := native.GetDevice(context.Background(), jid)
+	t.Cleanup(func() {
+		if err := fixture.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	device, err := native.CurrentDevice(context.Background(), current.SessionAccount.AccountRef)
 	if err != nil || device == nil {
 		t.Fatal("fixture device", err)
 	}
