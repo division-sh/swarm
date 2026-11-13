@@ -195,7 +195,7 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	}
 	pauseFullLifecycleRun(t, s.process.rpc, s.runID)
 	feed, err := readNumericFeed(ctx, s.process.rpc, s.runID)
-	if err != nil || feed.Cardinality != 100 || feed.Cursor <= 0 || feed.Cursor >= feed.Cardinality || feed.Owed <= 0 {
+	if err != nil || feed.Status != "open" || feed.Cardinality != 100 || feed.Cursor <= 0 || feed.Cursor >= feed.Cardinality || feed.Owed <= 0 {
 		t.Fatalf("cut not reached: post-pause feed must be partial with work owed: %+v, %v", feed, err)
 	}
 	if feed.Runtime.Reason != "run_paused" || feed.Runtime.Eligible == nil || *feed.Runtime.Eligible {
@@ -596,10 +596,14 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 		}
 		payload := joinedNormalize(joinedDecode(s.t, exact.Payload), identities)
 		for _, delivery := range event.Deliveries {
+			reason := ""
 			if event.EventID == retry && (delivery.Status != "failed" || !delivery.RetryScheduled) || event.EventID == dead && delivery.Status != "dead_letter" {
 				s.t.Fatalf("retained failure changed at comparison: %+v", event)
 			}
-			rows = append(rows, joinedJSON(joinedNormalize([]any{identities[event.EventID], event.EventName, payload, identities[event.SourceEventID], delivery.SubscriberType, delivery.SubscriberID, delivery.Target.FlowInstance, delivery.Status, delivery.Terminal, delivery.ReasonCode}, identities)))
+			if event.EventID == retry || event.EventID == dead {
+				reason = delivery.ReasonCode
+			}
+			rows = append(rows, joinedJSON(joinedNormalize([]any{identities[event.EventID], event.EventName, payload, identities[event.SourceEventID], delivery.SubscriberType, delivery.SubscriberID, delivery.Target.FlowInstance, delivery.Status, delivery.Terminal, reason}, identities)))
 		}
 	}
 	header := readPublicClockRun(s.t, s.process, s.runID)
