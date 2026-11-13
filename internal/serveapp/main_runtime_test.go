@@ -33,7 +33,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -8299,7 +8298,7 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 		RepoRoot,
 		fixtureRoot,
 		platformSpec,
-		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory},
 	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
@@ -8315,7 +8314,7 @@ func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimeco
 		RepoRoot,
 		fixtureRoot,
 		platformSpec,
-		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory},
 	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)

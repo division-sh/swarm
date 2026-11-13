@@ -118,7 +118,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return refuse("source_loading", "internal/packartifact.NewPlatformPackBaseGenerationOwner", "source:"+sourceRoot, err, nil)
 	}
-	if _, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, base); err != nil {
+	if _, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, base, configResult.AdmitPackInventory); err != nil {
 		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithPackBase", "source:"+sourceRoot, err, nil)
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)
