@@ -28,21 +28,14 @@ func ReadServedRunDeliverySummaryForTest(ctx context.Context, selected any, runI
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return runtimedelivery.RunSummary{}, err
 	}
-	var summary runtimedelivery.RunSummary
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		switch owner := selected.(type) {
-		case *PostgresStore:
-			summary, err = owner.deliveryPostgresOwner.SummarizeRunTx(ctx, tx, runID)
-		case *SQLiteRuntimeStore:
-			summary, err = owner.deliverySQLiteOwner.SummarizeRunTx(ctx, tx, runID)
-		}
-		return err
-	})
-	if err != nil {
-		return runtimedelivery.RunSummary{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadServedRunDeliverySummaryForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadServedRunDeliverySummaryForTest(ctx, runID)
+	default:
+		return runtimedelivery.RunSummary{}, fmt.Errorf("run delivery summary requires the original native owner")
 	}
-	return summary, nil
 }
 
 func ReadNodeDeliveryTargetEncodingForTest(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
@@ -52,17 +45,14 @@ func ReadNodeDeliveryTargetEncodingForTest(ctx context.Context, selected any, ev
 	if nodeID == "" || strings.TrimSpace(nodeID) != nodeID {
 		return "", fmt.Errorf("node target observation requires its exact nonempty recipient")
 	}
-	_, postgres := selected.(*PostgresStore)
-	var raw string
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		raw, err = delivery.ReadNodeDeliveryTargetEncodingTx(ctx, tx, postgres, eventID, nodeID)
-		return err
-	})
-	if err != nil {
-		return "", err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadNodeDeliveryTargetEncodingForTest(ctx, eventID, nodeID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadNodeDeliveryTargetEncodingForTest(ctx, eventID, nodeID)
+	default:
+		return "", fmt.Errorf("node target observation requires the original native owner")
 	}
-	return raw, nil
 }
 
 func ReadNodeDeliveryDiagnosticStorageForTest(ctx context.Context, selected any, eventID string) (NodeDeliveryDiagnosticStorage, error) {
@@ -110,32 +100,28 @@ func ReadCausalDeliveryFrontierForTest(ctx context.Context, selected any, runID,
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return CausalDeliveryFrontier{}, err
 	}
-	var out CausalDeliveryFrontier
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadCausalDeliveryFrontier(ctx, tx, runID, eventID)
-		return err
-	})
-	if err != nil {
-		return CausalDeliveryFrontier{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadCausalDeliveryFrontierForTest(ctx, runID, eventID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadCausalDeliveryFrontierForTest(ctx, runID, eventID)
+	default:
+		return CausalDeliveryFrontier{}, fmt.Errorf("causal delivery frontier requires the original native owner")
 	}
-	return out, nil
 }
 
 func ProbeCausalDeliveryFrontierForTest(ctx context.Context, selected any, probe CausalDeliveryFrontierProbe) (CausalDeliveryFrontier, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return CausalDeliveryFrontier{}, err
 	}
-	var out CausalDeliveryFrontier
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ProbeCausalDeliveryFrontier(ctx, tx, probe)
-		return err
-	})
-	if err != nil {
-		return CausalDeliveryFrontier{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ProbeCausalDeliveryFrontierForTest(ctx, probe)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ProbeCausalDeliveryFrontierForTest(ctx, probe)
+	default:
+		return CausalDeliveryFrontier{}, fmt.Errorf("causal delivery frontier requires the original native owner")
 	}
-	return out, nil
 }
 
 func CountClosedSourceFanOutIssuanceForTest(ctx context.Context, selected any, runID, eventID string, cardinality int) (int, error) {
@@ -162,80 +148,70 @@ func ReadEventDeliveryDiagnosticRowsForTest(ctx context.Context, selected any, e
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var out []EventDeliveryDiagnosticRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadEventDeliveryDiagnosticRows(ctx, tx, eventID, postgres)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadEventDeliveryDiagnosticRowsForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadEventDeliveryDiagnosticRowsForTest(ctx, eventID)
+	default:
+		return nil, fmt.Errorf("delivery diagnostics require the original native owner")
 	}
-	return out, nil
 }
 
 func ReadSubscriberEventNamesCreatedSinceForTest(ctx context.Context, selected any, since time.Time, subscriberID string) ([]string, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []string
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadSubscriberEventNamesCreatedSinceForTest(ctx, since, subscriberID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadSubscriberEventNamesCreatedSinceForTest(ctx, since, subscriberID)
+	default:
+		return nil, fmt.Errorf("subscriber event observation requires the original native owner")
 	}
-	return out, nil
 }
 
 func ReadCausalDeliveryStatusCountsForTest(ctx context.Context, selected any, runID, eventID string) ([]CausalDeliveryStatusCount, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []CausalDeliveryStatusCount
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadCausalDeliveryStatusCountsForTest(ctx, runID, eventID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadCausalDeliveryStatusCountsForTest(ctx, runID, eventID)
+	default:
+		return nil, fmt.Errorf("causal delivery counts require the original native owner")
 	}
-	return out, nil
 }
 
 func ReadNonLogRunDeliveryClaimTotalsForTest(ctx context.Context, selected any, runID string) (deliveries, claims int64, err error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, 0, err
 	}
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		deliveries, claims, err = delivery.ReadNonLogRunDeliveryClaimTotals(ctx, tx, runID)
-		return err
-	})
-	if err != nil {
-		return 0, 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadNonLogRunDeliveryClaimTotalsForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadNonLogRunDeliveryClaimTotalsForTest(ctx, runID)
+	default:
+		return 0, 0, fmt.Errorf("delivery claim totals require the original native owner")
 	}
-	return deliveries, claims, nil
 }
 
 func ReadDeliveryAttemptDiagnosticRowsForTest(ctx context.Context, selected any, deliveryID string) ([]DeliveryAttemptDiagnosticRow, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []DeliveryAttemptDiagnosticRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = delivery.ReadDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadDeliveryAttemptDiagnosticRowsForTest(ctx, deliveryID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadDeliveryAttemptDiagnosticRowsForTest(ctx, deliveryID)
+	default:
+		return nil, fmt.Errorf("delivery attempt diagnostics require the original native owner")
 	}
-	return out, nil
 }
 
 type EventPipelineReceiptObservationRow = pipelinepersistence.EventPipelineReceiptObservationRow
@@ -295,16 +271,14 @@ func CountDeadLettersForOriginalEventForTest(ctx context.Context, selected any, 
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = delivery.CountDeadLettersForOriginalEvent(ctx, tx, originalEventID)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.CountDeadLettersForOriginalEventForTest(ctx, originalEventID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.CountDeadLettersForOriginalEventForTest(ctx, originalEventID)
+	default:
+		return 0, fmt.Errorf("dead-letter count requires the original native owner")
 	}
-	return count, nil
 }
 
 type DeadLetterObservationRow = delivery.DeadLetterObservationRow
@@ -318,17 +292,14 @@ func ReadTargetFailureDeadLetterStorageForTest(ctx context.Context, selected any
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return TargetFailureDeadLetterStorage{}, err
 	}
-	var out TargetFailureDeadLetterStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		out, err = delivery.ReadTargetFailureDeadLetterStorage(ctx, tx, postgres, eventID)
-		return err
-	})
-	if err != nil {
-		return TargetFailureDeadLetterStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadTargetFailureDeadLetterStorageForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadTargetFailureDeadLetterStorageForTest(ctx, eventID)
+	default:
+		return TargetFailureDeadLetterStorage{}, fmt.Errorf("target failure dead letter requires the original native owner")
 	}
-	return out, nil
 }
 
 type ChainDepthDeadLetterStorage = delivery.ChainDepthDeadLetterStorage
@@ -337,51 +308,42 @@ func ReadChainDepthDeadLetterStorageForTest(ctx context.Context, selected any, r
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return ChainDepthDeadLetterStorage{}, err
 	}
-	var out ChainDepthDeadLetterStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		out, err = delivery.ReadChainDepthDeadLetterStorage(ctx, tx, postgres, runID, entityID)
-		return err
-	})
-	if err != nil {
-		return ChainDepthDeadLetterStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadChainDepthDeadLetterStorageForTest(ctx, runID, entityID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadChainDepthDeadLetterStorageForTest(ctx, runID, entityID)
+	default:
+		return ChainDepthDeadLetterStorage{}, fmt.Errorf("chain-depth dead letter requires the original native owner")
 	}
-	return out, nil
 }
 
 func CountDeadLetterEntityRelationsSinceForTest(ctx context.Context, selected any, since time.Time, entityID string) (int, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err
 	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		count, err = delivery.CountDeadLetterEntityRelationsSince(ctx, tx, postgres, since, entityID)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.CountDeadLetterEntityRelationsSinceForTest(ctx, since, entityID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.CountDeadLetterEntityRelationsSinceForTest(ctx, since, entityID)
+	default:
+		return 0, fmt.Errorf("dead-letter relation count requires the original native owner")
 	}
-	return count, nil
 }
 
 func ReadDeadLetterObservationRowsForTest(ctx context.Context, selected any) ([]DeadLetterObservationRow, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	var out []DeadLetterObservationRow
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		_, postgres := selected.(*PostgresStore)
-		var err error
-		out, err = delivery.ReadDeadLetterObservationRows(ctx, tx, postgres)
-		return err
-	})
-	if err != nil {
-		return nil, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadDeadLetterObservationRowsForTest(ctx)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadDeadLetterObservationRowsForTest(ctx)
+	default:
+		return nil, fmt.Errorf("dead-letter observation requires the original native owner")
 	}
-	return out, nil
 }
 
 // Transferred from B70ab4d333 /888cb4958 under6010346696. The three OR arms
