@@ -75,6 +75,14 @@ func newRunFanOutCommand(opts rootCommandOptions) *cobra.Command {
 					if row.Retry != nil {
 						fmt.Fprintf(w, "  retry_ready_at=%s cause=%s\n", row.Retry.ReadyAt.Format(time.RFC3339Nano), row.Retry.Failure.Detail.Code)
 					}
+					if row.ReadWait != nil {
+						age, reason := "unavailable", "read_attempt_disposition_unavailable"
+						if row.ReadWait.AgeMS != nil {
+							age = fmt.Sprint(*row.ReadWait.AgeMS)
+							reason = row.ReadWait.Failure.Detail.Code
+						}
+						fmt.Fprintf(w, "  read_admission_not_before=%s observed_failure_age_ms=%s cause=%s\n", row.ReadWait.NotBefore.Format(time.RFC3339Nano), age, reason)
+					}
 					if row.Failure != nil {
 						fmt.Fprintf(w, "  blocked=%s\n", row.Failure.Detail.Code)
 					}

@@ -24,6 +24,7 @@ const deploymentFanOutIntentColumns = `
 	i.cardinality, i.cursor, i.status, i.next_chunk_size, i.last_served_at,
 	i.created_at, i.updated_at, i.claim_owner, i.claim_generation,
 	i.lease_expires_at, i.blocked_reason, i.retry_ready_at, i.retry_failure,
+	i.read_retry_not_before, i.read_retry_delay_ms, i.read_retry_since, i.read_retry_failure,
 	CASE WHEN i.triggering_delivery_id IS NULL AND i.flow_path IS NULL
 		AND i.declaration_family IS NULL AND i.semantic_path IS NULL
 		AND i.semantic_digest IS NULL AND i.capsule IS NULL
@@ -127,10 +128,13 @@ func scanDeploymentFanOutIntent(row rowScanner) (fanoutobligation.Intent, error)
 	var claimGeneration uint64
 	var lastServedRaw, createdRaw, updatedRaw, leaseRaw, retryAtRaw any
 	var retryFailureRaw []byte
+	var readRetryAt, readRetrySince any
+	var readRetryDelay sql.NullInt64
+	var readRetryFailure []byte
 	if err := row.Scan(&runID, &origin, &feedID, &bundleHash, &sourceKind, &flowPath, &eventName,
 		&versionID, &schemaDigest, &cardinality, &cursor, &status, &nextChunk, &lastServedRaw,
 		&createdRaw, &updatedRaw, &claimOwner, &claimGeneration, &leaseRaw, &blockedReason,
-		&retryAtRaw, &retryFailureRaw, &disjoint); err != nil {
+		&retryAtRaw, &retryFailureRaw, &readRetryAt, &readRetryDelay, &readRetrySince, &readRetryFailure, &disjoint); err != nil {
 		return fanoutobligation.Intent{}, err
 	}
 	if origin != string(fanoutobligation.OriginDeployment) || disjoint != 1 {
@@ -179,6 +183,10 @@ func scanDeploymentFanOutIntent(row rowScanner) (fanoutobligation.Intent, error)
 		}
 		intent.Retry = &fanoutobligation.RetryWait{ReadyAt: at, Failure: failure}
 	}
+	intent.ReadRetry, err = decodeFanOutReadRetry(readRetryAt, readRetryDelay, readRetrySince, readRetryFailure)
+	if err != nil {
+		return fanoutobligation.Intent{}, err
+	}
 	if err := intent.Validate(); err != nil {
 		return fanoutobligation.Intent{}, err
 	}
@@ -216,6 +224,7 @@ func observeSelectedDeploymentCandidateTx(ctx context.Context, tx *sql.Tx, at ti
 			AND i.deployment_schema_digest=$14
 			AND i.status='open' AND (i.claim_owner IS NULL OR i.lease_expires_at<=$4)
 			AND (i.retry_ready_at IS NULL OR i.retry_ready_at<=$4)
+			AND (i.read_retry_not_before IS NULL OR i.read_retry_not_before<=$4)
 			AND r.status IN ('running','live') AND r.bundle_hash=i.bundle_hash
 			AND COALESCE(c.control_status,'') NOT IN ('paused','stopped')
 			AND b.binding_id=$5 AND e.execution_id=$6 AND e.generation=$7

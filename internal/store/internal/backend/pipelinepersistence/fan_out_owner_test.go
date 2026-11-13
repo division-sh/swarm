@@ -294,6 +294,7 @@ func initializeFanOutReadbackTestDB(t *testing.T, db *sql.DB, backend string) {
 			last_served_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
 			claim_owner TEXT, claim_generation BIGINT NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT, capsule TEXT,
 			retry_ready_at TIMESTAMP, retry_failure TEXT,
+			read_retry_not_before TIMESTAMP, read_retry_delay_ms BIGINT, read_retry_since TIMESTAMP, read_retry_failure TEXT,
 			UNIQUE (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path),
 			UNIQUE (run_id,deployment_feed_id))`,
 		`CREATE TABLE fan_out_outcomes (

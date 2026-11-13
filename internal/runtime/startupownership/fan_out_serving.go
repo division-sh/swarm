@@ -31,6 +31,7 @@ type fanOutServingService struct {
 	intents      map[fanoutobligation.IntentKey]struct{}
 	claimEntered map[fanoutobligation.IntentKey]bool
 	opportunity  *fanOutOpportunity
+	scanRetry    *fanoutobligation.ReadRetry // accessed only by the selector loop
 }
 
 func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence worklifetime.Occurrence, workers *int, executor FanOutExecutor) (*FanOutServingRegistration, error) {
@@ -117,6 +118,59 @@ func (r *FanOutServingRegistration) Wake() {
 	}
 }
 
+// ResumeRunFanOut uses the exact runtime registration, not a selector's grant
+// or another source's owner. Native admission remains authoritative per row.
+func (r *FanOutServingRegistration) ResumeRunFanOut(ctx context.Context, runID string) (fanoutobligation.ResumeResult, error) {
+	var result fanoutobligation.ResumeResult
+	if r == nil || r.grant == nil {
+		return result, errors.New("fan-out resume requires a live runtime registration")
+	}
+	if err := r.grant.ProveCurrent(ctx); err != nil {
+		return result, err
+	}
+	lease, err := r.occurrence.Begin(r.ctx)
+	if err != nil {
+		return result, err
+	}
+	defer lease.Done()
+	p := r.grant.owner
+	p.mu.Lock()
+	if r.turnsClosing || r.ctx.Err() != nil || p.fanOutClosing || p.requireLive() != nil || p.fanOutCapacity == nil || p.fanOutCapacity.service == nil {
+		p.mu.Unlock()
+		return result, errors.New("fan-out resume registration is closing")
+	}
+	store := p.fanOutCapacity.service.store
+	r.turns.Add(1)
+	p.mu.Unlock()
+	defer r.turns.Done()
+	workCtx, cancel := context.WithCancel(lease.Context())
+	defer cancel()
+	joined := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { defer close(joined); cancel() })
+	defer func() {
+		if !stop() {
+			<-joined
+		}
+	}()
+	evidence, err := r.grant.Evidence()
+	if err != nil {
+		return result, err
+	}
+	owner, err := store.BindFanOutGrant(evidence)
+	if err != nil {
+		return result, err
+	}
+	resume, ok := owner.(pipeline.FanOutResumeOwner)
+	if !ok {
+		return result, errors.New("fan-out resume requires its native granted owner")
+	}
+	result, err = resume.ResumeRunFanOut(workCtx, runID)
+	if result.Reopened != 0 {
+		r.Wake()
+	}
+	return result, err
+}
+
 // SetTestScanObserver observes the real shared selector after its store read.
 // It changes neither the recovery interval nor candidate/claim authority.
 func (r *FanOutServingRegistration) SetTestScanObserver(observer func(FanOutCandidate, bool, error)) {
@@ -187,7 +241,9 @@ func (s *fanOutServingService) run(standing *worklifetime.Lease) {
 		case <-s.wake:
 		case <-ticker.C:
 		}
-		s.refill()
+		if s.scanRetry == nil || !time.Now().Before(s.scanRetry.NotBefore) {
+			s.refill()
+		}
 	}
 }
 
@@ -282,9 +338,12 @@ func (s *fanOutServingService) refill() {
 		candidate, found, err := s.store.NextFanOutCandidate(s.ctx, grants, excluded)
 		s.reportTestScan(registrations, candidate, found, err)
 		if err != nil {
+			next := s.scanRetry.NextAttempt(time.Now())
+			s.scanRetry = &next
 			reporter.executor.ReportFanOutServingError(s.ctx, err)
 			return
 		}
+		s.scanRetry = nil
 		if !found {
 			return
 		}
