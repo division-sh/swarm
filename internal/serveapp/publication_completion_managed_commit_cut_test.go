@@ -3,6 +3,7 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -155,9 +156,27 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 		shutdown <- supervisor.ShutdownProcessWithOptions(t.Context(), runtimepkg.DefaultShutdownOptions())
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for manager.LookupBundleHashStatus(hash).Loaded() {
+	for {
+		if boundary == "bundle" {
+			if !manager.LookupBundleHashStatus(hash).Loaded() {
+				break
+			}
+		} else {
+			use, lookup, err := manager.AcquireBundleHash(t.Context(), hash)
+			if use != nil {
+				if doneErr := use.Done(); doneErr != nil {
+					t.Fatalf("release fresh admission probe: %v", doneErr)
+				}
+			}
+			if errors.Is(err, worklifetime.ErrAdmissionFenced) && use == nil && lookup.Loaded() {
+				break
+			}
+			if err != nil || use == nil || !lookup.Loaded() {
+				t.Fatalf("unexpected graceful admission boundary: use=%t lookup=%+v err=%v", use != nil, lookup, err)
+			}
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("managed retirement did not withdraw the admitted runtime")
+			t.Fatal("managed retirement did not reach its admission boundary")
 		}
 		time.Sleep(time.Millisecond)
 	}
