@@ -2345,17 +2345,25 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	shutdownErr := rt.drainAdmittedIngress(drainCtx, grace)
+	drainErr, continuationErr := rt.drainAndJoinDeliveryContinuations(drainCtx, grace)
+	shutdownErr = errors.Join(shutdownErr, drainErr)
+	var dependencyErr error
 	if rt.Manager != nil {
 		deadline, _ := drainCtx.Deadline()
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			remaining = time.Nanosecond
 		}
-		if err := rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining}); err != nil {
-			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", err))
+		dependencyErr = rt.Manager.ShutdownWithOptions(runtimemanager.ShutdownOptions{Grace: remaining})
+		if dependencyErr != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("agent manager shutdown: %w", dependencyErr))
 		}
 	} else {
-		shutdownErr = errors.Join(shutdownErr, rt.JoinManagerShutdownDependencies(drainCtx))
+		dependencyErr = rt.JoinManagerShutdownDependencies(drainCtx)
+		shutdownErr = errors.Join(shutdownErr, dependencyErr)
+	}
+	if continuationErr != nil && !errors.Is(dependencyErr, continuationErr) {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", continuationErr))
 	}
 	if rt.ToolExecutor != nil {
 		if err := rt.ToolExecutor.Close(drainCtx); err != nil {
@@ -2448,8 +2456,28 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	return shutdownErr
 }
 
-// The manager's transition joins these producers after accepted work drains,
-// before its terminal cleanup removes the readiness dependency they use.
+// Continuations still observe manager readiness while accepted work drains.
+// Join their producer before the manager leaves its runnable lifecycle phase.
+func (rt *Runtime) drainAndJoinDeliveryContinuations(ctx context.Context, grace time.Duration) (error, error) {
+	var result error
+	if rt.workOccurrence != nil {
+		if err := rt.workOccurrence.WaitForQuiescence(ctx); err != nil {
+			result = fmt.Errorf("agent manager shutdown: agent manager shutdown drain timed out after %s: %w", grace, err)
+		}
+	}
+	if rt.deliveryContinuations != nil {
+		if err := rt.deliveryContinuations.Retire(ctx); err != nil {
+			if ctx.Err() != nil && err == ctx.Err() {
+				result = errors.Join(result, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
+				return result, rt.deliveryContinuations.Retire(context.Background())
+			}
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+// The manager also joins dependencies on shutdown paths outside runtime stop.
 func (rt *Runtime) JoinManagerShutdownDependencies(ctx context.Context) error {
 	if rt == nil || !rt.shutdownAdmissionClosed() {
 		return nil
