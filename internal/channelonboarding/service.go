@@ -1107,6 +1107,20 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		return err
 	}
 	op = rebound
+	if !restoreOnly && op.Phase == PhaseSucceeded && op.Posture == ActivationSessionConnection {
+		if observer, ok := s.sessions.(interface {
+			ObserveSession(context.Context, Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
+		}); ok {
+			provider, _, _, err := observer.ObserveSession(ctx, op)
+			provider.CloseExecution()
+			if SessionUnavailableOnly(err) {
+				return nil // The joined worker owns the already-restored unavailable transport.
+			}
+			if err != nil {
+				return err
+			}
+		}
+	}
 	if err := s.restoreSessionProgress(ctx, op, candidate); err != nil {
 		return err
 	}

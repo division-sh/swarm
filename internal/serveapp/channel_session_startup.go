@@ -87,7 +87,15 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 			state = "connected"
 		}
 		if state == "connected" {
+			if presentations[op.OperationID] == "" {
+				continue // Wait for a fresh validated presentation, never print a cached empty label.
+			}
 			if d.sessionStates[op.OperationID] != state {
+				if d.sessionStates[op.OperationID] != "recovered" && d.refreshSessions != nil {
+					if err := d.refreshSessions(ctx); err != nil {
+						return err
+					}
+				}
 				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentations[op.OperationID])
 			}
 			d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
@@ -126,8 +134,12 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 				return err
 			}
 			if connected {
-				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentations[op.OperationID])
-				d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = "connected", 0
+				if d.refreshSessions != nil {
+					if err := d.refreshSessions(ctx); err != nil {
+						return err
+					}
+				}
+				d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = "recovered", 0
 			}
 		}
 	}
@@ -164,6 +176,7 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 		return nil
 	}
 	previous := map[[2]string]sessionprovider.SessionDiagnostic{}
+	boot := true
 	return func(ctx context.Context) error {
 		items, err := owner.sessionDiagnostics(ctx)
 		if err != nil {
@@ -179,8 +192,22 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 			old := previous[key]
 			next[key] = fact
 			previous[key] = fact // One owner can appear in both learned and registered views.
-			if fact.Down && !old.Down && hitl != nil && hitl.Provider == item.Operation.Provider && hitl.Account == item.Account {
-				fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
+			if hitl != nil && hitl.Provider == item.Operation.Provider && hitl.Account == item.Account {
+				down := fact.Down && !old.Down
+				if boot && !fact.Down && old.OccurrenceID == "" {
+					if owner, ok := sessions.(interface {
+						sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
+					}); ok {
+						at, connected, err := owner.sessionRecovery(ctx, item.Operation)
+						if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
+							return err
+						}
+						down = err == nil && !connected && !at.IsZero()
+					}
+				}
+				if down {
+					fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
+				}
 			}
 			if verbose && fact != old && (fact.Down || fact.Socket != "" || fact.Lifecycle != "") {
 				fmt.Fprintf(errOut, "ERROR whatsapp occurrence=%s socket=%s errno=%d close_status=%d lifecycle=%q\n", fact.OccurrenceID, fact.Socket, fact.Errno, fact.CloseStatus, fact.Lifecycle)
@@ -192,7 +219,7 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 				fmt.Fprintln(errOut, "OBSERVATION WhatsApp: SDK KeepAliveRestored observed")
 			}
 		}
-		previous = next
+		previous, boot = next, false
 		return nil
 	}
 }
