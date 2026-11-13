@@ -59,6 +59,16 @@ func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T
 }
 
 func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
+	t.Run("selected readback fact cannot bind another provider", func(t *testing.T) {
+		for _, provider := range []string{"telegram", "whatsapp", "unknown"} {
+			selection := channelonboarding.StartSelection{Candidate: channelonboarding.Candidate{Provider: provider}}
+			bindChannelReadbackFacts(&selection, nil, channelfixture.For("telegram"))
+			if got := selection.Candidate.ProviderFacts().MatchesProvider(provider); got != (provider == "telegram") {
+				t.Fatalf("selected Telegram fact bound provider %q: %t", provider, got)
+			}
+		}
+	})
+
 	t.Run("list facts require an exact admitted interface", func(t *testing.T) {
 		identity := operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
 			ChannelPackID: "different-from-provider", ChannelPackVersion: "1", ChannelManifestHash: "sha256:" + strings.Repeat("a", 64),

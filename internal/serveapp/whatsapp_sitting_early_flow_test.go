@@ -66,8 +66,11 @@ func (w *sittingCLIWriter) Write(p []byte) (int, error) {
 		w.qr.Do(func() { close(w.qrRendered) })
 	}
 	for _, stage := range []struct{ prefix, name string }{{"Linked to ", "preview"}, {"Send the code ", "challenge"}, {"Code received from ", "confirmation"}} {
-		if strings.HasPrefix(text, stage.prefix) {
-			return n, w.pause(stage.name, text)
+		for remaining := text; remaining != ""; {
+			if strings.HasPrefix(remaining, stage.prefix) {
+				return n, w.pause(stage.name, remaining)
+			}
+			_, remaining, _ = strings.Cut(remaining, "\n")
 		}
 	}
 	return n, nil
