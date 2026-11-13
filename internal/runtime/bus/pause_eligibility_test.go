@@ -475,6 +475,9 @@ func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertCompleteEventDelivery(t, seen, f.event)
+			if err := generation.manager.WaitForQuiescence(ctx); err != nil {
+				t.Fatal(err)
+			}
 			if err := generation.coordinator.Synchronize(ctx); err != nil {
 				t.Fatal(err)
 			}

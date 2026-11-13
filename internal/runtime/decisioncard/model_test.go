@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -701,7 +702,7 @@ func TestHumanTaskSourceOwnerRequiresExactRequesterRoute(t *testing.T) {
 				BudgetWindowStart: at, BudgetWindowEnd: at.Add(time.Hour), State: HumanTaskContinuationDecisionCommitted, OutcomeEventID: parentID}
 			product := eventtest.ChildForProducerWithRoutingSource(HumanTaskOutcomeEventID(cardID, parentID), "human_task.approved",
 				eventtest.Producer(events.EventProducerPlatform, "workflow-runtime"), "", []byte(`{}`), 1,
-				events.EventLineage{RunID: runID, ParentEventID: parentID}, events.EnvelopeForTargetRoute(events.EventEnvelope{}, tc.source.Route()), tc.source, at)
+				events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, events.EnvelopeForTargetRoute(events.EventEnvelope{}, tc.source.Route()), tc.source, at)
 			binding, err := BindHumanTaskReturn(card, full, product)
 			if err != nil {
 				t.Fatal(err)

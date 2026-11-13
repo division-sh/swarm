@@ -1705,18 +1705,70 @@ func TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDeliver
 	}
 }
 
+// This seeds component history only; native terminal-history proofs use both stores.
+func componentRecordedReplayForTest(t testing.TB, store *directRecipientTransactionalStore, original events.Event, route events.DeliveryRoute) (events.Event, operatorread.ReplaySelection) {
+	t.Helper()
+	original, err := eventtest.AdmitPayload(original, ".", string(original.Type()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := operatorread.NewOperatorEventFull(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := runtimedelivery.DeliveryID(original.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view.Deliveries = []operatorread.OperatorEventDelivery{{
+		DeliveryID: id, SubscriberID: route.Recipient.ID(), Status: "delivered", Route: route,
+	}}
+	selection, err := operatorread.SelectReplayDeliveries(view, []string{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := settlement.Validate([]events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.events = append(store.events, original)
+	store.routes = map[string][]events.DeliveryRoute{original.ID(): {route}}
+	store.settlements = map[string]events.RouteSettlement{original.ID(): settlement}
+	store.deliveries = map[string][]string{original.ID(): {route.Recipient.LocalID()}}
+	store.mu.Unlock()
+	replay, err := events.NewReplayEvent(events.ReplayEventInput{
+		Facts: events.EventFacts{ID: uuid.NewString(), Type: original.Type(),
+			Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
+			TaskID:   original.TaskID(), Payload: original.Payload(), ChainDepth: original.ChainDepth() + 1,
+			RoutingSource: original.RoutingSource(), Envelope: events.EnvelopeForTargetSet(original.Envelope(), []events.RouteIdentity{route.Target.Route()}),
+			CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode()},
+		Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return replay, selection
+}
+
 func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t *testing.T) {
-	store := &descriptorAwareEventStore{
-		descriptors: []runtimebus.ActiveAgentDescriptor{
-			testActiveAgentDescriptor(t, "agent-a", "", ""),
-		},
+	descriptor := testActiveAgentDescriptor(t, "agent-a", "", "")
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{descriptor},
 	}
 	eb, err := newScopedTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 
-	intent := requesterReturnIntentForTest(t, eventtest.RunCreatingRootIngress(
+	evt, selection := componentRecordedReplayForTest(t, store, eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("custom.direct"),
 		"",
@@ -1725,33 +1777,35 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 		0,
 		runtimebustest.DefaultRunID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))),
+		events.EventEnvelope{},
 		time.Now().UTC(),
-	), "agent-a", events.DeliveryContext{})
-	err = commitEnginePublicationsForTest(context.Background(), eb, store, []runtimeengine.EmitIntent{intent})
-	if err == nil {
-		err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})
-	}
+	), events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: descriptor.Identity})
+	err = eb.PublishRecordedReplay(context.Background(), evt, selection)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassTargetUnreachable || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" {
-		t.Fatalf("PublishDirect failure = %#v, want authoritative delivery incomplete", failure)
+		t.Fatalf("PublishDirect failure = %#v (error=%v), want authoritative delivery incomplete", failure, err)
 	}
-	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
+	persisted, readErr := store.ListEventDeliveryRecipients(context.Background(), evt.ID())
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	assertSortedStringsEqual(t, persisted, []string{"agent-a"})
 }
 
 func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *testing.T) {
-	store := newRouteSetEventStore()
+	descriptor := testActiveAgentDescriptor(t, "agent-a", "", "")
+	store := &directRecipientTransactionalStore{descriptors: []runtimebus.ActiveAgentDescriptor{descriptor}}
 	eb, err := newScopedTestEventBus(t, store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptor(t, "agent-a", "", ""))
+	eb.RegisterRuntimeActiveAgentDescriptor(descriptor)
 	ch := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.direct"))
 	eventID := uuid.NewString()
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:direct-context"}}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
 
-	intent := requesterReturnIntentForTest(t, eventtest.RunCreatingRootIngress(
+	evt, selection := componentRecordedReplayForTest(t, store, eventtest.RunCreatingRootIngress(
 		eventID,
 		events.EventType("custom.direct"),
 		"",
@@ -1762,13 +1816,10 @@ func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *tes
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),
-	), "agent-a", deliveryContext)
-	eventID = intent.Event.ID()
-	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("prepare requester return: %v", err)
-	}
-	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("dispatch requester return: %v", err)
+	), events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: descriptor.Identity, Context: deliveryContext})
+	eventID = evt.ID()
+	if err := eb.PublishRecordedReplay(ctx, evt, selection); err != nil {
+		t.Fatalf("PublishRecordedReplay: %v", err)
 	}
 	got := requireBusEvent(t, ch, "context-carrying direct delivery")
 	if got.DeliveryContext().ReplyContextID() != deliveryContext.ReplyContextID() {
