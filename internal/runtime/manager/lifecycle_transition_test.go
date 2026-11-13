@@ -46,9 +46,15 @@ func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
 
 type lifecycleTransitionTrackingBus struct {
 	*runtimebus.EventBus
-	resetCalls   atomic.Int32
-	resetStarted chan struct{}
-	resetRelease <-chan struct{}
+	resetCalls    atomic.Int32
+	shutdownJoins atomic.Int32
+	resetStarted  chan struct{}
+	resetRelease  <-chan struct{}
+}
+
+func (b *lifecycleTransitionTrackingBus) JoinManagerShutdownDependencies(context.Context) error {
+	b.shutdownJoins.Add(1)
+	return nil
 }
 
 func (b *lifecycleTransitionTrackingBus) ResetInMemoryState() error {
@@ -256,6 +262,13 @@ func TestManagerShutdownDuringResetJoinsResetTransition(t *testing.T) {
 	close(releaseReset)
 	awaitLifecycleCall(t, reset, "reset")
 	awaitLifecycleCall(t, shutdown, "shutdown during reset")
+	manager.lifecycle.shutdownJoin = trackingBus
+	foreign := newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+	defer foreign.drainCancel()
+	manager.lifecycle.joinShutdownDrain(foreign)
+	if got := trackingBus.shutdownJoins.Load(); got != 0 {
+		t.Fatalf("foreign transition joined current runtime dependencies %d time(s)", got)
+	}
 }
 
 func ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
