@@ -77,7 +77,15 @@ func newSessionWatchdogMonitorWriter(ctx context.Context, base MonitorTurnWriter
 	if !ok {
 		return nil, errors.New("session watchdog requires a runtime work occurrence")
 	}
-	lease, err := owner.Begin(ctx)
+	var lease *worklifetime.Lease
+	var err error
+	if accepted, ok := owner.(interface {
+		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+	}); ok {
+		lease, err = accepted.BeginAcceptedDescendant(ctx)
+	} else {
+		lease, err = owner.Begin(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
