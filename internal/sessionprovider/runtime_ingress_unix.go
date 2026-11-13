@@ -104,13 +104,7 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	}
 	incoming := c.incoming
 	phone := sync.OnceValues(func() (string, error) {
-		return incomingSenderPhone(work.Context(), message.Info.MessageSource, func(ctx context.Context, jid types.JID) (types.JID, error) {
-			occurrence := c.state.currentOccurrence()
-			if occurrence == nil {
-				return types.EmptyJID, errClientOccurrenceFenced
-			}
-			return occurrence.client.Store.LIDs.GetPNForLID(ctx, jid)
-		})
+		return incomingSenderPhone(work.Context(), message.Info.MessageSource, c.readSenderPhoneMap)
 	})
 	if c.operation.DeploymentRegistration {
 		reserved, sender, err := incoming.completedOperatorConversation(work.Context(), op, message)
@@ -137,6 +131,14 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		ctx = work.Context()
 	}
 	return c.captureIncomingMessage(ctx, incoming, message, phone)
+}
+
+func (c *RuntimeConnection) readSenderPhoneMap(ctx context.Context, jid types.JID) (types.JID, error) {
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil {
+		return types.EmptyJID, errClientOccurrenceFenced
+	}
+	return occurrence.client.Store.LIDs.GetPNForLID(ctx, jid)
 }
 
 func (c *RuntimeConnection) captureIncomingMessage(ctx context.Context, incoming *runtimeIncoming, message *events.Message, phone func() (string, error)) error {

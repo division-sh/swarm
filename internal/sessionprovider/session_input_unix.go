@@ -161,15 +161,10 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 			!nativeCaptureMatchesReference(event, reference, account, ownedSource, recoveryScope == channelonboarding.SessionInputBusiness) {
 			return result, errCaptureScopeChanged
 		}
-		body, err := event.ProjectedBody()
-		if err != nil {
-			return result, err
-		}
-		retained = true
 		nativeCurrent := func() bool {
 			return r.state.ownsConnectedOccurrence(workContext, occurrence)
 		}
-		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
+		result, err = (nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
 			DeploymentRegistration: event.Scope.DeploymentRegistration,
 			RegisteredBusiness:     event.Scope.RegisteredBusiness,
 			AccountOnly:            event.Scope.AccountOnly,
@@ -182,9 +177,20 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 			OwnedSource:                ownedSource,
 			OwnedRoot:                  ownedRoot,
 			NativeCurrent:              nativeCurrent,
-			Body:                       body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}, nil
+			Body:                       event.Body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}).withProjectedBody()
+		retained = err == nil
+		return result, err
 	}
 	return result, fmt.Errorf("WhatsApp authenticated input requires its verified retained capture")
+}
+
+func (input nativeSessionInput) withProjectedBody() (nativeSessionInput, error) {
+	body, err := input.OriginalCapture.ProjectedBody()
+	if err != nil {
+		return nativeSessionInput{}, err
+	}
+	input.Body = body
+	return input, nil
 }
 
 func nativeCaptureMatchesReference(event capturedEvent, reference SessionInputReference, account string, source correlation.SourceArtifactFact, recovery bool) bool {
