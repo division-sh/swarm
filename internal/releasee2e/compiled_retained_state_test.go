@@ -99,6 +99,10 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 		mu.Lock()
 		counts[body.Model]++
 		ordinal := counts[body.Model]
+		if body.Model == "memory" && ordinal == 2 {
+			interruptedBody = append([]byte(nil), request.Body...)
+		}
+		priorBody := interruptedBody
 		mu.Unlock()
 		switch body.Model {
 		case "retry":
@@ -107,10 +111,9 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 			return llmapi.Reply{StatusCode: 403, ErrorBody: `{"error":{"message":"synthetic model access refused"}}`}, nil
 		case "memory":
 			if ordinal == 2 {
-				interruptedBody = append([]byte(nil), request.Body...)
-				held <- interruptedBody
+				held <- priorBody
 				<-release
-			} else if ordinal == 3 && arm == "kill" && !bytes.Equal(interruptedBody, request.Body) {
+			} else if ordinal == 3 && arm == "kill" && !bytes.Equal(priorBody, request.Body) {
 				return llmapi.Reply{}, fmt.Errorf("interrupted read-only request changed on reissue")
 			}
 			if ordinal > 1 && !bytes.Contains(request.Body, []byte("cedar-731")) {
@@ -307,7 +310,11 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pauseFullLifecycleRun(t, s.process.rpc, s.runID)
+	var paused map[string]any
+	if err := s.process.rpc.call(ctx, "run.pause", map[string]any{"run_id": s.runID, "idempotency_key": "joined-final-pause"}, &paused); err != nil {
+		t.Fatal(err)
+	}
+	waitForFullLifecycleRunStatus(t, s.process.rpc, s.runID, "paused")
 	result := s.semanticResult(retry, dead)
 	mu.Lock()
 	want := 3
