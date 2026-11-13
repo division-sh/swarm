@@ -1107,19 +1107,8 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		return err
 	}
 	op = rebound
-	if !restoreOnly && op.Phase == PhaseSucceeded && op.Posture == ActivationSessionConnection {
-		if observer, ok := s.sessions.(interface {
-			ObserveSession(context.Context, Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
-		}); ok {
-			provider, _, _, err := observer.ObserveSession(ctx, op)
-			provider.CloseExecution()
-			if SessionUnavailableOnly(err) {
-				return nil // The joined worker owns the already-restored unavailable transport.
-			}
-			if err != nil {
-				return err
-			}
-		}
+	if complete, err := s.restoredSessionRecoveryComplete(ctx, op, restoreOnly); complete || err != nil {
+		return err
 	}
 	if err := s.restoreSessionProgress(ctx, op, candidate); err != nil {
 		return err
@@ -1147,6 +1136,24 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		return fmt.Errorf("recover channel onboarding %s: %w", op.OperationID, err)
 	}
 	return nil
+}
+
+func (s *Service) restoredSessionRecoveryComplete(ctx context.Context, op Operation, restoreOnly bool) (bool, error) {
+	if !restoreOnly && op.Phase == PhaseSucceeded && op.Posture == ActivationSessionConnection {
+		if observer, ok := s.sessions.(interface {
+			ObserveSession(context.Context, Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
+		}); ok {
+			provider, _, _, err := observer.ObserveSession(ctx, op)
+			provider.CloseExecution()
+			if SessionUnavailableOnly(err) {
+				return true, nil // The joined worker owns the already-restored unavailable transport.
+			}
+			if err != nil {
+				return false, err
+			}
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) targetAdmissionEnabled(ctx context.Context, candidate Candidate) (bool, error) {

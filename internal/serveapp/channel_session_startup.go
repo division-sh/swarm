@@ -71,76 +71,88 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		presentations[item.Operation.OperationID] = item.Account
 	}
 	for _, op := range operations {
-		at, connected, err := owner.sessionRecovery(ctx, op)
-		if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
-			if d.sessionStates[op.OperationID] != "not_linked" {
-				fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)
-			}
-			d.sessionStates[op.OperationID] = "not_linked"
-			continue
+		if err := d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (d *serveChannelDeliveryDispatcher) reconcileSessionConnection(ctx context.Context, op channelonboarding.Operation, presentation string, recovery func(context.Context, channelonboarding.Operation) (time.Time, bool, error)) error {
+	at, connected, err := recovery(ctx, op)
+	if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+		if d.sessionStates[op.OperationID] != "not_linked" {
+			fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)
+		}
+		d.sessionStates[op.OperationID] = "not_linked"
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	state := "disconnected"
+	if connected {
+		state = "connected"
+	}
+	if state == "connected" {
+		if presentation == "" {
+			return nil // Wait for a fresh validated presentation, never print a cached empty label.
+		}
+		if d.sessionStates[op.OperationID] != state {
+			if d.sessionStates[op.OperationID] != "recovered" && d.refreshSessions != nil {
+				if err := d.refreshSessions(ctx); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentation)
+		}
+		d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
+		return nil
+	}
+	if d.sessionStates[op.OperationID] != "disconnected" {
+		fmt.Fprintln(d.output, "WhatsApp disconnected: network unreachable, reconnecting...")
+		d.sessionStates[op.OperationID] = "disconnected"
+		d.sessionAttempts[op.OperationID] = 5
+		d.sessionNextAttempt[op.OperationID] = at.Add(5 * time.Second)
+	}
+	if at.IsZero() || d.now().Before(d.sessionNextAttempt[op.OperationID]) {
+		return nil
+	}
+	return d.retrySessionRecovery(ctx, op, recovery)
+}
+
+func (d *serveChannelDeliveryDispatcher) retrySessionRecovery(ctx context.Context, op channelonboarding.Operation, recovery func(context.Context, channelonboarding.Operation) (time.Time, bool, error)) error {
+	var err error
+	if op.DeploymentRegistration {
+		if d.deployment == nil || d.deployment.resume == nil {
+			return channelonboarding.ErrInvalidRequest
+		}
+		err = d.deployment.resume(ctx, op)
+	} else {
+		_, err = d.onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: op.OperationID})
+	}
+	if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
+		return err
+	}
+	if errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+		fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)
+		d.sessionStates[op.OperationID] = "not_linked"
+		return nil
+	}
+	d.sessionAttempts[op.OperationID] = min(d.sessionAttempts[op.OperationID]*2, 7200)
+	d.sessionNextAttempt[op.OperationID] = d.now().Add(time.Duration(d.sessionAttempts[op.OperationID]) * time.Second)
+	if err == nil {
+		_, connected, err := recovery(ctx, op)
 		if err != nil {
 			return err
 		}
-		state := "disconnected"
 		if connected {
-			state = "connected"
-		}
-		if state == "connected" {
-			if presentations[op.OperationID] == "" {
-				continue // Wait for a fresh validated presentation, never print a cached empty label.
-			}
-			if d.sessionStates[op.OperationID] != state {
-				if d.sessionStates[op.OperationID] != "recovered" && d.refreshSessions != nil {
-					if err := d.refreshSessions(ctx); err != nil {
-						return err
-					}
+			if d.refreshSessions != nil {
+				if err := d.refreshSessions(ctx); err != nil {
+					return err
 				}
-				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", presentations[op.OperationID])
 			}
-			d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
-			continue
-		}
-		if d.sessionStates[op.OperationID] != "disconnected" {
-			fmt.Fprintln(d.output, "WhatsApp disconnected: network unreachable, reconnecting...")
-			d.sessionStates[op.OperationID] = "disconnected"
-			d.sessionAttempts[op.OperationID] = 5
-			d.sessionNextAttempt[op.OperationID] = at.Add(5 * time.Second)
-		}
-		if at.IsZero() || d.now().Before(d.sessionNextAttempt[op.OperationID]) {
-			continue
-		}
-		if op.DeploymentRegistration {
-			if d.deployment == nil || d.deployment.resume == nil {
-				return channelonboarding.ErrInvalidRequest
-			}
-			err = d.deployment.resume(ctx, op)
-		} else {
-			_, err = d.onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: op.OperationID})
-		}
-		if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
-			return err
-		}
-		if errors.Is(err, channelonboarding.ErrSessionNotLinked) {
-			fmt.Fprintln(d.output, channelonboarding.ErrSessionNotLinked)
-			d.sessionStates[op.OperationID] = "not_linked"
-			continue
-		}
-		d.sessionAttempts[op.OperationID] = min(d.sessionAttempts[op.OperationID]*2, 7200)
-		d.sessionNextAttempt[op.OperationID] = d.now().Add(time.Duration(d.sessionAttempts[op.OperationID]) * time.Second)
-		if err == nil {
-			_, connected, err := owner.sessionRecovery(ctx, op)
-			if err != nil {
-				return err
-			}
-			if connected {
-				if d.refreshSessions != nil {
-					if err := d.refreshSessions(ctx); err != nil {
-						return err
-					}
-				}
-				d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = "recovered", 0
-			}
+			d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = "recovered", 0
 		}
 	}
 	return nil
@@ -193,17 +205,9 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 			next[key] = fact
 			previous[key] = fact // One owner can appear in both learned and registered views.
 			if hitl != nil && hitl.Provider == item.Operation.Provider && hitl.Account == item.Account {
-				down := fact.Down && !old.Down
-				if boot && !fact.Down && old.OccurrenceID == "" {
-					if owner, ok := sessions.(interface {
-						sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
-					}); ok {
-						at, connected, err := owner.sessionRecovery(ctx, item.Operation)
-						if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
-							return err
-						}
-						down = err == nil && !connected && !at.IsZero()
-					}
+				down, err := sessionDiagnosticDown(ctx, sessions, item, old, boot)
+				if err != nil {
+					return err
 				}
 				if down {
 					fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
@@ -222,4 +226,21 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 		previous, boot = next, false
 		return nil
 	}
+}
+
+func sessionDiagnosticDown(ctx context.Context, sessions serveSessionBootstrapOwner, item serveSessionDiagnostic, old sessionprovider.SessionDiagnostic, boot bool) (bool, error) {
+	fact := item.Fact
+	down := fact.Down && !old.Down
+	if boot && !fact.Down && old.OccurrenceID == "" {
+		if owner, ok := sessions.(interface {
+			sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
+		}); ok {
+			at, connected, err := owner.sessionRecovery(ctx, item.Operation)
+			if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
+				return false, err
+			}
+			down = err == nil && !connected && !at.IsZero()
+		}
+	}
+	return down, nil
 }
