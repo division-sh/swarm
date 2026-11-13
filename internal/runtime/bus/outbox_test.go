@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -253,7 +255,9 @@ func (s *recordingEventStore) eventTypes() []string {
 func (s *directRecipientTransactionalStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]string(nil), s.deliveries[eventID]...), nil
+	recipients := append([]string(nil), s.deliveries[eventID]...)
+	slices.Sort(recipients)
+	return recipients, nil
 }
 
 func (s *directRecipientTransactionalStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
@@ -625,7 +629,6 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	originalIdentity := runtimebustest.Identity(t, "agent-original", "flow-original")
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyEngineOutboxTarget(t), runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -634,6 +637,22 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 	source := semanticview.Wrap(bundle)
 	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runtimebustest.DefaultRunID)
 	original := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "flow-original", "", runtimebustest.DefaultRunID)
+	owner, found := semanticview.AgentDeclarationOwner(source, "flow-original", "agent-original")
+	if !found {
+		t.Fatal("original snapshot recipient has no declaration owner")
+	}
+	name, err := agentidentity.DeclaredName("agent-original", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := original.Route().AgentIdentityRoute()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalIdentity, err := agentidentity.New(runtimebustest.DefaultRunID, name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
 	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{{Identity: originalIdentity, EntityID: original.EntityID}},
 	}
@@ -648,8 +667,8 @@ func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	originalSubscriptions := []string{"custom.snapshot"}
-	originalAdmission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: "agent-original", FlowPath: "flow-original", LocalEvents: testLocalSubscriptionEvents(originalSubscriptions), Subscriptions: originalSubscriptions,
+	originalAdmission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: "agent-original", FlowID: "flow-original", FlowPath: original.InstancePath, Subscriptions: originalSubscriptions,
 	})
 	if err != nil {
 		t.Fatalf("admit original snapshot recipient: %v", err)

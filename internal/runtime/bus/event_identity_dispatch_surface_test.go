@@ -349,9 +349,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	seedCompleteEventDispatchRunWithOrigin(t, ctx, selected, runID, createdAt, origin)
-	sourceRoute := events.RouteIdentity{
-		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
-	}
+	sourceRoute := events.RouteIdentity{EntityID: runID}
 	var rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
 	if constructSource {
 		constructionCtx := runtimecorrelation.WithRunID(ctx, runID)
@@ -379,25 +377,26 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
 	eventType := events.EventType("custom.replay.checked")
+	routingSource := eventtest.RootRoutingSource(runID)
 	if constructSource {
-		eventType, err = runtimepinrouting.AdmitPublicationIdentity(sourceRoute.FlowID, "custom.replay.checked",
-			eventtest.ConcreteTemplateRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID))
+		routingSource = eventtest.ConcreteTemplateRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID)
+		eventType, err = runtimepinrouting.AdmitPublicationIdentity(sourceRoute.FlowID, "custom.replay.checked", routingSource)
 		if err != nil {
 			t.Fatalf("admit complete-event publication identity: %v", err)
 		}
 	}
-	event := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
+	event := eventtest.ChildForProducerWithRoutingSource(
 		eventID,
 		eventType,
 		eventtest.Producer(events.EventProducerNode, "declarative-node"),
 		"event-owned-task",
 		[]byte(`{"task_id":"payload-owned-task","text":"complete snapshot"}`),
 		3,
-		runID,
-		uuid.NewString(),
+		events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), TaskID: "event-owned-task", ExecutionMode: executionmode.Mock},
 		envelope,
+		routingSource,
 		createdAt,
-	), executionmode.Mock)
+	)
 	agentID := "complete-event-agent"
 	ownerURI := completeEventAgentOwnerURI(agentID)
 	if source != nil {
