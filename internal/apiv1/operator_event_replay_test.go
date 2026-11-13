@@ -210,6 +210,10 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	}
 
 	originalEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "scan.requested", "source", "", []byte(`{}`), 0, operatorReplayRunID, events.EventEnvelope{}, time.Now().UTC())
+	originalEvent, err = eventtest.AdmitPayload(originalEvent, "", "scan.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: runtimebustest.IdentityForRun(t, operatorReplayRunID, "agent-a", ""),
 		Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "original-reply"}}}
 	deliveryID, err := runtimedelivery.DeliveryID(originalEvent.ID(), route)
@@ -227,6 +231,17 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	}
 	if err := selection.ValidateRecorded(originalEvent, []events.DeliveryRoute{route}); err != nil {
 		t.Fatal(err)
+	}
+	replay, err := replayEventFromOriginal(original, uuid.NewString(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateEvent(replay); err != nil {
+		t.Fatal(err)
+	}
+	foreignEnvelope := events.EnvelopeForTargetRoute(replay.Envelope(), events.RouteIdentity{FlowID: "foreign", FlowInstance: uuid.NewString(), EntityID: uuid.NewString()})
+	if err := selection.ValidateEvent(eventtest.WithEnvelope(replay, foreignEnvelope)); err == nil {
+		t.Fatal("replay selection accepted a substituted event envelope")
 	}
 	for _, ids := range [][]string{nil, {deliveryID, deliveryID}, {"foreign-delivery"}} {
 		if _, err := operatorread.SelectReplayDeliveries(original, ids); err == nil {

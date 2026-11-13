@@ -760,7 +760,11 @@ func (d engineDispatcher) dispatchIntentWithBoundary(ctx context.Context, intent
 	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
 		return false, runtimepipelineobligation.Continue(), err
 	} else if reason != "" {
-		d.bus.logDispatchQueued(ctx, reason, intent.Event, 0, !intent.RequesterReturn.Empty(), false)
+		recipientsCount := 0
+		if !intent.RequesterReturn.Empty() {
+			recipientsCount = 1
+		}
+		d.bus.logDispatchQueued(ctx, reason, intent.Event, recipientsCount, !intent.RequesterReturn.Empty(), false)
 		return true, runtimepipelineobligation.Continue(), nil
 	}
 	deliveryRoutes, err := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())

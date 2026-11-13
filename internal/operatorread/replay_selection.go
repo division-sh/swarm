@@ -82,6 +82,7 @@ func (s ReplaySelection) ValidateEvent(replay events.Event) error {
 		replay.RunID() != original.RunID() || replay.Type() != original.Type() || !replay.Producer().Equal(original.Producer()) ||
 		replay.RoutingSource() != original.RoutingSource() || replay.TaskID() != original.TaskID() ||
 		replay.ChainDepth() != original.ChainDepth()+1 || replay.ExecutionMode() != original.ExecutionMode() ||
+		!reflect.DeepEqual(replay.NormalizedEnvelope(), original.NormalizedEnvelope()) ||
 		!bytes.Equal(replay.Payload(), original.Payload()) {
 		return fmt.Errorf("replay publication differs from its selected original event")
 	}
