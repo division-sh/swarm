@@ -2,11 +2,13 @@ package bootverify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -309,6 +311,97 @@ func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 	if credentialFindingContains(findings, "provider_credential", "tool provider.send") {
 		t.Fatalf("credential findings = %#v, admitted connector requirement survived filtering", findings)
 	}
+	t.Run("learned evidence is per use, not per key", func(t *testing.T) {
+		for _, state := range []string{"current", "wrong_flow", "wrong_role", "stale_with_default", "not_admitted_with_default"} {
+			t.Run(state, func(t *testing.T) {
+				values := map[string]string{}
+				if strings.HasSuffix(state, "with_default") {
+					values["provider_credential"] = "synthetic-default"
+				}
+				opts := Options{Credentials: bootverifyCredentialStore{values: values},
+					EffectReachability: commandConnectorEffectReachability(t, source, plan, executionposture.Live)}
+				opts.AdmittedCredentials = func(_ context.Context, use runtimecredentials.RequirementUse) (runtimecredentials.AdmittedSnapshot, bool, error) {
+					if use.Kind != "tool" || use.Name != "provider.send" || state == "not_admitted_with_default" {
+						return runtimecredentials.AdmittedSnapshot{}, false, nil
+					}
+					flow, role := "", "provider_credential"
+					if state == "wrong_flow" {
+						flow = "sibling"
+					}
+					if state == "wrong_role" {
+						role = "signing"
+					}
+					if use.FlowID != flow || use.Role != role {
+						return runtimecredentials.AdmittedSnapshot{}, false, nil
+					}
+					if state == "stale_with_default" {
+						return runtimecredentials.AdmittedSnapshot{}, false, operatorchannel.ErrCredentialStale
+					}
+					return runtimecredentials.AdmittedSnapshot{AtomicSnapshot: runtimecredentials.NewAtomicSnapshot(
+						runtimecredentials.Metadata{Key: "operation.token", Present: true}, "synthetic-learned")}, true, nil
+				}
+				observed, err := InspectStaticCredentialRequirements(t.Context(), source, opts)
+				if state == "stale_with_default" {
+					if !errors.Is(err, operatorchannel.ErrCredentialStale) {
+						t.Fatalf("default value masked invalid learned evidence: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				learned, staticTool, staticPolicy, staticOther := false, false, false, false
+				for _, descriptor := range observed {
+					for _, use := range descriptor.RequiredBy {
+						if descriptor.Key == "operation.token" && descriptor.Present && use.Name == "provider.send" {
+							learned = true
+						}
+						if descriptor.Key == "provider_credential" && !descriptor.Present {
+							staticTool = staticTool || use.Kind == "tool" && use.Name == "provider.send"
+							staticOther = staticOther || use.Kind == "tool" && use.Name == "audit.call"
+							staticPolicy = staticPolicy || use.Kind == "mcp_server" && use.Name == "audit"
+						}
+					}
+				}
+				wantLearned := state == "current"
+				wantStaticTool := state == "wrong_flow" || state == "wrong_role"
+				if learned != wantLearned || staticTool != wantStaticTool || staticPolicy != (len(values) == 0) || staticOther != (len(values) == 0) {
+					t.Fatalf("scope/currentness leaked: learned=%v staticTool=%v staticPolicy=%v observed=%+v", learned, staticTool, staticPolicy, observed)
+				}
+			})
+		}
+	})
+	t.Run("same key and tool in sibling flow retains its own requirement", func(t *testing.T) {
+		scoped, plan := scopedAliasMockConnectorFixture(t, false)
+		bundle, _ := semanticview.Bundle(scoped)
+		bundle.FlowTree.ByID["project-mock"].Tools = source.ToolEntries()
+		bundle.FlowTree.ByID["flow-mock"].Tools = source.ToolEntries()
+		opts := Options{Credentials: bootverifyCredentialStore{values: map[string]string{}},
+			EffectReachability: commandConnectorEffectReachability(t, scoped, plan, executionposture.Live)}
+		seen := map[string]bool{}
+		opts.AdmittedCredentials = func(_ context.Context, use runtimecredentials.RequirementUse) (runtimecredentials.AdmittedSnapshot, bool, error) {
+			if use.Kind != "tool" || use.Name != "provider.send" {
+				return runtimecredentials.AdmittedSnapshot{}, false, nil
+			}
+			seen[use.FlowID] = true
+			if use.FlowID != "project-mock" {
+				return runtimecredentials.AdmittedSnapshot{}, false, nil
+			}
+			return runtimecredentials.AdmittedSnapshot{AtomicSnapshot: runtimecredentials.NewAtomicSnapshot(
+				runtimecredentials.Metadata{Key: "project.operation", Present: true}, "synthetic")}, true, nil
+		}
+		observed, err := InspectStaticCredentialRequirements(t.Context(), scoped, opts)
+		if err != nil || !seen["project-mock"] || !seen["flow-mock"] {
+			t.Fatalf("flow provenance lost before evidence selection: %v %v", seen, err)
+		}
+		missing := false
+		for _, descriptor := range observed {
+			missing = missing || descriptor.Key == "provider_credential" && !descriptor.Present
+		}
+		if !missing {
+			t.Fatal("one learned flow satisfied its sibling's same-key requirement")
+		}
+	})
 }
 
 func TestManagedCredentialChecksRetainMixedSourceRequirement(t *testing.T) {
