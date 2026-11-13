@@ -612,6 +612,49 @@ func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
 	}
 }
 
+func TestCompletionOccurrenceHeartbeatStartsFromAcceptedWorkDuringDrain(t *testing.T) {
+	harness := effecttest.New()
+	authority := testConversationForkAuthority()
+	authority.Target = runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion,
+		ID: uuid.NewString(), RunID: authority.ForkChat.SourceRunID, Ordinal: 1}
+	authority.CompletionRequest = runtimeeffects.CompletionRequest{
+		ModelAlias: "regular", RequestedModel: "synthetic-test", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api",
+	}
+	ctx := runtimeeffects.WithAuthority(context.Background(), authority)
+	ctx = runtimeeffects.WithCompletionRequest(ctx, authority.CompletionRequest)
+	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "accepted-fork-drain")
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(harness, harness, harness, harness))
+	ctx = llmTestWorkContext(t, ctx)
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok {
+		t.Fatal("control has no occurrence")
+	}
+	accepted, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer accepted.Done()
+	handle, err := runtimeeffects.BeginCompletion(accepted.Context(), "anthropic_api", []byte("synthetic fork reply"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		t.Fatal("control did not reach the occurrence-owned heartbeat arm")
+	}
+	if err := owner.(*worklifetime.RuntimeOccurrence).Fence(); err != nil {
+		t.Fatal(err)
+	}
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeatWithTiming(accepted.Context(), handle, time.Hour, time.Minute)
+	if err != nil {
+		t.Fatalf("accepted occurrence-owned completion lost its heartbeat during drain: %v", err)
+	}
+	defer heartbeat.Stop()
+	if heartbeatCtx.Err() != nil || accepted.Context().Err() != nil {
+		t.Fatal("accepted completion context was canceled within grace")
+	}
+}
+
 type completionOriginHeartbeatStore struct {
 	runtimedelivery.Store
 	renewals atomic.Int32
