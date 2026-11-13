@@ -54,7 +54,7 @@ func semanticControls(f Frozen) []Action {
 	if f.SourceKind == "summary" {
 		controls = append(controls, Action{Kind: "open_inbox", Label: "Open inbox"})
 	}
-	if f.SourceKind == "notice" && !f.NoticeAcknowledged {
+	if f.SourceKind == "notice" && !f.NoticeAcknowledged && f.NoticeType != LinkNoticeType {
 		controls = append(controls, Action{Kind: "acknowledge_notice", Label: "Acknowledge"})
 	}
 	if f.Page != nil && f.Page.Index+1 < f.Page.Count {
@@ -66,6 +66,12 @@ func semanticControls(f Frozen) []Action {
 func projectedControlPages(f Frozen) ([][]Action, error) {
 	if err := f.Bounds.Validate(); err != nil {
 		return nil, err
+	}
+	if f.NoticeType == LinkNoticeType {
+		if len([]rune(f.FullText)) > f.Bounds.TextRunes {
+			return nil, fmt.Errorf("link notice exceeds its selected text bound")
+		}
+		return [][]Action{{}}, nil
 	}
 	controls := semanticControls(f)
 	pages, err := partitionControlPages(f, controls)

@@ -64,9 +64,6 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		return nil, err
 	}
 	for _, item := range registered {
-		if item.Fact.ConnectionID == "" {
-			continue
-		}
 		operations = append(operations, item.Operation)
 		presentations[item.Operation.OperationID] = item.Account
 	}
@@ -75,7 +72,11 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 		if ctx.Err() != nil {
 			return result, context.Cause(ctx)
 		}
-		result = errors.Join(result, d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery))
+		err := d.reconcileSessionConnection(ctx, op, presentations[op.OperationID], owner.sessionRecovery)
+		if d.linkNotices != nil {
+			d.linkNotices.observe(op, err)
+		}
+		result = errors.Join(result, err)
 	}
 	return result, nil
 }
@@ -182,11 +183,11 @@ type serveSessionDiagnostic struct {
 	Account   string
 }
 
-func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelonboarding.AccountReference, out, errOut io.Writer, verbose bool) func(context.Context) error {
+func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelonboarding.AccountReference, out, errOut io.Writer, verbose bool, observed ...func([]serveSessionDiagnostic)) func(context.Context) error {
 	owner, ok := sessions.(interface {
 		sessionDiagnostics(context.Context) ([]serveSessionDiagnostic, error)
 	})
-	if !ok || hitl == nil && !verbose {
+	if !ok || hitl == nil && !verbose && len(observed) == 0 {
 		return nil
 	}
 	previous := map[[2]string]sessionprovider.SessionDiagnostic{}
@@ -195,6 +196,9 @@ func serveSessionDiagnostics(sessions serveSessionBootstrapOwner, hitl *channelo
 		items, err := owner.sessionDiagnostics(ctx)
 		if err != nil {
 			return err
+		}
+		for _, observe := range observed {
+			observe(items)
 		}
 		next := map[[2]string]sessionprovider.SessionDiagnostic{}
 		for _, item := range items {

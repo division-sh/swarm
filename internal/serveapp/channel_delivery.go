@@ -59,6 +59,7 @@ type serveChannelDeliveryDispatcher struct {
 	sessionAttempts    map[string]int
 	sessionNextAttempt map[string]time.Time
 	now                func() time.Time
+	linkNotices        *serveLinkNotices
 }
 
 type selectedChannelDecisionOwner interface {

@@ -170,6 +170,11 @@ func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item r
 	var changed bool
 	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
 		changed = false
+		if item.Type == render.LinkNoticeType {
+			created, cause := channeldelivery.AdmitLinkNoticeTx(sqlCtx, tx, item.ID, item.Summary, true)
+			changed = created
+			return cause
+		}
 		_, err := tx.ExecContext(sqlCtx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
