@@ -74,7 +74,8 @@ func capturedChannelProjectionPlans(bundle *runtimecontracts.WorkflowContractBun
 			inputs = append(inputs, pin.EventType())
 		}
 		for _, definition := range scope.ConsumedTriggerProviders(inputs) {
-			if _, present := definition.ChannelPlan(); !present {
+			channelPlan, present := definition.ChannelPlan()
+			if !present {
 				continue
 			}
 			provider := definition.Provider()
@@ -87,7 +88,7 @@ func capturedChannelProjectionPlans(bundle *runtimecontracts.WorkflowContractBun
 			if err != nil {
 				return nil, err
 			}
-			plans = append(plans, plan)
+			plans = append(plans, plan.WithProviderFacts(channelPlan.ProviderFacts()))
 		}
 	}
 	return plans, nil
