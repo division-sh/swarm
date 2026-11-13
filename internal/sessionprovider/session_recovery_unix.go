@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
+	"go.mau.fi/whatsmeow/socket"
 )
 
 func missingSessionDevice(err error) bool {
@@ -29,9 +30,16 @@ func (c *RuntimeConnection) RecoveryFailure(ctx context.Context, op channelonboa
 
 func transientConnectError(err error) bool {
 	_, typed := failures.As(err)
-	return !typed && failures.OnlyBranches(err, func(e error) bool {
-		return e == syscall.ECONNREFUSED || e == syscall.ECONNRESET || e == syscall.ENETUNREACH || e == syscall.EHOSTUNREACH || e == syscall.ETIMEDOUT
+	network := false
+	only := failures.OnlyBranches(err, func(e error) bool {
+		if e == socket.ErrDialFailed {
+			return true
+		}
+		accepted := e == syscall.ECONNREFUSED || e == syscall.ECONNRESET || e == syscall.ENETUNREACH || e == syscall.EHOSTUNREACH || e == syscall.ETIMEDOUT
+		network = network || accepted
+		return accepted
 	})
+	return !typed && only && network
 }
 
 // SessionRecovery checks the live original owner; diagnostic facts are not permits.
