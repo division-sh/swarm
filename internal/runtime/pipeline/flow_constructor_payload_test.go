@@ -10,7 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/google/uuid"
 )
 
@@ -151,7 +154,17 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 			}
 			members["whatsapp/"+role+".yaml"] = string(body)
 		}
-		source := loadWorkflowTempSource(t, members)
+		bundle := loadWorkflowTempBundle(t, members)
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection, err := packadmission.AdmitInventory(rooted, bundle.PackInventory, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle.PackAdmission = projection.(packadmission.Projection).WithProviderFacts(channelfixture.For("whatsapp"))
+		source := semanticview.Wrap(bundle)
 		key, err := AdmitFlowInstanceKey(source, ".", "+1 (555) 0100")
 		if err != nil || key != "+15550100" {
 			t.Fatalf("unlinked account key was not canonically admitted before identity: %q %v", key, err)
