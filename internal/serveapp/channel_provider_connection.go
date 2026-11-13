@@ -6,6 +6,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
@@ -31,6 +32,7 @@ type serveSessionConnection interface {
 	AdmitActivityAccount(context.Context, operatorchannel.SessionAccountAdmission) (authority.Admission, error)
 	ValidateActivityRequestAccount(context.Context, operatorchannel.SessionAccountAdmission, string, int64) error
 	ObserveSession(context.Context) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, error)
+	SessionDiagnostic(context.Context) (sessionprovider.SessionDiagnostic, string, error)
 	ChannelExecution(context.Context) (execution.Channel, error)
 	VerifyDeploymentRegistration(context.Context, channelonboarding.Operation) (bool, error)
 	LogoutDeploymentRegistration(context.Context, channelonboarding.Operation) error

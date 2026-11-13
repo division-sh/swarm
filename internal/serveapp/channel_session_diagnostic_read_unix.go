@@ -41,7 +41,7 @@ func (s *serveSessionBootstrap) registeredSessionConnections(ctx context.Context
 	var out []serveSessionDiagnostic
 	accounts, connections := map[string]bool{}, map[string]bool{}
 	for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
-		if !op.DeploymentRegistration || op.ValidateSessionAccount() != nil || accounts[op.AccountReference] || connections[op.SessionConnectionID] {
+		if !op.DeploymentRegistration || op.ValidateSessionAccount(op.ProviderFacts()) != nil || accounts[op.AccountReference] || connections[op.SessionConnectionID] {
 			return nil, channelonboarding.ErrRevisionConflict
 		}
 		accounts[op.AccountReference], connections[op.SessionConnectionID] = true, true
