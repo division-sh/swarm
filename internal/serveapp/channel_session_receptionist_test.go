@@ -157,7 +157,7 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				if result.Operation.OperationID != id || result.Readiness == nil || !result.Readiness.Ready {
 					t.Fatal("second connect did not attach to the current connection", result)
 				}
-				originalReply := requireServedNativeAuthoredCustomerReply(t, endpoint, peer, false)
+				originalReply := requireServedNativeAuthoredCustomerReply(t, endpoint, peer, false, false)
 				customer, retained := peer.receiver(originalReply.To)
 				if !retained {
 					t.Fatal("original customer sender was not retained")

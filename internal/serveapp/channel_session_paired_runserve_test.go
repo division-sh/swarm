@@ -336,7 +336,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				}
 			}
 			if authoredReply {
-				message := requireServedNativeAuthoredCustomerReply(t, endpoint, peer, uncertainReply)
+				message := requireServedNativeAuthoredCustomerReply(t, endpoint, peer, uncertainReply, false)
 				if code := process.stop(); code != 0 {
 					t.Fatal("authored activity RunServe did not join before restart", code, process.outputString())
 				}

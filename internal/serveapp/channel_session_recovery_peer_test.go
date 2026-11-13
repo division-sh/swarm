@@ -4,6 +4,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -168,8 +169,14 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 			return err == nil && !healthy
 		})
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		input := issue3011PublishAndSettle(t, endpoint, "learned-down", map[string]any{})
-		issue3011ActivityOutcome(t, endpoint, input, opts.StoreMode, location, "")
+		evidence := map[string]any{}
+		input := issue3011PublishAndSettle(t, endpoint, "learned-down", evidence)
+		evidence["failed_activity"] = issue3011ActivityOutcome(t, endpoint, input, opts.StoreMode, location, "")
+		raw, err := json.Marshal(evidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("R161 learned down evidence: %s", raw)
 	}
 	wait(func() bool { n, l, _ := counts(); return n > connections && l > logins && healthy() })
 	n, l, accepted := counts()
@@ -181,7 +188,7 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 		t.Fatal("drop sentence not once", process.outputString())
 	}
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-	requireServedNativeAuthoredCustomerReply(t, endpoint, peer, false)
+	requireServedNativeAuthoredCustomerReply(t, endpoint, peer, false, !registered)
 	_, _, sends = counts()
 	if code := process.stop(); code != 0 {
 		t.Fatal("healthy recovery did not join", code)
@@ -308,7 +315,7 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 		t.Fatal("unavailable boot reset or resent")
 	}
 	endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-	requireServedNativeAuthoredCustomerReply(t, endpoint, peer, false, "RECOVERY_BOOT_CUSTOMER")
+	requireServedNativeAuthoredCustomerReply(t, endpoint, peer, false, false, "RECOVERY_BOOT_CUSTOMER")
 	_, _, sends = counts()
 	gate, release = recoveryLoginGate(t, peer)
 	current = operation()

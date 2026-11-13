@@ -32,7 +32,7 @@ func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T)
 	}
 }
 
-func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, uncertain bool, messageIDs ...string) servedNativeMessage {
+func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, uncertain, earlierActivities bool, messageIDs ...string) servedNativeMessage {
 	t.Helper()
 	const text = "A genuine customer message for the authored activity"
 	if uncertain {
@@ -43,6 +43,9 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 	var customer, customerLID types.JID
 	var cut []servedNativeActivityCut
 	if len(messageIDs) == 0 {
+		if earlierActivities {
+			cut = append(cut, servedNativeActivityCut{servedNativeActivityLedger(t, endpoint), "SERVED_AUTHORED_CUSTOMER"})
+		}
 		customer, customerLID = peer.customer(text, "SERVED_AUTHORED_CUSTOMER")
 	} else {
 		if len(messageIDs) != 1 || messageIDs[0] == "" {
