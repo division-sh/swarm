@@ -15,8 +15,7 @@ func (s *serveSessionBootstrap) ReadSessionConnection(ctx context.Context, op ch
 	}
 	connection := s.connection(op.OperationID)
 	if connection != nil {
-		view.Reason = connection.DisconnectionReason()
-		view.Cause = connection.FailureCause()
+		view.Reason, view.Cause = connection.FailureReport()
 		if view.Cause != "" && !(op.Phase == channelonboarding.PhaseSucceeded && view.Linked && view.Reason == "") {
 			view.State = "error"
 		}

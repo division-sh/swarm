@@ -36,6 +36,29 @@ func awaitDiagnostic(t *testing.T, ready func() bool) {
 // Invariant: only fixed facts survive SDK errors; real timeout/restoration do not fence.
 func TestWhatsAppDiagnosticCaptureAndNativeJoin(t *testing.T) {
 	for _, cell := range []struct {
+		name       string
+		occurrence *clientOccurrence
+		reason     string
+		cause      string
+	}{
+		{name: "healthy", occurrence: &clientOccurrence{}},
+		{name: "start fallback", occurrence: &clientOccurrence{fenced: true, startFailure: true,
+			diagnostic: SessionDiagnostic{Failure: "connection attempt failed"}}, reason: "network unreachable", cause: "connection attempt failed"},
+		{name: "SDK rejection", occurrence: &clientOccurrence{fenced: true, authenticated: true, failureReason: "connection rejected by WhatsApp",
+			diagnostic: SessionDiagnostic{Failure: "connection rejected"}}, reason: "connection rejected by WhatsApp", cause: "connection rejected"},
+		{name: "generic fence", occurrence: &clientOccurrence{fenced: true}, cause: "cause unknown"},
+		{name: "intentional shutdown", occurrence: &clientOccurrence{fenced: true, authenticated: true,
+			diagnostic: SessionDiagnostic{Intentional: true}}},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			connection := &RuntimeConnection{state: &sessionState{occurrence: cell.occurrence}}
+			reason, cause := connection.FailureReport()
+			if reason != cell.reason || cause != cell.cause || connection.DisconnectionReason() != reason || connection.FailureCause() != cause {
+				t.Fatalf("failure report = (%q, %q), want (%q, %q)", reason, cause, cell.reason, cell.cause)
+			}
+		})
+	}
+	for _, cell := range []struct {
 		err    error
 		socket string
 	}{

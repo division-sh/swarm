@@ -521,7 +521,7 @@ func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op
 	if c.connection == nil || op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired {
 		return view, nil
 	}
-	view.Reason = c.connection.DisconnectionReason()
+	view.Reason, view.Cause = c.connection.FailureReport()
 	notice, err := c.connection.ReadClaimCodeNotice(ctx, op)
 	if err != nil {
 		return view, err
@@ -556,7 +556,6 @@ func (c *deploymentChannelSession) ReadSessionConnection(ctx context.Context, op
 			view.State = "connected"
 		}
 	}
-	view.Cause = c.connection.FailureCause()
 	// The fenced retained-preview wait is a separately held control boundary.
 	retainedPreview := view.State == "connecting" && op.DeploymentRegistration && !op.AccountConfirmed && op.Phase == channelonboarding.PhaseAwaitingExternalIdentity
 	if view.Cause != "" && !retainedPreview {
