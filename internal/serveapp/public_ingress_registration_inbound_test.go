@@ -248,8 +248,13 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration,
 	}
+	providerFacts, installed := installedChannelFactsFor(target.Provider)
+	if !installed {
+		t.Fatal("fixture registration requires its installed provider facts")
+	}
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		ProviderFacts: providerFacts,
+		BindingID:     "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram.telegram_bot_token": "telegram.telegram_bot_token"},
 		Target: runtimepublicingress.RegistrationTarget{

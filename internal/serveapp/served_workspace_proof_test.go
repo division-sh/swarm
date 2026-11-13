@@ -130,11 +130,7 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 	var accounts []string
 	if posture == executionposture.Live {
 		bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
-		rooted, err := bundle.RootedSource()
-		if err != nil {
-			t.Fatal(err)
-		}
-		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		providers, err := packadmission.ProviderSourceForBundle(bundle)
 		if err != nil {
 			t.Fatal(err)
 		}
