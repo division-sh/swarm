@@ -230,6 +230,7 @@ func writeSessionDiagnosticDown(ctx context.Context, sessions serveSessionBootst
 	}
 	fact := item.Fact
 	down := fact.Failed() && !old.Failed()
+	disconnected := fact.Disconnected
 	if boot && !fact.Down && old.OccurrenceID == "" {
 		if owner, ok := sessions.(interface {
 			sessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
@@ -238,11 +239,14 @@ func writeSessionDiagnosticDown(ctx context.Context, sessions serveSessionBootst
 			if err != nil && !channelonboarding.SessionUnavailableOnly(err) {
 				return err
 			}
-			down = down || err == nil && !connected && !at.IsZero()
+			if !down {
+				down = err == nil && !connected && !at.IsZero()
+				disconnected = down
+			}
 		}
 	}
 	if down {
-		if fact.Disconnected {
+		if disconnected {
 			fmt.Fprintf(out, "ERROR WhatsApp disconnected: %s\n", fact.Cause())
 		} else {
 			fmt.Fprintf(out, "ERROR WhatsApp: %s\n", fact.Cause())
