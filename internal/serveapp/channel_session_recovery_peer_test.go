@@ -291,10 +291,10 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 		t.Fatal("scheduled attempt did not hold")
 	}
 	if code := process.stop(); code != 0 {
-		release(true)
+		release(false)
 		t.Fatal("held native attempt did not cancel/join", code)
 	}
-	release(true)
+	release(false)
 	// Fixture-controlled row deletion after joined shutdown, NOT phone/provider unlink.
 	fixture, native, err := sessionstate.OpenSDKFixture(context.Background(), filepath.Join(read().directory, current.SessionConnectionID, "provider.db"))
 	if err != nil {
