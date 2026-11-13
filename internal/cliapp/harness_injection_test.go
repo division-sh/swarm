@@ -19,7 +19,7 @@ func TestVerifyNamesOnlyRootInterfaceHasNoHarnessClassification(t *testing.T) {
 	if !strings.Contains(stdout.String(), "portable structural checks passed; deployment admission not evaluated") || strings.Contains(stdout.String(), "harness") || strings.Contains(stdout.String(), "production-valid") {
 		t.Fatalf("verify retains retired classification: %s", stdout.String())
 	}
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
 	stdout.Reset()

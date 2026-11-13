@@ -18,7 +18,7 @@ func TestVerifyAdmissionRetainsFrozenConfigThroughSourceLoading(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	configPath := writeTestVerifyRuntimeConfig(t)
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot(), ExplicitPath: configPath})
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot(), ExplicitPath: configPath, ChannelRegistration: channelRegistrationFixture{}})
 	if err != nil {
 		t.Fatal(err)
 	}

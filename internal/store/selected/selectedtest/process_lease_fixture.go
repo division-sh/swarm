@@ -62,11 +62,13 @@ func OpenProcessLeaseFixture(ctx context.Context, scope backendselection.Selecti
 }
 
 func OpenProcessLeaseInspection(ctx context.Context, scope backendselection.Selection, dsn string) (*selected.AdmissionInspection, error) {
-	return selected.OpenAdmissionInspection(ctx, selected.AuthorityRequest{Selection: scope, PostgresDSN: dsn})
+	return selected.OpenAdmissionInspection(ctx, selected.AuthorityRequest{Selection: scope, PostgresDSN: dsn, ProviderFacts:
+
+	// Inspection consumes the same native owner's canonical singleton reader, not
+	// the path a test may have replaced or a second generation decoder.
+	channelfixture.Facts})
 }
 
-// Inspection consumes the same native owner's canonical singleton reader, not
-// the path a test may have replaced or a second generation decoder.
 func InspectProcessLeaseSnapshot(ctx context.Context, owner startupownership.Store) (startupownership.AuthorityInspection, error) {
 	inspection, ok := owner.(interface {
 		InspectAuthority(context.Context) (startupownership.AuthorityInspection, error)

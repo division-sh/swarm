@@ -30,6 +30,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -149,7 +150,7 @@ func newMutationProtocolJourneyFixtureWithRoot(t *testing.T, backend, root strin
 
 func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mutationProtocolJourneyRuntime {
 	t.Helper()
-	selected, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{Selection: f.selection, PostgresDSN: f.dsn})
+	selected, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{Selection: f.selection, PostgresDSN: f.dsn, ProviderFacts: channelfixture.Facts})
 	if err != nil {
 		t.Fatal(err)
 	}
