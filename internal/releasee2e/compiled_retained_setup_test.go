@@ -59,6 +59,7 @@ connect:
 		}
 	}
 	writeReleaseFile(t, rootEvents, string(raw)+"continuity.tick:\n")
+	writeReleaseFile(t, filepath.Join(source, "policy.yaml"), "handler_retry_base_seconds: 3600\n")
 	for path, body := range map[string]string{
 		"control/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"control/schema.yaml": `instance: key
@@ -75,8 +76,7 @@ stages:
   done: {final: true}
 inputs: [control.seed, control.review, control.finish, work.requested, retry.requested, dead.requested]
 `,
-		"control/state.yaml":  "key: text\n",
-		"control/policy.yaml": "handler_retry_base_seconds: 3600\n",
+		"control/state.yaml": "key: text\n",
 		"control/nodes.yaml": `owner:
   control.seed:
     data_accumulation:
