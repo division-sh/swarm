@@ -15302,12 +15302,38 @@
             "minimum": 0,
             "type": "integer"
           },
+          "cause": {
+            "description": "Sanitized link failure, preserved when an independent holder refusal overrides reason.",
+            "enum": [
+              "closed by the other side",
+              "connection reset",
+              "network path unavailable",
+              "connection timed out",
+              "logged out",
+              "account temporarily banned",
+              "connection replaced",
+              "connection rejected",
+              "authentication refresh failed",
+              "client needs an update",
+              "connection must be re-established",
+              "connection attempt failed",
+              "connection attempt cancelled",
+              "incoming callback panic",
+              "incoming capture failed",
+              "storage failure",
+              "currentness failure",
+              "runtime release failed",
+              "cause unknown"
+            ],
+            "type": "string"
+          },
           "health": {
             "enum": [
               "pairing",
               "connecting",
               "connected",
-              "disconnected"
+              "disconnected",
+              "error"
             ],
             "type": "string"
           },
@@ -15756,6 +15782,31 @@
             "minimum": 0,
             "type": "integer"
           },
+          "cause": {
+            "description": "Sanitized failure observation; independent of legacy reason and never execution or retry authority.",
+            "enum": [
+              "closed by the other side",
+              "connection reset",
+              "network path unavailable",
+              "connection timed out",
+              "logged out",
+              "account temporarily banned",
+              "connection replaced",
+              "connection rejected",
+              "authentication refresh failed",
+              "client needs an update",
+              "connection must be re-established",
+              "connection attempt failed",
+              "connection attempt cancelled",
+              "incoming callback panic",
+              "incoming capture failed",
+              "storage failure",
+              "currentness failure",
+              "runtime release failed",
+              "cause unknown"
+            ],
+            "type": "string"
+          },
           "claim_code_notice": {
             "additionalProperties": false,
             "properties": {
@@ -15788,7 +15839,8 @@
               "pairing",
               "connecting",
               "connected",
-              "disconnected"
+              "disconnected",
+              "error"
             ],
             "type": "string"
           }
