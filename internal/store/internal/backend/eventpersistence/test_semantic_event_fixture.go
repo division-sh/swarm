@@ -11,21 +11,19 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 func (s *EventPostgresOwner) InsertCanonicalEventRecordForTest(ctx context.Context, record eventrecord.Record) (bool, error) {
 	var inserted bool
 	err := runNativeEventFixtureMutation(ctx, s, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		var err error
-		inserted, err = insertCanonicalFixtureRecord(txctx, attempt, authoractivityfixture.DialectPostgres, record)
+		inserted, err = insertCanonicalFixtureRecord(txctx, attempt, true, record)
 		return err
 	})
 	return inserted, err
@@ -35,36 +33,10 @@ func (s *EventSQLiteOwner) InsertCanonicalEventRecordForTest(ctx context.Context
 	var inserted bool
 	err := runNativeEventFixtureMutation(ctx, s, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		var err error
-		inserted, err = insertCanonicalFixtureRecord(txctx, attempt, authoractivityfixture.DialectSQLite, record)
+		inserted, err = insertCanonicalFixtureRecord(txctx, attempt, false, record)
 		return err
 	})
 	return inserted, err
-}
-
-func (s *EventPostgresOwner) InsertRevisionedExistingRunRootEventForTest(ctx context.Context, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	var event events.Event
-	err := runNativeEventFixtureMutation(ctx, s, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		var err error
-		event, err = eventfixture.ExistingRunRoot(txctx, attempt, authoractivityfixture.DialectPostgres, eventID, runID, eventType, producer, payload, envelope, createdAt)
-		return err
-	})
-	if err != nil {
-		return events.Event{}, err
-	}
-	return event, nil
-}
-
-func (s *EventSQLiteOwner) InsertRevisionedExistingRunRootEventForTest(ctx context.Context, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	var event events.Event
-	err := runNativeEventFixtureMutation(ctx, s, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		var err error
-		event, err = eventfixture.ExistingRunRoot(txctx, attempt, authoractivityfixture.DialectSQLite, eventID, runID, eventType, producer, payload, envelope, createdAt)
-		return err
-	})
-	if err != nil {
-		return events.Event{}, err
-	}
-	return event, nil
 }
 
 func (s *EventPostgresOwner) SetEventChainDepthForTest(ctx context.Context, eventID string, depth int) error {
@@ -80,11 +52,11 @@ func (s *EventSQLiteOwner) SetEventChainDepthForTest(ctx context.Context, eventI
 }
 
 func (s *EventPostgresOwner) CommitSemanticEventFixtureForTest(ctx context.Context, record eventrecord.Record, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {
-	return commitSelectedSemanticEventFixture(ctx, s, authoractivityfixture.DialectPostgres, record, routes, scope, disposition, revisioned, captureForkFrontier)
+	return commitSelectedSemanticEventFixture(ctx, s, true, record, routes, scope, disposition, revisioned, captureForkFrontier)
 }
 
 func (s *EventSQLiteOwner) CommitSemanticEventFixtureForTest(ctx context.Context, record eventrecord.Record, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {
-	return commitSelectedSemanticEventFixture(ctx, s, authoractivityfixture.DialectSQLite, record, routes, scope, disposition, revisioned, captureForkFrontier)
+	return commitSelectedSemanticEventFixture(ctx, s, false, record, routes, scope, disposition, revisioned, captureForkFrontier)
 }
 
 func runNativeEventFixtureMutation(ctx context.Context, selected any, write func(context.Context, *mutationprotocol.Attempt) error) error {
@@ -112,10 +84,10 @@ func runNativeUnrevisionedEventFixtureTransaction(ctx context.Context, selected 
 	}
 }
 
-func insertCanonicalFixtureRecord(ctx context.Context, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect, record eventrecord.Record) (bool, error) {
+func insertCanonicalFixtureRecord(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, record eventrecord.Record) (bool, error) {
 	var inserted bool
 	var err error
-	if dialect == authoractivityfixture.DialectPostgres {
+	if postgres {
 		inserted, err = eventrecordpostgres.Insert(ctx, attempt, record)
 	} else {
 		inserted, err = eventrecordsqlite.Insert(ctx, attempt, record)
@@ -127,7 +99,7 @@ func insertCanonicalFixtureRecord(ctx context.Context, attempt *mutationprotocol
 	var found bool
 	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		if dialect == authoractivityfixture.DialectPostgres {
+		if postgres {
 			existing, found, err = eventrecordpostgres.Load(ctx, tx, record.EventID)
 		} else {
 			existing, found, err = eventrecordsqlite.Load(ctx, tx, record.EventID)
@@ -143,18 +115,22 @@ func insertCanonicalFixtureRecord(ctx context.Context, attempt *mutationprotocol
 	return false, nil
 }
 
-func commitSelectedSemanticEventFixture(ctx context.Context, selected any, dialect authoractivityfixture.Dialect, record eventrecord.Record, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {
-	adapter, err := storedelivery.NewAdapter(storedelivery.Dialect(dialect))
+func commitSelectedSemanticEventFixture(ctx context.Context, selected any, postgres bool, record eventrecord.Record, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {
+	dialect := storedelivery.DialectSQLite
+	if postgres {
+		dialect = storedelivery.DialectPostgres
+	}
+	adapter, err := storedelivery.NewAdapter(dialect)
 	if err != nil {
 		return false, err
 	}
 	if !revisioned {
-		return commitUnrevisionedSemanticEventFixture(ctx, selected, dialect, record, routes, scope, disposition, adapter)
+		return commitUnrevisionedSemanticEventFixture(ctx, selected, postgres, record, routes, scope, disposition, adapter)
 	}
 	inserted := false
 	err = runNativeEventFixtureMutation(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		var err error
-		inserted, err = insertCanonicalFixtureRecord(txctx, attempt, dialect, record)
+		inserted, err = insertCanonicalFixtureRecord(txctx, attempt, postgres, record)
 		if err != nil || !inserted {
 			return err
 		}
@@ -173,7 +149,7 @@ func commitSelectedSemanticEventFixture(ctx context.Context, selected any, diale
 			return err
 		}
 		if captureForkFrontier {
-			if dialect != authoractivityfixture.DialectPostgres {
+			if !postgres {
 				return fmt.Errorf("semantic fork frontier fixture requires PostgreSQL, got %T", selected)
 			}
 			for _, family := range []runforkrevision.Family{runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries, runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyEventReceipts} {
@@ -223,12 +199,12 @@ func commitUnrevisionedFixtureFacts(ctx context.Context, selected any, tx *sql.T
 	}
 }
 
-func commitUnrevisionedSemanticEventFixture(ctx context.Context, selected any, dialect authoractivityfixture.Dialect, record eventrecord.Record, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition, adapter *storedelivery.Adapter) (bool, error) {
+func commitUnrevisionedSemanticEventFixture(ctx context.Context, selected any, postgres bool, record eventrecord.Record, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition, adapter *storedelivery.Adapter) (bool, error) {
 	inserted := false
 	var authority runtimedelivery.ExecutionAuthority
 	err := runNativeUnrevisionedEventFixtureTransaction(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		if dialect == authoractivityfixture.DialectPostgres {
+		if postgres {
 			inserted, err = eventrecordpostgres.InsertUnrevisionedFixtureRecord(ctx, tx, record)
 		} else {
 			inserted, err = eventrecordsqlite.InsertUnrevisionedFixtureRecord(ctx, tx, record)
