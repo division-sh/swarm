@@ -38,6 +38,17 @@ func TestChannelCLIRetainedPreviewWaitPreservesExactAccount(t *testing.T) {
 	if !retainedChannelPreviewPending(base) || validateCLIChannelProgressReadback(base, base) != nil {
 		t.Fatal("exact retained preview did not remain pending without a revision advance")
 	}
+	observedFailure := base
+	view := *base.Connection
+	view.Cause = "incoming capture failed"
+	observedFailure.Connection = &view
+	if !retainedChannelPreviewPending(observedFailure) || validateCLIChannelProgressReadback(base, observedFailure) != nil {
+		t.Fatal("reporting cause changed the held retained-preview decision")
+	}
+	view.State = "error"
+	if retainedChannelPreviewPending(observedFailure) {
+		t.Fatal("held retained-preview predicate was widened to error")
+	}
 	for name, change := range map[string]func(*channelonboarding.Operation){
 		"operation": func(o *channelonboarding.Operation) { o.OperationID += "foreign" },
 		"revision":  func(o *channelonboarding.Operation) { o.Revision++ },

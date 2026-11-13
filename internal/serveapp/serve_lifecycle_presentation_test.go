@@ -49,11 +49,13 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 	accountRows := []channelonboarding.AccountStatus{
 		{Provider: "whatsapp", Account: "+15550100", State: "live", Holders: []channelonboarding.AccountHolder{{Flow: "frontdesk"}}},
 		{Provider: "whatsapp", Account: "+15550200", State: "refused", Reason: "registration_not_current"},
+		{Provider: "whatsapp", Account: "+15550300", State: "refused", Health: "error", Cause: "connection reset", Reason: "competing_holders"},
 	}
 	reads := 0
 	observed, err := serveReadyDeploymentAccounts(t.Context(), []channelonboarding.Operation{
 		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550200", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
 		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550100", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
+		{DeploymentRegistration: true, Provider: "whatsapp", AccountReference: "+15550300", AccountConfirmed: true, Phase: channelonboarding.PhaseSucceeded},
 	}, func(_ context.Context, request apiv1.Request) (any, error) {
 		reads++
 		if request.Method != "channel.list" || request.Params["provider"] != "whatsapp" || request.Params["holder"] != "current holder" {
@@ -66,7 +68,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		}
 		return nil, errors.New("unknown account")
 	}, "current holder")
-	if err != nil || reads != 2 || !reflect.DeepEqual(observed, accountRows) {
+	if err != nil || reads != 3 || !reflect.DeepEqual(observed, accountRows) {
 		t.Fatalf("per-account readiness rows=%+v reads=%d err=%v", observed, reads, err)
 	}
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Dev: true, Output: &out})
@@ -123,6 +125,7 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		"telegram webhook",
 		"WhatsApp +15550100 (frontdesk): connected",
 		"WhatsApp +15550200: refused: registration_not_current",
+		"WhatsApp +15550300: error: connection reset · competing_holders",
 		"webhook_signing.telegram bound",
 		"shutdown · complete",
 		"credential telegram_bot_token · source file:/tmp/deployment/credentials.json",

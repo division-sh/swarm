@@ -36483,8 +36483,9 @@ api_specification:
               identity_operation_id: {type: string, format: uuid}
               observation: {type: string, format: uuid, description: Transient coalesced wrong-code observation; not a claim or an attempt count.}
           account_unclaimed: {type: integer, minimum: 0}
-          state: {type: string, enum: [pairing, connecting, connected, disconnected]}
+          state: {type: string, enum: [pairing, connecting, connected, disconnected, error]}
           reason: {type: string, description: Display-only finite SDK disconnect reason; not execution or retry authority.}
+          cause: {type: string, enum: [closed by the other side, connection reset, network path unavailable, connection timed out, logged out, account temporarily banned, connection replaced, connection rejected, authentication refresh failed, client needs an update, connection must be re-established, connection attempt failed, connection attempt cancelled, incoming callback panic, incoming capture failed, storage failure, currentness failure, runtime release failed, cause unknown], description: Sanitized failure observation; independent of legacy reason and never execution or retry authority.}
           linked: {type: boolean, description: Retained paired account exists; not operator identity or execution authority.}
           account_presentation: {type: string}
           account_name: {type: string}
@@ -36529,7 +36530,8 @@ api_specification:
           reason: {type: string}
           account_unclaimed: {type: integer, minimum: 0}
           linked: {type: boolean}
-          health: {type: string, enum: [pairing, connecting, connected, disconnected]}
+          health: {type: string, enum: [pairing, connecting, connected, disconnected, error]}
+          cause: {type: string, enum: [closed by the other side, connection reset, network path unavailable, connection timed out, logged out, account temporarily banned, connection replaced, connection rejected, authentication refresh failed, client needs an update, connection must be re-established, connection attempt failed, connection attempt cancelled, incoming callback panic, incoming capture failed, storage failure, currentness failure, runtime release failed, cause unknown], description: Sanitized link failure, preserved when an independent holder refusal overrides reason.}
           holders:
             type: array
             items:

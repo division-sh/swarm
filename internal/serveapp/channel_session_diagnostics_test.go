@@ -35,7 +35,7 @@ func (f *diagnosticReadFixture) sessionDiagnostics(context.Context) ([]serveSess
 func TestServeSessionDiagnosticFixedOutput(t *testing.T) {
 	for _, cell := range []struct{ socket, lifecycle, cause string }{
 		{"peer_close", "", "closed by the other side"}, {"reset", "", "connection reset"},
-		{"unreachable", "", "network unreachable"}, {"timeout", "", "connection timed out"},
+		{"unreachable", "", "network path unavailable"}, {"timeout", "", "connection timed out"},
 		{"reset", "logged out", "logged out"}, {"reset", "account temporarily banned", "account temporarily banned"},
 		{"reset", "session replaced by another connection", "connection replaced"}, {"reset", "connection rejected by WhatsApp", "connection rejected"},
 		{"reset", "WhatsApp authentication refresh failed", "authentication refresh failed"}, {"reset", "WhatsApp client needs an update", "client needs an update"},
@@ -43,7 +43,7 @@ func TestServeSessionDiagnosticFixedOutput(t *testing.T) {
 	} {
 		for _, selection := range []string{"operator", "other", "none", "learned"} {
 			for _, verbose := range []bool{false, true} {
-				fact := sessionprovider.SessionDiagnostic{ConnectionID: uuid.NewString(), OccurrenceID: uuid.NewString(), Down: true, Socket: cell.socket, Lifecycle: cell.lifecycle, KeepAliveTimeout: true, KeepAliveRestored: true}
+				fact := sessionprovider.SessionDiagnostic{ConnectionID: uuid.NewString(), OccurrenceID: uuid.NewString(), Down: true, Disconnected: true, Socket: cell.socket, Lifecycle: cell.lifecycle, KeepAliveTimeout: true, KeepAliveRestored: true}
 				item := serveSessionDiagnostic{Operation: channelonboarding.Operation{Provider: "whatsapp", DeploymentRegistration: selection != "learned"}, Account: "+15551234567", Fact: fact}
 				owner := &diagnosticReadFixture{items: []serveSessionDiagnostic{item, item}}
 				hitl := &channelonboarding.AccountReference{Provider: "whatsapp", Account: item.Account}
@@ -77,6 +77,28 @@ func TestServeSessionDiagnosticFixedOutput(t *testing.T) {
 					t.Fatal("duplicate snapshot printed again")
 				}
 			}
+		}
+	}
+	for _, cause := range []string{"incoming callback panic", "incoming capture failed", "storage failure", "currentness failure", "runtime release failed", "connection attempt failed", "connection attempt cancelled", "connection must be re-established", "PRIVATE-CANARY"} {
+		fact := sessionprovider.SessionDiagnostic{ConnectionID: uuid.NewString(), OccurrenceID: uuid.NewString(), Down: true, Failure: cause}
+		item := serveSessionDiagnostic{Operation: channelonboarding.Operation{Provider: "whatsapp"}, Account: "+15551234567", Fact: fact}
+		owner := &diagnosticReadFixture{items: []serveSessionDiagnostic{item, item}}
+		var out, errOut bytes.Buffer
+		poll := serveSessionDiagnostics(owner, &channelonboarding.AccountReference{Provider: "whatsapp", Account: item.Account}, &out, &errOut, false)
+		if err := poll(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != "ERROR WhatsApp: "+fact.Cause()+"\n" || strings.Contains(out.String(), "PRIVATE-CANARY") || errOut.Len() != 0 {
+			t.Fatal("non-drop line changed wording or exposed raw evidence", out.String())
+		}
+		owner.items = nil
+		if err := poll(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		item.Fact = sessionprovider.SessionDiagnostic{ConnectionID: fact.ConnectionID, OccurrenceID: fact.OccurrenceID, Down: true, Intentional: true}
+		owner.items = []serveSessionDiagnostic{item}
+		if err := poll(t.Context()); err != nil || strings.Count(out.String(), "ERROR WhatsApp:") != 1 {
+			t.Fatal("intentional stop invented a failure", err)
 		}
 	}
 }
@@ -187,6 +209,20 @@ func TestServeRegisteredDiagnosticReadAndHeldWriterBothStores(t *testing.T) {
 				t.Fatal("held output blocked socket/fence observation", items, err)
 			}
 			connection := owner.connection(op.OperationID)
+			var status channelonboarding.AccountStatus
+			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "provider": "whatsapp", "account": op.AccountReference}, &status)
+			if status.Health != "error" || status.State != "refused" || status.Reason != "network unreachable" || status.Cause != "closed by the other side" {
+				t.Fatal("native failure projection changed the legacy reason", status)
+			}
+			var list struct {
+				Accounts []channelonboarding.Result `json:"accounts"`
+			}
+			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "provider": "whatsapp"}, &list)
+			if len(list.Accounts) != 1 || list.Accounts[0].Status == nil || list.Accounts[0].Connection == nil ||
+				list.Accounts[0].Status.Cause != status.Cause || list.Accounts[0].Connection.Cause != status.Cause || list.Accounts[0].Connection.State != "error" || list.Accounts[0].Connection.Reason != status.Reason {
+				t.Fatal("list status and connection lost the same native failure", list)
+			}
 			if connection.CheckBootstrap(ctx) == nil {
 				t.Fatal("down diagnostic granted native health")
 			}

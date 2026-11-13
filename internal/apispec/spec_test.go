@@ -12,6 +12,22 @@ import (
 
 func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	api := loadRepoAPISpec(t)
+	for name, field := range map[string]string{"ChannelSessionConnection": "state", "ChannelAccountStatus": "health"} {
+		schema := api.Components.Schemas[name].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		enum := properties[field].(map[string]any)["enum"].([]any)
+		cause := properties["cause"].(map[string]any)
+		if schema["additionalProperties"] != false || cause["type"] != "string" || len(cause["enum"].([]any)) != 19 {
+			t.Fatal("failure readback lost its closed sanitized scalar contract", name)
+		}
+		hasError := false
+		for _, value := range enum {
+			hasError = hasError || value == "error"
+		}
+		if !hasError {
+			t.Fatal("failure readback omitted error", name)
+		}
+	}
 	report, err := Validate(api)
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)

@@ -200,7 +200,11 @@ func (o *clientOccurrence) bindCallbacks(handle func(context.Context, any) error
 			return handle(ctx, event)
 		},
 		func(ctx context.Context, failure callbackFailure) error {
-			o.fence()
+			cause := "incoming capture failed"
+			if failure.Reason == "crash" {
+				cause = "incoming callback panic"
+			}
+			o.fenceFailure(cause)
 			return record(ctx, failure)
 		})
 	if err != nil {
@@ -273,7 +277,7 @@ func (o *clientOccurrence) connect(ctx context.Context) (err error) {
 	// that owned occurrence only while this caller's attempt is pending.
 	canceled := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
-		o.fence()
+		o.fenceFailure("connection attempt cancelled")
 		close(canceled)
 	})
 	err = o.client.ConnectContext(o.ctx)
@@ -285,7 +289,11 @@ func (o *clientOccurrence) connect(ctx context.Context) (err error) {
 		err = errClientOccurrenceFenced
 	}
 	if err != nil {
-		o.fence()
+		cause := "connection attempt failed"
+		if ctx.Err() != nil {
+			cause = "connection attempt cancelled"
+		}
+		o.fenceFailure(cause)
 	}
 	return err
 }
@@ -355,10 +363,12 @@ func (o *clientOccurrence) prepareLogout(ctx context.Context) (context.Context, 
 }
 
 func (o *clientOccurrence) unlink(workCtx context.Context) error {
+	o.intentionalDisconnect()
 	if err := o.client.Logout(workCtx); err != nil {
+		o.recordFailure("cause unknown", false)
 		return err
 	}
-	o.fence()
+	o.fenceAfterDisconnect(false, "")
 	return nil
 }
 
@@ -411,11 +421,22 @@ func (o *clientOccurrence) reserveLogout(ctx context.Context) (context.Context, 
 }
 
 func (o *clientOccurrence) fence() {
-	o.fenceAfterDisconnect(false, "")
+	o.fenceFailure("cause unknown")
 }
 
 func (o *clientOccurrence) fenceAfterDisconnect(observed bool, reason string) {
 	o.mu.Lock()
+	if reason != "" && !o.diagnostic.Intentional && o.diagnostic.Failure == "" {
+		cause := "cause unknown"
+		if observed {
+			cause = (SessionDiagnostic{Socket: o.diagnostic.Socket}).Cause()
+		} else if reason == "connection must be re-established" {
+			cause = reason
+		} else if o.diagnostic.Lifecycle == reason {
+			cause = (SessionDiagnostic{Lifecycle: reason}).Cause()
+		}
+		o.diagnostic.Failure, o.diagnostic.Disconnected = cause, true
+	}
 	if !observed {
 		o.transientDisconnect = false
 	}
@@ -460,8 +481,14 @@ func (o *clientOccurrence) transientAdmissionRefusal(err error) bool {
 
 // A successful join does not close the provider database or release possession.
 // The containing connection must do both and retain evidence if either fails.
-func (o *clientOccurrence) join(ctx context.Context) error {
-	o.fence()
+func (o *clientOccurrence) join(ctx context.Context) (err error) {
+	defer func() {
+		if err != nil {
+			o.recordFailure("runtime release failed", false)
+		}
+	}()
+	o.intentionalDisconnect()
+	o.fenceAfterDisconnect(false, "")
 	o.mu.Lock()
 	callbacks := o.callbacks
 	pairing := o.pairing

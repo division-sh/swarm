@@ -56,6 +56,51 @@ func TestWhatsAppDiagnosticCaptureAndNativeJoin(t *testing.T) {
 			t.Fatal("capture leaked raw data, changed first fact or misclassified", fact)
 		}
 	}
+	for _, cause := range []string{"incoming capture failed", "incoming callback panic", "runtime release failed", "connection attempt failed", "connection attempt cancelled", "PRIVATE-CANARY"} {
+		t.Run(cause, func(t *testing.T) {
+			peer := newSDKPeer(t)
+			_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+			o := newOccurrenceFixture(t, peer, newSDKDeviceFixture(t, container), container, uuid.NewString(), nil)
+			o.mu.Lock()
+			o.diagnostic.Socket, o.diagnostic.Lifecycle = "reset", "logged out"
+			o.mu.Unlock()
+			o.fenceFailure(cause)
+			if err := o.join(peer.ctx); err != nil {
+				t.Fatal(err)
+			}
+			fact := o.diagnosticSnapshot()
+			if !fact.Failed() || fact.Disconnected || fact.Cause() != fixedSessionFailure(cause) || strings.Contains(fmt.Sprint(fact), "PRIVATE-CANARY") {
+				t.Fatal("local origin borrowed older socket/lifecycle facts or cleanup erased it", fact)
+			}
+		})
+	}
+	for _, interrupted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("intentional_join/interrupted=%t", interrupted), func(t *testing.T) {
+			peer := newSDKPeer(t)
+			_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+			o := newOccurrenceFixture(t, peer, newSDKDeviceFixture(t, container), container, uuid.NewString(), nil)
+			ctx := peer.ctx
+			if interrupted {
+				_, release, err := o.acquire(peer.ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			err := o.join(ctx)
+			fact := o.diagnosticSnapshot()
+			if interrupted {
+				if err == nil || !fact.Failed() || fact.Disconnected || fact.Cause() != "runtime release failed" {
+					t.Fatal("failed intentional cleanup hid its actual failure", fact, err)
+				}
+			} else if err != nil || fact.Failed() || !fact.Down || !fact.Intentional {
+				t.Fatal("normal shutdown became an error", fact, err)
+			}
+		})
+	}
 	min, max, response := whatsmeow.KeepAliveIntervalMin, whatsmeow.KeepAliveIntervalMax, whatsmeow.KeepAliveResponseDeadline
 	whatsmeow.KeepAliveIntervalMin, whatsmeow.KeepAliveIntervalMax, whatsmeow.KeepAliveResponseDeadline = 20*time.Millisecond, 21*time.Millisecond, 25*time.Millisecond
 	t.Cleanup(func() {
@@ -144,7 +189,7 @@ func TestWhatsAppDiagnosticOwnedLogoutAndReadGuardsBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			fact, got, err := c.SessionDiagnostic(f.ctx)
-			if err != nil || !fact.Down || fact.Cause() != "logged out" || got != account {
+			if err != nil || !fact.Failed() || !fact.Disconnected || fact.Cause() != "logged out" || got != account || c.FailureCause() != "logged out" || c.DisconnectionReason() != "logged out" {
 				t.Fatal("deleted device hid original occurrence fact", fact, err)
 			}
 			if _, _, err := c.AccountPresentation(f.ctx); err == nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,25 @@ import (
 )
 
 func TestWhatsAppCallbackPanicsReturnFailureAndFenceOccurrence(t *testing.T) {
+	t.Run("native_cause", func(t *testing.T) {
+		peer := newSDKPeer(t)
+		_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+		o, err := newClientOccurrence(peer.ctx, uuid.NewString(), uuid.NewString(), newSDKDeviceFixture(t, container), container.LIDMap(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		guard, err := o.bindCallbacks(func(context.Context, any) error { panic("PRIVATE-CANARY") }, func(context.Context, callbackFailure) error { return nil })
+		if err != nil || guard.receive(&events.Message{}) {
+			t.Fatal("native panic became successful capture", err)
+		}
+		if err := o.join(peer.ctx); err != nil {
+			t.Fatal(err)
+		}
+		fact := o.diagnosticSnapshot()
+		if !fact.Failed() || fact.Disconnected || fact.Cause() != "incoming callback panic" || strings.Contains(fmt.Sprint(fact), "PRIVATE-CANARY") {
+			t.Fatal("native callback origin or first failure was lost", fact)
+		}
+	})
 	for _, failRecord := range []bool{false, true} {
 		t.Run(map[bool]string{false: "recorded", true: "record_write_failed"}[failRecord], func(t *testing.T) {
 			connectionID, occurrenceID := uuid.NewString(), uuid.NewString()

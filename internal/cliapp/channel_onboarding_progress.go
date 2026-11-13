@@ -217,6 +217,14 @@ func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.Sessio
 	state, reason, account := "disconnected", "Not linked: run swarm channel connect whatsapp", ""
 	if connection != nil {
 		state, account = connection.State, connection.AccountPresentation
+		if state == "error" {
+			fmt.Fprint(out, "WhatsApp: error")
+			if account != "" {
+				fmt.Fprintf(out, " (%s)", cliSanitizeOneLineValue(account))
+			}
+			fmt.Fprintf(out, ": %s\n", cliSanitizeOneLineValue(connection.Cause))
+			return
+		}
 		switch state {
 		case "connected", "connecting", "pairing":
 			reason = ""

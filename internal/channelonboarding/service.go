@@ -274,6 +274,7 @@ type SessionConnectionReadback struct {
 	Unclaimed           *int64           `json:"account_unclaimed,omitempty"`
 	State               string           `json:"state"`
 	Reason              string           `json:"reason,omitempty"`
+	Cause               string           `json:"cause,omitempty"`
 	Linked              bool             `json:"linked"`
 	AccountPresentation string           `json:"account_presentation,omitempty"`
 	AccountName         string           `json:"account_name,omitempty"`
@@ -2571,7 +2572,7 @@ func (s *Service) sessionResult(ctx context.Context, op Operation, candidate *Ca
 			result.Pairing = &PairingReadback{Status: PairingStatusPreparing}
 		}
 	}
-	if result.Connection != nil && result.Pairing != nil && result.Pairing.Status == "awaiting_qr" {
+	if result.Connection != nil && result.Connection.State != "error" && result.Pairing != nil && result.Pairing.Status == "awaiting_qr" {
 		result.Connection.State = "pairing"
 	}
 	return result, nil

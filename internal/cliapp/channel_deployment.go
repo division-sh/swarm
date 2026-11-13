@@ -714,7 +714,12 @@ func writeDeploymentAccountStatus(w io.Writer, status channelonboarding.AccountS
 		}
 	}
 	fmt.Fprintf(w, "%s %s · %s · %s · %s", status.Provider, status.Account, status.State, role, status.Health)
-	if status.Reason != "" {
+	if status.Health == "error" {
+		fmt.Fprintf(w, ": %s", cliSanitizeOneLineValue(status.Cause))
+		if status.Reason == "competing_holders" {
+			fmt.Fprintf(w, " · %s", status.Reason)
+		}
+	} else if status.Reason != "" {
 		fmt.Fprintf(w, ": %s", status.Reason)
 	}
 	if status.Unclaimed != nil {

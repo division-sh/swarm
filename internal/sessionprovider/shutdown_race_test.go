@@ -100,6 +100,9 @@ func TestWhatsAppClientOccurrenceLogoutResultAndRemoteClose(t *testing.T) {
 			if err != nil && device.Deleted {
 				t.Fatal("failed logout deleted retained pairing")
 			}
+			if err == nil && o.diagnosticSnapshot().Failed() {
+				t.Fatal("successful intentional logout became an error")
+			}
 		})
 	}
 }

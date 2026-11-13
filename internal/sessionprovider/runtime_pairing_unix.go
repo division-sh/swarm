@@ -209,6 +209,20 @@ func (c *RuntimeConnection) DisconnectionReason() string {
 	return occurrence.failureReason
 }
 
+// FailureCause is reporting only, independent of the legacy control reason.
+func (c *RuntimeConnection) FailureCause() string {
+	if c == nil || c.state == nil {
+		return ""
+	}
+	if occurrence := c.state.currentOccurrence(); occurrence != nil {
+		fact := occurrence.diagnosticSnapshot()
+		if fact.Failed() {
+			return fact.Cause()
+		}
+	}
+	return ""
+}
+
 // Complete old-source input before the existing owner reopens the same pairing
 // under fresh source admission. No captured authority is projected into the new source.
 func (c *RuntimeConnection) PrepareSourceRollover(ctx context.Context) (err error) {

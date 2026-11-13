@@ -841,7 +841,12 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 		if state == "live" {
 			state = "connected"
 		}
-		if account.Reason != "" {
+		if account.Health == "error" {
+			state = "error: " + account.Cause
+			if account.Reason == "competing_holders" {
+				state += " · " + account.Reason
+			}
+		} else if account.Reason != "" {
 			state += ": " + account.Reason
 		}
 		fmt.Fprintf(p.out, "  %s: %s\n", label, state)

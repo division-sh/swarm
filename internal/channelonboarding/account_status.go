@@ -23,6 +23,7 @@ type AccountStatus struct {
 	Account   string          `json:"account"`
 	State     string          `json:"state"`
 	Reason    string          `json:"reason,omitempty"`
+	Cause     string          `json:"cause,omitempty"`
 	Linked    bool            `json:"linked"`
 	Health    string          `json:"health"`
 	Holders   []AccountHolder `json:"holders"`
@@ -133,9 +134,10 @@ func (s *Service) DeploymentAccountStatus(ctx context.Context, ref AccountRefere
 		status.Unclaimed = result.Connection.Unclaimed
 		status.Linked = result.Connection.Linked
 		status.Health, status.Reason = result.Connection.State, result.Connection.Reason
+		status.Cause = result.Connection.Cause
 		if result.Connection.State == "connected" {
 			status.State = "live"
-		} else if result.Connection.State == "disconnected" && result.Connection.Reason != "" {
+		} else if result.Connection.State == "error" || result.Connection.State == "disconnected" && result.Connection.Reason != "" {
 			status.State = "refused"
 		}
 	}
