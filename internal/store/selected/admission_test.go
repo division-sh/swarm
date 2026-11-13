@@ -35,7 +35,7 @@ import (
 func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent", "store.db")
 	inspection, err := OpenAdmissionInspection(context.Background(), AuthorityRequest{
-		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path},
+		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path}, ProviderFacts: channelfixture.Facts,
 	})
 	if err == nil {
 		inspection.Close()
@@ -66,7 +66,7 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 	}}
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			selection := AuthorityRequest{Selection: storebackend.Selection{Backend: backend}}
+			selection := AuthorityRequest{Selection: storebackend.Selection{Backend: backend}, ProviderFacts: channelfixture.Facts}
 			var bootstrap store.SchemaBootstrapper
 			var db *sql.DB
 			if backend == storebackend.BackendSQLite {

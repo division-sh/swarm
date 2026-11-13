@@ -151,7 +151,7 @@ func TestOwnerActivatedCloseRequiresExactProcessReceipt(t *testing.T) {
 
 func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) {
 	owner, err := OpenRuntime(context.Background(), RuntimeRequest{
-		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")},
+		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, ProviderFacts: channelfixture.Facts,
 	})
 	if err != nil {
 		t.Fatalf("OpenRuntime: %v", err)
@@ -178,7 +178,7 @@ func TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce(t *test
 	dsn, _, _ := testutil.StartEmptyPostgres(t)
 	owner, err := OpenRuntime(context.Background(), RuntimeRequest{
 		Selection:   storebackend.Selection{Backend: storebackend.BackendPostgres},
-		PostgresDSN: dsn,
+		PostgresDSN: dsn, ProviderFacts: channelfixture.Facts,
 	})
 	if err != nil {
 		t.Fatalf("OpenRuntime: %v", err)
