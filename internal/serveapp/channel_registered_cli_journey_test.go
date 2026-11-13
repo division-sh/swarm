@@ -17,7 +17,7 @@ func registeredChannelMailboxCLI(t *testing.T, h *channelOnboardingE2EHarness, w
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
 	command := append([]string{"--config", h.opts.ConfigPath, "mailbox"}, args...)
 	command = append(command, "--api-server", h.endpoint)
-	code := executeCLI(t.Context(), command, out, errOut, nil)
+	code := executeCLI(t.Context(), command, out, errOut, nil, ChannelRegistrations())
 	if (code == 0) != wantSuccess {
 		t.Fatalf("public mailbox %v exit=%d out=%s err=%s", args, code, out.String(), errOut.String())
 	}

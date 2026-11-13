@@ -278,7 +278,11 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, ChannelRegistrations()); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
 				t.Fatal("public account readback failed", code, listErr.String())
 			}
-			registered := listing.Accounts[0]
+			selected, found := ChannelRegistrations().Select(listing.Accounts[0].Operation.Provider)
+			if !found {
+				t.Fatal("public account readback has no exact installed provider facts")
+			}
+			registered := listing.Accounts[0].WithProviderFacts(selected.Facts)
 			if registered.Operation.OperationID != pairing.Operation.OperationID || registered.Operation.Phase != channelonboarding.PhaseSucceeded || !registered.Operation.AccountConfirmed || registered.Operation.IdentityOperationID == "" || registered.Binding == nil || registered.Binding.ExternalAccountRef != "15551234568@s.whatsapp.net" {
 				t.Fatal("public enrollment lost the original account or exact operator")
 			}
