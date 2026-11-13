@@ -211,6 +211,7 @@ func (am *AgentManager) Count() int {
 
 func (am *AgentManager) IsRunning() bool {
 	_, _, running := am.lifecycle.runSnapshot()
+	// Admission closes before accepted work and its producers finish.
 	if running && am.runtimeShutdownAdmissionClosed != nil && am.runtimeShutdownAdmissionClosed() {
 		return false
 	}

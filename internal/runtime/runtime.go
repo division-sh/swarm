@@ -2462,7 +2462,11 @@ func (rt *Runtime) drainAndJoinDeliveryContinuations(ctx context.Context, grace 
 	var result error
 	if rt.Manager != nil {
 		if err := rt.Manager.WaitForQuiescence(ctx); err != nil {
-			result = fmt.Errorf("agent manager shutdown: agent manager shutdown drain timed out after %s: %w", grace, err)
+			if ctx.Err() != nil {
+				result = fmt.Errorf("agent manager shutdown: agent manager shutdown drain timed out after %s: %w", grace, err)
+			} else {
+				result = fmt.Errorf("agent manager shutdown: %w", err)
+			}
 		}
 	}
 	if rt.deliveryContinuations != nil {
