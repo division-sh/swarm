@@ -59,21 +59,22 @@ func TestCompiledProcessFullLifecycleRetainedStateBothStores(t *testing.T) {
 }
 
 type joinedRetainedScenario struct {
-	t         *testing.T
-	ctx       context.Context
-	process   *releaseServeProcess
-	spec      releaseProcessSpec
-	binary    string
-	runID     string
-	seedID    string
-	card      fullLifecycleCard
-	session   goldenConversation
-	firstTurn goldenTurn
-	events    map[string]string
-	model     *llmapi.Server
-	telegram  *telegramapi.Double
-	unblock   func()
-	entered   <-chan []byte
+	t          *testing.T
+	ctx        context.Context
+	process    *releaseServeProcess
+	spec       releaseProcessSpec
+	binary     string
+	runID      string
+	seedID     string
+	card       fullLifecycleCard
+	session    goldenConversation
+	firstTurn  goldenTurn
+	events     map[string]string
+	memoryFlow string
+	model      *llmapi.Server
+	telegram   *telegramapi.Double
+	unblock    func()
+	entered    <-chan []byte
 }
 
 func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStoreSelection, arm string) []string {
@@ -451,6 +452,17 @@ func (s *joinedRetainedScenario) stableCheckpoint(retry, dead string) []string {
 	stages := map[string]bool{}
 	for _, entity := range listGoldenEntities(s.t, s.ctx, s.process.rpc, s.runID) {
 		if strings.HasPrefix(entity.FlowInstance, "control/") {
+			var detail struct {
+				Fields struct {
+					Key string `json:"key"`
+				} `json:"fields"`
+			}
+			if err := s.process.rpc.call(s.ctx, "entity.get", map[string]any{"entity_id": entity.EntityID, "run_id": s.runID}, &detail); err != nil {
+				s.t.Fatal(err)
+			}
+			if detail.Fields.Key == "memory" {
+				s.memoryFlow = entity.FlowInstance
+			}
 			stages[entity.CurrentState] = true
 			rows = append(rows, joinedJSON(entity))
 		}
@@ -472,7 +484,7 @@ func (s *joinedRetainedScenario) stableCheckpoint(retry, dead string) []string {
 	}
 	timers := 0
 	for _, instance := range diagnosis.Instances {
-		if instance.FlowInstance == "control/memory" && instance.Work.Timers > 0 && instance.NextWakeAt != nil {
+		if s.memoryFlow != "" && instance.FlowInstance == s.memoryFlow && instance.Work.Timers > 0 && instance.NextWakeAt != nil {
 			timers++
 			rows = append(rows, joinedJSON(instance))
 		}
@@ -505,9 +517,8 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 	rows := []string{"memory:cedar-731:3", "clock:24h:active", "run:paused", "card:continuity:approve"}
 	identities := map[string]string{s.runID: "run", s.card.CardID: "card:continuity", s.session.SessionID: "memory-session"}
 	entities := listGoldenEntities(s.t, s.ctx, s.process.rpc, s.runID)
-	for _, entity := range entities {
-		identities[entity.EntityID] = "instance:" + entity.FlowInstance
-	}
+	fields := map[string]any{}
+	reviewEntity, reviewFlow := "", ""
 	for _, entity := range entities {
 		var detail struct {
 			Fields json.RawMessage `json:"fields"`
@@ -515,8 +526,47 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 		if err := s.process.rpc.call(s.ctx, "entity.get", map[string]any{"entity_id": entity.EntityID, "run_id": s.runID}, &detail); err != nil {
 			s.t.Fatal(err)
 		}
-		rows = append(rows, joinedJSON([]any{entity.EntityType, entity.FlowInstance, entity.CurrentState, joinedDecode(s.t, detail.Fields)}))
+		fieldValues := joinedDecode(s.t, detail.Fields)
+		fields[entity.EntityID] = fieldValues
+		label := "root"
+		if object, ok := fieldValues.(map[string]any); ok {
+			if key, ok := object["item_id"].(string); ok {
+				label = "registry:" + key
+			} else if key, ok := object["key"].(string); ok {
+				label = "control:" + key
+				if key == "review" {
+					reviewEntity, reviewFlow = entity.EntityID, entity.FlowInstance
+				}
+			}
+		}
+		identities[entity.EntityID] = "entity:" + label
+		identities[entity.FlowInstance] = "path:" + label
 	}
+	for _, entity := range entities {
+		rows = append(rows, joinedJSON(joinedNormalize([]any{entity.EntityType, entity.FlowInstance, entity.CurrentState, fields[entity.EntityID]}, identities)))
+	}
+	var card struct {
+		DecisionCard struct {
+			Anchor   map[string]any  `json:"anchor"`
+			Snapshot json.RawMessage `json:"snapshot"`
+		} `json:"decision_card"`
+	}
+	if err := s.process.rpc.call(s.ctx, "mailbox.get", map[string]any{"mailbox_id": s.card.CardID}, &card); err != nil {
+		s.t.Fatal(err)
+	}
+	anchor := card.DecisionCard.Anchor
+	if reviewEntity == "" || anchor["entity_id"] != reviewEntity || anchor["flow_instance"] != reviewFlow || anchor["stage"] != "review" {
+		s.t.Fatalf("card is not anchored to the exact review instance: %v", anchor)
+	}
+	for _, field := range []string{"flow_instance_id", "stage_activation_id"} {
+		id, _ := anchor[field].(string)
+		if id == "" {
+			s.t.Fatalf("card lost %s", field)
+		}
+		identities[id] = "card-anchor:" + field
+	}
+	identities[s.card.CardContentHash] = "frozen-card-content"
+	rows = append(rows, joinedJSON(joinedNormalize(joinedDecode(s.t, card.DecisionCard.Snapshot), identities)))
 	events, err := listGoldenEvents(s.ctx, s.process.rpc, s.runID)
 	if err != nil {
 		s.t.Fatal(err)
@@ -546,7 +596,7 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 			if event.EventID == retry && (delivery.Status != "failed" || !delivery.RetryScheduled) || event.EventID == dead && delivery.Status != "dead_letter" {
 				s.t.Fatalf("retained failure changed at comparison: %+v", event)
 			}
-			rows = append(rows, joinedJSON([]any{identities[event.EventID], event.EventName, payload, identities[event.SourceEventID], delivery.SubscriberType, delivery.SubscriberID, delivery.Target.FlowInstance, delivery.Status, delivery.Terminal, delivery.ReasonCode}))
+			rows = append(rows, joinedJSON(joinedNormalize([]any{identities[event.EventID], event.EventName, payload, identities[event.SourceEventID], delivery.SubscriberType, delivery.SubscriberID, delivery.Target.FlowInstance, delivery.Status, delivery.Terminal, delivery.ReasonCode}, identities)))
 		}
 	}
 	header := readPublicClockRun(s.t, s.process, s.runID)

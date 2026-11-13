@@ -61,7 +61,7 @@ connect:
 			raw = append(raw, []byte("  note: text\n")...)
 		}
 	}
-	writeReleaseFile(t, rootEvents, string(raw)+"continuity.tick: {}\n")
+	writeReleaseFile(t, rootEvents, string(raw)+"continuity.tick:\n")
 	for path, body := range map[string]string{
 		"control/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"control/schema.yaml": `instance: key
