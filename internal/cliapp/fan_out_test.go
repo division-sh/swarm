@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/google/uuid"
 )
@@ -23,10 +24,20 @@ func fanOutCLIPage() fanoutobligation.ListPage {
 }
 
 func TestFanOutReadCLIPageAndFilters(t *testing.T) {
-	for _, format := range []string{"human", "json", "quiet", "root", "live", "live_no_commit", "live_json", "live_quiet"} {
+	for _, format := range []string{"human", "json", "quiet", "root", "live", "live_no_commit", "live_json", "live_quiet", "read_wait", "read_unknown"} {
 		t.Run(format, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
 			page := fanOutCLIPage()
+			if strings.HasPrefix(format, "read_") {
+				row := &page.Intents[0]
+				row.DurableState = "retry_wait"
+				row.ReadWait = &fanoutobligation.ReadWaitObservation{NotBefore: page.ObservedAt.Add(time.Second)}
+				if format == "read_wait" {
+					since, age := page.ObservedAt.Add(-2*time.Second), int64(2000)
+					failure := failures.Normalize(failures.New(failures.ClassDependencyUnavailable, "fan_out_read_retryable", "runtime.fan_out", "admit_read", nil), "runtime.fan_out", "admit_read")
+					row.ReadWait.Since, row.ReadWait.AgeMS, row.ReadWait.Failure = &since, &age, &failure
+				}
+			}
 			if strings.HasPrefix(format, "live") {
 				at := page.ObservedAt.Add(time.Second)
 				eligible, workers, active, latency := false, 8, 3, 2.5
@@ -77,6 +88,16 @@ func TestFanOutReadCLIPageAndFilters(t *testing.T) {
 				t.Fatalf("params=%v", params)
 			}
 			switch format {
+			case "read_wait", "read_unknown":
+				age, reason := "unavailable", "read_attempt_disposition_unavailable"
+				if format == "read_wait" {
+					age, reason = "2000", "fan_out_read_retryable"
+				}
+				for _, want := range []string{"state=retry_wait", "read_admission_not_before=2026-09-14T12:00:01Z", "observed_failure_age_ms=" + age, "cause=" + reason} {
+					if !strings.Contains(out.String(), want) {
+						t.Fatalf("missing %s: %s", want, out.String())
+					}
+				}
 			case "live", "live_no_commit":
 				latency := "2.5"
 				if format == "live_no_commit" {
