@@ -215,6 +215,9 @@ func provePublicCompletionManagedCommitCut(t *testing.T, backend servedparity.Ba
 	if eventBacked && (firstDisposals != 1 || firstDisposeErr != nil) {
 		t.Fatalf("managed commit lost exact original claim disposition: count=%d err=%v", firstDisposals, firstDisposeErr)
 	}
+	if lookup := manager.LookupBundleHashStatus(hash); lookup.Loaded() {
+		t.Fatalf("managed shutdown retained source visibility after the drain: %+v", lookup)
+	}
 	h.stop(t)
 	probe.afterCommit = nil
 	h.start(t)
