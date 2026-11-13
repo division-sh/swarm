@@ -5,6 +5,7 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -429,12 +430,6 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 				mux.Handle("/", h.provider)
 				mux.Handle("/webhooks/_swarm_probe/", httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: h.opts.PublicWebhookListen}))
 				peer := newServeNativeProtocolPeer(t, mux)
-				h.opts.SwarmDir, h.opts.SwarmDirSet = filepath.Join(t.TempDir(), "native"), true
-				body, err := os.ReadFile(h.opts.ConfigPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				writeStandingCandidateFile(t, h.opts.ConfigPath, string(body)+"\npaths:\n  swarm_dir: "+h.opts.SwarmDir+"\n")
 				first := issue3011RegisterForSend(t, h.opts, peer, 1)
 				peer.account.User, peer.lid.User = "15551234570", "100000000003"
 				second := issue3011RegisterForSend(t, h.opts, peer, 2)
@@ -459,7 +454,8 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 						return false
 					}
 					_, ready, err := connection.SessionRecovery(ctx, op)
-					return err == nil && ready
+					reads, _ := h.provider.CommandReadbackCounts()
+					return err == nil && ready && reads > 0
 				}
 				waitSessionRecovery(t, func() bool { return healthy(registered[0].Operation) && healthy(registered[1].Operation) }, h.process.outputString)
 				node := waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"}, Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "replaced"}}}}
@@ -478,13 +474,17 @@ func TestRunServeTerminalAccountDoesNotStarveRecoveryBothStores(t *testing.T) {
 				}, h.process.outputString)
 				readsBefore, _ := h.provider.CommandReadbackCounts()
 				peer.disconnect()
+				observed := ""
 				waitSessionRecovery(t, func() bool {
 					reads, _ := h.provider.CommandReadbackCounts()
 					peer.mu.Lock()
-					reconnected := peer.connections == before+1
+					connections := peer.connections
 					peer.mu.Unlock()
-					return reconnected && healthy(registered[1].Operation) && reads > readsBefore && strings.Contains(diagnostics.String(), terminalErr.Error())
-				}, h.process.outputString)
+					ready := healthy(registered[1].Operation)
+					logged := strings.Contains(diagnostics.String(), terminalErr.Error())
+					observed = fmt.Sprintf("connections_delta=%d expected=1 native_ready=%t inbox_reads_delta=%d terminal_logged=%t", connections-before, ready, reads-readsBefore, logged)
+					return connections == before+1 && ready && reads > readsBefore && logged
+				}, func() string { return observed + "\n" + diagnostics.String() + h.process.outputString() })
 				peer.mu.Lock()
 				after, sent := peer.connections, peer.acceptedSends
 				peer.mu.Unlock()
