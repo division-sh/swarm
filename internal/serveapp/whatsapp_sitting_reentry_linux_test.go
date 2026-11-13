@@ -272,7 +272,11 @@ func requireSittingPreviewReentry(t *testing.T, ctx context.Context, config, dir
 	if json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 {
 		t.Fatal("restored account list did not return exactly one registration")
 	}
-	registered := listing.Accounts[0]
+	selected, found := ChannelRegistrations().Select(listing.Accounts[0].Operation.Provider)
+	if !found {
+		t.Fatal("restored account readback has no exact installed provider facts")
+	}
+	registered := listing.Accounts[0].WithProviderFacts(selected.Facts)
 	if registered.Operation.OperationID != before.OperationID || registered.Operation.AccountReference != before.AccountReference || !registered.Operation.AccountConfirmed || registered.Operation.Phase != channelonboarding.PhaseSucceeded || registered.Binding == nil || registered.Binding.ExternalAccountRef != "15551234568@s.whatsapp.net" {
 		t.Fatal("restored approval lost its retained account or exact operator")
 	}
