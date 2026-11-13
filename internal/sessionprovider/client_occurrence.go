@@ -91,10 +91,7 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 			o.connectOnce.Do(func() { close(o.connected) })
 		case *events.KeepAliveTimeout, *events.KeepAliveRestored:
 			_, timeout := event.(*events.KeepAliveTimeout)
-			o.mu.Lock()
-			o.diagnostic.KeepAliveTimeout = o.diagnostic.KeepAliveTimeout || timeout
-			o.diagnostic.KeepAliveRestored = o.diagnostic.KeepAliveRestored || !timeout
-			o.mu.Unlock()
+			o.observeKeepAlive(timeout)
 		case *events.Disconnected:
 			o.mu.Lock()
 			if !o.fenced {
