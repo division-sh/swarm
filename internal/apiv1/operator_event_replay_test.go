@@ -251,7 +251,11 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 		t.Fatal(err)
 	}
 	foreignEnvelope := events.EnvelopeForTargetRoute(replay.Envelope(), events.RouteIdentity{FlowID: "foreign", FlowInstance: uuid.NewString(), EntityID: uuid.NewString()})
-	if err := selection.ValidateEvent(eventtest.WithEnvelope(replay, foreignEnvelope)); err == nil {
+	foreignReplay, err := events.ResolveEnvelope(replay, foreignEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selection.ValidateEvent(foreignReplay); err == nil {
 		t.Fatal("replay selection accepted a substituted event envelope")
 	}
 	for _, ids := range [][]string{nil, {deliveryID, deliveryID}, {"foreign-delivery"}} {
