@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,13 +50,14 @@ type lifecycleTransitionTrackingBus struct {
 	*runtimebus.EventBus
 	resetCalls    atomic.Int32
 	shutdownJoins atomic.Int32
+	shutdownErr   error
 	resetStarted  chan struct{}
 	resetRelease  <-chan struct{}
 }
 
 func (b *lifecycleTransitionTrackingBus) JoinManagerShutdownDependencies(context.Context) error {
 	b.shutdownJoins.Add(1)
-	return nil
+	return b.shutdownErr
 }
 
 func (b *lifecycleTransitionTrackingBus) ResetInMemoryState() error {
@@ -77,7 +80,7 @@ type blockedManagerLifecycleFixture struct {
 	cancelRun context.CancelFunc
 }
 
-func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *runtimebus.EventBus, native *ManagerDeliveryNativeFixture) blockedManagerLifecycleFixture {
+func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *runtimebus.EventBus, native *ManagerDeliveryNativeFixture, dependencies ...ShutdownDependencies) blockedManagerLifecycleFixture {
 	t.Helper()
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -94,9 +97,13 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 			return nil, ctx.Err()
 		},
 	}
+	opts := AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()}
+	if len(dependencies) != 0 {
+		opts.ShutdownDependencies = dependencies[0]
+	}
 	manager := newTestAgentManagerWithOptions(t, managerBus, func(runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native, SemanticSource: native.SemanticSource, SourceArtifactFact: native.Authority.SourceArtifact()})
+	}, opts)
 	if err := manager.spawnAgentInternal(native.Context, PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestEphemeralTopologyAdmissionForSource(t, native.SemanticSource),
 	}, true); err != nil {
@@ -272,27 +279,108 @@ func TestManagerShutdownDuringResetJoinsResetTransition(t *testing.T) {
 }
 
 func ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	t.Run("caller_budget_does_not_expire_shared_work", func(t *testing.T) {
+		native := newNativeDelivery(t)
+		eventBus := newLifecycleTransitionEventBus(t)
+		fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
+		transition := fixture.manager.lifecycle.prepareShutdownTransitionWithGrace(true, time.Second)
+		short := make(chan error, 1)
+		long := make(chan error, 1)
+		go func() { short <- fixture.manager.ShutdownWithOptions(ShutdownOptions{Grace: 10 * time.Millisecond}) }()
+		go func() { long <- fixture.manager.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}) }()
+		assertLifecycleCallBlocked(t, short, "short caller")
+		assertLifecycleCallBlocked(t, long, "long caller")
+		if err := transition.drainCtx.Err(); err != nil {
+			t.Fatalf("caller reporting budget expired shared work: %v", err)
+		}
+		fixture.unblock()
+		select {
+		case err := <-short:
+			if err == nil {
+				t.Fatal("short caller lost its own reporting timeout")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out joining short caller")
+		}
+		awaitLifecycleCall(t, long, "long caller with successful shared work")
+		if transition.result != nil {
+			t.Fatalf("caller-only timeout latched as shared failure: %v", transition.result)
+		}
+	})
+	for _, independent := range []bool{false, true} {
+		name := "shared_work_expiry"
+		if independent {
+			name += "_with_independent_failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			proveManagerSharedDrainExpiry(t, newNativeDelivery, independent)
+		})
+	}
+}
+
+func proveManagerSharedDrainExpiry(t *testing.T, newNativeDelivery managerDeliveryNativeFactory, independent bool) {
+	t.Helper()
 	native := newNativeDelivery(t)
 	eventBus := newLifecycleTransitionEventBus(t)
-	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
+	dependencies := &lifecycleTransitionTrackingBus{EventBus: eventBus}
+	if independent {
+		dependencies.shutdownErr = errors.New("independent shutdown dependency failure")
+	}
+	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native, dependencies)
+	runCtx, _, _ := fixture.manager.lifecycle.runSnapshot()
+	transition := fixture.manager.lifecycle.prepareShutdownTransitionWithGrace(true, 10*time.Millisecond)
+	deadline, _ := transition.drainCtx.Deadline()
 	short := make(chan error, 1)
 	long := make(chan error, 1)
 	go func() { short <- fixture.manager.ShutdownWithOptions(ShutdownOptions{Grace: 10 * time.Millisecond}) }()
-	waitForManagerShuttingDown(t, fixture.manager)
+	select {
+	case <-runCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("shared work deadline did not cancel held work")
+	}
+	if transition.drainCtx.Err() != context.DeadlineExceeded {
+		t.Fatalf("held work canceled without shared drain expiry: %v", transition.drainCtx.Err())
+	}
+	selected := fixture.manager.lifecycle.prepareShutdownTransitionWithGrace(true, time.Second)
+	if selected != transition {
+		t.Fatal("later caller replaced the shared transition")
+	}
+	if got, _ := selected.drainCtx.Deadline(); !got.Equal(deadline) {
+		t.Fatal("later caller granted a fresh work deadline")
+	}
 	go func() { long <- fixture.manager.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}) }()
 	assertLifecycleCallBlocked(t, short, "short-grace shutdown")
 	assertLifecycleCallBlocked(t, long, "long-grace shutdown")
-
 	fixture.unblock()
 	select {
 	case err := <-short:
-		if err == nil {
-			t.Fatal("short-grace shutdown returned nil after its reporting budget elapsed")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("short caller lost shared drain expiry: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for short-grace shutdown")
 	}
-	awaitLifecycleCall(t, long, "long-grace shutdown")
+	// Select the exact shared result even if its final join won the scheduling race.
+	shared := waitForRuntimeLifecycleTransition(selected, time.Second, "shutdown drain")
+	if !errors.Is(shared, context.DeadlineExceeded) {
+		t.Errorf("later waiter reported success after shared work expired: %v", shared)
+	}
+	select {
+	case err := <-long:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("long caller lost shared drain expiry: %v", err)
+		}
+		for _, result := range []error{shared, err} {
+			if independent && (!errors.Is(result, dependencies.shutdownErr) || strings.Count(result.Error(), dependencies.shutdownErr.Error()) != 1) {
+				t.Errorf("independent failure not retained exactly once: %v", result)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out joining later shutdown caller")
+	}
+	if got := dependencies.shutdownJoins.Load(); got != 1 {
+		t.Errorf("shared dependency joins = %d, want 1", got)
+	}
 }
 
 func ProveNativeManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
