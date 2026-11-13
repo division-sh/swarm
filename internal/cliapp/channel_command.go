@@ -148,7 +148,11 @@ func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, i
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if binding := selectedChannelFacts(opts.channelRegistration, operationID); binding.Session() {
+	binding := selectedChannelFacts(opts.channelRegistration, operationID)
+	if opts.channelReadbackFact.MatchesProvider(operationID) {
+		binding = opts.channelReadbackFact
+	}
+	if binding.Session() {
 		list, err := fetchChannelList(ctx, client)
 		if err != nil {
 			return returnCLIAPIError(errOut, err, channelErrorClassifier())
