@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/google/uuid"
 )
 
@@ -33,6 +34,11 @@ func TestChannelLogoutCLIUsesExactRetainedOperation(t *testing.T) {
 				server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 					methods = append(methods, request.Method)
 					switch request.Method {
+					case "channel.list":
+						return map[string]any{"channels": []any{map[string]any{
+							"operation":  map[string]any{"operation_id": operatorChannelCLIOperation, "provider": "whatsapp", "phase": channelonboarding.PhaseSucceeded},
+							"connection": map[string]any{"linked": true, "state": "connected"},
+						}}}
 					case "channel.onboarding_get":
 						if request.Params["operation_id"] != operatorChannelCLIOperation {
 							t.Fatal("readback guessed another operation")
@@ -62,6 +68,12 @@ func TestChannelLogoutCLIUsesExactRetainedOperation(t *testing.T) {
 				}
 				if output == "--json" && !strings.Contains(stdout, effectID) {
 					t.Fatalf("JSON lost exact effect identity: %q", stdout)
+				}
+				methods = nil
+				stdout, stderr, code = runOperatorChannelCLIWithBinding(t, server, channelfixture.For("whatsapp"), "",
+					"channel", "logout", "whatsapp", "--idempotency-key", "logout-key", output)
+				if code != 0 || stderr != "" || strings.Join(methods, ",") != "channel.list,channel.onboarding_get,channel.logout" {
+					t.Fatalf("selected-fact logout code=%d methods=%v stdout=%q stderr=%q", code, methods, stdout, stderr)
 				}
 			})
 		}

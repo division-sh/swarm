@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/cliapp"
 )
 
 func TestRunServeWhatsAppPublicLogoutBothStores(t *testing.T) {
@@ -65,8 +66,12 @@ func requireServedNativeCLILogout(t *testing.T, endpoint, operationID, key strin
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
-	code := executeCLI(ctx, []string{"channel", "logout", operationID, "--idempotency-key", key,
-		"--api-server", server.String(), "--api-token-file", token, "--json"}, &stdout, &stderr, nil, ChannelRegistrations())
+	facts, found := installedChannelFactsFor("whatsapp")
+	if !found {
+		t.Fatal("WhatsApp logout fixture requires its installed provider facts")
+	}
+	code := cliapp.ExecuteWithChannelReadbackFact(ctx, []string{"channel", "logout", operationID, "--idempotency-key", key,
+		"--api-server", server.String(), "--api-token-file", token, "--json"}, &stdout, &stderr, nil, RunTestSession, facts)
 	if code != 0 {
 		t.Fatal("public CLI logout failed", code, stdout.String(), stderr.String())
 	}
