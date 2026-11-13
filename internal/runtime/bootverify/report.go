@@ -166,10 +166,13 @@ func (r Report) DiscoveredToolAdmission() (map[string]runtimemcp.DiscoveredTool,
 	return maps.Clone(r.mcpTools), nil
 }
 
+type AdmittedCredentialInspector func(context.Context, runtimecredentials.RequirementUse) (runtimecredentials.AdmittedSnapshot, bool, error)
+
 type Options struct {
 	ExecutionPosture        executionposture.Posture
 	Purpose                 ValidationPurpose
 	Credentials             runtimecredentials.Store
+	AdmittedCredentials     AdmittedCredentialInspector
 	ManagedCredentials      runtimemanagedcredentials.Store
 	EffectReachability      SourceBootEffectReachability
 	CheckMCPReachable       bool

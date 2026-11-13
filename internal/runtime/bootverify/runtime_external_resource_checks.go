@@ -3,6 +3,7 @@ package bootverify
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -144,11 +145,31 @@ func MissingStaticCredentialRequirements(ctx context.Context, source semanticvie
 // InspectStaticCredentialRequirements retains the provenance from the same
 // observations used by the missing-credential admission check.
 func InspectStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
-	index := runtimecredentials.BuildRequirementIndex(source)
+	index := runtimecredentials.BuildRequirementUses(source)
 	keys := sortedSetKeysLocal(index)
 	out := make([]runtimecredentials.Descriptor, 0, len(keys))
 	for _, key := range keys {
-		requirements := liveStaticCredentialRequirements(source, opts, index[key])
+		var requirements []runtimecredentials.Requirement
+		for _, use := range index[key] {
+			if !requiresLiveCredential(opts, use.Kind, use.Name) {
+				continue
+			}
+			if opts.AdmittedCredentials != nil {
+				observed, admitted, err := opts.AdmittedCredentials(ctx, use)
+				if err != nil {
+					return nil, staticCredentialInspectionError(key, err)
+				}
+				if admitted {
+					descriptor := observed.Descriptor()
+					descriptor.RequiredBy = []runtimecredentials.Requirement{use.Requirement}
+					out = append(out, descriptor)
+					continue
+				}
+			}
+			if !slices.Contains(requirements, use.Requirement) {
+				requirements = append(requirements, use.Requirement)
+			}
+		}
 		if len(requirements) == 0 {
 			continue
 		}
@@ -168,16 +189,6 @@ func InspectStaticCredentialRequirements(ctx context.Context, source semanticvie
 func staticCredentialInspectionError(key string, cause error) error {
 	failure := failures.Wrap(failures.ClassDependencyUnavailable, "credential_inspection_unavailable", "bootverify", "static_credential_inspection", map[string]any{"credential_key": key}, cause)
 	return fmt.Errorf("required static credential inspection is unavailable for %s: %w", key, failure)
-}
-
-func liveStaticCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimecredentials.Requirement) []runtimecredentials.Requirement {
-	out := make([]runtimecredentials.Requirement, 0, len(requirements))
-	for _, requirement := range requirements {
-		if requiresLiveCredential(opts, requirement.Kind, requirement.Name) {
-			out = append(out, requirement)
-		}
-	}
-	return out
 }
 
 func liveManagedCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimemanagedcredentials.Requirement) []runtimemanagedcredentials.Requirement {

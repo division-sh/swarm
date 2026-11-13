@@ -39,6 +39,8 @@ type WorkflowContractValidationOptions struct {
 	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
 	ChannelPlans                   []packs.SatisfactionPlan
 	ChannelActivationPublication   channelonboarding.ChannelActivationPublication
+	ChannelOnboardingStore         channelonboarding.Store
+	admittedCredentials            runtimebootverify.AdmittedCredentialInspector
 }
 
 type WorkflowContractValidationResult struct {
@@ -132,10 +134,14 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result.finishAdmissionClause(phase)
 	phase = ""
 	registryExecuted = true
+	if opts.Purpose != runtimebootverify.StructuralValidation && opts.admittedCredentials == nil {
+		opts.admittedCredentials = bootAdmittedCredentials(source, opts.ChannelOnboardingStore, opts.ProviderCredentials, opts.ChannelPlans)
+	}
 	registered := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		ExecutionPosture:        opts.ExecutionPosture,
 		Purpose:                 opts.Purpose,
 		Credentials:             opts.Credentials,
+		AdmittedCredentials:     opts.admittedCredentials,
 		ManagedCredentials:      opts.ManagedCredentials,
 		EffectReachability:      result.bootEffectReachability,
 		CheckMCPReachable:       opts.CheckMCPReachable,

@@ -17,6 +17,14 @@ type Requirement struct {
 	Name string
 }
 
+// RequirementUse retains the declaration seat until boot evidence is selected.
+// Presentation still uses the coalesced Requirement, never an authority by key.
+type RequirementUse struct {
+	Requirement
+	FlowID string
+	Role   string
+}
+
 type Descriptor struct {
 	Key        string
 	Present    bool
@@ -38,6 +46,17 @@ var ErrStoreLockUnsupported = fmt.Errorf("credential store locking is unsupporte
 
 func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement {
 	index := map[string][]Requirement{}
+	for key, uses := range BuildRequirementUses(source) {
+		for _, use := range uses {
+			index[key] = append(index[key], use.Requirement)
+		}
+		index[key] = normalizeRequirements(index[key])
+	}
+	return index
+}
+
+func BuildRequirementUses(source semanticview.Source) map[string][]RequirementUse {
+	index := map[string][]RequirementUse{}
 	if source == nil {
 		return index
 	}
@@ -49,13 +68,10 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 	for _, scope := range source.FlowScopes() {
 		appendPolicyCredentialRequirements(index, source, strings.TrimSpace(scope.ID))
 	}
-	for key, refs := range index {
-		index[key] = normalizeRequirements(refs)
-	}
 	return index
 }
 
-func appendToolRequirements(index map[string][]Requirement, source semanticview.Source, flowID string, entries map[string]runtimecontracts.ToolSchemaEntry) {
+func appendToolRequirements(index map[string][]RequirementUse, source semanticview.Source, flowID string, entries map[string]runtimecontracts.ToolSchemaEntry) {
 	for name, entry := range entries {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -69,12 +85,12 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 			if storeKey == "" {
 				continue
 			}
-			index[storeKey] = append(index[storeKey], Requirement{Kind: "tool", Name: name})
+			index[storeKey] = append(index[storeKey], RequirementUse{Requirement: Requirement{Kind: "tool", Name: name}, FlowID: flowID, Role: key})
 		}
 	}
 }
 
-func appendPolicyCredentialRequirements(index map[string][]Requirement, source semanticview.Source, flowID string) {
+func appendPolicyCredentialRequirements(index map[string][]RequirementUse, source semanticview.Source, flowID string) {
 	if value, ok := semanticview.PolicyValueForFlow(source, flowID, "mcp_servers"); ok {
 		for name, key := range parseMCPServerCredentialKeys(value.Value) {
 			appendPolicyCredentialRequirement(index, source, flowID, key, Requirement{Kind: "mcp_server", Name: name})
@@ -87,7 +103,7 @@ func appendPolicyCredentialRequirements(index map[string][]Requirement, source s
 	}
 }
 
-func appendPolicyCredentialRequirement(index map[string][]Requirement, source semanticview.Source, flowID, key string, ref Requirement) {
+func appendPolicyCredentialRequirement(index map[string][]RequirementUse, source semanticview.Source, flowID, key string, ref Requirement) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return
@@ -99,7 +115,11 @@ func appendPolicyCredentialRequirement(index map[string][]Requirement, source se
 	if storeKey == "" {
 		return
 	}
-	index[storeKey] = append(index[storeKey], ref)
+	index[storeKey] = append(index[storeKey], RequirementUse{Requirement: ref, FlowID: flowID})
+}
+
+func (s AdmittedSnapshot) Descriptor() Descriptor {
+	return Descriptor{Key: s.Key, Present: s.Present, Source: s.Source, Writable: s.Writable, Shadowed: s.Shadowed, UpdatedAt: s.UpdatedAt, sourceFact: s.SourceFact()}
 }
 
 func Describe(ctx context.Context, store Store, source semanticview.Source, key string) (Descriptor, error) {
