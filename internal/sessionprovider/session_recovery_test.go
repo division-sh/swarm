@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
+	"go.mau.fi/whatsmeow/socket"
 )
 
 func recoveryNativeFixture(t *testing.T, backend string, registered bool) (*activeInputFixture, *RuntimeConnection, func() (*RuntimeConnection, error)) {
@@ -209,12 +210,27 @@ func TestWhatsAppRecoveryPermanentEventsBothStores(t *testing.T) {
 
 // Invariant: only actual network-start leaves qualify; mixed storage/cancel/fence failures never do.
 func TestWhatsAppRecoveryStartErrorBranches(t *testing.T) {
-	for _, err := range []error{syscall.ECONNREFUSED, fmt.Errorf("dial: %w", syscall.ENETUNREACH), syscall.ETIMEDOUT} {
+	for _, err := range []error{
+		syscall.ECONNREFUSED,
+		fmt.Errorf("dial: %w", syscall.ENETUNREACH),
+		syscall.ETIMEDOUT,
+		fmt.Errorf("%w: %w", socket.ErrDialFailed, fmt.Errorf("dial: %w", syscall.ECONNREFUSED)),
+	} {
 		if !transientConnectError(err) {
 			t.Fatal("network start refused", err)
 		}
 	}
-	for _, err := range []error{errClientOccurrenceFenced, context.Canceled, errors.Join(syscall.ECONNREFUSED, errSessionAccount), errors.New("unknown")} {
+	for _, err := range []error{
+		errClientOccurrenceFenced,
+		context.Canceled,
+		errors.Join(syscall.ECONNREFUSED, errSessionAccount),
+		errors.New("unknown"),
+		socket.ErrDialFailed,
+		errors.Join(socket.ErrDialFailed, syscall.ECONNREFUSED, errSessionAccount),
+		errors.Join(socket.ErrDialFailed, syscall.ECONNREFUSED, context.Canceled),
+		errors.Join(socket.ErrDialFailed, syscall.ECONNREFUSED, channelonboarding.ErrSessionNotLinked),
+		errors.Join(socket.ErrDialFailed, syscall.ECONNREFUSED, errClientOccurrenceFenced),
+	} {
 		if transientConnectError(err) {
 			t.Fatal("unqualified error admitted", err)
 		}
