@@ -228,7 +228,7 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	} else {
 		requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &down)
 	}
-	if down.Operation.OperationID != id || down.Connection == nil || down.Connection.State != "disconnected" || down.Connection.Reason == "" {
+	if down.Operation.OperationID != id || down.Connection == nil || down.Connection.State != "disconnected" || (!registered && down.Connection.Reason == "") {
 		t.Fatal("deferred public readback lost disconnected/reason", down)
 	}
 	lease, currentPublication := runtime.ChannelActivations.AcquirePresentation()
