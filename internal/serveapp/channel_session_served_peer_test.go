@@ -135,7 +135,7 @@ type servedNativeReceiver struct {
 	lid    types.JID
 }
 
-func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
+func newServeNativeProtocolPeer(t *testing.T, telegramHandler ...http.Handler) *serveNativeProtocolPeer {
 	t.Helper()
 	noise := whatsappfixture.NewNoiseServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -199,8 +199,17 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 	transport := server.Client().Transport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.TLSClientConfig.ServerName = "example.com"
+	var telegram *httptest.Server
+	if len(telegramHandler) > 0 {
+		telegram = httptest.NewTLSServer(telegramHandler[0])
+		t.Cleanup(telegram.Close)
+		transport.TLSClientConfig.RootCAs.AddCert(telegram.Certificate())
+	}
 	dial := &net.Dialer{}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if telegram != nil && address == "api.telegram.org:443" {
+			return dial.DialContext(ctx, network, telegram.Listener.Addr().String())
+		}
 		if address == "web.whatsapp.com:443" {
 			peer.mu.Lock()
 			fail := peer.failNextDial
