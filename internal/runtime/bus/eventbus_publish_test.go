@@ -1706,9 +1706,9 @@ func TestEventBusCheckPublishRecipientPlanReportsSubscribedPublishWithoutDeliver
 }
 
 func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t *testing.T) {
-	store := &descriptorAwareEventStore{
+	store := &directRecipientTransactionalStore{
 		descriptors: []runtimebus.ActiveAgentDescriptor{
-			testActiveAgentDescriptor(t, "agent-a", "", ""),
+			testActiveAgentDescriptor(t, "agent-a", eventtest.UUID("ent-1"), ""),
 		},
 	}
 	eb, err := newScopedTestEventBus(t, store)
@@ -1734,9 +1734,13 @@ func TestEventBusPublishDirect_PersistsButDoesNotMarkDeliveredBeforeRealFanOut(t
 	}
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassTargetUnreachable || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" {
-		t.Fatalf("PublishDirect failure = %#v, want authoritative delivery incomplete", failure)
+		t.Fatalf("PublishDirect failure = %#v (error=%v), want authoritative delivery incomplete", failure, err)
 	}
-	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"agent-a"})
+	persisted, readErr := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID())
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	assertSortedStringsEqual(t, persisted, []string{"agent-a"})
 }
 
 func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *testing.T) {
@@ -1745,7 +1749,7 @@ func TestEventBusPublishDirect_PreservesContextOnPersistedAndLiveDelivery(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptor(t, "agent-a", "", ""))
+	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptor(t, "agent-a", runtimebustest.DefaultRunID, ""))
 	ch := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.direct"))
 	eventID := uuid.NewString()
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:direct-context"}}

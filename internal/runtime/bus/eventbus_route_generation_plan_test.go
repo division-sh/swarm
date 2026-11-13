@@ -164,7 +164,7 @@ func TestEventBusIdentityRoutePlanResolvesCurrentAgentGenerationAtDispatch(t *te
 	const agentID = "identity-route-generation-agent"
 	oldToken := testAgentLifecycleToken(t, agentID, "", 14, 1)
 	newToken := testAgentLifecycleToken(t, agentID, "", 14, 2)
-	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
+	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity, EntityID: busInternalTestRunID})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.identity_route")))
 	evt := routeGenerationTestEvent("identity-route-generation", "test.identity_route")
 	evt = eventtest.WithEnvelope(evt, events.EnvelopeForEntityID(evt.Envelope(), busInternalTestRunID))
