@@ -255,7 +255,7 @@ inputs: [inbound.telegram.text_message]
 			if status := command("channel", "status", "telegram", account); !strings.Contains(status, account) {
 				t.Fatal("public status omitted exact bot", status)
 			}
-			_, count := provider.OnboardingCounts()
+			_, count := provider.Counts()
 			if count != 0 {
 				t.Fatal("no-agent/no-HITL rehearsal sent output before customer input", count)
 			}
@@ -275,7 +275,15 @@ inputs: [inbound.telegram.text_message]
 			if response.StatusCode != http.StatusAccepted {
 				t.Fatal("native HTTPS inbound refused", response.StatusCode, process.outputString())
 			}
-			delivery := waitChannelOnboardingDelivery(t, provider, 0)
+			var delivery map[string]any
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+				if delivery = provider.Delivery(0); delivery != nil {
+					break
+				}
+			}
+			if delivery == nil {
+				t.Fatal("timed out waiting for Telegram delivery 0")
+			}
 			if fmt.Sprint(delivery["chat_id"]) != "1001" || delivery["text"] != text {
 				t.Fatal("wrong reply destination or text", delivery)
 			}
@@ -287,7 +295,7 @@ inputs: [inbound.telegram.text_message]
 			if code := process.stop(); code != 0 {
 				t.Fatal("public serve did not join after logout", code)
 			}
-			_, count = provider.OnboardingCounts()
+			_, count = provider.Counts()
 			if count != 1 {
 				t.Fatal("sitting did not produce exactly one reply", count)
 			}
