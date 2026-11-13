@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,12 +89,16 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 		operands  []string
 		mismatch  bool
 		connected bool
+		expect    string
 	}{
-		{"false", root, []string{source}, false, false},
-		{"true", root, []string{source}, true, true},
-		{"cwd omitted", source, nil, false, false},
-		{"cwd dot", source, []string{"."}, false, false},
-		{"cwd omitted mismatch", source, nil, true, false},
+		{"false", root, []string{source}, false, false, ""},
+		{"expect directory mismatch", root, nil, true, true, source},
+		{"expect directory match", root, nil, false, true, source},
+		{"expect hash mismatch", root, nil, true, true, directoryHash},
+		{"expect hash match", root, nil, false, true, directoryHash},
+		{"cwd omitted", source, nil, false, false, ""},
+		{"cwd dot", source, []string{"."}, false, false, ""},
+		{"cwd omitted mismatch", source, nil, true, false, ""},
 	} {
 		t.Run(selection.name, func(t *testing.T) {
 			mismatch := selection.mismatch
@@ -111,6 +116,7 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 				if req.Method == "health.check" {
 					health := runCommandHealthResult()
 					health["bundle"].(map[string]any)["bundle_hash"] = servedHash
+					health["bundle"].(map[string]any)["source_label"] = "not-a-selected-name"
 					writeJSONRPCResult(t, w, req.ID, health)
 					return
 				}
@@ -128,21 +134,48 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 			args := append([]string{"run", "start"}, selection.operands...)
 			args = append(args, "--event", "scan.requested", "--payload", payloadPath, "--no-follow")
 			if selection.connected {
-				args = append(args, "--connect", server.URL)
+				args = append(args, "--connect", strings.Replace(server.URL, "://", "://synthetic-user:synthetic-password@", 1)+"?token=synthetic-query#synthetic-fragment")
+			}
+			if selection.expect != "" {
+				args = append(args, "--expect-bundle", selection.expect)
 			}
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), selection.cwd, args, &stdout, &stderr, testRunCommandOptions(server))
 			wantCode := 0
 			if mismatch {
 				wantCode = 6
-				for _, want := range []string{directoryHash, servedHash, "BUNDLE_MISMATCH", "restart swarm serve", "re-admit edited source"} {
+				wantText := []string{directoryHash, servedHash, "BUNDLE_MISMATCH", "restart swarm serve", "re-admit edited source"}
+				if selection.connected {
+					wantText = []string{directoryHash, servedHash, "nothing was sent: the serve at " + server.URL + " holds bundle", "check that you are connected to the right serve"}
+					if selection.expect == source {
+						wantText = append(wantText, fmt.Sprintf("(from %q)", source), fmt.Sprintf("%q is the release it should hold", source))
+					} else if strings.Contains(stderr.String(), "(from ") || !strings.Contains(stderr.String(), "the expected hash is the release it should hold") {
+						t.Fatalf("hash expectation described as a directory: %s", &stderr)
+					}
+				}
+				for _, want := range wantText {
 					if !strings.Contains(stderr.String(), want) {
 						t.Fatalf("stderr=%q, want %q", stderr.String(), want)
 					}
 				}
 			}
-			if code != wantCode || starts.Load() != 1 {
+			for _, private := range []string{"synthetic-user", "synthetic-password", "synthetic-query", "synthetic-fragment"} {
+				if strings.Contains(stdout.String()+stderr.String(), private) {
+					t.Fatalf("endpoint credential/query/fragment escaped into output: %s %s", &stdout, &stderr)
+				}
+			}
+			wantStarts := int32(1)
+			if selection.connected && mismatch {
+				wantStarts = 0
+			}
+			if code != wantCode || starts.Load() != wantStarts {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+			}
+			if selection.connected && !mismatch && !strings.Contains(stdout.String(), "bundle_hash="+directoryHash+"\n") {
+				t.Fatalf("successful connected start omitted its selected identity: %s", &stdout)
+			}
+			if (!selection.connected || mismatch) && strings.Contains(stdout.String(), "bundle_hash=") || strings.Contains(stdout.String(), "not-a-selected-name") {
+				t.Fatalf("borrowed a name or changed local/refused output: %s", &stdout)
 			}
 		})
 	}
@@ -270,20 +303,69 @@ func TestRunStartInitiationRequiresEventPairOrData(t *testing.T) {
 }
 
 func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
+	t.Run("bound directory wording", func(t *testing.T) {
+		mismatch := &runBundleExpectationMismatch{expected: "expected-hash", selected: "bound-hash", directory: "release", bound: true}
+		want := `nothing was sent: this request is already bound to bundle bound-hash, not the expected expected-hash (from "release"); check that "release" is the release this request is bound to`
+		if mismatch.Error() != want {
+			t.Fatalf("mismatch=%q, want %q", mismatch.Error(), want)
+		}
+	})
+	t.Run("expectation uses permanent binding before input materialization", func(t *testing.T) {
+		setCLIAPITestToken(t, "test-token")
+		healthHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+		boundHash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+		runID := uuid.NewString()
+		server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+			rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+				switch req.Method {
+				case "health.check":
+					return runCommandHealthResult()
+				case "data.show":
+					if req.Params["view"] != "operation" || req.Params["detail"] != "request_binding" {
+						t.Errorf("materialized input before checking bound identity: %+v", req)
+					}
+					return map[string]any{"run_id": runID, "bundle_hash": boundHash,
+						"request_hash": "resource-run-creation-request-v1:sha256:" + strings.Repeat("c", 64),
+						"pins":         []any{}, "imports": []any{map[string]any{
+							"source_invocation_id": uuid.NewString(),
+							"declaration":          map[string]any{"flow_path": ".", "event": "records.loaded"},
+							"schema_digest":        "resource-schema-v1:sha256:" + strings.Repeat("d", 64),
+							"expected_head":        map[string]any{"state": "absent"},
+						}}}
+				default:
+					t.Errorf("unexpected effect/query on bound mismatch: %+v", req)
+					return nil
+				}
+			},
+		})
+		defer server.Close()
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+			"run", "start", "--connect", server.URL, "--expect-bundle", healthHash,
+			"--data", "records.loaded=must-not-read.jsonl", "--idempotency-key", uuid.NewString(), "--no-follow",
+		}, &stdout, &stderr, testRunCommandOptions(server))
+		want := "nothing was sent: this request is already bound to bundle " + boundHash + ", not the expected " + healthHash + "; check that the expected hash is the release this request is bound to"
+		if code != 6 || !strings.Contains(stderr.String(), want) || strings.Contains(stderr.String(), "serve at") || stdout.Len() != 0 {
+			t.Fatalf("bound mismatch: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+		}
+		assertRunCommandMethods(t, calls, []string{"health.check", "data.show"})
+	})
 	for _, tc := range []struct {
-		name   string
-		flag   string
-		value  func(string) string
-		field  string
-		rows   bool
-		reject bool
+		name     string
+		flag     string
+		value    func(string) string
+		field    string
+		rows     bool
+		reject   bool
+		retained bool
 	}{
-		{"import", "--data", func(path string) string { return "records.loaded=" + path }, "imports", false, false},
-		{"pin", "--pin", func(string) string { return "records.loaded@head" }, "pins", false, false},
-		{"row_receipts", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
-		{"row_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, true},
-		{"row_delivery_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
-		{"row_delivery_pending", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false},
+		{"import", "--data", func(path string) string { return "records.loaded=" + path }, "imports", false, false, false},
+		{"pin", "--pin", func(string) string { return "records.loaded@head" }, "pins", false, false, false},
+		{"retained_pin", "--pin", func(string) string { return "records.loaded@head" }, "pins", false, false, true},
+		{"row_receipts", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false, false},
+		{"row_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, true, false},
+		{"row_delivery_refusal", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false, false},
+		{"row_delivery_pending", "--data", func(path string) string { return "records.loaded=" + path }, "imports", true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -300,12 +382,23 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 			versionID := "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 			feedID := "00000000-0000-4000-8000-000000000001"
 			runID := uuid.NewString()
+			selectedHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+			if tc.retained {
+				selectedHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
+			}
 			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 					switch req.Method {
 					case "health.check":
-						return runCommandHealthResult()
+						health := runCommandHealthResult()
+						health["bundle"].(map[string]any)["source_label"] = "not-a-selected-name"
+						return health
 					case "data.show":
+						if req.Params["detail"] == "request_binding" {
+							return map[string]any{"run_id": runID, "bundle_hash": selectedHash,
+								"request_hash": "resource-run-creation-request-v1:sha256:" + strings.Repeat("c", 64),
+								"imports":      []any{}, "pins": []any{map[string]any{"declaration": declaration, "version_id": versionID}}}
+						}
 						if req.Params["view"] == "version" {
 							return map[string]any{"declaration": declaration, "version_id": versionID}
 						}
@@ -319,6 +412,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 							"continuation": map[string]any{"state": "end"},
 						}
 					case "run.start":
+						if req.Params["bundle_hash"] != selectedHash {
+							t.Fatalf("expectation changed selected identity: %+v", req.Params)
+						}
 						if _, found := req.Params["event_name"]; found {
 							t.Fatal("feed-only run.start sent event_name")
 						}
@@ -369,7 +465,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 						}
 						at := time.Now().UTC()
 						return map[string]any{"run_id": runID, "run_status": "completed", "observed_at": at, "order": fanoutobligation.ListIdentityOrder,
-							"intents":             []fanoutobligation.IntentReadback{{Key: fanoutobligation.IntentKey{RunID: runID, DeploymentFeedID: feedID}, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Status: fanoutobligation.StatusClosed, DurableState: "closed", Cardinality: len(outcomes), Cursor: len(outcomes), NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: at, UpdatedAt: at, Runtime: fanoutobligation.UnavailableRuntimeReadback()}},
+							"intents":             []fanoutobligation.IntentReadback{{Key: fanoutobligation.IntentKey{RunID: runID, DeploymentFeedID: feedID}, BundleHash: selectedHash, Status: fanoutobligation.StatusClosed, DurableState: "closed", Cardinality: len(outcomes), Cursor: len(outcomes), NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: at, UpdatedAt: at, Runtime: fanoutobligation.UnavailableRuntimeReadback()}},
 							"deployment_outcomes": fanoutobligation.DeploymentOutcomePage{RunID: runID, DeploymentFeedID: feedID, Outcomes: outcomes, NextOrdinal: len(outcomes), More: new(bool)},
 						}
 					default:
@@ -380,8 +476,11 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 			})
 			defer server.Close()
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), root,
-				[]string{"run", "start", "--connect", server.URL, tc.flag, tc.value(input), "--no-follow"},
+			args := []string{"run", "start", "--connect", server.URL, tc.flag, tc.value(input), "--no-follow"}
+			if tc.retained {
+				args = append(args, "--idempotency-key", uuid.NewString())
+			}
+			code := executeRootCommandWithOptions(context.Background(), root, args,
 				&stdout, &stderr, testRunCommandOptions(server))
 			wantCode := 0
 			if tc.reject || tc.name == "row_delivery_refusal" {
@@ -391,7 +490,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			want := []string{"health.check", "data.show", "run.start"}
-			if tc.name == "pin" {
+			if tc.flag == "--pin" {
 				want = []string{"health.check", "data.show", "data.show", "run.start"}
 			}
 			want = append(want, "run.fan_out.list")
@@ -402,6 +501,9 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 				}
 			}
 			assertRunCommandMethods(t, calls, want)
+			if !strings.Contains(stdout.String(), "bundle_hash="+selectedHash+"\n") || strings.Contains(stdout.String(), "not-a-selected-name") {
+				t.Fatalf("publication receipt omitted or borrowed selected hash: %s", &stdout)
+			}
 			if tc.rows && (!strings.Contains(stdout.String(), "row 0 ACCEPTED") || !strings.Contains(stdout.String(), "feed published: deployment_feed_id="+feedID)) {
 				t.Fatalf("missing row/receipt readout: %s", stdout.String())
 			}
@@ -1173,6 +1275,12 @@ func TestRunCommandWebSocketHandshakeHTTPErrorDetachesObserver(t *testing.T) {
 
 func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	var selectionCalls atomic.Int32
+	selectionServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		selectionCalls.Add(1)
+		http.Error(w, "unexpected request before validation", http.StatusInternalServerError)
+	}))
+	defer selectionServer.Close()
 	for _, tc := range []struct {
 		name       string
 		token      string
@@ -1180,6 +1288,14 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		wantCode   int
 		wantStderr string
 	}{
+		{name: "connected positional teaches flag before payload", token: "test-token", args: []string{"run", "start", "missing-source", "--connect", selectionServer.URL, "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: "--connect runs the flow the serve already holds, so it takes no directory: remove \"missing-source\", or use --expect-bundle \"missing-source\" to check that the serve holds it"},
+		{name: "connected empty positional is still present", token: "test-token", args: []string{"run", "start", "", "--connect", selectionServer.URL, "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: "remove \"\", or use --expect-bundle \"\""},
+		{name: "connected positional echoes safe one line", token: "test-token", args: []string{"run", "start", "source\n\x1b[31mname", "--connect", selectionServer.URL, "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: fmt.Sprintf("remove %q", cliSanitizeOneLineValue("source\n\x1b[31mname"))},
+		{name: "empty expectation refused", token: "test-token", args: []string{"run", "start", "--connect", selectionServer.URL, "--expect-bundle=", "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: "--expect-bundle must be a nonempty"},
+		{name: "malformed hash does not become a directory", token: "test-token", args: []string{"run", "start", "--connect", selectionServer.URL, "--expect-bundle", "bundle-v2:sha256:bad", "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: "--expect-bundle must match bundle-v2:sha256:"},
+		{name: "retired hash does not become a directory", token: "test-token", args: []string{"run", "start", "--connect", selectionServer.URL, "--expect-bundle", "sha256:bad", "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: "--expect-bundle must match bundle-v2:sha256:"},
+		{name: "local expectation refused before source", token: "test-token", args: []string{"run", "start", "missing-source", "--expect-bundle", "missing-expectation", "--event", "scan.requested", "--payload", "missing-payload.json"}, wantCode: 2, wantStderr: "--expect-bundle requires --connect publication mode"},
+		{name: "reattach expectation refused before source", token: "test-token", args: []string{"run", "start", "--connect", selectionServer.URL, "--reattach", "run-1", "--expect-bundle", "missing-expectation"}, wantCode: 2, wantStderr: "--expect-bundle requires --connect publication mode"},
 		{name: "unknown detach", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "unknown flag: --detach"},
 		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
 		{name: "invalid retired bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "unknown flag"},
@@ -1218,6 +1334,9 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 			}
 			if !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+			if selectionCalls.Load() != 0 {
+				t.Fatal("invalid source/expectation reached the API")
 			}
 		})
 	}

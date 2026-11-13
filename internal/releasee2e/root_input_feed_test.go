@@ -45,7 +45,8 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 				if err := process.waitReady(ctx); err != nil {
 					t.Fatalf("input-only feed serve: %v\n%s", err, process.output.String())
 				}
-				id := waitForFullLifecycleStandingRun(t, process.rpc, goldenServedBundleHash(t, process.rpc, "live"), "").RunID
+				servedHash := goldenServedBundleHash(t, process.rpc, "live")
+				id := waitForFullLifecycleStandingRun(t, process.rpc, servedHash, "").RunID
 				if selector == "--pin" {
 					rows, err := os.ReadFile(filepath.Join(root, "rows.jsonl"))
 					if err != nil {
@@ -66,10 +67,35 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 				if selector == "--pin" {
 					value = "company.registered@head"
 				}
+				mismatchHash := "bundle-v2:sha256:" + strings.Repeat("f", 64)
+				if mismatchHash == servedHash {
+					t.Fatal("mismatch fixture accidentally selected the served identity")
+				}
+				refusedKey := uuid.NewString()
+				refused := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
+					"run", "start", "--connect", process.apiBase, "--expect-bundle", mismatchHash,
+					selector, value, "--run-id", id, "--idempotency-key", refusedKey, "--no-follow")
+				if refused.err == nil || !strings.Contains(refused.output, "nothing was sent: the serve at "+process.apiBase+" holds bundle "+servedHash) || !strings.Contains(refused.output, mismatchHash) || strings.Contains(refused.output, "run started:") {
+					t.Fatalf("connected identity mismatch did not refuse before publication: %v\n%s", refused.err, refused.output)
+				}
+				var absent map[string]any
+				if err := process.rpc.call(ctx, "data.show", map[string]any{
+					"view": "operation", "detail": "request_binding",
+					"operation_ref": map[string]any{"kind": "rows_publication", "idempotency_key": refusedKey},
+				}, &absent); err == nil || !strings.Contains(err.Error(), "DATA_OPERATION_NOT_FOUND") {
+					t.Fatalf("identity refusal created a publication operation: result=%+v error=%v", absent, err)
+				}
+				expected := source
+				if selector == "--pin" {
+					expected = servedHash
+				}
 				connected := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-					"run", "start", "--connect", process.apiBase, selector, value, "--run-id", id, "--idempotency-key", uuid.NewString(), "--no-follow")
+					"run", "start", "--connect", process.apiBase, "--expect-bundle", expected, selector, value, "--run-id", id, "--idempotency-key", uuid.NewString(), "--no-follow")
 				if connected.err != nil {
 					t.Fatalf("connected input-only feed %s: %v\n%s", selector, connected.err, connected.output)
+				}
+				if !strings.Contains(connected.output, "bundle_hash="+servedHash+"\n") {
+					t.Fatalf("connected receipt omitted the selected bundle: %s", connected.output)
 				}
 				waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, id, goldenStartupTimeout)
 				assertRootInputFeedBinaryRows(t, process, id, binary, root, config, env)
