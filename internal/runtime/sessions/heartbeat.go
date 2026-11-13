@@ -33,7 +33,15 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 		}
 		return func() {}
 	}
-	workLease, err := owner.Begin(ctx)
+	var workLease *worklifetime.Lease
+	var err error
+	if accepted, ok := owner.(interface {
+		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+	}); ok {
+		workLease, err = accepted.BeginAcceptedDescendant(ctx)
+	} else {
+		workLease, err = owner.Begin(ctx)
+	}
 	if err != nil {
 		if onError != nil {
 			onError(fmt.Errorf("admit session lease heartbeat: %w", err))
