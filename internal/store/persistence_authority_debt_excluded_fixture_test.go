@@ -47,6 +47,28 @@ func debtReviewedExcludedFixture(finding authorityFinding) string {
 		declaration = "declaration:0828980a6973a0dbf420e39cb162844fd5bbcb06e27922c8019c3337334cdc9a"
 		context = "98149c9df2ccd441aae2bb7ee092f61a28c74305333234ae5782d55b48754693"
 		reason = "nil-only process attribute validation; no persistence"
+	case "internal/serveapp/channel_provider_construction_unsupported.go\x00qualifyWhatsAppPlan",
+		"internal/serveapp/channel_provider_construction_unsupported.go\x00openChannelRegistration",
+		"internal/serveapp/channel_provider_construction_unsupported.go\x00openTelegramChannelRegistration",
+		"internal/serveapp/channel_provider_construction_unsupported.go\x00openWhatsAppChannelRegistration",
+		"internal/serveapp/channel_provider_construction_unsupported.go\x00openWhatsAppDeploymentConnection",
+		"internal/serveapp/channel_provider_construction_unsupported.go\x00openWhatsAppRuntimeConnection":
+		switch finding.Enclosing {
+		case "qualifyWhatsAppPlan":
+			declaration = "declaration:d4c8f6c11958531c6afb5a4465eb2a92cbad4870135d132fd424d978b809c75f"
+		case "openChannelRegistration":
+			declaration = "declaration:d0817cda9016b84aeb5ebacecbbf0f482060b2b50c6fa58adc7065a1f55294d6"
+		case "openTelegramChannelRegistration":
+			declaration = "declaration:aca79be7deab8ce93921f678a8b5e34c8e55a6b84bc0645368d460aab72fb0cc"
+		case "openWhatsAppChannelRegistration":
+			declaration = "declaration:bfa9b1d5b9817327995bce97ac19b6b7f38ef35a640610ced5d70aa033c31fab"
+		case "openWhatsAppDeploymentConnection":
+			declaration = "declaration:28a2153cc26ad47e80092a90aa14f2323c30887fba1ff92487d9259f59d242d5"
+		case "openWhatsAppRuntimeConnection":
+			declaration = "declaration:4e9e57e0a5645aa7124a1c4b58d98125c801bde4696eeb2e290454e9c0b276c3"
+		}
+		context = "64633fdc113c0fed6bc27dc439e7016bceed87d803fd432b47747cd3afec074d"
+		reason = "exact unsupported-platform constructor refuses or delegates to the existing refusal; no native execution credit"
 	default:
 		return ""
 	}
@@ -71,6 +93,9 @@ func debtClassifyReviewedExcludedFixtures(t *testing.T, findings []authorityFind
 		ruling := "#642/6202173993"
 		if finding.File == "internal/testutil/testprocess/process_darwin.go" || finding.File == "tests/support/testutil/testprocess/process_darwin.go" {
 			ruling = "#2903/6584235489"
+		}
+		if finding.File == "internal/serveapp/channel_provider_construction_unsupported.go" {
+			ruling = "#2338/6840391584"
 		}
 		t.Logf("reviewed excluded source %s declaration=%s body=%s context=%s ruling=%s reason=%s", finding.File, finding.Enclosing, finding.Member, finding.Resolved, ruling, reason)
 	}
