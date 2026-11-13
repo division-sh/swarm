@@ -84,7 +84,6 @@ func TestTelegramPublicSittingJourneyBothStores(t *testing.T) {
 			telegram.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}
 			telegram.StartTLS()
 			defer telegram.Close()
-			listener := reserveChannelOnboardingListener(t)
 			roots := x509.NewCertPool()
 			if !roots.AppendCertsFromPEM(certPEM) {
 				t.Fatal("synthetic certificate was not admitted by test trust")
@@ -96,7 +95,7 @@ func TestTelegramPublicSittingJourneyBothStores(t *testing.T) {
 			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 				switch address {
 				case hostname + ":443":
-					address = listener.Addr().String()
+					address = "127.0.0.1:443"
 				case "api.telegram.org:443":
 					address = telegram.Listener.Addr().String()
 				default:
@@ -239,10 +238,7 @@ inputs: [inbound.telegram.text_message]
 
 			process := startRuntimeTestProcessWithRunner(t, source, cliapp.ServeOptions{}, func(ctx context.Context, _ string, opts cliapp.ServeOptions) int {
 				return cliapp.Execute(ctx, []string{"--config", config, "serve", source}, opts.Output, opts.ErrorOutput,
-					func(ctx context.Context, root cliapp.InvocationRoot, options cliapp.ServeOptions) int {
-						options.PublicWebhookListener = listener
-						return Run(ctx, root, options)
-					}, nil, registration)
+					Run, nil, registration)
 			})
 			process.waitForReadyLine()
 			callback, signing, _ := provider.Registration()
