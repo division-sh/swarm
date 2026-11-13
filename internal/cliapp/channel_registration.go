@@ -91,6 +91,8 @@ func bindChannelReadbackFacts(target any, factory ChannelRegistrationFactory, se
 		return selectedChannelFacts(factory, provider)
 	}
 	switch result := target.(type) {
+	case *channelonboarding.StartSelection:
+		result.Candidate = result.Candidate.WithProviderFacts(factsFor(result.Candidate.Provider))
 	case *channelonboarding.Result:
 		*result = result.WithProviderFacts(factsFor(result.Operation.Provider))
 	case *map[string][]channelonboarding.Result:
@@ -104,11 +106,13 @@ func bindChannelReadbackFacts(target any, factory ChannelRegistrationFactory, se
 		result.facts = make([]channelprovider.Binding, len(result.Channels))
 		for i := range result.Channels {
 			row := &result.Channels[i]
-			facts := factsFor(row.Identity.Interface.ChannelPackID)
-			if row.Operation != nil {
+			var facts channelprovider.Binding
+			if row.Operation != nil && row.Operation.Interface.Normalized() == row.Identity.Interface.Normalized() {
 				facts = factsFor(row.Operation.Provider)
 				op := row.Operation.WithProviderFacts(facts)
 				row.Operation = &op
+			} else if row.Activation != nil && row.Activation.Interface.Normalized() == row.Identity.Interface.Normalized() {
+				facts = factsFor(row.Activation.Provider)
 			}
 			result.facts[i] = facts
 		}
