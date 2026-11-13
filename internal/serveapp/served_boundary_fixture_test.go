@@ -171,7 +171,7 @@ func newServedBoundaryFixtureLifetime(t *testing.T, backend, sourceRoot string) 
 		var err error
 		if backend == "postgres" {
 			selected, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg),
+				Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor,
 			})
 		} else {
 			selected, err = previous(ctx, selection, cfg)

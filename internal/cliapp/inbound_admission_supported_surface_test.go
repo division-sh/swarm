@@ -88,7 +88,7 @@ func requireProviderBindingsBeforeHandlerMaterialization(t *testing.T, bundle *r
 func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	for _, repo := range []string{RepoRoot(), t.TempDir()} {
@@ -107,7 +107,7 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
@@ -141,7 +141,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 
 func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = writeInboundAdmissionPolicyMatrixFixture(t)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))

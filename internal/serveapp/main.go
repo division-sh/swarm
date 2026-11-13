@@ -726,6 +726,7 @@ func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]ope
 }
 
 func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.ServeOptions) int {
+	opts.ChannelRegistration = ChannelRegistrations()
 	publicListener := opts.PublicWebhookListener
 	defer func() {
 		if publicListener != nil {

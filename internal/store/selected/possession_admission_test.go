@@ -35,7 +35,7 @@ func TestAdmissionPossessionDoesNotMaskCorruptProcessGenerationBothStores(t *tes
 		t.Run(string(backend), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			request := AuthorityRequest{Selection: backendselection.Selection{Backend: backend}}
+			request := AuthorityRequest{Selection: backendselection.Selection{Backend: backend}, ProviderFacts: channelfixture.Facts}
 			var owner interface {
 				store.SchemaBootstrapper
 				startupownership.Store

@@ -37,7 +37,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 						t.Fatal("mixed receiver fixture selected another backend")
 					}
 					return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-						Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg),
+						Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor,
 					})
 				}
 				t.Cleanup(func() { buildStoresForServe = previous })

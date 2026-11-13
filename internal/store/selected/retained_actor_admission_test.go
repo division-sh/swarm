@@ -50,7 +50,7 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			request := AuthorityRequest{Selection: backendselection.Selection{Backend: backend}}
+			request := AuthorityRequest{Selection: backendselection.Selection{Backend: backend}, ProviderFacts: channelfixture.Facts}
 			var owner interface {
 				store.SchemaBootstrapper
 				agentfixture.Store

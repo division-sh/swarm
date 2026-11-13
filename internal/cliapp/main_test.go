@@ -1680,7 +1680,7 @@ func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Contex
 	if repo == "" {
 		repo = t.TempDir()
 	}
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	// These fixtures prove declaration semantics, not deployment readiness.
 	opts.portable = true
 	opts.sourceRoot = sourceRoot
@@ -1831,7 +1831,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 		t.Fatalf("verify stderr used legacy lint_evidence prefix:\n%s", errText)
 	}
 
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
@@ -1856,7 +1856,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 
 	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
@@ -1921,7 +1921,7 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 		}
 	}
 
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
@@ -2004,7 +2004,7 @@ func TestRunVerifyCommand_UnreachableStageUsesBlockingAnalyzerOutput(t *testing.
 		t.Fatalf("verify stderr used legacy fatal warning banner:\n%s", errText)
 	}
 
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
@@ -2130,7 +2130,7 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 	t.Setenv("SWARM_CONFIG", configPath)
 
 	var buf bytes.Buffer
-	opts := defaultVerifyCommandOptions()
+	opts := defaultVerifyCommandOptionsForTest()
 	opts.portable = true
 	opts.sourceRoot = root
 	code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &buf, &buf)

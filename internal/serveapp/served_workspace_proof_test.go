@@ -282,7 +282,7 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 				t.Fatal("native workspace fixture selected another backend")
 			}
 			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
-				Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg),
+				Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor,
 			})
 		}
 		t.Cleanup(func() { buildStoresForServe = previous })
