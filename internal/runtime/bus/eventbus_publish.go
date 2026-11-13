@@ -2722,7 +2722,7 @@ func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *wor
 		return admittedCtx, nil, errors.New("event bus requires a process work occurrence")
 	}
 	owner := eb.workOwnerForContext(admittedCtx)
-	lease, err := owner.Begin(admittedCtx)
+	lease, err := beginAcceptedRuntimeWork(owner, admittedCtx)
 	if err != nil {
 		return admittedCtx, nil, fmt.Errorf("admit event bus work: %w", err)
 	}
