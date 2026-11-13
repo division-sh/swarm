@@ -150,7 +150,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 
 	record["stage"] = "public CLI registration"
 	op := issue3011RegisterForSend(t, opts, peer)
-	peer.senderFrom(types.NewJID("15557654321", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
+	_, customer, customerLID := peer.senderFrom(types.NewJID("15557654321", types.DefaultUserServer), types.NewJID("100000000090", types.HiddenUserServer))
 	record["operation_id"], record["account"] = op.OperationID, op.AccountReference
 	process, endpoint = start()
 	peer.awaitPostLogin()
@@ -243,7 +243,8 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	healthy := issue3011PublishAndSettle(t, endpoint, "healthy", record)
 	select {
 	case sent := <-peer.sent:
-		if sent.To.ToNonAD().String() != "15557654321@s.whatsapp.net" || sent.Body.GetConversation() != "synthetic diagnostic notice" {
+		record["healthy_sent"] = map[string]any{"id": sent.ID, "to": sent.To.String(), "body": sent.Body.String()}
+		if sent.To.ToNonAD() != customer && sent.To.ToNonAD() != customerLID || sent.Body.GetConversation() != "synthetic diagnostic notice" {
 			t.Fatal("fresh authored send changed its customer/input")
 		}
 		record["healthy_activity"] = issue3011ActivityOutcome(t, endpoint, healthy, backend, location, sent.ID)
