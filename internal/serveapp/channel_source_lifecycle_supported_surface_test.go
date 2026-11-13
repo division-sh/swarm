@@ -608,6 +608,16 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		waitObservedChannelRejectedCallback(t, observation, rejectedToken)
 		waitObservedChannelSendsSettled(t, observation)
 		preserved := readChannelPreservedHistory(t, observation)
+		originalPlans := map[string]string{}
+		if !clear {
+			for card := range originalCards {
+				plan, err := observation.GenerationZeroSentPlan(t.Context(), card)
+				if err != nil {
+					t.Fatal(err)
+				}
+				originalPlans[plan] = card
+			}
+		}
 		originalCardFacts := map[string]decisioncard.Card{}
 		if clear {
 			items, next, err := cards.ListDecisionCards(t.Context(), decisioncard.ListOptions{Status: decisioncard.StatusPending, AnchorKind: string(decisioncard.AnchorKindStageGate), Limit: 200})
@@ -672,7 +682,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				}
 				successorPlans = append(successorPlans, plan)
 			}
-			waitObservedChannelSendsSettled(t, observation)
+			waitObservedChannelSendsSettled(t, observation, originalPlans)
 		}
 		checkHistory := func() {
 			if !clear {
@@ -958,6 +968,31 @@ func channelHistoryWithoutResetRenders(beforeHistory, afterHistory string, cards
 }
 
 func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
+	t.Run("post_reset_settlement", func(t *testing.T) {
+		originals := map[string]string{"original-plan": "original-card"}
+		for name, mutate := range map[string]func(*storetest.ChannelResetSettlement){
+			"settled_original":             func(*storetest.ChannelResetSettlement) {},
+			"unrelated_or_fresh_plan":      func(r *storetest.ChannelResetSettlement) { r.PlanID = "other" },
+			"wrong_source":                 func(r *storetest.ChannelResetSettlement) { r.SourceID = "other" },
+			"not_card":                     func(r *storetest.ChannelResetSettlement) { r.SourceKind = "notice" },
+			"live_source":                  func(r *storetest.ChannelResetSettlement) { r.SourcePresent = true },
+			"missing_receipt":              func(r *storetest.ChannelResetSettlement) { r.ReceiptState = "" },
+			"mismatched_receipt_operation": func(r *storetest.ChannelResetSettlement) { r.ExactReceipt = false },
+			"failed_receipt":               func(r *storetest.ChannelResetSettlement) { r.ReceiptState = "failed" },
+			"authorized":                   func(r *storetest.ChannelResetSettlement) { r.OperationState = "authorized" },
+			"launched":                     func(r *storetest.ChannelResetSettlement) { r.OperationState = "launched" },
+			"response_observed":            func(r *storetest.ChannelResetSettlement) { r.OperationState = "response_observed" },
+			"uncertain":                    func(r *storetest.ChannelResetSettlement) { r.OperationState = "indeterminate" },
+			"failed_operation":             func(r *storetest.ChannelResetSettlement) { r.OperationState = "failed" },
+			"another_unsettled_operation":  func(r *storetest.ChannelResetSettlement) { r.UnsafeOperations = true },
+		} {
+			r := storetest.ChannelResetSettlement{PlanID: "original-plan", SourceID: "original-card", SourceKind: "card", ReceiptState: "sent", OperationState: "settled", ExactReceipt: true}
+			mutate(&r)
+			if r.SettledOriginal(originals) != (name == "settled_original") {
+				t.Errorf("post-reset observation admitted %s", name)
+			}
+		}
+	})
 	t.Run("superseded_renders", func(t *testing.T) {
 		card := newCursorMailboxFixture(t, servedparity.BackendDefaultSQLite).base
 		cards := map[string]decisioncard.Card{card.CardID: card}

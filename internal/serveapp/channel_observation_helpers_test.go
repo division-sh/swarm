@@ -120,11 +120,15 @@ func waitObservedChannelRejectedCallback(t *testing.T, reader storetest.ChannelO
 	}
 }
 
-func waitObservedChannelSendsSettled(t *testing.T, reader storetest.ChannelObservation) {
+func waitObservedChannelSendsSettled(t *testing.T, reader storetest.ChannelObservation, originals ...map[string]string) {
 	t.Helper()
+	read := reader.CountUnsettledResponsibilities
+	if len(originals) != 0 {
+		read = func(ctx context.Context) (int, error) { return reader.CountUnsettledAfterReset(ctx, originals[0]) }
+	}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		count, err := reader.CountUnsettledResponsibilities(t.Context())
+		count, err := read(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
