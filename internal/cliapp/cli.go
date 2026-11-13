@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/spf13/cobra"
@@ -38,6 +39,16 @@ func InjectedBuildMetadata() BuildMetadata {
 }
 
 func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner, runTest TestSessionRunner, registration ...ChannelRegistrationFactory) int {
+	return executeCLIInvocation(ctx, args, out, errOut, runServe, runTest, channelprovider.Binding{}, registration...)
+}
+
+// ExecuteWithChannelReadbackFact supplies one selected value without installing
+// a local registration constructor or changing the invocation's target.
+func ExecuteWithChannelReadbackFact(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner, runTest TestSessionRunner, fact channelprovider.Binding) int {
+	return executeCLIInvocation(ctx, args, out, errOut, runServe, runTest, fact)
+}
+
+func executeCLIInvocation(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner, runTest TestSessionRunner, fact channelprovider.Binding, registration ...ChannelRegistrationFactory) int {
 	root, err := captureInvocationRoot()
 	if err != nil {
 		if errOut != nil {
@@ -48,6 +59,7 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe
 	opts := defaultRootCommandOptions()
 	opts.runServe = runServe
 	opts.runTest = runTest
+	opts.channelReadbackFact = fact
 	if len(registration) == 1 {
 		opts.channelRegistration = registration[0]
 	}

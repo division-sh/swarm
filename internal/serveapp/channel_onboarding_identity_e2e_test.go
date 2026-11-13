@@ -185,7 +185,7 @@ func TestChannelOnboardingE2E12MultipleExactContexts(t *testing.T) {
 
 			connectOut, connectErr := &lockedBuffer{}, &lockedBuffer{}
 			restoreInput := installChannelOnboardingCLIInput(t, "")
-			connectCode := executeCLI(context.Background(), append([]string{"--config", harness.opts.ConfigPath}, append(exactChannelOnboardingArgs("connect", second), "--api-server", harness.endpoint)...), connectOut, connectErr, nil)
+			connectCode := executeTelegramRuntimeCLI(context.Background(), append([]string{"--config", harness.opts.ConfigPath}, append(exactChannelOnboardingArgs("connect", second), "--api-server", harness.endpoint)...), connectOut, connectErr, nil)
 			restoreInput()
 			if connectCode == 0 || !strings.Contains(connectErr.String(), "provider credential input could not be read") {
 				t.Fatalf("%s E2E-12 missing credential input code=%d stdout=%s stderr=%s", backend, connectCode, connectOut.String(), connectErr.String())
@@ -199,7 +199,7 @@ func TestChannelOnboardingE2E12MultipleExactContexts(t *testing.T) {
 				t.Fatalf("%s E2E-12 sibling unexpectedly has a bound identity: %#v", backend, pending.Identity)
 			}
 			blockedOut, blockedErr := &lockedBuffer{}, &lockedBuffer{}
-			blockedCode := executeCLI(context.Background(), []string{"--config", harness.opts.ConfigPath, "channel", "resume", pending.Operation.OperationID, "--yes", "--api-server", harness.endpoint}, blockedOut, blockedErr, nil)
+			blockedCode := executeTelegramRuntimeCLI(context.Background(), []string{"--config", harness.opts.ConfigPath, "channel", "resume", pending.Operation.OperationID, "--yes", "--api-server", harness.endpoint}, blockedOut, blockedErr, nil)
 			blockedSurface := blockedOut.String() + "\n" + blockedErr.String()
 			blockedOperationID := channelOnboardingOperationIDPattern.FindString(blockedSurface)
 			if blockedCode == 0 || blockedOperationID != pending.Operation.OperationID || !strings.Contains(blockedSurface, "CHANNEL_CREDENTIAL_REQUIRED") {
@@ -303,7 +303,7 @@ func TestChannelOnboardingE2E20FailedReplacementPreservesPredecessor(t *testing.
 func requireAmbiguousChannelOnboardingChoices(t *testing.T, harness *channelOnboardingE2EHarness, want int) []channelOnboardingExactChoice {
 	t.Helper()
 	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-	code := executeCLI(context.Background(), []string{
+	code := executeTelegramRuntimeCLI(context.Background(), []string{
 		"--config", harness.opts.ConfigPath, "channel", "reconnect", "telegram", "--yes", "--api-server", harness.endpoint,
 	}, stdout, stderr, nil)
 	surface := stdout.String() + "\n" + stderr.String()
@@ -603,7 +603,7 @@ func startChannelOnboardingCLICommand(t *testing.T, configPath, endpoint string,
 	commandArgs := append([]string{"--config", configPath}, args...)
 	commandArgs = append(commandArgs, "--api-server", endpoint)
 	go func() {
-		done <- executeCLI(context.Background(), commandArgs, stdout, stderr, nil)
+		done <- executeTelegramRuntimeCLI(context.Background(), commandArgs, stdout, stderr, nil)
 	}()
 	return channelOnboardingCLICommand{stdout: stdout, stderr: stderr, done: done}
 }

@@ -97,7 +97,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), ".")
 	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), sourceRoot, nil, ChannelRegistrations().AdmitInventory)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
