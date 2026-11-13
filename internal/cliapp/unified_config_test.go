@@ -230,6 +230,23 @@ func TestUnifiedConfigSelectedFileAndExplicitReplacement(t *testing.T) {
 	if got.CLI.Serve.APIListenAddr != "127.0.0.1:4444" || got.Source != unifiedConfigSourceExplicit {
 		t.Fatalf("explicit serve api/source = %q/%q", got.CLI.Serve.APIListenAddr, got.Source)
 	}
+	for _, row := range []struct {
+		source, dir string
+		present     bool
+	}{
+		{"{}", "", false},
+		{"paths: {}", "", false},
+		{"paths: {swarm_dir: ''}", "", true},
+		{"paths: {swarm_dir: null}", "", true},
+		{"paths: {swarm_dir: state}", "state", true},
+		{"paths: {<<: {swarm_dir: merged}}", "merged", true},
+	} {
+		writeRuntimeConfigText(t, explicitPath, row.source+"\n")
+		loaded, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicitPath})
+		if err != nil || loaded.CLI.Paths.SwarmDir != row.dir || loaded.CLI.Paths.SwarmDirSet != row.present {
+			t.Fatalf("source %q: paths=%#v error=%v", row.source, loaded.CLI.Paths, err)
+		}
+	}
 }
 
 func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
