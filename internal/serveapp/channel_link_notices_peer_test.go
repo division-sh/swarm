@@ -3,6 +3,7 @@
 package serveapp
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -56,7 +57,7 @@ func TestChannelNoticeLinkRegisteredBothStores(t *testing.T) {
 			reader := openChannelAnchorObservation(t, h)
 			kinds := map[string]int{}
 			for _, notice := range notices {
-				messageID := waitChannelAnchorObservedReceipt(t, reader, notice.MailboxID)
+				messageID := waitLinkNoticeReceipt(t, reader, notice.MailboxID, h.process.outputString)
 				message := h.provider.Delivery(messageID - 1)
 				text := fmt.Sprint(message["text"])
 				if fmt.Sprint(message["chat_id"]) != "1001" || strings.Contains(text, "\n") || message["reply_markup"] != nil {
@@ -78,4 +79,45 @@ func TestChannelNoticeLinkRegisteredBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func waitLinkNoticeReceipt(t *testing.T, reader render.Observer, id string, detail func() string) int {
+	t.Helper()
+	messageID := 0
+	waitSessionRecovery(t, func() bool {
+		plans, err := reader.ListCurrentChannelDeliveryPlans(t.Context(), "", 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var matching []render.Candidate
+		for _, plan := range plans {
+			if plan.SourceKind == "notice" && plan.SourceID == id {
+				matching = append(matching, plan)
+			}
+		}
+		if len(matching) > 1 {
+			t.Fatal("notice created duplicate plans", id)
+		}
+		if len(matching) != 1 || matching[0].State != "sent" {
+			return false
+		}
+		plan := matching[0]
+		receipt, found, err := reader.GetCurrentChannelSentReceipt(t.Context(), plan.DeliveryID, plan.CurrentReceiptID)
+		if err != nil || !found || receipt.DeliveryID != plan.DeliveryID || receipt.RenderID != plan.CurrentRenderID || receipt.OperationID != plan.CurrentReceiptID {
+			t.Fatal("notice receipt lost its exact plan/render/effect join", found, err)
+		}
+		raw, err := json.Marshal(receipt.DeliveryReference)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reference struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &reference); err != nil || reference.ID < 1 {
+			t.Fatal("notice lacks its provider reference", err)
+		}
+		messageID = reference.ID
+		return true
+	}, detail)
+	return messageID
 }
