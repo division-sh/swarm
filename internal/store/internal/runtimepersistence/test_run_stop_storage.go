@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -19,18 +20,28 @@ func RemovePausedRunControlForTest(ctx context.Context, selected any, runID stri
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return runlifecycle.RemovePausedRunControlFixtureTx(ctx, tx, runID)
-	})
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runLifecyclePostgresOwner.RemovePausedRunControlForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.runLifecycleSQLiteOwner.RemovePausedRunControlForTest(ctx, runID)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }
 
 func ContradictPausedRunControlForTest(ctx context.Context, selected any, runID string) error {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return runlifecycle.ContradictPausedRunControlFixtureTx(ctx, tx, runID)
-	})
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runLifecyclePostgresOwner.ContradictPausedRunControlForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.runLifecycleSQLiteOwner.ContradictPausedRunControlForTest(ctx, runID)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }
 
 func ReadRunStopStorageForTest(ctx context.Context, selected any, runID string) (RunStopStorage, error) {
