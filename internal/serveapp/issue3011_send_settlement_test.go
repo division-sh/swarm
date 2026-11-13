@@ -381,11 +381,11 @@ func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serv
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	var out, errOut bytes.Buffer
-	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, &out, &errOut, nil, nil, factory); code != 0 {
+	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, &out, &errOut, nil, nil, fixtureRegistration(factory)); code != 0 {
 		t.Fatalf("registration failed: %d %s", code, errOut.String())
 	}
 	var outList, errList bytes.Buffer
-	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &outList, &errList, nil, nil, factory); code != 0 {
+	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &outList, &errList, nil, nil, fixtureRegistration(factory)); code != 0 {
 		t.Fatal("registration list failed", code)
 	}
 	var listed struct {
@@ -406,7 +406,7 @@ func issue3011RegisteredStatus(t *testing.T, opts cliapp.ServeOptions, endpoint 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	var out, errOut bytes.Buffer
-	code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"), "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"), "--json"}, &out, &errOut, nil, nil, ChannelRegistrations())
 	t.Logf("registration-status readback exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	if code != 0 {
 		t.Fatal("public registered readback failed", code, errOut.String())
