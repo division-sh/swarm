@@ -50,7 +50,7 @@ func (c *RuntimeConnection) SessionRecovery(ctx context.Context, expected channe
 	}
 	defer func() { err = errors.Join(err, work.Done()) }()
 	op, err := c.currentOperation(work.Context())
-	if err != nil || op.Revision != expected.Revision || op.Provider != expected.Provider || op.PrincipalID != expected.PrincipalID || op.SessionAccount != expected.SessionAccount || op.OperationID != expected.OperationID || op.SessionConnectionID != expected.SessionConnectionID || op.AccountReference != expected.AccountReference || op.Coordinate != expected.Coordinate || op.Interface.Normalized() != expected.Interface.Normalized() || op.RequestHash != expected.RequestHash || (op.Phase != channelonboarding.PhaseSucceeded && (!op.DeploymentRegistration || op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation)) || op.DeploymentRegistration && !op.AccountConfirmed || op.FailureCode != "" || op.LogoutCompleted {
+	if err != nil || sessionRecoveryOperationInvalid(op, expected) {
 		return at, false, errors.Join(channelonboarding.ErrRevisionConflict, err)
 	}
 	o := c.state.currentOccurrence()
@@ -83,4 +83,8 @@ func (c *RuntimeConnection) SessionRecovery(ctx context.Context, expected channe
 		return at, false, nil
 	}
 	return time.Time{}, false, err
+}
+
+func sessionRecoveryOperationInvalid(op, expected channelonboarding.Operation) bool {
+	return op.Revision != expected.Revision || op.Provider != expected.Provider || op.PrincipalID != expected.PrincipalID || op.SessionAccount != expected.SessionAccount || op.OperationID != expected.OperationID || op.SessionConnectionID != expected.SessionConnectionID || op.AccountReference != expected.AccountReference || op.Coordinate != expected.Coordinate || op.Interface.Normalized() != expected.Interface.Normalized() || op.RequestHash != expected.RequestHash || (op.Phase != channelonboarding.PhaseSucceeded && (!op.DeploymentRegistration || op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation)) || op.DeploymentRegistration && !op.AccountConfirmed || op.FailureCode != "" || op.LogoutCompleted
 }
