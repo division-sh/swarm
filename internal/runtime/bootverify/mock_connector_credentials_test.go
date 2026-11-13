@@ -331,7 +331,7 @@ func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 					if state == "wrong_role" {
 						role = "signing"
 					}
-					if use.FlowID != flow || use.Role != role {
+					if (use.FlowID != flow && !(flow == "" && use.FlowID == ".")) || use.Role != role {
 						return runtimecredentials.AdmittedSnapshot{}, NoAdmittedCredential, nil
 					}
 					if state == "stale_with_default" {
@@ -404,6 +404,21 @@ func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 		}
 		if !missing {
 			t.Fatal("one learned flow satisfied its sibling's same-key requirement")
+		}
+		// Inherited activity tools still belong to the consuming flow, not the
+		// ancestor declaration whose key is shared by the learned activation.
+		bundle.FlowTree.Root.Tools = source.ToolEntries()
+		bundle.FlowTree.ByID["project-mock"].Tools = nil
+		bundle.FlowTree.ByID["flow-mock"].Tools = nil
+		addScopedAliasActivities(t, scoped)
+		inherited := map[string]bool{}
+		for _, use := range runtimecredentials.BuildRequirementUses(scoped)["provider_credential"] {
+			if use.Name == "provider.send" && use.Role == "provider_credential" {
+				inherited[use.FlowID] = true
+			}
+		}
+		if !inherited["project-live"] || !inherited["flow-live"] {
+			t.Fatalf("inherited activity collapsed into its declaration: %v", inherited)
 		}
 	})
 }

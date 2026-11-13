@@ -23,6 +23,7 @@ type RequirementUse struct {
 	Requirement
 	FlowID string
 	Role   string
+	Entry  runtimecontracts.ToolSchemaEntry
 }
 
 type Descriptor struct {
@@ -64,6 +65,18 @@ func BuildRequirementUses(source semanticview.Source) map[string][]RequirementUs
 	for _, scope := range source.FlowScopes() {
 		appendToolRequirements(index, source, strings.TrimSpace(scope.ID), scope.Tools)
 	}
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
+			entry, found := source.ActivityToolEntry(node, site.Spec.Tool)
+			if found {
+				appendToolRequirements(index, source, node.FlowPath(), map[string]runtimecontracts.ToolSchemaEntry{site.Spec.Tool: entry})
+			}
+		}
+	}
 	appendPolicyCredentialRequirements(index, source, "")
 	for _, scope := range source.FlowScopes() {
 		appendPolicyCredentialRequirements(index, source, strings.TrimSpace(scope.ID))
@@ -85,7 +98,7 @@ func appendToolRequirements(index map[string][]RequirementUse, source semanticvi
 			if storeKey == "" {
 				continue
 			}
-			index[storeKey] = append(index[storeKey], RequirementUse{Requirement: Requirement{Kind: "tool", Name: name}, FlowID: flowID, Role: key})
+			index[storeKey] = append(index[storeKey], RequirementUse{Requirement: Requirement{Kind: "tool", Name: name}, FlowID: flowID, Role: key, Entry: entry})
 		}
 	}
 }
