@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/sessionstate"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/google/uuid"
@@ -356,6 +357,7 @@ func TestWhatsAppCapturePublicationProcessDeathBoundaries(t *testing.T) {
 		if err := json.Unmarshal([]byte(os.Getenv(eventKey)), &event); err != nil {
 			t.Fatal(err)
 		}
+		event = event.WithProviderFacts(channelfixture.For("whatsapp"))
 		if err := json.Unmarshal([]byte(os.Getenv(requestKey)), &request); err != nil {
 			t.Fatal(err)
 		}

@@ -432,7 +432,7 @@ func runtimeIncomingIdentityFixture(t *testing.T, f *activeInputFixture, id stri
 	t.Helper()
 	event := capturedEvent{Scope: f.scope, Source: f.source, OccurrenceID: uuid.NewString(),
 		Conversation: types.NewJID("100000000003", types.DefaultUserServer).String(), EventID: id,
-		Kind: "message", Body: []byte(`{}`), ReceivedAt: time.Now().UTC().Truncate(time.Microsecond)}
+		Kind: "message", Body: []byte(`{}`), ReceivedAt: time.Now().UTC().Truncate(time.Microsecond)}.WithProviderFacts(channelfixture.For("whatsapp"))
 	event.Source.DeploymentRegistration = event.Scope.DeploymentRegistration
 	identity, err := event.PublicationIdentity()
 	if err != nil {
