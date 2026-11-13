@@ -532,12 +532,16 @@ func (c *Coordinator) DispatchPublished(event events.Event, routes []events.Deli
 	}
 	jobs := make([]dispatchJob, 0, len(routes))
 	for index, route := range routes {
-		lease, err := c.beginDispatchWork(c.runContext)
+		lease, err := c.beginRecipientDispatch(c.runContext)
 		if err != nil {
+			var releaseErr error
 			for _, job := range jobs {
-				err = errors.Join(err, job.lease.Done())
+				releaseErr = errors.Join(releaseErr, job.lease.Done())
 			}
-			return err
+			if err == worklifetime.ErrDispatchClosed {
+				return releaseErr
+			}
+			return errors.Join(err, releaseErr)
 		}
 		jobs = append(jobs, dispatchJob{deliveryID: ids[index], event: event, route: route,
 			lease: lease, wakeVersion: c.wakeVersion.Load()})
@@ -837,11 +841,7 @@ func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.Continu
 	}
 	var lease *worklifetime.Lease
 	var err error
-	if runtime, ok := c.workOwner.(*worklifetime.RuntimeOccurrence); ok {
-		lease, err = runtime.BeginContinuationDispatch(ctx)
-	} else {
-		lease, err = c.beginDispatchWork(ctx)
-	}
+	lease, err = c.beginRecipientDispatch(ctx)
 	if errors.Is(err, worklifetime.ErrDispatchClosed) {
 		return nil
 	}
@@ -860,6 +860,13 @@ func (c *Coordinator) beginDispatchWork(ctx context.Context) (*worklifetime.Leas
 	return c.workOwner.Begin(ctx)
 }
 
+func (c *Coordinator) beginRecipientDispatch(ctx context.Context) (*worklifetime.Lease, error) {
+	if runtime, ok := c.workOwner.(*worklifetime.RuntimeOccurrence); ok {
+		return runtime.BeginContinuationDispatch(ctx)
+	}
+	return c.beginDispatchWork(ctx)
+}
+
 func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Duration, shouldWake bool, resultErr error) {
 	dispatchCtx := ctx
 	if c.selectedReconcile != nil {
@@ -871,6 +878,9 @@ func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (delay time.Dur
 				if selected && owned && current == owner && owner.Identity() == (worklifetime.SelectedForkIdentity{
 					ExecutionID: c.authority.ExecutionID(), RunID: c.authority.ForkRunID(), Generation: c.authority.Generation(),
 				}) {
+					if owner.DispatchClosed() {
+						return 0, false, nil
+					}
 					// This exact occurrence is fenced by the process shutdown drain.
 					// Retire new handoffs without canceling accepted carrier contexts.
 					c.mu.Lock()
