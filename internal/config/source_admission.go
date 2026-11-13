@@ -94,6 +94,12 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 			if _, admitted := options[field.Name]; !admitted {
 				return undefinedConfigSourceKey(owner, field, options)
 			}
+			if shape == reflect.TypeFor[PublicWebhookConfig]() {
+				scalar, err := field.Value.Scalar()
+				if err != nil || scalar.Tag != "!!str" {
+					return fmt.Errorf("serve.public_webhook.%s must be a string", field.Name)
+				}
+			}
 			if err := validateConfigValue(field.Value, child, owner+"."+field.Name); err != nil {
 				return err
 			}
