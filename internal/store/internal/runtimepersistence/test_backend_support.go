@@ -6,10 +6,6 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
@@ -70,68 +66,16 @@ func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected an
 	routes = events.NormalizeDeliveryRoutes(routes)
 	switch store := selected.(type) {
 	case *PostgresStore:
-		if store == nil || store.backend == nil {
+		if store == nil || store.backend == nil || store.deliveryPostgresOwner == nil {
 			return fmt.Errorf("postgres fixture store is required")
 		}
-		adapter, err := storedelivery.NewAdapter(storedelivery.DialectPostgres)
-		if err != nil {
-			return fmt.Errorf("construct postgres delivery fixture adapter: %w", err)
-		}
-		return mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			var authority runtimedelivery.ExecutionAuthority
-			err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-				var err error
-				authority, err = persistedEventDeliveryFixtureAuthority(txctx, tx, runID, false)
-				return err
-			})
-			if err != nil {
-				return struct{}{}, err
-			}
-			_, err = adapter.CommitInitial(txctx, attempt, eventID, runID, routes, authority)
-			return struct{}{}, err
-		}).Err()
+		return store.deliveryPostgresOwner.CommitPersistedEventDeliveryFixtureForTest(ctx, eventID, runID, routes)
 	case *SQLiteRuntimeStore:
-		if store == nil || store.backend == nil {
+		if store == nil || store.backend == nil || store.deliverySQLiteOwner == nil {
 			return fmt.Errorf("sqlite fixture store is required")
 		}
-		adapter, err := storedelivery.NewAdapter(storedelivery.DialectSQLite)
-		if err != nil {
-			return fmt.Errorf("construct sqlite delivery fixture adapter: %w", err)
-		}
-		return mutationprotocol.RunSQLite(ctx, store.backend, "persisted event delivery fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			var authority runtimedelivery.ExecutionAuthority
-			err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-				var err error
-				authority, err = persistedEventDeliveryFixtureAuthority(txctx, tx, runID, true)
-				return err
-			})
-			if err != nil {
-				return struct{}{}, err
-			}
-			_, err = adapter.CommitInitial(txctx, attempt, eventID, runID, routes, authority)
-			return struct{}{}, err
-		}).Err()
+		return store.deliverySQLiteOwner.CommitPersistedEventDeliveryFixtureForTest(ctx, eventID, runID, routes)
 	default:
 		return fmt.Errorf("persisted event delivery fixture store %T is unsupported", selected)
 	}
-}
-
-func persistedEventDeliveryFixtureAuthority(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) (runtimedelivery.ExecutionAuthority, error) {
-	query := `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
-	if sqlite {
-		query = `SELECT bundle_hash FROM runs WHERE run_id=?`
-	}
-	var bundleHash string
-	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash); err != nil {
-		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("load delivery fixture run source artifact: %w", err)
-	}
-	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
-	if err != nil {
-		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("construct delivery fixture source: %w", err)
-	}
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "storetest:"+runID, 1)
-	if err != nil {
-		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("construct delivery fixture authority: %w", err)
-	}
-	return authority, nil
 }
