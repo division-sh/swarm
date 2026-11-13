@@ -41,11 +41,11 @@ outputs: [continuity.tick]
 connect:
   - {event: item.registered, from: ., to: registry, resolution: select-or-create}
   - {event: control.seed, from: ., to: control, resolution: select-or-create}
-  - {event: control.review, from: ., to: control}
-  - {event: control.finish, from: ., to: control}
-  - {event: work.requested, from: ., to: control}
-  - {event: retry.requested, from: ., to: control}
-  - {event: dead.requested, from: ., to: control}
+  - {event: control.review, from: ., to: control, resolution: select}
+  - {event: control.finish, from: ., to: control, resolution: select}
+  - {event: work.requested, from: ., to: control, resolution: select}
+  - {event: retry.requested, from: ., to: control, resolution: select}
+  - {event: dead.requested, from: ., to: control, resolution: select}
 `)
 	rootEvents := filepath.Join(source, "events.yaml")
 	raw, err := os.ReadFile(rootEvents)
