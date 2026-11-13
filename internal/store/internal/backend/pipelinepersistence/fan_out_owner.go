@@ -41,9 +41,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanFanOutIntent(row rowScanner) (result fanoutobligation.Intent, scanErr error) {
 	decoded := false
 	defer func() {
-		if decoded && scanErr != nil {
-			scanErr = fanOutInvalidRead(scanErr)
-		}
+		scanErr = fanOutDecodedReadFailure(decoded, scanErr)
 	}()
 	var (
 		runID, origin, bundleHash                                                             string
@@ -596,28 +594,12 @@ func releaseFanOutRetryable(ctx context.Context, attempt *mutationprotocol.Attem
 		if err != nil {
 			return err
 		}
-		failure, err := runtimefailures.MarshalEnvelope(request.Failure)
+		args, err := fanOutRetryReleaseEvidence(intent, request, now)
 		if err != nil {
 			return err
 		}
-		var pacingAt, pacingDelay, pacingSince, pacingFailure any
-		var retryAt, retryFailure any = now.Add(time.Second), string(failure)
-		if request.ReadEvaluation {
-			if intent.ReadRetry == nil {
-				return errors.New("read retry requires its admitted attempt pacing")
-			}
-			if err := intent.ReadRetry.ObserveFailure(now, request.Failure); err != nil {
-				return err
-			}
-			retryAt, retryFailure = nil, nil
-			pacingAt, pacingDelay = intent.ReadRetry.NotBefore, intent.ReadRetry.Delay.Milliseconds()
-			pacingSince, pacingFailure, err = encodeFanOutReadFailure(*intent.ReadRetry)
-			if err != nil {
-				return err
-			}
-		}
 		predicate, keyArgs := fanOutKeyPredicate("", request.Claim.Key, 8)
-		args := append([]any{now, retryAt, retryFailure, pacingAt, pacingDelay, pacingSince, pacingFailure}, keyArgs...)
+		args = append(args, keyArgs...)
 		ownerPosition := len(args) + 1
 		args = append(args, request.Claim.Owner, request.Claim.Generation)
 		query := `UPDATE fan_out_intents

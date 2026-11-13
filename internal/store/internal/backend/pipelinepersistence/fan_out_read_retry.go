@@ -7,6 +7,7 @@ import (
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func decodeFanOutReadRetry(rawAt any, delay sql.NullInt64, rawSince any, rawFailure []byte) (*fanoutobligation.ReadRetry, error) {
@@ -41,4 +42,25 @@ func encodeFanOutReadFailure(r fanoutobligation.ReadRetry) (any, any, error) {
 	}
 	raw, err := runtimefailures.MarshalEnvelope(*r.Failure)
 	return r.Since.UTC(), string(raw), err
+}
+
+func fanOutRetryReleaseEvidence(intent fanoutobligation.Intent, request pipeline.FanOutRetryableRelease, now time.Time) ([]any, error) {
+	failure, err := runtimefailures.MarshalEnvelope(request.Failure)
+	if err != nil {
+		return nil, err
+	}
+	if !request.ReadEvaluation {
+		return []any{now, now.Add(time.Second), string(failure), nil, nil, nil, nil}, nil
+	}
+	if intent.ReadRetry == nil {
+		return nil, errors.New("read retry requires its admitted attempt pacing")
+	}
+	if err := intent.ReadRetry.ObserveFailure(now, request.Failure); err != nil {
+		return nil, err
+	}
+	since, cause, err := encodeFanOutReadFailure(*intent.ReadRetry)
+	if err != nil {
+		return nil, err
+	}
+	return []any{now, nil, nil, intent.ReadRetry.NotBefore, intent.ReadRetry.Delay.Milliseconds(), since, cause}, nil
 }

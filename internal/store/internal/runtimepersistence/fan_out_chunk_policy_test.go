@@ -183,6 +183,10 @@ func TestFanOutForkResetsOnlyOperationalBudgetBothStores(t *testing.T) {
 						t.Fatalf("child budget/cursor/outcomes=%d/%d/%d source budget=%d", budget, cursor, outcomes, sourceBudget)
 					}
 					childRead := read(child.ForkRunID)
+					var readEpisodes int
+					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND (read_retry_not_before IS NOT NULL OR read_retry_delay_ms IS NOT NULL OR read_retry_since IS NOT NULL OR read_retry_failure IS NOT NULL)`, child.ForkRunID).Scan(&readEpisodes); err != nil || readEpisodes != 0 {
+						t.Fatalf("fork retained source read pacing: episodes=%d err=%v", readEpisodes, err)
+					}
 					if childRead.Retry != nil || childRead.ClaimOwner != "" || childRead.ClaimGeneration != 0 || childRead.LeaseExpiresAt != nil || childRead.LastServedAt != nil {
 						t.Fatalf("child inherited operational state: %+v", childRead)
 					}

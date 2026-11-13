@@ -32,3 +32,10 @@ func fanOutReadFailure(ctx context.Context, stage string, cause error, readDispo
 }
 
 func fanOutInvalidRead(cause error) error { return &fanOutReadDefect{cause: cause} }
+
+func fanOutDecodedReadFailure(decoded bool, err error) error {
+	if decoded && err != nil {
+		return fanOutInvalidRead(err)
+	}
+	return err
+}

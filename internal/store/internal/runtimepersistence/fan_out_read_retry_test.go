@@ -119,6 +119,21 @@ func TestFanOutOrdinaryResumeUsesExactNativeOwnerBothStores(t *testing.T) {
 			if turn.key != key {
 				t.Fatal("resume changed exact handler identity")
 			}
+			_, claim, found, err = turn.owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "hostile-prefix", BundleHash: fixture.bundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: time.Minute})
+			if err != nil || !found {
+				t.Fatalf("hostile prefix claim found=%v err=%v", found, err)
+			}
+			if _, err := turn.owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `DELETE FROM fan_out_outcomes WHERE run_id=$1`, fixture.runID); err != nil {
+				t.Fatal(err)
+			}
+			resumed, err = registration.ResumeRunFanOut(ctx, fixture.runID)
+			if err == nil || resumed.Reopened != 0 || resumed.Remaining != 1 {
+				t.Fatalf("missing prefix reopened or disappeared: %+v err=%v", resumed, err)
+			}
+			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 0)
 			if err := grants[0].Retire(ctx); err != nil {
 				t.Fatal(err)
 			}
