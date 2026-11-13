@@ -137,6 +137,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			claimGeneration                                                            uint64
 			leaseExpires, lastServed                                                   any
 			retryReadyAt, retryFailure                                                 any
+			readRetryAbsent                                                            bool
 		)
 		intentQuery := `
 			SELECT bundle_hash, semantic_digest, source_kind,
@@ -144,7 +145,8 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 				COALESCE(source_field, ''), source_mutation_id,
 				source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 				cardinality, cursor, status, next_chunk_size, capsule,
-				claim_owner, claim_generation, lease_expires_at, last_served_at, COALESCE(blocked_reason, ''), retry_ready_at, retry_failure
+				claim_owner, claim_generation, lease_expires_at, last_served_at, COALESCE(blocked_reason, ''), retry_ready_at, retry_failure,
+				(read_retry_not_before IS NULL AND read_retry_delay_ms IS NULL AND read_retry_since IS NULL AND read_retry_failure IS NULL)
 			FROM fan_out_intents
 			WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`
 		if postgres {
@@ -159,6 +161,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			&resourceFlowPath, &resourceEvent, &resourceVersion,
 			&cardinality, &cursor, &status, &nextChunk, &capsuleRaw,
 			&claimOwner, &claimGeneration, &leaseExpires, &lastServed, &blockedReason, &retryReadyAt, &retryFailure,
+			&readRetryAbsent,
 		); err != nil {
 			return fmt.Errorf("load materialized fork fan-out %s: %w", sourceIntent.Request.Key.String(), err)
 		}
@@ -187,7 +190,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			strings.TrimSpace(sourceMutation.String) != strings.TrimSpace(source.MutationID) || strings.TrimSpace(resourceFlowPath.String) != strings.TrimSpace(source.Declaration.FlowPath) ||
 			strings.TrimSpace(resourceEvent.String) != strings.TrimSpace(source.Declaration.EventName) || strings.TrimSpace(resourceVersion.String) != strings.TrimSpace(string(source.VersionID)) ||
 			cardinality != sourceIntent.Request.Cardinality || cursor != sourceIntent.Cursor || status != string(sourceIntent.Status) || nextChunk != fanoutobligation.InitialChunkSize ||
-			!capsule.Equal(projectedCapsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || retryReadyAt != nil || retryFailure != nil || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
+			!capsule.Equal(projectedCapsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || retryReadyAt != nil || retryFailure != nil || !readRetryAbsent || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
 			return fmt.Errorf("fork materialization %s fan-out intent conflicts with fixed plan", forkRunID)
 		}
 		outcomeQuery := `
@@ -371,6 +374,7 @@ func materializeRunForkFanOutObligations(
 		intent.NextChunkSize = fanoutobligation.InitialChunkSize
 		intent.LastServedAt = time.Time{}
 		intent.Retry = nil
+		intent.ReadRetry = nil
 		intent.ClaimOwner = ""
 		intent.ClaimGeneration = 0
 		intent.LeaseExpiresAt = time.Time{}

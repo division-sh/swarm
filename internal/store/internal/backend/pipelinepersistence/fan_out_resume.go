@@ -4,18 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"reflect"
-	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
-	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 type fanOutResumeTransaction func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
@@ -50,170 +42,73 @@ func resumeRunFanOut(ctx context.Context, runID string, postgres bool, grant sta
 	if grant.SelectedFork != nil {
 		return result, errors.New("selected fork handler resume is not admitted")
 	}
-	// The run lock bounds this one inventory. Later blocked revisions are not
-	// appended to it, even when another worker reblocks a reopened handler.
+	// One run-locked inventory only; a subsequently reblocked revision is new work.
 	var inventory []fanoutobligation.Intent
 	acknowledged, err := transaction(ctx, func(ctx context.Context, tx *sql.Tx, _ *mutationprotocol.Attempt) error {
-		ready, err := admitFanOutRun(ctx, tx, admission, grant, runID, true)
-		if err != nil || !ready {
-			return errors.Join(err, fanoutobligation.ErrStaleClaim)
-		}
-		if err := runstate.RequireNormalControlTx(ctx, tx, runID, runfork.ControlRunContinue); err != nil {
-			return err
-		}
-		rows, err := tx.QueryContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE run_id=$1 AND status='blocked' ORDER BY COALESCE(CAST(triggering_delivery_id AS TEXT),''),COALESCE(CAST(deployment_feed_id AS TEXT),''),flow_path,declaration_family,semantic_path`, runID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			intent, err := scanFanOutIntent(rows)
-			if err != nil {
-				return err
-			}
-			inventory = append(inventory, intent)
-		}
-		return errors.Join(rows.Err(), rows.Close())
+		var err error
+		inventory, err = loadFanOutResumeInventory(ctx, tx, admission, grant, runID)
+		return err
 	})
 	if err != nil || !acknowledged {
-		if err == nil {
-			err = errors.New("fan-out resume inventory was not acknowledged")
-		}
-		return result, err
+		return result, errors.Join(err, unacknowledgedFanOutResume(acknowledged))
 	}
-	result.Observed = len(inventory)
-	result.Admitted = true
+	result.Observed, result.Admitted = len(inventory), true
 	var refusals error
 	for _, observed := range inventory {
 		if err := ctx.Err(); err != nil {
-			return result, err
+			return result, errors.Join(refusals, err)
 		}
 		prefix, validationErr := validate(ctx, observed)
-		changed := false
-		reopened := false
-		var refused error
+		var state fanOutReopenObservation
 		acknowledged, err := transaction(ctx, func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
-			ready, err := admitFanOutRun(ctx, tx, admission, grant, runID, true)
-			if err != nil || !ready {
-				return errors.Join(err, fanoutobligation.ErrStaleClaim)
-			}
-			if err := runstate.RequireNormalControlTx(ctx, tx, runID, runfork.ControlRunContinue); err != nil {
-				return err
-			}
-			predicate, args := fanOutKeyPredicate("", observed.Request.Key, 1)
-			query := `SELECT ` + fanOutIntentColumns + ` FROM fan_out_intents WHERE ` + predicate
-			if postgres {
-				query += ` FOR UPDATE`
-			}
-			current, err := scanFanOutIntent(tx.QueryRowContext(ctx, query, args...))
-			if err != nil {
-				return err
-			}
-			if !sameBlockedFanOutRevision(current, observed) {
-				changed = true
-				return nil
-			}
-			if validationErr != nil {
-				refused = validationErr
-				return nil
-			}
-			if err := refuseInheritedFanOutResume(ctx, tx, current); err != nil {
-				refused = err
-				return nil
-			}
-			if hash, err := current.Request.OriginBundleHash(); err != nil || hash != grant.BundleHash {
-				return errors.Join(err, fanoutobligation.ErrStaleClaim)
-			}
-			if life := current.Request.Capsule.Context.Life; life != nil {
-				header, found, err := workflowheader.LoadForRead(ctx, tx, life.RunID, current.Request.Capsule.EntityID, life.FlowInstance)
-				if err != nil {
-					return err
-				}
-				if !found || header.Life != life.Life {
-					refused = pipeline.InstanceRestarted(flowidentity.RunScopedFlowInstance{RunID: life.RunID, Route: current.Request.Capsule.Route}, life.Life, header.Life)
-					return nil
-				}
-			}
-			currentPrefix, err := readFanOutResumePrefix(ctx, tx, current)
-			if err != nil {
-				refused = err
-				return nil
-			}
-			if !reflect.DeepEqual(currentPrefix, prefix) {
-				changed = true
-				return nil
-			}
-			at, err := fanOutAdmissionTime(ctx, tx, postgres, time.Now)
-			if err != nil {
-				return err
-			}
-			predicate, args = fanOutKeyPredicate("", observed.Request.Key, 2)
-			updated, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET status='open',blocked_reason=NULL,updated_at=$1 WHERE `+predicate+` AND status='blocked' AND claim_owner IS NULL`, append([]any{at}, args...)...)
-			if err != nil {
-				return err
-			}
-			count, err := updated.RowsAffected()
-			if err != nil || count != 1 {
-				return errors.Join(err, fanoutobligation.ErrStaleClaim)
-			}
-			fact, err := runforkrevision.FanOutIntentFact(observed.Request.Key)
-			if err != nil {
-				return err
-			}
-			reopened = true
-			return attempt.AddFacts(runID, fact)
+			var err error
+			state, err = reopenFanOutHandlerTx(ctx, tx, attempt, postgres, admission, grant, observed, prefix, validationErr)
+			return err
 		})
 		if acknowledged {
-			if refused != nil {
+			switch {
+			case state.refusal != nil:
 				result.Remaining++
-				refusals = errors.Join(refusals, refused)
-			} else if changed {
+				refusals = errors.Join(refusals, state.refusal)
+			case state.changed:
 				result.Changed++
-			} else if reopened {
+			case state.reopened:
 				result.Reopened++
 			}
+		} else {
+			// Observe current state without retrying an unacknowledged write.
+			changed, readErr := observeUnacknowledgedFanOutResume(ctx, postgres, admission, grant, observed, transaction)
+			if changed {
+				result.Changed++
+			}
+			err = errors.Join(err, readErr, unacknowledgedFanOutResume(false))
 		}
-		if err != nil || !acknowledged {
-			if err == nil {
-				err = errors.New("fan-out resume transition was not acknowledged")
-			}
-			if !acknowledged {
-				// Resolve only the current state under native admission. Never retry
-				// an unacknowledged reopen or infer its success from a local error.
-				readChanged := false
-				readAcknowledged, readErr := transaction(ctx, func(ctx context.Context, tx *sql.Tx, _ *mutationprotocol.Attempt) error {
-					ready, readErr := admitFanOutRun(ctx, tx, admission, grant, runID, true)
-					if readErr != nil || !ready {
-						return errors.Join(readErr, fanoutobligation.ErrStaleClaim)
-					}
-					if readErr := runstate.RequireNormalControlTx(ctx, tx, runID, runfork.ControlRunContinue); readErr != nil {
-						return readErr
-					}
-					predicate, args := fanOutKeyPredicate("", observed.Request.Key, 1)
-					query := `SELECT ` + fanOutIntentColumns + ` FROM fan_out_intents WHERE ` + predicate
-					if postgres {
-						query += ` FOR UPDATE`
-					}
-					current, readErr := scanFanOutIntent(tx.QueryRowContext(ctx, query, args...))
-					if readErr == nil && !sameBlockedFanOutRevision(current, observed) {
-						readChanged = true
-					}
-					return readErr
-				})
-				if readAcknowledged && readChanged {
-					result.Changed++
-				}
-				err = errors.Join(err, readErr)
-			}
+		if err != nil {
 			return result, errors.Join(refusals, err)
 		}
 	}
 	return result, refusals
 }
 
-func sameBlockedFanOutRevision(current, observed fanoutobligation.Intent) bool {
-	return current.Status == fanoutobligation.StatusBlocked && current.ClaimOwner == "" &&
-		current.ClaimGeneration == observed.ClaimGeneration && current.UpdatedAt.Equal(observed.UpdatedAt) &&
-		current.Cursor == observed.Cursor && current.BlockedReason == observed.BlockedReason &&
-		current.Source == observed.Source && reflect.DeepEqual(current.Request, observed.Request)
+func unacknowledgedFanOutResume(acknowledged bool) error {
+	if acknowledged {
+		return nil
+	}
+	return errors.New("fan-out resume transaction was not acknowledged")
+}
+
+func observeUnacknowledgedFanOutResume(ctx context.Context, postgres bool, admission FanOutAdmission, grant startupownership.GrantEvidence, observed fanoutobligation.Intent, transaction fanOutResumeTransaction) (bool, error) {
+	changed := false
+	acknowledged, err := transaction(ctx, func(ctx context.Context, tx *sql.Tx, _ *mutationprotocol.Attempt) error {
+		if err := admitOrdinaryFanOutResumeTx(ctx, tx, admission, grant, observed.Request.Key.RunID); err != nil {
+			return err
+		}
+		current, err := lockFanOutResumeIntent(ctx, tx, postgres, observed.Request.Key)
+		if err != nil {
+			return err
+		}
+		changed = !sameBlockedFanOutRevision(current, observed)
+		return nil
+	})
+	return acknowledged && changed, errors.Join(err, unacknowledgedFanOutResume(acknowledged))
 }
