@@ -34,6 +34,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/testprocess"
@@ -89,7 +90,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 					selection = storebackend.Selection{Backend: storebackend.BackendPostgres}
 				}
 				checkpoint := killMixedFanOutAtClaim(t, backend, address, retained)
-				storeRequest := storeselected.RuntimeRequest{Selection: selection}
+				storeRequest := storeselected.RuntimeRequest{Selection: selection, ProviderFacts: channelfixture.Facts}
 				if backend == "postgres" {
 					storeRequest.PostgresDSN = address
 				}

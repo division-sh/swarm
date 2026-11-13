@@ -39,6 +39,9 @@ func executeRootCommand(ctx context.Context, root string, args []string, out, er
 }
 
 func executeRootCommandWithOptions(ctx context.Context, root string, args []string, out, errOut io.Writer, opts rootCommandOptions) int {
+	if opts.channelRegistration == nil {
+		opts.channelRegistration = channelRegistrationFixture{}
+	}
 	return executeRootCommandAtInvocation(ctx, mustInvocationRootForTest(root), args, out, errOut, opts)
 }
 
@@ -47,6 +50,9 @@ func newRootCommand(ctx context.Context, root string, out, errOut io.Writer) *co
 }
 
 func newRootCommandWithOptions(ctx context.Context, root string, out, errOut io.Writer, opts rootCommandOptions) *cobra.Command {
+	if opts.channelRegistration == nil {
+		opts.channelRegistration = channelRegistrationFixture{}
+	}
 	return newRootCommandAtInvocation(ctx, mustInvocationRootForTest(root), out, errOut, opts)
 }
 
@@ -55,7 +61,7 @@ func loadCLICommandConfig() (cliCommandConfig, error) {
 	if err != nil {
 		return cliCommandConfig{}, err
 	}
-	return loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path()})
+	return loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ChannelRegistration: channelRegistrationFixture{}})
 }
 
 func loadRuntimeConfig(path string) (*config.Config, error) {
@@ -63,7 +69,7 @@ func loadRuntimeConfig(path string) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: path})
+	result, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: path, ChannelRegistration: channelRegistrationFixture{}})
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +86,9 @@ func resolveCLISwarmDir(opts cliSwarmDirOptions) (CLISwarmDirResolution, error) 
 
 func rootCommandOptionsForTest(t testing.TB, opts rootCommandOptions) rootCommandOptions {
 	t.Helper()
+	if opts.channelRegistration == nil {
+		opts.channelRegistration = channelRegistrationFixture{}
+	}
 	if opts.invocationRoot.Path() == "" {
 		opts.invocationRoot = mustInvocationRootForTest(t.TempDir())
 	}
@@ -98,6 +107,9 @@ func resolveCLIAPISettingsForTest(t testing.TB, opts rootCommandOptions) (cliAPI
 
 func unifiedConfigOptionsForTest(t testing.TB, opts unifiedConfigLoadOptions) unifiedConfigLoadOptions {
 	t.Helper()
+	if opts.ChannelRegistration == nil {
+		opts.ChannelRegistration = channelRegistrationFixture{}
+	}
 	if opts.RepoRoot == "" {
 		opts.RepoRoot = t.TempDir()
 	}
@@ -107,4 +119,10 @@ func unifiedConfigOptionsForTest(t testing.TB, opts unifiedConfigLoadOptions) un
 func loadUnifiedConfigForTest(t testing.TB, opts unifiedConfigLoadOptions) (unifiedConfigLoadResult, error) {
 	t.Helper()
 	return loadUnifiedConfig(unifiedConfigOptionsForTest(t, opts))
+}
+
+func defaultVerifyCommandOptionsForTest() verifyCommandOptions {
+	opts := defaultVerifyCommandOptions()
+	opts.channelRegistration = channelRegistrationFixture{}
+	return opts
 }

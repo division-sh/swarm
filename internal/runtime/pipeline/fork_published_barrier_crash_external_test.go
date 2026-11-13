@@ -31,6 +31,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
@@ -110,7 +111,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			address := filepath.Join(t.TempDir(), "published-barrier-crash.db")
-			request := storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: address}}
+			request := storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: address}, ProviderFacts: channelfixture.Facts}
 			if backend == "postgres" {
 				address = testutil.StartPostgresDSN(t)
 				request.Selection = storebackend.Selection{Backend: storebackend.BackendPostgres}
