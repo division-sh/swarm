@@ -73,7 +73,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			return map[string]any{}
 		})
 		setCLIAPITestToken(t, operatorChannelCLIToken)
-		remote, err := newCLIAPIClient(testRootCommandOptions(server))
+		remote, err := newCLIAPIClientForTest(t, testRootCommandOptions(server))
 		if err != nil {
 			t.Fatal(err)
 		}
