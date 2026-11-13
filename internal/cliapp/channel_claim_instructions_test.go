@@ -27,6 +27,7 @@ func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.
 			IdentityOperation: &operatorchannel.Operation{Challenge: "00007", ExpiresAt: expires},
 			Connection:        &channelonboarding.SessionConnectionReadback{AccountPresentation: "+15551234567"},
 		}
+		result = result.WithProviderFacts(channelfixture.For("whatsapp"))
 		if registered {
 			result.Operation.AccountReference = "+15551234567"
 			result.Connection.AccountPresentation = "not the destination"
@@ -59,6 +60,7 @@ func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.
 		IdentityOperation: &operatorchannel.Operation{Challenge: "00007", ExpiresAt: expires},
 		Connection:        &channelonboarding.SessionConnectionReadback{AccountPresentation: "420079", AccountName: "SwarmTestBot"},
 	}
+	result = result.WithProviderFacts(channelfixture.For("telegram"))
 	var out bytes.Buffer
 	if err := writeChannelClaimInstructions(&out, result); err != nil {
 		t.Fatal(err)
@@ -94,6 +96,7 @@ func TestWhatsAppClaimInstructionsRefuseMissingOrMaskedDestination(t *testing.T)
 		var out bytes.Buffer
 		result := channelOnboardingResult{Operation: channelonboarding.Operation{Provider: "whatsapp", AccountReference: account},
 			IdentityOperation: &operatorchannel.Operation{Challenge: "12345", ExpiresAt: time.Now().Add(time.Minute)}}
+		result = result.WithProviderFacts(channelfixture.For("whatsapp"))
 		if err := writeChannelClaimInstructions(&out, result); err == nil || out.Len() != 0 {
 			t.Fatal("instructions guessed a destination", account, out.String(), err)
 		}
