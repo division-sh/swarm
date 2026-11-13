@@ -20,6 +20,8 @@ func fanOutReadFailure(ctx context.Context, stage string, cause error, readDispo
 	switch {
 	case ctx.Err() != nil, errors.Is(cause, fanoutobligation.ErrStaleClaim):
 		disposition = pipeline.FanOutReadYield
+	case fanOutReadHasUncertainCause(cause):
+		disposition = pipeline.FanOutReadUncertain
 	case errors.As(cause, &defect):
 		disposition = pipeline.FanOutReadDefect
 	case readDisposed:
@@ -29,6 +31,23 @@ func fanOutReadFailure(ctx context.Context, stage string, cause error, readDispo
 		}
 	}
 	return &pipeline.FanOutEvaluationLoadError{Cause: cause, Stage: stage, Disposition: disposition}
+}
+
+func fanOutReadHasUncertainCause(err error) bool {
+	if failure, ok := err.(*runtimefailures.Error); ok && failure.Failure.Class == runtimefailures.ClassOutcomeUncertain {
+		return true
+	}
+	switch cause := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, child := range cause.Unwrap() {
+			if fanOutReadHasUncertainCause(child) {
+				return true
+			}
+		}
+	case interface{ Unwrap() error }:
+		return fanOutReadHasUncertainCause(cause.Unwrap())
+	}
+	return false
 }
 
 func fanOutInvalidRead(cause error) error { return &fanOutReadDefect{cause: cause} }

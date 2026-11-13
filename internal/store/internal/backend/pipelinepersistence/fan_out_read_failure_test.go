@@ -26,6 +26,8 @@ func TestFanOutReadDispositionRequiresNativeEvidence(t *testing.T) {
 		{"mixed_cancel_disposal", errors.Join(context.Canceled, driver.ErrBadConn, independent), true, true, pipeline.FanOutReadYield},
 		{"independent_disposed", independent, true, false, pipeline.FanOutReadRetry},
 		{"uncertain_disposed", uncertain, true, false, pipeline.FanOutReadUncertain},
+		{"uncertain_sibling", errors.Join(failures.New(failures.ClassDependencyUnavailable, "read_unavailable", "test", "read", nil), uncertain), true, false, pipeline.FanOutReadUncertain},
+		{"defect_with_uncertain_disposal", errors.Join(fanOutInvalidRead(independent), uncertain), true, false, pipeline.FanOutReadUncertain},
 		{"known_data_defect", fanOutInvalidRead(independent), true, false, pipeline.FanOutReadDefect},
 		{"stale", fanoutobligation.ErrStaleClaim, true, false, pipeline.FanOutReadYield},
 	} {
