@@ -213,6 +213,7 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	if feed.Runtime.Reason != "run_paused" || feed.Runtime.Eligible == nil || *feed.Runtime.Eligible {
 		t.Fatalf("partial feed is not parked by exact run control: %+v", feed)
 	}
+	t.Logf("partial-feed cut reached before %s: cursor=%d/%d owed=%d status=%s", arm, feed.Cursor, feed.Cardinality, feed.Owed, feed.Status)
 	before := s.checkpoint(retry, dead, second)
 	t.Logf("all eight populations witnessed before %s: cursor=%d/100 owed=%d run=%s card=%s session=%s", arm, feed.Cursor, feed.Owed, s.runID, s.card.CardID, s.session.SessionID)
 	switch arm {
@@ -440,7 +441,7 @@ func (s *joinedRetainedScenario) checkpoint(retry, dead, held string) []string {
 	}
 	live := false
 	for _, d := range event.Deliveries {
-		live = live || d.SubscriberID == "worker" && !d.Terminal && d.Status == "processing"
+		live = live || d.SubscriberID == "worker" && !d.Terminal && d.Status == "in_progress"
 	}
 	if !live {
 		s.t.Fatalf("held provider delivery is not in flight while paused: %+v", event)
@@ -603,12 +604,17 @@ func (s *joinedRetainedScenario) semanticResult(retry, dead string) []string {
 			s.t.Fatalf("event has an unobserved causal predecessor: %+v", event)
 		}
 		var exact struct {
-			Payload json.RawMessage `json:"payload"`
+			Payload                  json.RawMessage `json:"payload"`
+			OperatorReferenceEventID string          `json:"operator_reference_event_id"`
 		}
 		if err := s.process.rpc.call(s.ctx, "event.get", map[string]any{"event_id": event.EventID}, &exact); err != nil {
 			s.t.Fatal(err)
 		}
+		if exact.OperatorReferenceEventID != "" && identities[exact.OperatorReferenceEventID] == "" {
+			s.t.Fatalf("event has an unobserved operator reference: %s", event.EventID)
+		}
 		payload := joinedNormalize(joinedDecode(s.t, exact.Payload), identities)
+		rows = append(rows, joinedJSON([]any{"event", identities[event.EventID], event.EventName, payload, identities[event.SourceEventID], identities[exact.OperatorReferenceEventID], event.NoDelivery}))
 		for _, delivery := range event.Deliveries {
 			reason := ""
 			if event.EventID == retry && (delivery.Status != "failed" || !delivery.RetryScheduled) || event.EventID == dead && delivery.Status != "dead_letter" {
