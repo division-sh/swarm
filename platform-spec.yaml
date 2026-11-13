@@ -43398,6 +43398,7 @@ filesystem_source_model:
       - swarm packs show <pack-id> [directory]
       - swarm import <pack-id> [directory]
     source_free_commands: |
+      Under `run start --connect`, the CLI reads no local flow source, except a directory passed to `--expect-bundle`, which it reads only to compute its bundle hash. Payload and data files are still read relative to the working directory.
       Remote connect and reattach modes, doctor, workspace build, secrets, connections and operational API commands do not inspect a local source root. A local positional root is mutually exclusive with remote authority. Fork and channel connect/reconnect/rebind/status inspect a directory only when their optional --source identity selector is supplied; operation-ID resume remains source-free.
   admission:
     owner: internal/sourceartifact

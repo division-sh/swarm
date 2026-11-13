@@ -58,31 +58,35 @@ const (
 )
 
 type runCommandOptions struct {
-	apiOptions       rootCommandOptions
-	eventName        string
-	payloadPath      string
-	connectURL       string
-	noFollow         bool
-	timeout          time.Duration
-	reattachRunID    string
-	configPath       string
-	sourceRoot       string
-	sourceBundleHash string
-	dataImports      []string
-	dataPins         []string
-	idempotencyKey   string
-	runID            string
-	apiPort          int
-	changedFlags     map[string]bool
+	apiOptions         rootCommandOptions
+	eventName          string
+	payloadPath        string
+	connectURL         string
+	noFollow           bool
+	timeout            time.Duration
+	reattachRunID      string
+	configPath         string
+	sourceRoot         string
+	sourceRootSet      bool
+	sourceBundleHash   string
+	expectBundle       string
+	expectedBundleHash string
+	dataImports        []string
+	dataPins           []string
+	idempotencyKey     string
+	runID              string
+	apiPort            int
+	changedFlags       map[string]bool
 }
 
 type runStartResult struct {
-	PublicationID     string                  `json:"publication_id,omitempty"`
-	RunID             string                  `json:"run_id"`
-	EventID           string                  `json:"event_id,omitempty"`
-	DeploymentFeedIDs []string                `json:"deployment_feed_ids,omitempty"`
-	Status            string                  `json:"status"`
-	DataBinding       durabledata.DataBinding `json:"data_binding"`
+	PublicationID      string                  `json:"publication_id,omitempty"`
+	RunID              string                  `json:"run_id"`
+	EventID            string                  `json:"event_id,omitempty"`
+	DeploymentFeedIDs  []string                `json:"deployment_feed_ids,omitempty"`
+	Status             string                  `json:"status"`
+	DataBinding        durabledata.DataBinding `json:"data_binding"`
+	selectedBundleHash string
 }
 
 type runCommandOKResult struct {
@@ -169,6 +173,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 			runOpts := opts
 			if len(args) == 1 {
 				runOpts.sourceRoot = args[0]
+				runOpts.sourceRootSet = true
 			}
 			runOpts.changedFlags = runCommandChangedFlags(cmd)
 			if path, set, err := effectiveCommandConfigPath(cmd, runOpts.configPath, runOpts.changedFlags["config"]); err != nil {
@@ -190,6 +195,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared input event to publish into the flow's live run")
 	cmd.Flags().StringVar(&opts.payloadPath, "payload", "", "Path to JSON object payload file")
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
+	cmd.Flags().StringVar(&opts.expectBundle, "expect-bundle", "", "Optional directory or canonical bundle hash to check with --connect; never selects the source")
 	bindCLIAPITokenFileFlag(cmd, &opts.apiOptions)
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Print publication receipts and available row outcomes without waiting for run quiescence")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
@@ -218,6 +224,11 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
 	}
+	expectedHash, err := opts.resolveBundleExpectation(root)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	opts.expectedBundleHash = expectedHash
 	apiOpts, wsEndpoint, err := opts.runtimeEndpoints()
 	if err != nil {
 		writeCLIAPIError(errOut, err)
@@ -300,6 +311,9 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 }
 
 func (o runCommandOptions) validate() error {
+	if err := o.validateBundleExpectation(); err != nil {
+		return err
+	}
 	if o.timeout < 0 {
 		return fmt.Errorf("--timeout must be non-negative (0 waits indefinitely)")
 	}
@@ -497,6 +511,14 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	if opts.sourceBundleHash != "" {
 		bundleHash = opts.sourceBundleHash
 	}
+	if opts.expectedBundleHash != "" && opts.expectedBundleHash != bundleHash {
+		server, _ := runCommandGuidanceSelection(client)
+		mismatch := &runBundleExpectationMismatch{expected: opts.expectedBundleHash, selected: bundleHash, server: server, bound: binding != nil}
+		if strings.TrimSpace(opts.expectBundle) != opts.expectedBundleHash {
+			mismatch.directory = opts.expectBundle
+		}
+		return runStartResult{}, mismatch
+	}
 	if bundleHash != "" {
 		params["bundle_hash"] = bundleHash
 	}
@@ -560,6 +582,9 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	}
 	if err := validateRunStartResult(result); err != nil {
 		return runStartResult{}, err
+	}
+	if strings.TrimSpace(opts.connectURL) != "" {
+		result.selectedBundleHash = bundleHash
 	}
 	return result, nil
 }
@@ -1182,6 +1207,10 @@ func runCommandTerminalExit(status string) error {
 }
 
 func runCommandErrorExitCode(err error) int {
+	var mismatch *runBundleExpectationMismatch
+	if errors.As(err, &mismatch) {
+		return cliExitConflict
+	}
 	return cliAPIErrorExitCode(err, cliAPIErrorClassifier{
 		notFoundCodes: []string{"RUN_NOT_FOUND"},
 		conflictCodes: []string{
@@ -1205,6 +1234,9 @@ func writeRunCommandStarted(out io.Writer, result runStartResult) {
 		return
 	}
 	fmt.Fprintf(out, "run started: run_id=%s status=%s\n", result.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, result.Status))
+	if result.selectedBundleHash != "" {
+		fmt.Fprintf(out, "bundle_hash=%s\n", result.selectedBundleHash)
+	}
 	if result.PublicationID != "" {
 		fmt.Fprintf(out, "rows published: publication_id=%s\n", result.PublicationID)
 	}
