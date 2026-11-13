@@ -334,8 +334,12 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 							peer.rejectNextLogin = true
 							peer.mu.Unlock()
 							process := startServeRuntimeTestProcess(t, opts)
-							if code, exited := process.waitForExit(5 * time.Second); !exited || code != 1 || serveOutputIsReady(process.outputString()) {
-								t.Fatalf("revoked account did not refuse startup: exit=%d exited=%t\n%s", code, exited, process.outputString())
+							process.waitForReadyLine()
+							waitSessionRecovery(t, func() bool {
+								return strings.Contains(process.outputString(), "Not linked: run swarm channel connect whatsapp")
+							}, process.outputString)
+							if code := process.stop(); code != 0 {
+								t.Fatal("revoked account startup did not join before relinking", code)
 							}
 							select {
 							case <-qr:

@@ -361,7 +361,7 @@ func issue3011NoActivity(t *testing.T, endpoint, run string, record map[string]a
 	}
 }
 
-func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer) channelonboarding.Operation {
+func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, priorAccounts ...int) channelonboarding.Operation {
 	t.Helper()
 	var paired sync.Once
 	factory := func(ctx context.Context, options cliapp.ChannelRegistrationOptions) (cliapp.ChannelRegistrationSession, error) {
@@ -391,11 +391,20 @@ func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serv
 	var listed struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
-	if err := json.Unmarshal(outList.Bytes(), &listed); err != nil || len(listed.Accounts) != 1 {
+	expected := 1
+	if len(priorAccounts) != 0 {
+		expected += priorAccounts[0]
+	}
+	if err := json.Unmarshal(outList.Bytes(), &listed); err != nil || len(listed.Accounts) != expected {
 		t.Fatal("registration list is not unique", err)
 	}
 	op := listed.Accounts[0].Operation
-	if !op.DeploymentRegistration || !op.AccountConfirmed || op.Phase != channelonboarding.PhaseSucceeded {
+	for _, row := range listed.Accounts {
+		if row.Operation.Provider == "whatsapp" && row.Operation.AccountReference == "+"+peer.account.User {
+			op = row.Operation
+		}
+	}
+	if !op.DeploymentRegistration || !op.AccountConfirmed || op.Phase != channelonboarding.PhaseSucceeded || op.AccountReference != "+"+peer.account.User {
 		t.Fatal("registration did not complete")
 	}
 	return op
