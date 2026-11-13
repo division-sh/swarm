@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
@@ -237,19 +236,14 @@ func TestServeRegisteredDiagnosticReadAndHeldWriterBothStores(t *testing.T) {
 			connection := owner.connection(op.OperationID)
 			var status channelonboarding.AccountStatus
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-			stamp, found := runtime.Options.ProcessWorkOwner.OriginalProcess()
-			if !found {
-				t.Fatal("status read lost its exact serve holder")
-			}
-			holder := startupownership.AuthorityFromLease(stamp)
-			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "holder": holder, "provider": "whatsapp", "account": op.AccountReference}, &status)
+			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "provider": "whatsapp", "account": op.AccountReference}, &status)
 			if status.Health != "error" || status.State != "refused" || status.Reason != "network unreachable" || status.Cause != "closed by the other side" {
 				t.Fatal("native failure projection changed the legacy reason", status)
 			}
 			var list struct {
 				Accounts []channelonboarding.Result `json:"accounts"`
 			}
-			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "holder": holder, "provider": "whatsapp"}, &list)
+			requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{"scope": "deployment", "provider": "whatsapp"}, &list)
 			if len(list.Accounts) != 1 || list.Accounts[0].Status == nil || list.Accounts[0].Connection == nil ||
 				list.Accounts[0].Status.Cause != status.Cause || list.Accounts[0].Connection.Cause != status.Cause || list.Accounts[0].Connection.State != "error" || list.Accounts[0].Connection.Reason != "" {
 				t.Fatal("list status and connection lost the same native failure", list)

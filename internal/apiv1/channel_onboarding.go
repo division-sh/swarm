@@ -131,9 +131,6 @@ func scopedChannelHandlers(handlers map[string]MethodHandler, channels *operator
 						return nil, NewInvalidParamsError(map[string]any{"field": "account", "reason": "requires deployment scope and provider"})
 					}
 				}
-				if _, exists := req.Params["holder"]; exists {
-					return nil, NewInvalidParamsError(map[string]any{"field": "holder", "reason": "requires deployment scope"})
-				}
 				return handler(ctx, req)
 			}
 			return deploymentChannelRequest(ctx, req, scope, channels, deployment)

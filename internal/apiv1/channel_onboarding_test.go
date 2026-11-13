@@ -112,6 +112,17 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 			return lifecycle.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID,
 				ClientLanguage: req.Params["client_language"].(string), ExpectedLocaleRevision: revision})
 		}})
+	for method, handler := range OperatorChannelHandlers(OperatorChannelHandlerOptions{
+		Channels: channels, Confirmation: directOperatorChannelConfirmationTestAdapter{service: channels},
+		Destructive: directOperatorChannelDestructiveTestAdapter{service: channels},
+		Readback:    operatorChannelIdentityReadbackAdapter{service: channels}, Idempotency: selected,
+		Deployment: func(context.Context, Request) (any, error) {
+			deploymentCalls++
+			return nil, fmt.Errorf("unexpected deployment dispatch")
+		},
+	}) {
+		handlers[method] = handler
+	}
 	for _, method := range []string{"channel.onboarding_select", "channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry"} {
 		if handlers[method] == nil {
 			t.Fatalf("channel onboarding handler %s is missing", method)
@@ -119,6 +130,27 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	}
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: handlers})
 	bindAPITestHandlerOriginalProcess(t, handler, ctx)
+	for _, cell := range []struct{ method, params string }{
+		{"channel.onboarding_select", `"verb":"connect","provider":"telegram"`},
+		{"channel.onboarding_start", `"verb":"connect","provider":"telegram"`},
+		{"channel.onboarding_get", `"operation_id":"` + operationID + `"`},
+		{"channel.onboarding_retry", `"operation_id":"` + operationID + `"`},
+		{"channel.confirm", `"operation_id":"` + operationID + `","expected_revision":1,"approve":true`},
+		{"channel.logout", `"operation_id":"` + operationID + `","expected_revision":1`},
+		{"channel.list", `"provider":"telegram"`},
+	} {
+		if handlers[cell.method] == nil {
+			t.Fatalf("missing channel handler: %s", cell.method)
+		}
+		response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"obsolete-holder","method":"`+cell.method+`","params":{"scope":"deployment","holder":{},`+cell.params+`}}`)
+		if response.Error == nil || response.Error.Code != -32602 || deploymentCalls != 0 {
+			t.Fatal("obsolete holder reached deployment dispatch", cell.method, response, deploymentCalls)
+		}
+		raw, err := json.Marshal(response.Error)
+		if err != nil || !strings.Contains(string(raw), `"field":"holder"`) || !strings.Contains(string(raw), `"reason":"unknown parameter"`) {
+			t.Fatal("holder was not refused by ordinary descriptor admission", cell.method, string(raw), err)
+		}
+	}
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"channel.onboarding_get","params":{"operation_id":"`+operationID+`"}}`)))
