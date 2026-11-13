@@ -96,18 +96,20 @@ inputs: [control.seed, control.review, control.finish, work.requested, retry.req
   subscriptions: [work.requested]
 retry-worker:
   role: retry_worker
-  intent: prompts/worker.md
+  intent: prompts/retry-worker.md
   model: retry
   tools: []
   subscriptions: [retry.requested]
 dead-worker:
   role: dead_worker
-  intent: prompts/worker.md
+  intent: prompts/dead-worker.md
   model: dead
   tools: []
   subscriptions: [dead.requested]
 `,
-		"control/prompts/worker.md": "Remember the synthetic marker supplied in the first event. Recall it on later turns.\n",
+		"control/prompts/worker.md":       "Remember the synthetic marker supplied in the first event. Recall it on later turns.\n",
+		"control/prompts/retry-worker.md": "Handle the synthetic retry request.\n",
+		"control/prompts/dead-worker.md":  "Handle the synthetic refused request.\n",
 	} {
 		writeReleaseFile(t, filepath.Join(source, path), body)
 	}
