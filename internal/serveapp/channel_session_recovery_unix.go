@@ -24,9 +24,35 @@ func (s *serveSessionBootstrap) sessionRecovery(ctx context.Context, op channelo
 		return time.Time{}, false, err
 	}
 	if channelonboarding.SessionUnavailableOnly(attempt.err) {
+		if !retainedSessionIdentityCurrent(op, attempt.operation) {
+			return time.Time{}, false, channelonboarding.ErrRevisionConflict
+		}
 		return time.Time{}, false, attempt.err
 	}
 	return attempt.connection.SessionRecovery(ctx, op)
+}
+
+func sessionNotLinkedOnly(err error) bool {
+	return channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) && !errors.Is(err, channelonboarding.ErrSessionUnavailable)
+}
+
+// A joined failed open is observation only: no connection, admission or retry.
+func (s *serveSessionBootstrap) recordDeploymentNotLinked(ctx context.Context, op channelonboarding.Operation, disposition error) error {
+	if !op.DeploymentRegistration || op.Phase != channelonboarding.PhaseSucceeded || !op.AccountConfirmed || op.LogoutCompleted || !sessionNotLinkedOnly(disposition) {
+		return errors.Join(channelonboarding.ErrInvalidRequest, disposition)
+	}
+	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.connections[op.OperationID] != nil {
+		return channelonboarding.ErrConflict
+	}
+	done := make(chan struct{})
+	close(done)
+	s.connections[op.OperationID] = &serveSessionBootstrapAttempt{operation: op, done: done, err: disposition}
+	return nil
 }
 
 func (s *serveSessionBootstrap) sessionPublicationCurrent(ctx context.Context, activation channelonboarding.CompiledActivation) (bool, error) {

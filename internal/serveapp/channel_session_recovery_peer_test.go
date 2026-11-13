@@ -327,6 +327,41 @@ func exerciseServedSessionRecovery(t *testing.T, opts cliapp.ServeOptions, proce
 	if after != before {
 		t.Fatal("missing-device boot dialed or requested QR")
 	}
+	if registered {
+		runtime = servedTestProcessRuntime(t, process)
+		ctx = servedRuntimeProofAuthorActivityContext(t, runtime, runtime.Options.SourceArtifactFact.BundleHash())
+		owner := read()
+		at, linked, observationErr := owner.sessionRecovery(ctx, current)
+		if !at.IsZero() || linked || !sessionNotLinkedOnly(observationErr) || owner.connection(id) != nil {
+			t.Fatal("terminal missing-device observation gained retry/native ownership", at, linked, observationErr)
+		}
+		if _, _, admitted, err := owner.ObserveSession(ctx, current); admitted || !errors.Is(err, channelonboarding.ErrSessionNotLinked) {
+			t.Fatal("terminal missing-device observation admitted execution", admitted, err)
+		}
+		lease, currentPublication = runtime.ChannelActivations.AcquirePresentation()
+		if !currentPublication {
+			t.Fatal("terminal missing-device structural publication absent")
+		}
+		for _, activation := range lease.Activations() {
+			if activation.OnboardingOperationID == id {
+				t.Error("terminal missing-device observation published native execution")
+			}
+		}
+		lease.Release()
+		owner.mu.Lock()
+		terminal := owner.connections[id]
+		stale := terminal.operation
+		stale.Revision++
+		owner.connections[id] = &serveSessionBootstrapAttempt{operation: stale, done: terminal.done, err: terminal.err}
+		owner.mu.Unlock()
+		_, _, staleErr := owner.sessionRecovery(ctx, current)
+		owner.mu.Lock()
+		owner.connections[id] = terminal
+		owner.mu.Unlock()
+		if !errors.Is(staleErr, channelonboarding.ErrRevisionConflict) {
+			t.Fatal("stale terminal observation survived current operation validation", staleErr)
+		}
+	}
 	if code := process.stop(); code != 0 {
 		t.Fatal("not-linked boot failed join", code)
 	}

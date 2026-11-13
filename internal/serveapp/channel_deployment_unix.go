@@ -111,7 +111,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		if err != nil || rootErr != nil {
 			return errors.Join(err, rootErr)
 		}
-		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu, runtimeOptions.output)
+		return restoreDeploymentAccountControls(ctx, operations, root, config, directory, stores, process, factory, clients, &mu, runtimeOptions.output, runtimeOptions.sessions)
 	}
 	return handler, claim, restore, close
 }
@@ -289,17 +289,26 @@ func rememberDeploymentControl(clients map[string]*cliapp.DeploymentChannelContr
 	}
 }
 
-func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex, output io.Writer) error {
+func restoreDeploymentAccountControls(ctx context.Context, operations []channelonboarding.Operation, root cliapp.InvocationRoot, config, directory string, stores *selected.Owner, process *worklifetime.Process, factory cliapp.ChannelRegistrationFactory, clients map[string]*cliapp.DeploymentChannelControl, mu *sync.Mutex, output io.Writer, sessions serveSessionBootstrapOwner) error {
 	for _, op := range channelonboarding.RetainedConfirmedAccounts(operations, "whatsapp") {
 		ref := channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}
 		client, err := cliapp.UseDeploymentChannelControl(ctx, root, config, directory, op.Provider, stores, process, factory)
 		if err != nil {
 			return err
 		}
-		if err := client.ResumeRegisteredAccount(ctx, ref); err != nil {
+		if err := client.ResumeRegisteredAccount(ctx, ref, op); err != nil {
 			if channelonboarding.SessionUnavailableOnly(err) && errors.Is(err, channelonboarding.ErrSessionNotLinked) {
 				if err := client.Close(context.WithoutCancel(ctx)); err != nil {
 					return err
+				}
+				observer, ok := sessions.(interface {
+					recordDeploymentNotLinked(context.Context, channelonboarding.Operation, error) error
+				})
+				if !ok {
+					return channelonboarding.ErrInvalidRequest
+				}
+				if observeErr := observer.recordDeploymentNotLinked(ctx, op, err); observeErr != nil {
+					return observeErr
 				}
 				if output != nil {
 					fmt.Fprintln(output, channelonboarding.ErrSessionNotLinked)
