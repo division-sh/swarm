@@ -615,7 +615,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		registrations, confirmations := provider.OnboardingCounts()
 		out, errOut := &lockedBuffer{}, &lockedBuffer{}
 		restoreInput := installChannelOnboardingCLIInput(t, "bot-token\n")
-		code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "connect", "telegram", "--yes", "--client-language", "en",
+		code := executeTelegramRuntimeCLI(t.Context(), []string{"--config", configPath, "channel", "connect", "telegram", "--yes", "--client-language", "en",
 			"--idempotency-key", "registered-enrollment-refusal", "--api-server", endpoint}, out, errOut, nil)
 		restoreInput()
 		if code == 0 || !strings.Contains(errOut.String(), "telegram account 420079 is registered to this deployment") || strings.Contains(out.String(), "READY") {
