@@ -27,11 +27,13 @@ type ChannelObservation interface {
 	RegistrationCounts(context.Context) (int, int, int, error)
 	DeliveryDefaultState(context.Context) (string, error)
 	CountUnsettledResponsibilities(context.Context) (int, error)
+	CountUnsettledAfterReset(context.Context, map[string]string) (int, error)
 	EventCardinality(context.Context, string, string) (int, error)
 	Close() error
 }
 
 type ChannelControlCounts = private.ChannelControlCounts
+type ChannelResetSettlement = private.ChannelResetSettlement
 
 func (o channelObservation) NativeConsumerParent(ctx context.Context, operation string, currentOnly bool) (channelnative.TransportParent, error) {
 	return private.ReadChannelNativeConsumerForTest(ctx, o.selected, operation, currentOnly)
@@ -77,6 +79,9 @@ func (o channelObservation) DeliveryDefaultState(ctx context.Context) (string, e
 }
 func (o channelObservation) CountUnsettledResponsibilities(ctx context.Context) (int, error) {
 	return private.CountUnsettledChannelResponsibilitiesForTest(ctx, o.selected)
+}
+func (o channelObservation) CountUnsettledAfterReset(ctx context.Context, originals map[string]string) (int, error) {
+	return private.CountUnsettledChannelAfterResetForTest(ctx, o.selected, originals)
 }
 func (o channelObservation) EventCardinality(ctx context.Context, run, event string) (int, error) {
 	return private.CountChannelObservedEventsForTest(ctx, o.selected, run, event)
