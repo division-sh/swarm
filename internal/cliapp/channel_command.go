@@ -1146,15 +1146,7 @@ func writeChannelList(out io.Writer, result channelListResult) {
 	footers := []string{}
 	wroteSession := false
 	for i, row := range result.Channels {
-		var binding channelprovider.Binding
-		if i < len(result.facts) {
-			binding = result.facts[i]
-		}
-		if row.Operation != nil {
-			if current := row.Operation.ProviderFacts(); current.ReadyTeaching() != "" {
-				binding = current
-			}
-		}
+		binding := channelListRowFacts(result.facts, i, row)
 		if binding.ReadyTeaching() != "" {
 			writeProviderConnection(out, binding, row.Connection, false)
 			wroteSession = true
@@ -1199,6 +1191,19 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "NATIVE INBOX"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
 		Rows:    rows, EmptyMessage: "No operator channels are active.", FooterLines: footers,
 	})
+}
+
+func channelListRowFacts(facts []channelprovider.Binding, index int, row channelReadbackResult) channelprovider.Binding {
+	var binding channelprovider.Binding
+	if index < len(facts) {
+		binding = facts[index]
+	}
+	if row.Operation != nil {
+		if current := row.Operation.ProviderFacts(); current.ReadyTeaching() != "" {
+			binding = current
+		}
+	}
+	return binding
 }
 
 func channelListReadiness(row channelReadbackResult, ready, nativeInbox, reason string, footers []string) (string, string, string, []string) {
