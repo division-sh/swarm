@@ -16,6 +16,18 @@ release approval or a promise of old-store migration.
 
 ### Added
 
+- WhatsApp link notices use the configured operator's bound conversation and
+  the existing delivery journal. Down and back notices each have a ten-minute
+  creation cap; intervening observed drops are counted. Delayed deliveries can
+  still arrive together. Terminal causes get one independent attention notice
+  per cause until authenticated recovery. (#3011)
+  Observation state is memory-only: restarting during an outage can announce
+  it again; a healthy start does not reconstruct an earlier recovery. These
+  notices are one `Swarm Notice:` line, with no acknowledgement or reference.
+  They do not prove that the operator read them. If the operator link itself
+  is down, no down notice is created for later delivery. Its recovery formatter
+  remains pending R199 and currently creates no notice or quota consumption.
+
 - Retained WhatsApp transports reconnect on the same stored device after a
   positively identified transient drop, including registered accounts. Retries
   begin after five seconds, double to a two-hour interval, and continue while

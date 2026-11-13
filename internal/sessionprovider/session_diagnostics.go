@@ -17,6 +17,7 @@ type SessionDiagnostic struct {
 	Errno, CloseStatus                            int
 	Down                                          bool
 	Disconnected, Intentional                     bool
+	Stopped                                       bool
 	KeepAliveTimeout, KeepAliveRestored           bool
 	fenced                                        bool
 }
@@ -135,5 +136,6 @@ func (o *clientOccurrence) diagnosticSnapshot() SessionDiagnostic {
 	d := o.diagnostic
 	d.ConnectionID, d.OccurrenceID, d.Down = o.connectionID, o.occurrenceID, o.fenced && o.authenticated
 	d.fenced = o.fenced
+	d.Stopped = o.fenced && !o.transientDisconnect && o.failureReason != ""
 	return d
 }

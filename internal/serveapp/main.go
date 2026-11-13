@@ -2034,7 +2034,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		channelSelectedDecisions = supervisor.selected
 	}
 	channelWorkerReady := make(chan struct{})
-	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
+	channelDispatcher := &serveChannelDeliveryDispatcher{
 		deployment: deploymentTransport,
 		store:      stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
@@ -2051,7 +2051,13 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
-	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, runtimeReady: channelWorkerReady, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose)}); err != nil {
+	}
+	var noticeObservers []func([]serveSessionDiagnostic)
+	if cfg.Channels.HITL != nil {
+		channelDispatcher.linkNotices = &serveLinkNotices{dispatcher: channelDispatcher, hitl: *cfg.Channels.HITL, mailbox: stores.Mailbox(), entries: map[string]*linkNoticeEntry{}}
+		noticeObservers = append(noticeObservers, channelDispatcher.linkNotices.capture)
+	}
+	if err := startServeChannelDelivery(ctx, processWorkOwner, channelDispatcher, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted, runtimeReady: channelWorkerReady, diagnostics: serveSessionDiagnostics(sessionBootstrap, cfg.Channels.HITL, presenter.out, presenter.errOut, opts.Verbose, noticeObservers...)}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)
 		return 1
 	}
