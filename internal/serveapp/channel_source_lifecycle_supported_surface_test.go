@@ -608,7 +608,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		waitObservedChannelRejectedCallback(t, observation, rejectedToken)
 		waitObservedChannelSendsSettled(t, observation)
 		preserved := readChannelPreservedHistory(t, observation)
-		originalCards := map[string]decisioncard.Card{}
+		originalCardFacts := map[string]decisioncard.Card{}
 		if clear {
 			items, next, err := cards.ListDecisionCards(t.Context(), decisioncard.ListOptions{Status: decisioncard.StatusPending, AnchorKind: string(decisioncard.AnchorKindStageGate), Limit: 200})
 			if err != nil || next != "" {
@@ -619,7 +619,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				if err != nil {
 					t.Fatal(err)
 				}
-				originalCards[item.CardID] = original
+				originalCardFacts[item.CardID] = original
 			}
 		}
 		params := map[string]any{"include_source_artifacts": clear, "idempotency_key": "cli-source-reset"}
@@ -680,7 +680,7 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				return
 			}
 			actual := readChannelPreservedHistory(t, observation, successorPlans...)
-			normalized, err := channelHistoryWithoutResetRenders(preserved, actual, originalCards, backend == servedparity.BackendExplicitPostgres)
+			normalized, err := channelHistoryWithoutResetRenders(preserved, actual, originalCardFacts, backend == servedparity.BackendExplicitPostgres)
 			if err != nil || normalized != preserved {
 				t.Fatalf("reset altered preserved history: %v", err)
 			}
@@ -1003,7 +1003,8 @@ func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
 					var projection map[string]any
 					_ = json.Unmarshal(terminal.Input, &projection)
 					projection[change] = map[string]any{"source_id": uuid.NewString(), "audience": map[string]any{"principal_id": audience.PrincipalID, "interface_key": "foreign", "delivery_epoch": 1, "external_account": "account", "conversation_reference": "room", "conversation_scope": "direct"}, "choices": []any{map[string]any{"verdict": "approve", "label": "Approve", "fields": []any{}}}, "full_text": "forged terminal text"}[change]
-					input, err := canonicaljson.Encode(projection)
+					raw, _ := json.Marshal(projection)
+					input, err := canonicaljson.Canonicalize(raw)
 					if err != nil {
 						t.Fatal(err)
 					}
