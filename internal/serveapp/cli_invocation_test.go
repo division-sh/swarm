@@ -41,11 +41,11 @@ func executeCLIFromWithRunners(ctx context.Context, root string, args []string, 
 			panic(err)
 		}
 	}()
-	return cliapp.Execute(ctx, args, out, errOut, runServe, runTest)
+	return cliapp.Execute(ctx, args, out, errOut, runServe, runTest, ChannelRegistrations())
 }
 
 func executeCLI(ctx context.Context, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner) int {
-	return cliapp.Execute(ctx, args, out, errOut, runServe, RunTestSession)
+	return cliapp.Execute(ctx, args, out, errOut, runServe, RunTestSession, ChannelRegistrations())
 }
 
 func invocationRootForTest(root string) cliapp.InvocationRoot {
