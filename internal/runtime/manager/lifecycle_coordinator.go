@@ -47,11 +47,16 @@ const (
 )
 
 type runtimeLifecycleTransition struct {
-	kind     runtimeLifecycleTransitionKind
-	done     chan struct{}
-	claimed  bool
-	complete bool
-	result   error
+	kind          runtimeLifecycleTransitionKind
+	done          chan struct{}
+	claimed       bool
+	complete      bool
+	result        error
+	drainCtx      context.Context
+	drainCancel   context.CancelFunc
+	drainAccepted bool
+	drainOnce     sync.Once
+	drainErr      error
 }
 
 func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind) *runtimeLifecycleTransition {
@@ -374,6 +379,8 @@ type agentLifecycleCoordinator struct {
 	resetOccurrence     uint64
 	workRetiring        bool
 	watcherExpected     bool
+	shutdownRequested   chan struct{}
+	shutdownRequestSent bool
 	transition          *runtimeLifecycleTransition
 	pendingReset        *runtimeLifecycleTransition
 	retryDone           <-chan struct{}
@@ -1140,7 +1147,15 @@ func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentR
 	c.pendingReset = nil
 	c.retryDone = nil
 	c.watcherExpected = true
+	c.shutdownRequested = make(chan struct{})
+	c.shutdownRequestSent = false
 	return c.runCtx, true, nil
+}
+
+func (c *agentLifecycleCoordinator) shutdownRequestSignal() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.shutdownRequested
 }
 
 func (c *agentLifecycleCoordinator) runSnapshot() (context.Context, AgentRunMode, bool) {
@@ -1348,6 +1363,11 @@ func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycl
 }
 
 func (c *agentLifecycleCoordinator) prepareShutdownTransition(drain bool) *runtimeLifecycleTransition {
+	grace, _ := ResolveShutdownGrace(DefaultShutdownOptions().Grace)
+	return c.prepareShutdownTransitionWithGrace(drain, grace)
+}
+
+func (c *agentLifecycleCoordinator) prepareShutdownTransitionWithGrace(drain bool, grace time.Duration) *runtimeLifecycleTransition {
 	if c == nil {
 		return nil
 	}
@@ -1357,6 +1377,8 @@ func (c *agentLifecycleCoordinator) prepareShutdownTransition(drain bool) *runti
 	switch c.phase {
 	case runtimeLifecycleRunning:
 		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+		transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), grace)
+		transition.drainAccepted = drain
 		c.transition = transition
 		c.phase = runtimeLifecycleShuttingDown
 	case runtimeLifecycleShuttingDown, runtimeLifecycleResetting:
@@ -1367,19 +1389,40 @@ func (c *agentLifecycleCoordinator) prepareShutdownTransition(drain bool) *runti
 		c.workMu.Unlock()
 		if hasRunOwner {
 			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
+			transition.drainCtx, transition.drainCancel = context.WithTimeout(context.Background(), grace)
+			transition.drainAccepted = drain
 			c.transition = transition
 			c.phase = runtimeLifecycleShuttingDown
 		}
 	}
-	if !drain && transition != nil && transition.kind == runtimeLifecycleTransitionShutdown {
+	if !drain && transition != nil && transition.kind == runtimeLifecycleTransitionShutdown &&
+		(!transition.drainAccepted || c.runCtx == nil || c.runCtx.Err() != nil) {
 		c.retireWorkAdmissionAs(true)
 		cancel = c.cancelRun
+	}
+	if transition != nil && transition.kind == runtimeLifecycleTransitionShutdown && c.shutdownRequested != nil && !c.shutdownRequestSent {
+		close(c.shutdownRequested)
+		c.shutdownRequestSent = true
 	}
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	return transition
+}
+
+func (c *agentLifecycleCoordinator) joinShutdownDrain(transition *runtimeLifecycleTransition) {
+	if transition == nil || transition.kind != runtimeLifecycleTransitionShutdown {
+		return
+	}
+	transition.drainOnce.Do(func() {
+		if transition.drainAccepted {
+			transition.drainErr = c.drainShutdownWork(transition.drainCtx)
+			if errors.Is(transition.drainErr, worklifetime.ErrRetired) {
+				transition.drainErr = nil
+			}
+		}
+	})
 }
 
 func (c *agentLifecycleCoordinator) requestResetTransition() (*runtimeLifecycleTransition, *runtimeLifecycleTransition) {
@@ -1495,6 +1538,7 @@ func (c *agentLifecycleCoordinator) completeShutdownTransition(transition *runti
 	if c == nil || transition == nil {
 		return
 	}
+	c.joinShutdownDrain(transition)
 	c.mu.Lock()
 	if c.transition != transition || transition.kind != runtimeLifecycleTransitionShutdown || transition.complete {
 		c.mu.Unlock()
@@ -1505,6 +1549,9 @@ func (c *agentLifecycleCoordinator) completeShutdownTransition(transition *runti
 		result = errors.Join(result, c.transitionExecutor.Done())
 	}
 	transition.result = result
+	if transition.drainCancel != nil {
+		transition.drainCancel()
+	}
 	transition.complete = true
 	c.runMode = AgentRunModeStopped
 	c.runCtx = nil
