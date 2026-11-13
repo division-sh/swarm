@@ -107,13 +107,34 @@ func TestChannelNoticeLinkWorkerCustodyAndCurrentness(t *testing.T) {
 	before := len(mailbox.requests)
 	selected.Binding = &operatorchannel.Binding{Status: operatorchannel.BindingCurrent, Revision: 2}
 	mailbox.failure = render.ErrLinkNoticeAbsent
-	if err := poll(); err != nil || mailbox.create[before] || n.entries[op.OperationID].pending != nil {
+	if err := poll(); err != nil || mailbox.create[before] || n.entries[op.OperationID].item.ID != "" {
 		t.Fatal("stale destination was recreated", err)
 	}
 	owner.failure = context.Canceled
 	before = len(mailbox.requests)
 	if err := poll(); err != nil || len(mailbox.requests) != before || n.entries[op.OperationID].valid {
 		t.Fatal("caller cancellation became a notice")
+	}
+	stopped := n.items[0]
+	stopped.Fact.Stopped = true
+	for _, refusal := range []error{context.Canceled, channelonboarding.ErrRevisionConflict, errors.New("storage"), errors.Join(channelonboarding.ErrRevisionConflict, context.Canceled)} {
+		n.capture([]serveSessionDiagnostic{stopped})
+		n.observe(op, refusal, owner.at)
+		if n.entries[op.OperationID].valid {
+			t.Fatal("stopped fact bypassed refusal", refusal)
+		}
+		if err := n.reconcile(t.Context(), nil); err != nil || len(mailbox.requests) != before {
+			t.Fatal("refused observation created a notice", err)
+		}
+	}
+	for _, mutate := range []func(*channelonboarding.Operation){func(o *channelonboarding.Operation) { o.Revision++ }, func(o *channelonboarding.Operation) { o.RequestHash = "stale" }, func(o *channelonboarding.Operation) { o.DeploymentRegistration = !o.DeploymentRegistration }} {
+		stale := stopped
+		mutate(&stale.Operation)
+		n.capture([]serveSessionDiagnostic{stale})
+		n.observe(op, nil, owner.at)
+		if n.entries[op.OperationID].valid {
+			t.Fatal("stale stopped observation was accepted")
+		}
 	}
 	back := linkNoticeEvent{kind: "back", since: now, upAt: now.Add(4 * time.Minute), extra: 2, cause: "connection reset"}
 	if got := linkNoticeText(back, true); got != "Swarm Notice: WhatsApp link back after 4m0s, 2 more drops in between; cause: connection reset" {

@@ -535,6 +535,13 @@ func (c *RuntimeConnection) SessionDiagnostic(ctx context.Context) (fact Session
 	return fact, account, nil
 }
 
+func (d SessionDiagnostic) StoppedRefusalOnly(err error) bool {
+	_, typed := failures.As(err)
+	return d.Stopped && !typed && failures.OnlyBranches(err, func(branch error) bool {
+		return branch == errClientOccurrenceFenced || branch == errTerminalAccountRefusal
+	})
+}
+
 func (c *RuntimeConnection) UnclaimedCount(ctx context.Context) (count int64, err error) {
 	work, err := c.begin(ctx)
 	if err != nil {
