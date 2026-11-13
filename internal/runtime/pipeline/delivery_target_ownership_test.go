@@ -367,6 +367,38 @@ func TestTargetLookupCoordinatePreservesDeclaredNonRootAndHandlerIdentity(t *tes
 	if _, err := ClassifyDeliveryTargetOwnership(DeliveryTargetLookup{}, []DeliveryTargetOwnerCandidate{{Route: target}}); err == nil {
 		t.Fatal("unadmitted lookup acquired target ownership")
 	}
+	t.Run("reply lookup retains exact origin and native life", func(t *testing.T) {
+		for _, admission := range []ReplyOriginTargetAdmission{{}, NewEphemeralReplyOriginTargetAdmission()} {
+			origin := target
+			reply, err := admission.Admit(origin, PreparedWorkflowPublicationState{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin.EntityID = eventtest.UUID("changed-reply-origin")
+			if reply.Coordinate() != target {
+				t.Fatal("reply lookup borrowed a changed origin")
+			}
+			owner, err := ClassifyReplyOriginTargetOwnership(source, reply, []DeliveryTargetOwnerCandidate{{Route: target, Life: 7}})
+			if err != nil || owner.Route() != target || owner.Life() != 7 {
+				t.Fatalf("reply lookup lost native life: owner=%+v err=%v", owner, err)
+			}
+			for _, candidates := range [][]DeliveryTargetOwnerCandidate{
+				{{Route: target}},
+				{{Route: target, Life: -1}},
+				{{Route: target, Life: 7}, {Route: target, Life: 8}},
+			} {
+				if _, err := ClassifyReplyOriginTargetOwnership(source, reply, candidates); err == nil {
+					t.Fatalf("reply lookup replaced invalid native life with optional origin: %+v", candidates)
+				}
+			}
+		}
+		if _, err := ClassifyReplyOriginTargetOwnership(source, ReplyOriginTargetLookup{}, nil); err == nil {
+			t.Fatal("unadmitted reply lookup acquired optional absence")
+		}
+		if _, err := (ReplyOriginTargetAdmission{}).Admit(events.RouteIdentity{}, PreparedWorkflowPublicationState{}); err == nil {
+			t.Fatal("native admission accepted empty reply origin")
+		}
+	})
 }
 
 func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *testing.T) {

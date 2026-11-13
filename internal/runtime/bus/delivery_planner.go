@@ -117,6 +117,7 @@ type deliveryRecipientPolicy struct {
 	loadTargetOwnerCandidates  func(context.Context) ([]runtimepipeline.DeliveryTargetOwnerCandidate, bool, error)
 	semanticSource             semanticview.Source
 	requireTargetOwners        bool
+	replyOrigins               runtimepipeline.ReplyOriginTargetAdmission
 	runProposal                runtimepipeline.FlowInstanceRunProposal
 }
 
@@ -701,6 +702,7 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 			loadTargetOwnerCandidates:  eb.targetOwnerCandidates,
 			semanticSource:             eb.semanticSource,
 			requireTargetOwners:        !eb.ephemeral,
+			replyOrigins:               eb.replyOrigins,
 			instances:                  eb.connectRoutePlanner.lifecycle.index,
 		},
 		connectPlanner: eb.connectRoutePlanner,

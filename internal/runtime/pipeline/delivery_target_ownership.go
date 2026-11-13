@@ -223,6 +223,58 @@ type DeliveryTargetLookup struct {
 
 func (l DeliveryTargetLookup) Coordinate() events.RouteIdentity { return l.coordinate }
 
+// ReplyOriginTargetAdmission is fixed by the Bus constructor. Its zero value
+// requires native ownership; only the explicit ephemeral constructor opts out.
+type ReplyOriginTargetAdmission struct {
+	ephemeral bool
+}
+
+func NewEphemeralReplyOriginTargetAdmission() ReplyOriginTargetAdmission {
+	return ReplyOriginTargetAdmission{ephemeral: true}
+}
+
+type ReplyOriginTargetLookup struct {
+	origin    events.RouteIdentity
+	ephemeral bool
+	present   bool
+}
+
+func (l ReplyOriginTargetLookup) Coordinate() events.RouteIdentity { return l.origin }
+
+func (a ReplyOriginTargetAdmission) Admit(origin events.RouteIdentity, prospective PreparedWorkflowPublicationState) (ReplyOriginTargetLookup, error) {
+	origin = origin.Normalized()
+	if err := prospective.ValidateTarget(origin); err != nil {
+		return ReplyOriginTargetLookup{}, err
+	}
+	if origin.Empty() && !a.ephemeral {
+		return ReplyOriginTargetLookup{}, fmt.Errorf("receiver target blueprint is required")
+	}
+	return ReplyOriginTargetLookup{origin: origin, ephemeral: a.ephemeral, present: true}, nil
+}
+
+func ClassifyReplyOriginTargetOwnership(source semanticview.Source, lookup ReplyOriginTargetLookup, candidates []DeliveryTargetOwnerCandidate) (events.DeliveryTargetOwnership, error) {
+	if !lookup.present {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("reply origin classification requires its admitted lookup")
+	}
+	if lookup.origin.Empty() {
+		return events.DeliveryTargetOwnership{}, nil
+	}
+	// An explicit reply entity narrows the inventory. Node classification below
+	// deliberately retains its contradictory-entity refusal instead.
+	matching := make([]DeliveryTargetOwnerCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if lookup.origin.FlowInstance != "" && candidate.Route.FlowInstance != lookup.origin.FlowInstance || lookup.origin.EntityID != "" && candidate.Route.EntityID != lookup.origin.EntityID {
+			continue
+		}
+		matching = append(matching, candidate)
+	}
+	owner, found, err := selectDeliveryTargetOwner(source, lookup.origin, matching, lookup)
+	if err != nil || found {
+		return owner, err
+	}
+	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", lookup.origin.FlowInstance)
+}
+
 // AdmitDeliveryTargetLookup resolves the receiving declaration once, before any
 // instance lookup. Classification consumes this fact, not a caller-built route.
 func AdmitDeliveryTargetLookup(req DeliveryTargetOwnershipRequest) (DeliveryTargetLookup, error) {
@@ -313,6 +365,10 @@ func ClassifyDeliveryTargetOwnership(lookup DeliveryTargetLookup, candidates []D
 // SelectDeliveryTargetOwner decides only the supplied candidate evidence, not
 // handler or reply admission. Only found=false with no error means absence.
 func SelectDeliveryTargetOwner(source semanticview.Source, blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate) (events.DeliveryTargetOwnership, bool, error) {
+	return selectDeliveryTargetOwner(source, blueprint, candidates, ReplyOriginTargetLookup{})
+}
+
+func selectDeliveryTargetOwner(source semanticview.Source, blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate, reply ReplyOriginTargetLookup) (events.DeliveryTargetOwnership, bool, error) {
 	blueprint = blueprint.Normalized()
 	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(source, blueprint, candidates)
 	if err != nil {
@@ -328,14 +384,28 @@ func SelectDeliveryTargetOwner(source semanticview.Source, blueprint events.Rout
 		}
 		return captureDeliveryTargetLife(owner, candidates)
 	}
-	if len(existing) == 1 && len(materializing) == 0 {
-		owner, err := events.NewExistingEntityTarget(existing[0])
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, false, err
+	var selected events.RouteIdentity
+	native := len(existing) == 1
+	switch {
+	case native:
+		selected = existing[0]
+	case reply.present && reply.ephemeral:
+		selected = reply.origin
+		if selected.EntityID == "" {
+			owner, err := events.NewEntitylessReceiverTarget(selected)
+			return owner, err == nil, err
 		}
+	default:
+		return events.DeliveryTargetOwnership{}, false, nil
+	}
+	owner, err := events.NewExistingEntityTarget(selected)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, false, err
+	}
+	if native {
 		return captureDeliveryTargetLife(owner, candidates)
 	}
-	return events.DeliveryTargetOwnership{}, false, nil
+	return owner, true, nil
 }
 
 func captureDeliveryTargetLife(owner events.DeliveryTargetOwnership, candidates []DeliveryTargetOwnerCandidate) (events.DeliveryTargetOwnership, bool, error) {

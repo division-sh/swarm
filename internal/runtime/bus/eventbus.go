@@ -69,6 +69,7 @@ type EventBus struct {
 	store                       EventStore
 	pipelineObligations         runtimepipelineobligation.Store
 	ephemeral                   bool
+	replyOrigins                runtimepipeline.ReplyOriginTargetAdmission
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
 	templateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
@@ -485,6 +486,7 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 		return nil, err
 	}
 	eb.ephemeral = true
+	eb.replyOrigins = runtimepipeline.NewEphemeralReplyOriginTargetAdmission()
 	eb.rebuildRoutePlanners(eb.connectRoutePlanner.graph)
 	return eb, nil
 }

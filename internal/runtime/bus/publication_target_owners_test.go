@@ -61,6 +61,13 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	for _, required := range []bool{false, true} {
 		candidate := base
 		candidate.required = required
+		if !required {
+			ephemeral, err := NewEphemeralEventBus(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate.replyOrigins = ephemeral.deliveryPlanner.recipientPolicy.replyOrigins
+		}
 		before, reads := plan, len(reader.lookups)
 		owner, err := candidate.returnOwner(ctx, event, &plan, record)
 		if !owner.Empty() || !errors.Is(err, readFailure) || len(reader.lookups) != reads+1 || !reflect.DeepEqual(before, plan) {
