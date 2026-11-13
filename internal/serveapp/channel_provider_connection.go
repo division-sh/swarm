@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -25,6 +26,7 @@ type serveSessionConnection interface {
 	PairingReadback(context.Context, operatorchannel.Principal) (channelonboarding.PairingReadback, error)
 	AccountPresentation(context.Context) (string, string, error)
 	DisconnectionReason() string
+	FailureReport() (reason, cause string)
 	ReadClaimCodeNotice(context.Context, channelonboarding.Operation) (*channelonboarding.ClaimCodeNotice, error)
 	SessionPreviewConnected(context.Context, channelonboarding.Operation) (bool, error)
 	UnclaimedCount(context.Context) (int64, error)
@@ -33,6 +35,8 @@ type serveSessionConnection interface {
 	ValidateActivityRequestAccount(context.Context, operatorchannel.SessionAccountAdmission, string, int64) error
 	ObserveSession(context.Context) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, error)
 	SessionDiagnostic(context.Context) (sessionprovider.SessionDiagnostic, string, error)
+	SessionRecovery(context.Context, channelonboarding.Operation) (time.Time, bool, error)
+	RecoveryFailure(context.Context, channelonboarding.Operation, error) error
 	ChannelExecution(context.Context) (execution.Channel, error)
 	VerifyDeploymentRegistration(context.Context, channelonboarding.Operation) (bool, error)
 	LogoutDeploymentRegistration(context.Context, channelonboarding.Operation) error
