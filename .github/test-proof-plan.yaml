@@ -92,6 +92,7 @@ profiles:
     - serveapp-channel-lifecycle
     - serveapp-channel-native
     - serveapp-runtime
+    - serveapp-session-recovery
     - contracts-first
     - contracts-rest
     - api-llm-bus-full
@@ -173,6 +174,7 @@ profiles:
     - serveapp-channel-lifecycle
     - serveapp-channel-native
     - serveapp-runtime
+    - serveapp-session-recovery
     - contracts-first
     - contracts-rest
     - api-llm-bus-full
@@ -945,11 +947,19 @@ units:
   serveapp-runtime:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # RE2 complement of TestReceiver; the adjacent unit owns that family.
-    run: '^TestR($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^r].*)))))))$'
+    # Positive RE2 complement of the TestReceiver prefix and the three exact
+    # session-recovery roots owned below; neighboring/future roots stay here.
+    run: '^TestR(?:|[^eu].*|e(?:|[^c].*|c(?:|[^e].*|e(?:|[^i].*|i(?:|[^v].*|v(?:|[^e].*|e(?:|[^r].*))))))|u(?:|[^n].*|n(?:|[^S].*|S(?:|[^e].*|e(?:|[^r].*|r(?:|[^v].*|v(?:|[^e].*|e(?:|[^ST].*|S(?:|[^e].*|e(?:|[^s].*|s(?:|[^s].*|s(?:|[^i].*|i(?:|[^o].*|o(?:|[^n].*|n(?:|[^R].*|R(?:|[^e].*|e(?:|[^c].*|c(?:|[^o].*|o(?:|[^v].*|v(?:|[^e].*|e(?:|[^r].*|r(?:|[^y].*|y(?:|[^LR].*|L(?:|[^e].*|e(?:|[^a].*|a(?:|[^r].*|r(?:|[^n].*|n(?:|[^e].*|e(?:|[^d].*|d(?:|[^B].*|B(?:|[^o].*|o(?:|[^t].*|t(?:|[^h].*|h(?:|[^S].*|S(?:|[^t].*|t(?:|[^o].*|o(?:|[^r].*|r(?:|[^e].*|e(?:|[^s].*|s.+))))))))))))))))|R(?:|[^e].*|e(?:|[^g].*|g(?:|[^i].*|i(?:|[^s].*|s(?:|[^t].*|t(?:|[^e].*|e(?:|[^r].*|r(?:|[^e].*|e(?:|[^d].*|d(?:|[^B].*|B(?:|[^o].*|o(?:|[^t].*|t(?:|[^h].*|h(?:|[^S].*|S(?:|[^t].*|t(?:|[^o].*|o(?:|[^r].*|r(?:|[^e].*|e(?:|[^s].*|s.+))))))))))))))))))))))))))))))))))|T(?:|[^e].*|e(?:|[^r].*|r(?:|[^m].*|m(?:|[^i].*|i(?:|[^n].*|n(?:|[^a].*|a(?:|[^l].*|l(?:|[^A].*|A(?:|[^c].*|c(?:|[^c].*|c(?:|[^o].*|o(?:|[^u].*|u(?:|[^n].*|n(?:|[^t].*|t(?:|[^D].*|D(?:|[^o].*|o(?:|[^e].*|e(?:|[^s].*|s(?:|[^N].*|N(?:|[^o].*|o(?:|[^t].*|t(?:|[^S].*|S(?:|[^t].*|t(?:|[^a].*|a(?:|[^r].*|r(?:|[^v].*|v(?:|[^e].*|e(?:|[^R].*|R(?:|[^e].*|e(?:|[^c].*|c(?:|[^o].*|o(?:|[^v].*|v(?:|[^e].*|e(?:|[^r].*|r(?:|[^y].*|y(?:|[^B].*|B(?:|[^o].*|o(?:|[^t].*|t(?:|[^h].*|h(?:|[^S].*|S(?:|[^t].*|t(?:|[^o].*|o(?:|[^r].*|r(?:|[^e].*|e(?:|[^s].*|s.+)))))))))))))))))))))))))))))))))))))))))))))))))))))$'
     required_children:
       TestR7ServedObserverOrdersExecutionAndRestartBothStores: [default_sqlite/observer_first=false, default_sqlite/observer_first=true, explicit_postgres/observer_first=false, explicit_postgres/observer_first=true]
       TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/connected_restart/before_restart, default_sqlite/connected_restart/after_restart, explicit_postgres/connected_typed_creation, explicit_postgres/connected_restart/before_restart, explicit_postgres/connected_restart/after_restart]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  serveapp-session-recovery:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestRunServe(SessionRecovery(Learned|Registered)BothStores|TerminalAccountDoesNotStarveRecoveryBothStores)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
