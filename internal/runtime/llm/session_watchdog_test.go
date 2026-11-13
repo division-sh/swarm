@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -193,6 +194,38 @@ func TestSessionWatchdogMonitorWriter_CloseCancelsBlockedWatchdogPersistence(t *
 }
 
 func TestSessionWatchdogJoinedOnGenerationRetire(t *testing.T) {
+	t.Run("accepted_turn_after_fence", func(t *testing.T) {
+		process := worklifetime.NewProcess()
+		owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "draining-watchdog", BundleHash: "draining-watchdog"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = owner.RetireAndWait(context.Background())
+			process.Retire()
+			_, _ = process.Join(context.Background())
+		})
+		parent, err := owner.Begin(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = parent.Done() }()
+		if err := owner.Fence(); err != nil {
+			t.Fatal(err)
+		}
+		meta := MonitorTurnMeta{AgentID: "agent-1", SessionID: "sess-1", Memory: testMemory(), MemoryIdentity: testMemoryIdentity("agent-1", "support/inst-1"), WatchdogLongRunningAfter: time.Hour, WatchdogNoOutputAfter: 2 * time.Hour}
+		writer, err := newSessionWatchdogMonitorWriter(worklifetime.WithOccurrence(parent.Context(), owner), noopMonitorWriter{}, &captureConversationStore{}, nil, meta)
+		if err != nil {
+			t.Fatalf("accepted turn lost its watchdog during drain: %v", err)
+		}
+		defer func() { _ = writer.Close() }()
+		if got := owner.ActiveCount(); got != 2 {
+			t.Fatalf("accepted parent and watchdog leases=%d, want 2", got)
+		}
+		if _, err := newSessionWatchdogMonitorWriter(worklifetime.WithOccurrence(context.Background(), owner), noopMonitorWriter{}, &captureConversationStore{}, nil, meta); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			t.Fatalf("fresh watchdog after fence=%v", err)
+		}
+	})
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "watchdog-runtime",
