@@ -686,6 +686,13 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		}
 		checkHistory := func() {
 			actual := readChannelPreservedHistory(t, observation, successorPlans...)
+			for _, plan := range successorPlans {
+				var err error
+				actual, err = channelHistoryWithoutSuccessorPlan(actual, plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			normalized, err := channelHistoryWithoutResetRenders(preserved, actual, originalCardFacts, backend == servedparity.BackendExplicitPostgres)
 			if err != nil || normalized != preserved {
 				t.Fatalf("reset altered preserved history: %v", err)
