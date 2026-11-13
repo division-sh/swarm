@@ -21,11 +21,11 @@ func repoRootForTest() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
 }
 
-func executeCLIFrom(ctx context.Context, root string, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner) int {
-	return executeCLIFromWithRunners(ctx, root, args, out, errOut, runServe, RunTestSession)
+func executeCLIFrom(ctx context.Context, root string, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner, registration ...cliapp.ChannelRegistrationFactory) int {
+	return executeCLIFromWithRunners(ctx, root, args, out, errOut, runServe, RunTestSession, registration...)
 }
 
-func executeCLIFromWithRunners(ctx context.Context, root string, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner, runTest cliapp.TestSessionRunner) int {
+func executeCLIFromWithRunners(ctx context.Context, root string, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner, runTest cliapp.TestSessionRunner, registration ...cliapp.ChannelRegistrationFactory) int {
 	cliInvocationTestMu.Lock()
 	defer cliInvocationTestMu.Unlock()
 
@@ -41,11 +41,11 @@ func executeCLIFromWithRunners(ctx context.Context, root string, args []string, 
 			panic(err)
 		}
 	}()
-	return cliapp.Execute(ctx, args, out, errOut, runServe, runTest, ChannelRegistrations())
+	return cliapp.Execute(ctx, args, out, errOut, runServe, runTest, registration...)
 }
 
-func executeCLI(ctx context.Context, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner) int {
-	return cliapp.Execute(ctx, args, out, errOut, runServe, RunTestSession, ChannelRegistrations())
+func executeCLI(ctx context.Context, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner, registration ...cliapp.ChannelRegistrationFactory) int {
+	return cliapp.Execute(ctx, args, out, errOut, runServe, RunTestSession, registration...)
 }
 
 func invocationRootForTest(root string) cliapp.InvocationRoot {
