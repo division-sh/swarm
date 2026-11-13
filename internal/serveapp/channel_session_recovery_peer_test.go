@@ -54,7 +54,7 @@ func TestRunServeSessionRecoveryLearnedBothStores(t *testing.T) {
 func TestRunServeSessionRecoveryRegisteredBothStores(t *testing.T) {
 	read := captureRecoveryBootstrap(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, permanent := range []string{"transient", "logout", "replacement", "ban", "replacement/publication", "ban/publication", "replacement/incoming", "ban/incoming"} {
+		for _, permanent := range []string{"transient", "logout", "replacement", "ban", "replacement/publication", "ban/publication", "replacement/incoming", "ban/incoming", "replacement/registration", "ban/registration"} {
 			if !t.Run(backend+"/"+permanent, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
@@ -433,6 +433,10 @@ func requireRecoveryPermanentBoot(t *testing.T, opts cliapp.ServeOptions, peer *
 			defer lease.Release()
 			for _, activation := range lease.Activations() {
 				if activation.OnboardingOperationID == op.OperationID {
+					if boundary == "registration" {
+						_, err := filterServeSessionActivationSnapshot(ctx, serveChannelActivationSnapshot{Activations: []channelonboarding.CompiledActivation{activation}}, read(), false)
+						return err
+					}
 					_, err := read().sessionPublicationCurrent(ctx, activation, false)
 					return err
 				}
