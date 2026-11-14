@@ -18,7 +18,7 @@ func (s *RunLifecyclePostgresOwner) ReadRunStopStorageForTest(ctx context.Contex
 	var out RunStopStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = readRunStopStorageTx(ctx, tx, runID)
+		out, err = readRunStopStorageTxForTest(ctx, tx, runID)
 		return err
 	})
 	if err != nil {
@@ -31,7 +31,7 @@ func (s *RunLifecycleSQLiteOwner) ReadRunStopStorageForTest(ctx context.Context,
 	var out RunStopStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = readRunStopStorageTx(ctx, tx, runID)
+		out, err = readRunStopStorageTxForTest(ctx, tx, runID)
 		return err
 	})
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *RunLifecycleSQLiteOwner) ReadRunStopStorageForTest(ctx context.Context,
 	return out, nil
 }
 
-func readRunStopStorageTx(ctx context.Context, tx *sql.Tx, runID string) (RunStopStorage, error) {
+func readRunStopStorageTxForTest(ctx context.Context, tx *sql.Tx, runID string) (RunStopStorage, error) {
 	var out RunStopStorage
 	state, err := ReadStopRunControlStorageTx(ctx, tx, runID)
 	if err != nil {
