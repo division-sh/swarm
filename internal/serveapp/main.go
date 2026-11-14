@@ -1104,7 +1104,15 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		opts.TestAPIListenerBound(apiListener.Addr())
 	}
 	presenter.recordStandby(standbyReadout(ctx))
-	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
+	var bootStoreInput *storeselected.BootCheckInput
+	if req.BootChecks != nil {
+		bootStoreInput = req.BootChecks.BootStoreInput()
+		if bootStoreInput == nil && !(opts.Dev && !opts.LocalRun) {
+			presenter.fail(3, "db_connection", errors.New("selected store boot inspection is required"))
+			return 3
+		}
+	}
+	stores, err := buildStoresForServe(ctx, storeSelection, cfg, bootStoreInput)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
 		if errors.As(err, &acquisitionErr) {
@@ -2650,13 +2658,16 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 	return shutdownErr
 }
 
-func buildStores(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*storeselected.Owner, error) {
+func buildStores(ctx context.Context, selection storebackend.Selection, cfg *config.Config, input ...*storeselected.BootCheckInput) (*storeselected.Owner, error) {
 	if cfg == nil {
 		return nil, errors.New("runtime config is required")
 	}
 	request := storeselected.RuntimeRequest{
 		Selection:      selection,
 		SessionLockTTL: cfg.LLM.Session.LockTTL,
+	}
+	if len(input) != 0 {
+		request.BootCheckInput = input[0]
 	}
 	if selection.Backend == storebackend.BackendPostgres {
 		dsn, err := postgresDSNFromConfig(ctx, cfg.Database)

@@ -36,11 +36,11 @@ func AcquireSQLiteConstructionGuard(selectedPath string) (*SQLiteConstructionGua
 	return sqliteConstructionGuard(context.Background(), selectedPath, false)
 }
 
-func WaitSQLiteConstructionGuard(ctx context.Context, selectedPath string) (*SQLiteConstructionGuard, error) {
-	return sqliteConstructionGuard(ctx, selectedPath, true)
+func WaitSQLiteConstructionGuard(ctx context.Context, selectedPath string, input ...*SQLiteInspectionInput) (*SQLiteConstructionGuard, error) {
+	return sqliteConstructionGuard(ctx, selectedPath, true, input...)
 }
 
-func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait bool) (*SQLiteConstructionGuard, error) {
+func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait bool, input ...*SQLiteInspectionInput) (*SQLiteConstructionGuard, error) {
 	if ctx == nil {
 		return nil, errors.New("SQLite construction requires a context")
 	}
@@ -60,7 +60,7 @@ func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait bool
 	}
 	var possession sqlitePossession
 	if wait {
-		possession, err = waitSQLiteConstructionPossession(ctx, abs)
+		possession, err = waitSQLiteConstructionPossession(ctx, abs, input...)
 	} else {
 		possession, err = acquireSQLiteConstructionPossession(abs)
 	}

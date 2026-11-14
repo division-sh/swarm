@@ -93,7 +93,7 @@ func runMemoryConsumedProcess(t *testing.T, raw string) {
 			publisher.EventPublisher, publisher.CompletionSpendProjector = rt.Bus, rt.Budget
 		}
 		original := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			stores, err := original(ctx, selection, cfg)
 			if err != nil {
 				return nil, err

@@ -76,7 +76,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			unsetStoreSelectorEnv(t)
 			oldBuildStores := buildStoresForServe
 			var captured storebackend.Selection
-			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				captured = selection
 				return nil, errors.New("stop after selector proof")
 			}
@@ -115,7 +115,7 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 
 	oldBuildStores := buildStoresForServe
 	var captured storebackend.Selection
-	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		captured = selection
 		return nil, errors.New("stop after selector proof")
 	}

@@ -68,12 +68,18 @@ func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error
 	return store, backend.ConstructionHandle(), nil
 }
 
-func OpenSQLiteRuntimeForServing(ctx context.Context, path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
-	constructionGuard, err := storestartupownership.WaitSQLiteConstructionGuard(ctx, path)
+func OpenSQLiteRuntimeForServing(ctx context.Context, path string, input ...*SQLiteInspectionInput) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+	constructionGuard, err := storestartupownership.WaitSQLiteConstructionGuard(ctx, path, input...)
 	if err != nil {
 		return nil, nil, err
 	}
 	return openSQLiteUnderPossession(ctx, path, constructionGuard)
+}
+
+type SQLiteInspectionInput = storestartupownership.SQLiteInspectionInput
+
+func CaptureSQLiteInspectionInput(ctx context.Context, path string) (*SQLiteInspectionInput, error) {
+	return storestartupownership.CaptureSQLiteInspectionInput(ctx, path)
 }
 
 func openSQLiteUnderPossession(ctx context.Context, path string, constructionGuard *storestartupownership.SQLiteConstructionGuard) (*private.SQLiteRuntimeStore, *sql.DB, error) {

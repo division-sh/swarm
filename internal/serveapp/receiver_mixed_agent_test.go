@@ -32,7 +32,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			} else {
 				dsn := testutil.StartEmptyPostgresDSN(t)
 				previous := buildStoresForServe
-				buildStoresForServe = func(ctx context.Context, selection backendselection.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, selection backendselection.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 					if selection.Backend != backendselection.BackendPostgres {
 						t.Fatal("mixed receiver fixture selected another backend")
 					}
