@@ -27,7 +27,7 @@ func configureCompletion2270PostgresFixture(t *testing.T) {
 	t.Helper()
 	location := testutil.StartEmptyPostgresDSN(t)
 	previous := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{
 			Selection: selection, PostgresDSN: location, SessionLockTTL: runtimeSessionLockTTL(cfg),
 		})

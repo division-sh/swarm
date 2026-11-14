@@ -277,7 +277,7 @@ func startWorkspaceGatewayProofRuntimeWithPosture(t *testing.T, backend servedpa
 		proof.Backend = "postgres"
 		dsn := testutil.StartEmptyPostgresDSN(t)
 		previous := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			if selection.Backend != storebackend.BackendPostgres {
 				t.Fatal("native workspace fixture selected another backend")
 			}

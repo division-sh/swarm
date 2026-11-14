@@ -77,7 +77,7 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 			original := buildStoresForServe
 			var db *sql.DB
 			var privateRoot string
-			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				if selection.Backend != storebackend.BackendSQLite {
 					t.Fatalf("private backing store = %v", selection.Backend)
 				}
@@ -251,7 +251,7 @@ func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
 					}, nil
 				}
 			}
-			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				privateRoot = filepath.Dir(selection.SQLitePath)
 				if stage == "store_acquisition" {
 					return nil, errors.New("injected store acquisition failure")
