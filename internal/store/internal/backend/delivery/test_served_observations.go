@@ -72,6 +72,44 @@ func readNodeDeliveryTargetEncodingTx(ctx context.Context, tx *sql.Tx, postgres 
 	return raw, nil
 }
 
+func (s *DeliveryPostgresOwner) ReadAgentSettledAttemptCountForTest(ctx context.Context, eventID, agentID string) (int, error) {
+	var count int
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = readAgentSettledAttemptCountTx(ctx, tx, true, eventID, agentID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *DeliverySQLiteOwner) ReadAgentSettledAttemptCountForTest(ctx context.Context, eventID, agentID string) (int, error) {
+	var count int
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = readAgentSettledAttemptCountTx(ctx, tx, false, eventID, agentID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func readAgentSettledAttemptCountTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, agentID string) (int, error) {
+	query := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
+	if postgres {
+		query = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, query, eventID, agentID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *DeliveryPostgresOwner) ReadCausalDeliveryFrontierForTest(ctx context.Context, runID, eventID string) (CausalDeliveryFrontier, error) {
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
