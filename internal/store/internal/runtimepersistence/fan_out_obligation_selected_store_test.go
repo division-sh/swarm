@@ -1678,7 +1678,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, fixture.runID, `[{"name":"own-000","score":7.25},{"name":"own-001","score":-2},{"name":"own-002","score":1e3}]`, createdAt)
 			bindFanOutEntityRevision(t, ctx, db, postgres, fixture, fixture.runID, entityID, mutationID, createdAt)
 
-			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "own-run-source", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
+			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "own-run-source", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
 			if err != nil || !found {
 				t.Fatalf("claim own-run entity source: found=%v err=%v", found, err)
 			}
@@ -1705,6 +1705,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
+			waitFanOutReadPacingForTest(t, ctx, intent)
 
 			unrelatedRunID := uuid.NewString()
 			ctx = originalStoreFixtureContext(t, ctx, owner)
