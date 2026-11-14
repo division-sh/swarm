@@ -15,8 +15,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 )
@@ -221,6 +223,25 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 	if string(input) != "Startup validation probe. Do not call any tools. Reply with the exact text ok." || strings.Contains(string(input), agentframe.Version) || strings.Contains(string(input), `"kind":"initial"`) {
 		t.Fatalf("startup input acquired managed execution-frame semantics: %q", input)
 	}
+	t.Run("observation_without_execution_authority", func(t *testing.T) {
+		planned, err := CompileManagedCapabilityAdmission(actor, ClaudeCLIProviderContract(), tools, toolcapabilities.Set{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := &workspace.Target{Container: "swarm-admission-probe", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
+		observed, err := ObserveClaudeStartup(context.Background(), cfg, runtime.providerCredentials, actor, "system prompt", planned, target, toolgateway.HTTPObservation{})
+		if err != nil || observed == nil {
+			t.Fatalf("store-free observation: %+v %v", observed, err)
+		}
+		if observed.CapabilitySurface != nil || observed.completionHandle != nil || observed.completionAttempt != nil || observed.SessionID != "provider-startup-1" {
+			t.Fatalf("raw observation minted execution evidence: %+v", observed)
+		}
+		observed.ProviderVisibleTools = []string{"Bash"}
+		observed.VisibleTools = []string{"Bash"}
+		if err := validateStartupCLIObservation(planned, observed); err == nil {
+			t.Fatal("raw observation accepted a foreign provider builtin")
+		}
+	})
 }
 
 func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_UsesUUIDSessionID(t *testing.T) {
