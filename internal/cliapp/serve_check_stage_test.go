@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -12,8 +13,12 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
-func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath string) (ServeCheckStageResult, error) {
+func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath string, selectedOptions ...ServeOptions) (ServeCheckStageResult, error) {
 	t.Helper()
+	opts := DefaultServeOptions()
+	if len(selectedOptions) != 0 {
+		opts = selectedOptions[0]
+	}
 	cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return ServeCheckStageResult{}, err
@@ -38,11 +43,10 @@ func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configP
 	if err != nil {
 		return ServeCheckStageResult{}, err
 	}
-	request, _, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, cliSwarmDirOptions{}, admitted)
+	request, _, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, cliSwarmDirOptions{SwarmDir: opts.SwarmDir, SwarmDirFlagSet: opts.SwarmDirSet}, admitted)
 	if err != nil {
 		return ServeCheckStageResult{}, err
 	}
-	opts := DefaultServeOptions()
 	profile, err := cfg.Config.LLMBackendProfile()
 	if err != nil {
 		return ServeCheckStageResult{}, err
@@ -70,9 +74,9 @@ func (serveCheckAnswerRuntime) ObserveStartupAnswer(ctx context.Context, _ llmse
 	return []byte(`{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ready"}],"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ready"}}],"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}]}`), ctx.Err()
 }
 
-func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath, format string, out, diagnostic io.Writer) int {
+func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath, format string, out, diagnostic io.Writer, selectedOptions ...ServeOptions) int {
 	t.Helper()
-	stage, err := serveChecksForTest(t, ctx, repo, source, configPath)
+	stage, err := serveChecksForTest(t, ctx, repo, source, configPath, selectedOptions...)
 	if err != nil && stage.Bundle == nil {
 		t.Fatalf("check stage prerequisites: %v", err)
 	}
@@ -82,6 +86,29 @@ func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, c
 	opts := defaultVerifyCommandOptions()
 	opts.output.asJSON, opts.output.quiet = format == "json", format == "quiet"
 	return renderVerifyCommandResult(opts, view, stage.Validation, decision, out, diagnostic)
+}
+
+// Preserve the public serve parser's coordinate precedence while inspecting
+// the stage through its existing report presenters, not a shipped JSON flag.
+func executeServeChecksForTest(t testing.TB, ctx context.Context, repo string, args []string, out, diagnostic io.Writer) int {
+	t.Helper()
+	format := "text"
+	command := make([]string, 0, len(args)+1)
+	for _, arg := range args {
+		switch arg {
+		case "verify":
+			command = append(command, "serve", "--dry-run")
+		case "--json", "--quiet":
+			format = strings.TrimPrefix(arg, "--")
+		default:
+			command = append(command, arg)
+		}
+	}
+	options := defaultRootCommandOptions()
+	options.runServe = func(ctx context.Context, root InvocationRoot, selected ServeOptions) int {
+		return renderServeChecksForTest(t, ctx, root.Path(), selected.SourceRoot, selected.ConfigPath, format, out, diagnostic, selected)
+	}
+	return executeRootCommandWithOptions(ctx, repo, command, out, diagnostic, options)
 }
 
 func TestServeCheckStageGeneratedBoundaryModePolicy(t *testing.T) {
