@@ -89,7 +89,6 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	for _, repo := range []string{RepoRoot(), t.TempDir()} {
 		var out, errOut bytes.Buffer
@@ -108,7 +107,6 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
@@ -142,7 +140,6 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = writeInboundAdmissionPolicyMatrixFixture(t)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()

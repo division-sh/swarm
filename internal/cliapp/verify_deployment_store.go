@@ -82,9 +82,6 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	})
 	if !opened {
 		accountVerifyStoreAccessFailure(result, subject)
-		if len(serve) != 0 {
-			accountServeAbsentStore(result, subject)
-		}
 		return nil
 	}
 	if len(serve) != 0 && serve[0].dryRun {
@@ -153,25 +150,6 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
 	return retained
-}
-
-func accountServeAbsentStore(result *runtime.WorkflowContractValidationResult, subject string) {
-	for _, observation := range result.BootReport.Observations {
-		if observation.CheckID != "selected_store_access" || observation.NotRunCause == nil || observation.NotRunCause.Kind != bootverify.AdmissionAbsentSQLiteStore {
-			continue
-		}
-		for i := range result.BootReport.Observations {
-			current := &result.BootReport.Observations[i]
-			if current.CheckID == "selected_store_access" || len(current.Dependencies) == 1 && current.Dependencies[0] == "selected_store_access" {
-				current.Status = bootverify.AdmissionNotApplicable
-			}
-		}
-		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
-			ID: "store_schema_preparation", Owner: "internal/store.SchemaBootstrapper.BootstrapSchema", Subject: subject,
-			Reason: "the selected SQLite store is absent; only boot may create it and prepare its schema after checks pass; no possession or schema readiness was observed",
-		})
-		return
-	}
 }
 
 func accountVerifyStoreAccessFailure(result *runtime.WorkflowContractValidationResult, subject string) {
@@ -299,7 +277,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		for _, run := range runs {
 			report, err := snapshot.InspectRunMutationDrift(ctx, run.RunID)
 			if err != nil {
-				drift = append(drift, err)
+				drift = append(drift, verifyRunFailure(run.RunID, err))
 				continue
 			}
 			if len(report.Rows) != 0 {
