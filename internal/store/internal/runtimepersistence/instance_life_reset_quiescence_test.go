@@ -186,7 +186,7 @@ func holdInstanceResetTimer(t *testing.T, f receiverConfigActivationFixture, fir
 			t.Fatal(err)
 		}
 		scheduler, dispatcher := &selectedStoreLifecycleScheduler{}, &terminalScheduleDispatcherProbe{}
-		lifecycle, err := genericschedule.NewLifecycle(store, scheduler, publisher, dispatcher, nil, executionposture.Live)
+		lifecycle, err := genericschedule.NewLifecycle(store, scheduler, publisher, dispatcher, forkCompletionScheduleLogger{t: t}, executionposture.Live)
 		if err != nil {
 			t.Fatal(err)
 		}
