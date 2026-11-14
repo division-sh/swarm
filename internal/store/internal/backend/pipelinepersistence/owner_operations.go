@@ -111,17 +111,6 @@ func FixturePipelineReceiptCardinalityTx(ctx context.Context, tx *sql.Tx, eventI
 	return count, nil
 }
 
-func FixtureDecisionRouteStatusTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
-	if tx == nil {
-		return "", fmt.Errorf("decision route evidence requires a selected read transaction")
-	}
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM decision_card_route_obligations WHERE event_id=$1`, eventID).Scan(&status); err != nil {
-		return "", err
-	}
-	return status, nil
-}
-
 // This is a fixed handoff witness, not continuation eligibility or transfer.
 func ReadIncompletePipelineHandoffCount(ctx context.Context, q eventReadQueryer, runID string) (int, error) {
 	facts, err := delivery.ReadPipelineHandoffDeliveryFacts(ctx, q, runID)

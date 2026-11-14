@@ -97,3 +97,40 @@ func deleteCommittedReplayScopeFixtureTx(ctx context.Context, tx *sql.Tx, postgr
 	}
 	return nil
 }
+
+func (s *PipelinePostgresOwner) ReadDecisionRouteStatusForTest(ctx context.Context, eventID string) (string, error) {
+	var status string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		status, err = readDecisionRouteStatusTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
+func (s *PipelineSQLiteOwner) ReadDecisionRouteStatusForTest(ctx context.Context, eventID string) (string, error) {
+	var status string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		status, err = readDecisionRouteStatusTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
+func readDecisionRouteStatusTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	if tx == nil {
+		return "", fmt.Errorf("decision route evidence requires a selected read transaction")
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM decision_card_route_obligations WHERE event_id=$1`, eventID).Scan(&status); err != nil {
+		return "", err
+	}
+	return status, nil
+}
