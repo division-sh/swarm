@@ -6,9 +6,142 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
+
+func TestRuntimeRunTransitionJoinsOnlySelectedRunAndAcceptedDescendants(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	process := NewProcess()
+	runtime, err := process.NewRuntime(ctx, RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceID, otherID := uuid.NewString(), uuid.NewString()
+	accepted, err := runtime.BeginDispatch(correlation.WithRunID(ctx, sourceID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := runtime.BeginAcceptedDescendant(accepted.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := runtime.BeginDispatch(correlation.WithRunID(ctx, otherID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() {
+		done, err := runtime.BeginRunTransition(ctx, sourceID)
+		if done != nil {
+			done()
+		}
+		finished <- err
+	}()
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		runtime.occurrence.gate.mu.Lock()
+		state := runtime.occurrence.gate.runs[sourceID]
+		fenced := state != nil && state.transitions != 0
+		runtime.occurrence.gate.mu.Unlock()
+		if fenced {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatal("selected transition did not fence source work")
+		}
+	}
+	if _, err := runtime.BeginDispatch(correlation.WithRunID(ctx, sourceID)); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("fresh source work crossed fork fence: %v", err)
+	}
+	lateChild, err := runtime.BeginAcceptedDescendant(child.Context())
+	if err != nil {
+		t.Fatalf("accepted source descendant was fenced: %v", err)
+	}
+	unrelated, err := runtime.BeginDispatch(correlation.WithRunID(ctx, otherID))
+	if err != nil {
+		t.Fatalf("unrelated run was fenced: %v", err)
+	}
+	if err := errors.Join(accepted.Done(), child.Done(), unrelated.Done(), other.Done()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-finished:
+		t.Fatalf("source transition skipped its accepted descendant: %v", err)
+	default:
+	}
+	if err := lateChild.Done(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("source transition did not join settled work")
+	}
+	resumed, err := runtime.BeginDispatch(correlation.WithRunID(ctx, sourceID))
+	if err != nil {
+		t.Fatalf("settled transition left source fenced: %v", err)
+	}
+	if err := resumed.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Join(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunlessPlatformDeliveryBelongsToItsRoutedRunOccurrence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	process := NewProcess()
+	runtime, err := process.NewRuntime(ctx, RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.NewString()
+	event := eventtest.PersistedProjectionForProducer(
+		uuid.NewString(), events.EventType("platform.boot"), eventtest.Producer(events.EventProducerPlatform, "test"), "",
+		[]byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if event.RunID() != "" {
+		t.Fatal("platform source event unexpectedly owns a run")
+	}
+	delivery, err := runtime.NewRoutedEventDelivery(ctx, event, events.DeliveryRoute{Context: events.DeliveryContext{RunID: runID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivery.lease.ownsRun(runID) {
+		t.Fatal("routed delivery lost its exact run while source event was run-less")
+	}
+	if err := delivery.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	done, err := runtime.BeginRunTransition(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done()
+	if _, err := runtime.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Join(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestProcessSelectedForkSurvivesLoadedRuntimeReplacement(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

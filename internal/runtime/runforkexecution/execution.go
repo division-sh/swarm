@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
@@ -105,12 +106,13 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
 	}
+	finishOrchestration = sync.OnceFunc(finishOrchestration)
 	defer finishOrchestration()
 	if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(err, req.Owner.completePreparation(prepared))
 	}
 	if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
-		result, err := executePreparedLiveFork(ctx, req, prepared)
+		result, err := executePreparedLiveFork(ctx, req, &prepared, finishOrchestration)
 		if replay := isolatedSelectedForkOperationReplay(err); replay != nil {
 			req.ForkOperation = prepared.forkOperation
 			return req.Owner.continueElectedSelectedForkOperation(ctx, req, replay)
@@ -144,7 +146,11 @@ func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedCon
 		materialization, materializationDiagnostic = req.Owner.resumePrepared(ctx, prepared, *req.Recovery)
 		acknowledged = materializationDiagnostic == nil
 	} else {
-		materialization, acknowledged, materializationDiagnostic = req.Owner.materializePrepared(ctx, prepared)
+		if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
+			materialization, acknowledged, materializationDiagnostic = req.Owner.materializePreparedLive(ctx, prepared)
+		} else {
+			materialization, acknowledged, materializationDiagnostic = req.Owner.materializePrepared(ctx, prepared)
+		}
 	}
 	if !acknowledged {
 		disposed = true
