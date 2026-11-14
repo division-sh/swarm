@@ -25,8 +25,22 @@ func TestCompletion2270ForkChatUncertainRecoveryBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				now := time.Now().UTC()
+				physical := completionSettlementFixture{db: fixture.db, sqlite: fixture.sqlite}
+				setCompletionAttemptLease(t, physical, handle.Attempt().AttemptID, now.Add(-time.Minute))
+				beforeCurrent := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+				counts, err := fixture.store.(startupRecoveryInspector).InspectStartupRecovery(ctx, now, true)
+				if err != nil || counts != (runtimeeffects.StartupRecoveryCounts{}) {
+					t.Fatalf("current forkchat parent selected after attempt expiry: %+v %v", counts, err)
+				}
+				if summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(now)); err != nil || summary != (runtimeeffects.RecoverySummary{}) {
+					t.Fatalf("current forkchat parent recovered after attempt expiry: %+v %v", summary, err)
+				}
+				historicalContextRequireUnchanged(t, beforeCurrent, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+				// Parent revocation, not the provider attempt's clock, owns recovery.
+				setCompletionAttemptLease(t, physical, handle.Attempt().AttemptID, now.Add(time.Hour))
 				expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-				now := fixture.now.Add(10 * time.Minute)
+				now = fixture.now.Add(10 * time.Minute)
 				want := runtimeeffects.RecoverySummary{OutcomeUncertain: 1}
 				children := 1
 				if cut == "authorized" {
