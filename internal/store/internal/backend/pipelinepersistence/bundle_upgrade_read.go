@@ -97,12 +97,8 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 			if card.Status == "pending" {
 				state.Cards = append(state.Cards, card)
 			}
-			if committedGates[card.CardID] && card.Status == decisioncard.StatusDecided && card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
-				full, err := decisionpersistence.ReadDecisionCardInTx(ctx, tx, card.CardID, !sqlite)
-				if err != nil {
-					return runbundle.UpgradeState{}, err
-				}
-				state.CommittedGateCards = append(state.CommittedGateCards, full)
+			if err := appendCommittedUpgradeGateCard(ctx, tx, sqlite, &state, card, committedGates); err != nil {
+				return runbundle.UpgradeState{}, err
 			}
 		}
 		if next == "" {
@@ -125,6 +121,17 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 		return runbundle.UpgradeState{}, err
 	}
 	return state, nil
+}
+
+func appendCommittedUpgradeGateCard(ctx context.Context, tx *sql.Tx, sqlite bool, state *runbundle.UpgradeState, card decisioncard.ListItem, committed map[string]bool) error {
+	if committed[card.CardID] && card.Status == decisioncard.StatusDecided && card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+		full, err := decisionpersistence.ReadDecisionCardInTx(ctx, tx, card.CardID, !sqlite)
+		if err != nil {
+			return err
+		}
+		state.CommittedGateCards = append(state.CommittedGateCards, full)
+	}
+	return nil
 }
 
 func collectUpgradeCommittedGateCards(buckets map[string]any, committed map[string]bool) error {
