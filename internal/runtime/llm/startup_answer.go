@@ -18,6 +18,41 @@ import (
 	"github.com/google/uuid"
 )
 
+// StartupAnswerObserver is the raw-observation seam for injected runtimes.
+// It cannot create a managed session or supply native execution authority.
+type StartupAnswerObserver interface {
+	ObserveStartupAnswer(context.Context, llmselection.Profile, llmselection.ResolvedModel) ([]byte, error)
+}
+
+func ObserveInjectedStartupAnswer(ctx context.Context, cfg *config.Config, profile llmselection.Profile, model llmselection.ResolvedModel, runtime Runtime) error {
+	observer, ok := runtime.(StartupAnswerObserver)
+	if !ok {
+		return fmt.Errorf("injected runtime does not provide a startup answer observer")
+	}
+	if _, err := RequireProviderContractForProfile(profile, runtime); err != nil {
+		return err
+	}
+	raw, err := observer.ObserveStartupAnswer(ctx, profile, model)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if profile.ID == llmselection.BackendClaudeCLI {
+		return validateClaudeStartupAnswer(raw)
+	}
+	_, decode, err := startupAnswerRequest(ctx, cfg, profile, model)
+	if err != nil {
+		return err
+	}
+	answer, err := decode(raw)
+	if err != nil {
+		return err
+	}
+	return validateStartupAnswer(answer)
+}
+
 // ObserveProviderStartupAnswer completes a single no-tool request. Grouping by
 // provider/credential belongs to the boot stage, not to this transport owner.
 func ObserveProviderStartupAnswer(ctx context.Context, cfg *config.Config, profile llmselection.Profile, model llmselection.ResolvedModel, credentials ProviderCredentialResolver, target *workspace.Target) error {
@@ -187,14 +222,18 @@ func observeClaudeStartupAnswer(ctx context.Context, cfg *config.Config, model l
 	if err := cmd.Run(); err != nil {
 		return errors.Join(bounded.Err(), claudeCLIProcessFailure(summarizeCLIErrorOutput(stderr.String(), claudeCommandSecrets(cmd)...), "", "claude_cli_startup_probe_failed", "startup_probe", err))
 	}
+	return validateClaudeStartupAnswer(stdout.Bytes())
+}
+
+func validateClaudeStartupAnswer(raw []byte) error {
 	var result struct {
 		Type    string `json:"type"`
 		IsError bool   `json:"is_error"`
 	}
-	if json.Unmarshal(stdout.Bytes(), &result) != nil || result.Type != "result" || result.IsError {
+	if json.Unmarshal(raw, &result) != nil || result.Type != "result" || result.IsError {
 		return fmt.Errorf("provider startup response did not complete successfully")
 	}
-	return validateStartupAnswer(*parseCLIResponse(stdout.Bytes()))
+	return validateStartupAnswer(*parseCLIResponse(raw))
 }
 
 func validateStartupAnswer(answer Response) error {

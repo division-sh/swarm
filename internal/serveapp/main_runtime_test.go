@@ -64,6 +64,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -91,13 +92,25 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type servedNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+type servedStartupAnswerObservation struct{}
+
+func (servedStartupAnswerObservation) ObserveStartupAnswer(ctx context.Context, _ llmselection.Profile, _ llmselection.ResolvedModel) ([]byte, error) {
+	return []byte(`{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ready"}],"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ready"}}],"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}]}`), ctx.Err()
+}
+
+type servedNoopLLMRuntime struct {
+	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
+}
 
 func (servedNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.AnthropicAPIProviderContract()
 }
 
-type servedOpenAICompatibleNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+type servedOpenAICompatibleNoopLLMRuntime struct {
+	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
+}
 
 func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.OpenAICompatibleProviderContract()
@@ -141,6 +154,7 @@ type delayedRunStatusAgent struct {
 
 type servedEventPublishBlockingLLMRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 	started chan<- struct{}
 	release <-chan struct{}
 }
@@ -151,6 +165,7 @@ func (r servedEventPublishBlockingLLMRuntime) ProviderContract() runtimellm.Prov
 
 type servedSessionCleanupProofLLMRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 	store   *store.PostgresStore
 	started chan<- string
 	release <-chan struct{}
@@ -162,6 +177,7 @@ func (r servedSessionCleanupProofLLMRuntime) ProviderContract() runtimellm.Provi
 
 type servedLiveAgentProofLLMRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 	calls             *atomic.Int32
 	directiveFailures bool
 }
@@ -8056,6 +8072,21 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 }
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	if _, mocked := opts.TestLLMRuntime.(runtimellm.StartupAnswerObserver); mocked {
+		store, err := cliapp.BuildProviderCredentialStore()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+			if _, present, err := store.Get(t.Context(), key); err != nil {
+				t.Fatal(err)
+			} else if !present {
+				if err := store.Set(t.Context(), key, "mocked-startup-credential"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
 	return startRuntimeTestProcessWithRunner(t, repo, opts, runFrom)
 }
 
