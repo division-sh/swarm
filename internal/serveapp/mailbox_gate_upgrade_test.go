@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,7 +80,7 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 						return
 					}
 					out, errOut := &lockedBuffer{}, &lockedBuffer{}
-					code := executeCLI(t.Context(), []string{"--config", config, "mailbox", "decide", before.CardID, "approve", "--idempotency-key", params["idempotency_key"].(string), "--api-server", rt.Endpoint, "--api-token-file", tokenFile}, out, errOut, nil)
+					code := executeCLI(t.Context(), []string{"--config", config, "mailbox", "decide", before.CardID, "approve", "--idempotency-key", params["idempotency_key"].(string), "--api-server", strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "--api-token-file", tokenFile}, out, errOut, nil)
 					if code != 0 {
 						t.Fatalf("current-run CLI answer exit=%d out=%s err=%s", code, out.String(), errOut.String())
 					}

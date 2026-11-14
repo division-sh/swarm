@@ -167,7 +167,7 @@ func TestCompileGateOfferUsesDeclaredCurrentContract(t *testing.T) {
 	load := func(comment string) semanticview.Source {
 		artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-			"schema.yaml":   []byte("# " + comment + "\nstages:\n  waiting:\n    gate:\n      decision: review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: {event: approved, fields: {result: ready}}\n  done: {final: true}\n"),
+			"schema.yaml":   []byte("# " + comment + "\nstages:\n  waiting:\n    gate:\n      decision: review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: {event: approved, fields: {result: \"ready\"}}\n  done: {final: true}\n"),
 			"events.yaml":   []byte("approved:\n  result: text\n"),
 		})
 		if err != nil {
