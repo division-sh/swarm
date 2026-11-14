@@ -21,12 +21,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/tests/support/runtime/effects/effecttest"
 	"github.com/google/uuid"
 )
 
@@ -395,8 +397,105 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 						t.Fatalf("converged candidate failed to execute: %+v, %v", grant, err)
 					}
 				}
+				assertAcceptedMCPTransportDuringDrain(t, ctx, supervisor, manager, primary, binding.AuthToken())
 			})
 		}
+	}
+}
+
+// This native-backed transport control pairs with the gateway's successful
+// tool-dispatch control; it does not execute a provider or native tool mutation.
+func assertAcceptedMCPTransportDuringDrain(t *testing.T, ctx context.Context, supervisor *processLifecycleSupervisor, manager *runtime.RuntimeContextManager, rt *runtime.Runtime, auth string) {
+	t.Helper()
+	harness := effecttest.New()
+	turnCtx := actors.WithActor(harness.Context("accepted-outer-mcp"), actors.AgentConfig{
+		ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance(),
+	})
+	admission, ok := managedexecution.FromContext(turnCtx)
+	if !ok {
+		t.Fatal("synthetic turn has no execution admission")
+	}
+	admission.BundleHash = rt.Options.SourceArtifactFact.BundleHash()
+	turnCtx = managedexecution.WithAdmission(turnCtx, admission)
+	turnCtx = correlation.WithSourceArtifactFact(turnCtx, rt.Options.SourceArtifactFact)
+	surface, ok := managedcapabilities.FromContext(turnCtx)
+	if !ok {
+		t.Fatal("synthetic turn has no capability surface")
+	}
+	owner := rt.WorkOccurrence()
+	parent, err := owner.Begin(worklifetime.WithOccurrence(turnCtx, owner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := sync.OnceFunc(func() {
+		if err := parent.Done(); err != nil {
+			t.Error(err)
+		}
+	})
+	defer release()
+	token := rt.MCPTurns.RegisterTurnContextWithCapabilitySurface(parent.Context(), time.Minute, surface)
+	if token == "" {
+		t.Fatal("register synthetic current provider turn")
+	}
+	defer rt.MCPTurns.UnregisterTurnContext(token)
+	request := func(contextToken string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+		r.Header.Set("Authorization", "Bearer "+auth)
+		r.Header.Set("X-SWARM-Context-Token", contextToken)
+		response := httptest.NewRecorder()
+		supervisor.serveMCP(response, r)
+		return response
+	}
+	if response := request(token); response.Code != http.StatusOK {
+		t.Fatalf("pre-stop MCP transport: %d %s", response.Code, response.Body.String())
+	}
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- supervisor.ShutdownProcessWithOptions(ctx, runtime.ShutdownOptions{Grace: 10 * time.Second})
+	}()
+	defer func() {
+		release()
+		select {
+		case err := <-stopped:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("outer MCP shutdown did not join its released turn")
+		}
+	}()
+	deadline := time.After(5 * time.Second)
+	for {
+		use, lookup, err := manager.AcquireBundleHash(ctx, admission.BundleHash)
+		if use != nil {
+			if doneErr := use.Done(); doneErr != nil {
+				t.Fatal(doneErr)
+			}
+		}
+		if errors.Is(err, worklifetime.ErrAdmissionFenced) && lookup.Loaded() {
+			break
+		}
+		if err != nil && !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			t.Fatal(err)
+		}
+		select {
+		case <-deadline:
+			t.Fatal("outer MCP control did not reach a loaded fresh-admission seal")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if parent.Context().Err() != nil {
+		t.Fatal("accepted outer MCP parent canceled during grace")
+	}
+	if response := request(token); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "protocolVersion") {
+		t.Fatalf("registered turn lost served MCP transport during drain: %d %s", response.Code, response.Body.String())
+	}
+	if response := request(""); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("fresh unregistered request escaped outer admission: %d", response.Code)
+	}
+	rt.MCPTurns.UnregisterTurnContext(token)
+	if response := request(token); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("retired token escaped outer admission: %d", response.Code)
 	}
 }
 
