@@ -1702,19 +1702,20 @@ func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs
 		}
 	})
 	t.Run("unrelated_selector_is_not_a_witness", func(t *testing.T) {
-		root := canonicalrouting.CopyLexicalAddressing(t, false)
-		path := filepath.Join(root, "schema.yaml")
-		raw, err := os.ReadFile(path)
+		root := canonicalrouting.CopyLexicalAddressing(t, true)
+		replaceFixtureText(t, filepath.Join(root, "schema.yaml"), "key_from: payload.target_account_id", "key_from: payload.source_account_id")
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 		if err != nil {
-			t.Fatal(err)
+			if !strings.Contains(err.Error(), "source_account_id") || !strings.Contains(err.Error(), "schema.yaml") {
+				t.Fatalf("invalid own-row key failed for an unrelated reason: %v", err)
+			}
+			return
 		}
-		if err := os.WriteFile(path, append(raw, []byte("  - {event: ticket.done, from: account/ticket, to: account/audit}\n")...), 0600); err != nil {
-			t.Fatal(err)
-		}
-		graph := CompileConnectGraph(loadLexicalAddressSource(t, root))
+		graph := CompileConnectGraph(semanticview.Wrap(bundle))
 		issues := graph.Issues()
 		if len(issues) != 1 || issues[0].Failure != ConnectFailureDeliveryTopologyInvalid || !strings.Contains(issues[0].Detail, "account/schema.yaml") {
-			t.Fatalf("another event's account selector authorized this edge: %+v", issues)
+			t.Fatalf("another event's typed source authorized this edge: %+v", issues)
 		}
 	})
 	t.Run("missing_admitted_selector_cannot_waive_height", func(t *testing.T) {

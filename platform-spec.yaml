@@ -1811,7 +1811,7 @@ contract_formats:
       typed_pubsub: 'Typed pub/sub routing derives from subscriptions — agents.yaml subscriptions,
         direct nodes.yaml handler keys. The platform matches canonical event identity
         only within one exact flow identity. Canonical name equality and filesystem ancestry never authorize cross-flow delivery.'
-      inter_flow_connect: Between flows, authored topology derives only from exact least-common-ancestor schema connect entries over output and input pins. Output pins declare event identity and producer interface evidence, keyed receivers declare one scalar instance identity field, and each LCA connect owns its explicit ordinary resolution mode and key_from exception. Omission derives the same-named typed payload source; explicitly spelling that source is redundant and refused. The immutable compiled connection lowers these facts into route plans. See flow_model.composition_routing and engine.cross_flow_routing. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
+      inter_flow_connect: Between flows, authored topology derives from least-common-ancestor schema connect entries over output and input pins, with the proper-descendant keyed-ancestor selection exception defined under parent_connect. Output pins declare event identity and producer interface evidence, keyed receivers declare one scalar instance identity field, and each LCA connect owns its explicit ordinary resolution mode and key_from exception. Omission derives the same-named typed payload source; explicitly spelling that source is redundant and refused. The immutable compiled connection lowers these facts into route plans. See flow_model.composition_routing and engine.cross_flow_routing. Qualified exact subscriptions and slash-qualified wildcard subscriptions cannot cross a flow boundary; authors must declare output/input pins and connect in the nearest common ancestor schema.yaml.
       input_source_resolution:
         canonical_owner: internal/runtime/core/pinrouting.ResolveFlowInputProducer
         rule: |
@@ -15335,9 +15335,10 @@ flow_model:
             inputs:
               - deploy.completed
       parent_connect:
-        location: schema.yaml connect at the exact least common ancestor FlowNode
+        location: 'schema.yaml connect at the exact declared-path least common ancestor, except for a proper descendant addressing another instance of a keyed ancestor: that connection belongs at the keyed receiver''s immediate structural parent and selects the receiver through its existing admitted per-edge key source.'
         canonical_form: |
           `connect` is a list of event-centric structured connections. Each entry is owned by the exact FlowNode containing its schema.yaml and names one source event visible in that flow, one producer flow, one receiver flow, and optional receiver-event rename. `from` and `to` contain exact flow IDs visible from that authoring FlowNode; `.` is the sole sentinel for the authoring flow. They never contain pin identities, runtime instance paths, or guessed event spellings.
+          A keyless intermediate owner does not authorize moving the row higher. A selector on another producer/event/branch is not evidence for this row. Lexically bound ancestors remain bound; their keys are not supplied again.
         fields:
           event: |
             Required exact canonical source event identity visible in the flow authoring this row. It must pass the canonical event-name grammar as authored; leading or trailing slash aliases are invalid and are never normalized into acceptance.
