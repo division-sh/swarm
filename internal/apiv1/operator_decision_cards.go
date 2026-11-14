@@ -337,7 +337,11 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	bundleSource := opts.SourceArtifact
 	if err == nil && runtimeContextManager(opts.RuntimeContexts) != nil {
 		var selected selectedRuntimeContext
-		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
+		if card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+			ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, card.RunID)
+		} else {
+			ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
+		}
 		if err != nil {
 			return nil, pausedDecisionCardSourceError(ctx, opts, card, err)
 		}
@@ -370,7 +374,7 @@ func pausedDecisionCardSourceError(ctx context.Context, opts DecisionCardHandler
 		return err
 	}
 	lookup, availability, readErr := opts.RuntimeContexts.LookupRunStatus(ctx, card.RunID)
-	if readErr != nil || availability.RunID != card.RunID || availability.BundleHash != card.BundleHash ||
+	if readErr != nil || availability.RunID != card.RunID || card.Anchor.Kind() != decisioncard.AnchorKindStageGate && availability.BundleHash != card.BundleHash ||
 		availability.Status != "paused" || !availability.Available() || lookup.State != runtimepkg.RuntimeContextStateUnloaded {
 		return err
 	}

@@ -32,7 +32,7 @@ import (
 
 func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
-		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
+		for _, operation := range []string{"disk", "new_process", "new_process_equal", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
 				previous := buildSelectedAPICapabilities
 				buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
@@ -106,13 +106,19 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				}
 				callback, signing, _ := h.provider.Registration()
 				switch operation {
-				case "disk", "new_process":
+				case "disk", "new_process", "new_process_equal":
 					path := filepath.Join(h.opts.SourceRoot, "chat", "reviews", "schema.yaml")
 					body, err := os.ReadFile(path)
 					if err != nil {
 						t.Fatal(err)
 					}
 					body = append(body, []byte("\n# Changed artifact bytes; semantic declaration remains identical.\n")...)
+					if operation == "new_process" {
+						if strings.Count(string(body), "advances_to: approved") < 1 {
+							t.Fatal("changed-offer fixture lacks its exact target")
+						}
+						body = []byte(strings.Replace(string(body), "advances_to: approved", "advances_to: done", 1))
+					}
 					if err := os.WriteFile(path, body, 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -141,11 +147,18 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							t.Fatalf("changed process replaced retained source: %v", err)
 						}
 						callback, signing, _ = h.provider.Registration()
-						if postChannelSourceControl(t, callback, signing, card, token, messageID) == http.StatusAccepted {
+						if operation == "new_process_equal" {
+							postChannelSourceControl(t, callback, signing, card, token, messageID)
+							waitChannelAnchorDecision(t, db, card)
+						} else if postChannelSourceControl(t, callback, signing, card, token, messageID) == http.StatusAccepted {
 							waitChannelRejectedCallback(t, db, token)
 						}
 						var decisions int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 0 {
+						want := 0
+						if operation == "new_process_equal" {
+							want = 1
+						}
+						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != want {
 							t.Fatalf("replacement admitted a predecessor control: count=%d err=%v", decisions, err)
 						}
 					}
@@ -477,13 +490,21 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 		t.Fatal(err)
 	}
 	switch operation {
-	case "disk", "new_process":
+	case "disk", "new_process", "new_process_equal":
 		path := filepath.Join(h.opts.SourceRoot, "chat", "reviews", "schema.yaml")
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, append(body, []byte("\n# Changed artifact bytes; retained decision remains frozen.\n")...), 0o600); err != nil {
+		next := append([]byte(nil), body...)
+		next = append(next, []byte("\n# Changed artifact bytes; retained decision remains frozen.\n")...)
+		if operation == "new_process" {
+			if strings.Count(string(next), "advances_to: approved") < 1 {
+				t.Fatal("changed-offer fixture lacks its exact target")
+			}
+			next = []byte(strings.Replace(string(next), "advances_to: approved", "advances_to: done", 1))
+		}
+		if err := os.WriteFile(path, next, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		var identity apiv1.RuntimeIdentityResult
@@ -528,42 +549,55 @@ func runRegisteredSourceLifecycle(t *testing.T, h *channelOnboardingE2EHarness, 
 				t.Fatal(err)
 			}
 			t.Logf("changed-source facts backend=%s own_run_status=%s own_run_on_new_source=%t card_on_original_source=%t cards_on_new_source=%d", backend, header.Run.Status, header.Run.BundleHash == identity.SourceArtifacts[0].BundleHash, before.BundleHash == hash, reissued)
-			cliFailure := registeredChannelMailboxCLI(t, h, false, "decide", card, "approve", "--idempotency-key", "unloaded-cli-"+card)
-			t.Logf("changed-source CLI refusal backend=%s: %s", backend, strings.TrimSpace(cliFailure))
-			callback, signing, _ := h.provider.Registration()
-			postChannelSourceControl(t, callback, signing, card, token, messageID)
-			waitObservedChannelRejectedCallback(t, observation, token)
-			refused := readRegisteredChannelCard(t, h, card)
-			if refused.Status != decisioncard.StatusPending || refused.Verdict != "" || refused.DecisionEventID != "" || refused.BundleHash != hash || !bytes.Equal(refused.Snapshot, before.Snapshot) {
-				t.Fatalf("refusing an unavailable source consumed or changed its card: %+v", refused)
+			if operation == "new_process_equal" {
+				if header.Run.BundleHash != identity.SourceArtifacts[0].BundleHash || reissued != 0 {
+					t.Fatal("equal upgrade did not retain the card on its current run")
+				}
+				callback, signing, _ := h.provider.Registration()
+				postChannelSourceControl(t, callback, signing, card, token, messageID)
+				waitObservedChannelDecision(t, h, card)
+				decisions, err := observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided")
+				if err != nil || decisions != 1 {
+					t.Fatalf("equal offer did not admit exactly one current-source answer: count=%d err=%v", decisions, err)
+				}
+			} else {
+				cliFailure := registeredChannelMailboxCLI(t, h, false, "decide", card, "approve", "--idempotency-key", "unloaded-cli-"+card)
+				t.Logf("changed-source CLI refusal backend=%s: %s", backend, strings.TrimSpace(cliFailure))
+				callback, signing, _ := h.provider.Registration()
+				postChannelSourceControl(t, callback, signing, card, token, messageID)
+				waitObservedChannelRejectedCallback(t, observation, token)
+				refused := readRegisteredChannelCard(t, h, card)
+				if refused.Status != decisioncard.StatusPending || refused.Verdict != "" || refused.DecisionEventID != "" || refused.BundleHash != hash || !bytes.Equal(refused.Snapshot, before.Snapshot) {
+					t.Fatalf("refusing an unavailable source consumed or changed its card: %+v", refused)
+				}
+				decisions, err := observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided")
+				if err != nil || decisions != 0 {
+					t.Fatalf("replacement source admitted a predecessor control: count=%d err=%v", decisions, err)
+				}
+				if err := os.WriteFile(path, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				h.stop(t)
+				h.start(t)
+				requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
+				if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
+					t.Fatal("explicit restoration did not load the exact original source")
+				}
+				callback, signing, _ = h.provider.Registration()
+				postChannelSourceUpdate(t, callback, signing, map[string]any{"update_id": 979101, "callback_query": map[string]any{
+					"id": "restored-source-" + card, "from": map[string]any{"id": 7000},
+					"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token,
+				}})
+				waitObservedChannelDecision(t, h, card)
+				if decisions, err = observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided"); err != nil || decisions != 1 {
+					t.Fatalf("restored source did not admit exactly one later answer: count=%d err=%v", decisions, err)
+				}
+				refusals, err := observation.ControlCounts(t.Context(), token)
+				if err != nil || refusals.OriginalRefused != 1 {
+					t.Fatalf("later answer changed the original refused action: count=%d err=%v", refusals.OriginalRefused, err)
+				}
+				t.Logf("explicit original-source restoration backend=%s later_decisions=%d original_refused_intents=%d", backend, decisions, refusals.OriginalRefused)
 			}
-			decisions, err := observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided")
-			if err != nil || decisions != 0 {
-				t.Fatalf("replacement source admitted a predecessor control: count=%d err=%v", decisions, err)
-			}
-			if err := os.WriteFile(path, body, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			h.stop(t)
-			h.start(t)
-			requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
-			if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
-				t.Fatal("explicit restoration did not load the exact original source")
-			}
-			callback, signing, _ = h.provider.Registration()
-			postChannelSourceUpdate(t, callback, signing, map[string]any{"update_id": 979101, "callback_query": map[string]any{
-				"id": "restored-source-" + card, "from": map[string]any{"id": 7000},
-				"message": map[string]any{"message_id": messageID, "chat": map[string]any{"id": 1001, "type": "private"}}, "data": token,
-			}})
-			waitObservedChannelDecision(t, h, card)
-			if decisions, err = observation.EventCardinality(t.Context(), seed.RunID, "mailbox.card_decided"); err != nil || decisions != 1 {
-				t.Fatalf("restored source did not admit exactly one later answer: count=%d err=%v", decisions, err)
-			}
-			refusals, err := observation.ControlCounts(t.Context(), token)
-			if err != nil || refusals.OriginalRefused != 1 {
-				t.Fatalf("later answer changed the original refused action: count=%d err=%v", refusals.OriginalRefused, err)
-			}
-			t.Logf("explicit original-source restoration backend=%s later_decisions=%d original_refused_intents=%d", backend, decisions, refusals.OriginalRefused)
 		}
 		if retained, err := (*sourceReader).GetSourceArtifact(t.Context(), hash); err != nil || !bytes.Equal(retained.SourceBlob, source.SourceBlob) {
 			t.Fatal("source replacement altered retained bytes", err)

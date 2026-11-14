@@ -225,7 +225,7 @@ func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if len(instances) != 1 {
 		return fmt.Errorf("decision card workflow instance is missing or non-singular")
 	}
-	return runtimepipeline.ValidateDecisionCardGateMutation(card, instances[0])
+	return command.GateOffer.RequireMutation(ctx, card, instances[0])
 }
 
 func validateDecisionCardGateState(state *runtimepipeline.WorkflowEngineStateRecord, card decisioncard.Card) error {
