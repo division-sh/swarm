@@ -184,6 +184,11 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		parent = context.Background()
 	}
 	runIDs := leaseRunIDs(parent)
+	// Standing custody is joined at occurrence retirement, not at a run's
+	// admitted-work cut. Its ambient run context does not admit run work.
+	if !transient {
+		runIDs = nil
+	}
 	var acceptedRunParent *Lease
 	if ancestor == nil {
 		acceptedRunParent, _ = parent.Value(acceptedLeaseContextKey{}).(*Lease)
@@ -282,6 +287,10 @@ func (g *gate) beginRunTransition(ctx context.Context, runID string) (func(), er
 		return nil, err
 	}
 	g.mu.Lock()
+	if g.state == gateRetired || g.ctx.Err() != nil {
+		g.mu.Unlock()
+		return nil, ErrRetired
+	}
 	if g.runs == nil {
 		g.runs = make(map[string]*runWork)
 	}
@@ -315,6 +324,9 @@ func (g *gate) beginRunTransition(ctx context.Context, runID string) (func(), er
 	case <-ctx.Done():
 		done()
 		return nil, ctx.Err()
+	case <-g.ctx.Done():
+		done()
+		return nil, ErrRetired
 	}
 }
 

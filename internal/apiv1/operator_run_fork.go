@@ -12,6 +12,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -310,17 +311,20 @@ func loadRunForkOutcomeForRequest(ctx context.Context, reader RunForkOperationRe
 	} else {
 		record, found, err = reader.LoadForkOperationByID(ctx, request.OperationID)
 	}
-	if err != nil || !found {
-		return record, found, errors.Join(executionErr, err)
+	if err != nil {
+		return record, found, &runForkOutcomeReadbackFailure{execution: executionErr, readback: err}
+	}
+	if !found {
+		return record, false, executionErr
 	}
 	if err := record.Validate(); err != nil {
-		return runfork.ForkOperationRecord{}, false, errors.Join(executionErr, err)
+		return runfork.ForkOperationRecord{}, false, &runForkOutcomeReadbackFailure{execution: executionErr, readback: err}
 	}
 	if record.Request.Actor != request.Actor || record.Request.IdempotencyKey != request.IdempotencyKey ||
 		record.Request.TransportHash != request.TransportHash || record.Request.SourceRunID != request.SourceRunID ||
 		record.Request.ForkEventID != request.ForkEventID || record.Request.AtStart != request.AtStart ||
 		(request.IdempotencyKey == "" && record.Request.OperationID != request.OperationID) {
-		return runfork.ForkOperationRecord{}, false, errors.Join(executionErr, fmt.Errorf("durable fork outcome disagrees with original request identity"))
+		return runfork.ForkOperationRecord{}, false, &runForkOutcomeReadbackFailure{execution: executionErr, readback: errors.New("durable fork outcome disagrees with original request identity")}
 	}
 	// A different operation's result is observable only after the execution
 	// owner joined it. Arbitrary losing failures are not key-election proof.
@@ -328,6 +332,19 @@ func loadRunForkOutcomeForRequest(ctx context.Context, reader RunForkOperationRe
 		return runfork.ForkOperationRecord{}, false, executionErr
 	}
 	return record, true, nil
+}
+
+type runForkOutcomeReadbackFailure struct {
+	execution error
+	readback  error
+}
+
+func (f *runForkOutcomeReadbackFailure) Error() string {
+	return errors.Join(f.execution, f.readback).Error()
+}
+
+func (f *runForkOutcomeReadbackFailure) Unwrap() []error {
+	return []error{f.execution, f.readback}
 }
 
 func projectForkOperationResult(ctx context.Context, artifacts sourceartifact.Reader, record runfork.ForkOperationRecord) (RunForkExecutionResult, error) {
@@ -538,6 +555,26 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	if err == nil {
 		return nil
 	}
+	var readback *runForkOutcomeReadbackFailure
+	if errors.As(err, &readback) {
+		if readback.execution == nil {
+			return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", "run-fork", "confirm", nil, err)
+		}
+		first := runtimefailures.RunForkExecutionFailure
+		if onlyRunForkWriteConflict(readback.execution) {
+			first = runtimefailures.RunForkWriterConflict
+		}
+		return runtimefailures.WrapRunForkUnconfirmed(first, runtimefailures.RunForkOutcomeReadback, err)
+	}
+	if hasRunForkWriteConflict(err) {
+		if onlyRunForkWriteConflict(err) {
+			return err
+		}
+		if strings.Contains(err.Error(), "dynamic flow runtime readiness retains predecessor retirement") {
+			return runtimefailures.WrapRunForkUnconfirmed(runtimefailures.RunForkWriterConflict, runtimefailures.RunForkPredecessorRetirement, err)
+		}
+		return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", "run-fork", "confirm", nil, err)
+	}
 	var applicationErr *ApplicationError
 	if errors.As(err, &applicationErr) {
 		return applicationErr
@@ -613,4 +650,50 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	default:
 		return err
 	}
+}
+
+func onlyRunForkWriteConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	if failure, ok := err.(*runtimefailures.Error); ok {
+		return failure.Failure.Class == runtimefailures.ClassLifecycleConflict && failure.Failure.Detail.Code == "run_fork_write_conflict"
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		branches := joined.Unwrap()
+		if len(branches) == 0 {
+			return false
+		}
+		for _, branch := range branches {
+			if !onlyRunForkWriteConflict(branch) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyRunForkWriteConflict(wrapped.Unwrap())
+	}
+	return false
+}
+
+func hasRunForkWriteConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	if failure, ok := err.(*runtimefailures.Error); ok {
+		return failure.Failure.Class == runtimefailures.ClassLifecycleConflict && failure.Failure.Detail.Code == "run_fork_write_conflict"
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, branch := range joined.Unwrap() {
+			if hasRunForkWriteConflict(branch) {
+				return true
+			}
+		}
+		return false
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return hasRunForkWriteConflict(wrapped.Unwrap())
+	}
+	return false
 }

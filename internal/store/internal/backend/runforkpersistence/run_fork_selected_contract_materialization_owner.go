@@ -590,7 +590,7 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 					return operation(txctx, tx, attempt)
 				})
 			})
-			return result.Acknowledged(), result.Err()
+			return result.Acknowledged(), classifyRunForkNativeResult(result)
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, true, s.durableData)
@@ -635,7 +635,7 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 					return operation(txctx, tx, attempt)
 				})
 			})
-			return result.Acknowledged(), result.Err()
+			return result.Acknowledged(), classifyRunForkNativeResult(result)
 		},
 		plan: func(ctx context.Context, tx *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false, s.durableData)

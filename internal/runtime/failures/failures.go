@@ -251,6 +251,12 @@ func definition(class Class, taskFailure, retryable, deterministic bool, message
 }
 
 func (def Definition) message(detail Detail) string {
+	if def.Class == ClassLifecycleConflict && detail.Code == "run_fork_write_conflict" {
+		return "Another writer changed the run while the fork was being written. That write was rolled back. If you used an idempotency key, try the same request again with that key; otherwise ask an operator to check for an existing fork before retrying."
+	}
+	if def.Class == ClassOutcomeUncertain && detail.Code == "run_fork_commit_unconfirmed" {
+		return runForkCommitUnconfirmedMessage
+	}
 	if def.Class == ClassUnexpectedArrival && detail.Code == "no_route" {
 		return fmt.Sprintf("No handler in stage %q of flow %q; handled events: %v. Further emits without a handler will be refused.", detail.Attributes["stage"], detail.Attributes["flow_id"], detail.Attributes["handled_events"])
 	}
@@ -267,6 +273,55 @@ func (def Definition) message(detail Detail) string {
 		return message
 	}
 	return fmt.Sprintf(def.MessageTemplate, detail.Code)
+}
+
+const runForkCommitUnconfirmedMessage = "The fork may or may not have been written. Do not retry yet. Ask an operator to check the fork operation and original run status before trying again; provide the idempotency key if you used one."
+
+type RunForkUnconfirmedCause string
+
+const (
+	RunForkWriterConflict        RunForkUnconfirmedCause = "writer_conflict"
+	RunForkPredecessorRetirement RunForkUnconfirmedCause = "predecessor_retirement"
+	RunForkOutcomeReadback       RunForkUnconfirmedCause = "outcome_readback"
+	RunForkExecutionFailure      RunForkUnconfirmedCause = "execution_failure"
+)
+
+func runForkUnconfirmedMessage(first, second RunForkUnconfirmedCause) string {
+	switch {
+	case first == RunForkWriterConflict && second == RunForkPredecessorRetirement:
+		return "The fork could not be confirmed: another writer changed the run, and the previous runtime could not be safely retired. Do not retry yet. Ask an operator to check the fork operation and runtime retirement."
+	case first == RunForkWriterConflict && second == RunForkOutcomeReadback:
+		return "The fork could not be confirmed: another writer changed the run, and the durable fork outcome could not be read. Do not retry yet. Ask an operator to check the fork operation and original run status."
+	case first == RunForkExecutionFailure && second == RunForkOutcomeReadback:
+		return "The fork could not be confirmed: fork execution failed, and the durable fork outcome could not be read. Do not retry yet. Ask an operator to check the fork operation and original run status."
+	default:
+		return ""
+	}
+}
+
+func validRunForkUnconfirmedMessage(message string) bool {
+	for _, pair := range [][2]RunForkUnconfirmedCause{
+		{RunForkWriterConflict, RunForkPredecessorRetirement},
+		{RunForkWriterConflict, RunForkOutcomeReadback},
+		{RunForkExecutionFailure, RunForkOutcomeReadback},
+	} {
+		if message == runForkUnconfirmedMessage(pair[0], pair[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// WrapRunForkUnconfirmed names two safe cause categories in the public message
+// without adding cause text or structured fields to the failure envelope.
+func WrapRunForkUnconfirmed(first, second RunForkUnconfirmedCause, cause error) error {
+	message := runForkUnconfirmedMessage(first, second)
+	if message == "" {
+		return Wrap(ClassInternalFailure, "invalid_failure_construction", "run-fork", "confirm", nil, cause)
+	}
+	err := Wrap(ClassOutcomeUncertain, "run_fork_commit_unconfirmed", "run-fork", "confirm", nil, cause).(*Error)
+	err.Failure.Message = message
+	return err
 }
 
 func Classes() []Class {
@@ -640,7 +695,7 @@ func ValidateEnvelope(envelope Envelope) error {
 	if envelope.Retryable != expectedRetryable || envelope.Deterministic != expectedDeterministic {
 		return fmt.Errorf("failure envelope decisions do not match registry for %s/%s", envelope.Class, envelope.Detail.Code)
 	}
-	if envelope.Message != def.message(envelope.Detail) {
+	if envelope.Message != def.message(envelope.Detail) && !(envelope.Class == ClassOutcomeUncertain && envelope.Detail.Code == "run_fork_commit_unconfirmed" && validRunForkUnconfirmedMessage(envelope.Message)) {
 		return fmt.Errorf("failure envelope message does not match registry template")
 	}
 	if envelope.Remediation != fmt.Sprintf(def.RemediationTemplate, envelope.Detail.Code) {
@@ -853,7 +908,7 @@ func decisions(def Definition, detail Detail) (bool, bool) {
 	case ClassComputeFailure:
 		deterministic = true
 	case ClassLifecycleConflict:
-		if detail.Code == "workflow_engine_state_revision_conflict" || detail.Code == "join_publication_entry_changed" {
+		if detail.Code == "workflow_engine_state_revision_conflict" || detail.Code == "join_publication_entry_changed" || detail.Code == "run_fork_write_conflict" {
 			retryable = true
 		}
 	case ClassInternalFailure:

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -21,6 +22,7 @@ import (
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -42,6 +44,20 @@ type runForkSelectedContractActivationPort struct {
 	deliveries       *storedelivery.Adapter
 	attachment       func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error
 	liveHandoff      func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkSelectedContractActivationEvidence) (string, error)
+}
+
+func classifyRunForkNativeResult[T any](result mutationprotocol.Result[T]) error {
+	err := result.Err()
+	if err == nil || result.Acknowledged() {
+		return err
+	}
+	if postgresbackend.IsRolledBackSerializationConflict(err) {
+		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "run_fork_write_conflict", "run-fork", "write", nil, err)
+	}
+	if _, clean := result.CleanCancellation(); !clean && result.Phase() == mutationprotocol.CommitAdmission {
+		return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "run_fork_commit_unconfirmed", "run-fork", "commit", nil, err)
+	}
+	return err
 }
 
 type runForkSelectedContractActivationEvidence struct {
@@ -459,7 +475,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 					return operation(txctx, tx, attempt)
 				})
 			})
-			return result.Acknowledged(), result.Err()
+			return result.Acknowledged(), classifyRunForkNativeResult(result)
 		},
 		loadLineage: func(ctx context.Context, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
 			return loadRunForkActivationLineage(ctx, s.RunLifecyclePostgresOwner, tx, forkRunID)
@@ -502,7 +518,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 					return operation(txctx, tx, attempt)
 				})
 			})
-			return result.Acknowledged(), result.Err()
+			return result.Acknowledged(), classifyRunForkNativeResult(result)
 		},
 		loadLineage: func(ctx context.Context, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
 			return loadSQLiteRunForkActivationLineage(ctx, s.RunLifecycleSQLiteOwner, tx, forkRunID)
