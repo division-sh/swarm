@@ -71,7 +71,9 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 				t.Fatalf("inspection fixture attempt %s already expired", attemptID)
 			}
 		}
-		want := effects.StartupRecoveryCounts{ProviderTurnsToResume: 1, ProviderTurnsToDeadLetter: 2, HTTPToolCallsUnknown: 1}
+		// A future takeover is not a fence. The exact native transitions below
+		// still recover all three provider attempts inside their own transactions.
+		want := effects.StartupRecoveryCounts{HTTPToolCallsUnknown: 1}
 		before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
 		requireStartupRecoveryCLI(t, fixture, binary)
 		// A native recovery row lock must not block an observational read.

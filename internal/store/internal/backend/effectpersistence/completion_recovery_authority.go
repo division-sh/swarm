@@ -73,6 +73,14 @@ func selectAbandonedCompletionAttempts(ctx context.Context, tx *sql.Tx, attempts
 			selected = append(selected, row)
 			continue
 		}
+		cancellation, err := readProviderOriginCancellation(ctx, tx, !sqlite, attempt, true, recoveryInspection)
+		if err != nil {
+			return nil, err
+		}
+		if cancellation.disposition != providerOriginNotCanceled {
+			selected = append(selected, row)
+			continue
+		}
 		runID := token.Identity.RunID
 		active, known := runs[runID]
 		if !known {
