@@ -138,12 +138,12 @@ func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePa
 	result.BootReport.Sort()
 }
 
-func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult) (WorkspaceBackendSelection, workspace.Resolver, bool) {
+func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult, preference ...WorkspaceBackendSelection) (WorkspaceBackendSelection, workspace.Resolver, bool) {
 	subject := "source:" + result.BootReport.SourceArtifactHash
 	verifyDeploymentObservation(ctx, result, "declared_model_admission", "internal/runtime.ValidateDeclaredAgentModelAdmission", subject, failures.ClassSchemaInvalid, func(context.Context) error {
 		return runtime.ValidateDeclaredAgentModelAdmission(executionposture.Live, cfg.Config, source)
 	})
-	backend, workspaceInspection, workspaceOK := inspectVerifyWorkspaceAdmission(ctx, cfg, source, result)
+	backend, workspaceInspection, workspaceOK := inspectVerifyWorkspaceAdmission(ctx, cfg, source, result, preference...)
 	providers, providerErr := llm.NewAgentProviderContracts(opts.LLMProfile)
 	verifyDeploymentObservation(ctx, result, "native_tool_admission", "internal/runtime/tools.ValidateNativeToolBootConfig", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
 		if providerErr != nil {
@@ -164,12 +164,15 @@ func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResu
 	return backend, workspaceInspection, workspaceOK
 }
 
-func inspectVerifyWorkspaceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, result *runtime.WorkflowContractValidationResult) (WorkspaceBackendSelection, workspace.Resolver, bool) {
+func inspectVerifyWorkspaceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, result *runtime.WorkflowContractValidationResult, preferences ...WorkspaceBackendSelection) (WorkspaceBackendSelection, workspace.Resolver, bool) {
 	subject := "source:" + result.BootReport.SourceArtifactHash
 	var workspaceInspection workspace.Resolver
 	var backend WorkspaceBackendSelection
 	workspaceOK := verifyDeploymentObservation(ctx, result, "workspace_capability_admission", "internal/cliapp.DecideWorkspaceBackend", subject, failures.ClassSchemaInvalid, func(context.Context) error {
 		preference, err := ResolveWorkspaceBackend("", false, cfg.Config)
+		if len(preferences) != 0 {
+			preference, err = preferences[0], nil
+		}
 		if err != nil {
 			return err
 		}
@@ -302,8 +305,11 @@ func inspectVerifyManagedCatalogAdmission(ctx context.Context, source semanticvi
 	})
 }
 
-func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, subject string) {
+func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, subject string, intents ...ServeOptions) {
 	intent := ServeOptions{}
+	if len(intents) != 0 {
+		intent = intents[0]
+	}
 	mode, enabled, err := ResolveServePublicIngressMode(intent, cfg.Config.Serve.PublicWebhook)
 	if err != nil {
 		verifyDeploymentObservation(ctx, result, "public_ingress_admission", "internal/cliapp.ResolveServePublicIngressMode", subject, failures.ClassSchemaInvalid, func(context.Context) error { return err })
@@ -330,11 +336,13 @@ func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult
 	})
 }
 
-func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult) {
-	var held []struct {
-		subject  string
-		listener net.Listener
-	}
+type verifyListenerBinding struct {
+	subject  string
+	listener net.Listener
+}
+
+func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, intents ...ServeOptions) {
+	var held []verifyListenerBinding
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyCleanupDeadline)
 		defer cancel()
@@ -345,9 +353,13 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 		}
 	}()
 	var api, mcp string
+	intent := ServeOptions{}
+	if len(intents) != 0 {
+		intent = intents[0]
+	}
 	valid := verifyDeploymentObservation(ctx, result, "serve_listener_configuration", "internal/cliapp.RuntimeConfigLoadResult.ResolveServeListeners", "project:"+repo, failures.ClassSchemaInvalid, func(context.Context) error {
 		var err error
-		api, mcp, err = cfg.ResolveServeListeners(ServeOptions{}, false, false)
+		api, mcp, err = cfg.ResolveServeListeners(intent, len(intents) != 0, len(intents) != 0)
 		return err
 	})
 	if !valid {
@@ -358,27 +370,32 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 		if err != nil {
 			return err
 		}
-		auth, err := cfg.ResolveServeAPIAuth(root, ServeOptions{})
+		auth, err := cfg.ResolveServeAPIAuth(root, intent)
 		if err != nil {
 			return err
 		}
 		return ValidateServeAPIAuthBinding(api, auth)
 	})
-	for _, binding := range []struct{ name, addr string }{{"api", api}, {"mcp", mcp}} {
-		verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.ListenServeHTTPListener", binding.name+":"+binding.addr, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-			local, cancel := context.WithTimeout(ctx, verifyLocalDeadline)
-			defer cancel()
-			listener, err := ListenServeHTTPListenerInContext(local, binding.name, binding.addr)
-			if err != nil {
-				return err
-			}
-			// Boot binds this set concurrently; isolated probes miss conflicts.
-			held = append(held, struct {
-				subject  string
-				listener net.Listener
-			}{binding.name + ":" + binding.addr, listener})
-			return local.Err()
-		})
+	bindings := []struct{ name, addr string }{{"api", api}, {"mcp", mcp}}
+	if intent.PublicWebhookListen != "" {
+		bindings = append(bindings, struct{ name, addr string }{"public-webhook", intent.PublicWebhookListen})
+	}
+	for _, binding := range bindings {
+		if intent.DryRun {
+			probeServeDryRunListener(ctx, binding.name, binding.addr, &held, result)
+		} else {
+			verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.ListenServeHTTPListener", binding.name+":"+binding.addr, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+				local, cancel := context.WithTimeout(ctx, verifyLocalDeadline)
+				defer cancel()
+				listener, err := ListenServeHTTPListenerInContext(local, binding.name, binding.addr)
+				if err != nil {
+					return err
+				}
+				// Boot binds this set concurrently; isolated probes miss conflicts.
+				held = append(held, verifyListenerBinding{binding.name + ":" + binding.addr, listener})
+				return local.Err()
+			})
+		}
 		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
 			ID: "listener_binding", Owner: "internal/cliapp.ListenServeHTTPListener", Subject: binding.name + ":" + binding.addr,
 			Reason: "availability is an observation, not a reservation; startup must bind and publish its own listener",
