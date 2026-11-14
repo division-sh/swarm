@@ -22,6 +22,10 @@ func (s authorityObservationFixture) InspectStartupRecovery(context.Context, tim
 	return effects.StartupRecoveryCounts{}, nil
 }
 
+func (s authorityObservationFixture) ForecastStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error) {
+	return effects.StartupRecoveryCounts{}, nil
+}
+
 func (s authorityObservationFixture) InspectAuthority(context.Context) (startupownership.AuthorityInspection, error) {
 	return startupownership.EmptyAuthorityInspection("sqlite_retained_owner")
 }
