@@ -9695,12 +9695,16 @@ engine:
     deployment_validation:
       owner: Existing source/config admission, selected-store inspection and consumer-owned admission predicates
       selection: >
-        Default verify validates the exact ordinary live serve intent when the configuration owner's
-        selected-file facts identify explicit/locator or invocation-root .swarm/swarm.yaml configuration.
-        Built-in defaults and ignored root/global files do not identify a deployment.
-        Missing or malformed declared configuration is a refusal, not a portable fallback.
-        Explicit --portable opts down to structural validation; absence of deployment context may
-        also return structural success, with the reason and every unchecked family visible.
+        The serve-owned check stage validates the exact ordinary live serve intent before lasting
+        Swarm changes. Both boot and serve --dry-run use it. Dry run stops after observations and
+        joined disposable checks; occupied listener bindings are explicitly not checked, never passed.
+        Real boot takes its own native authority, revalidates exact inputs and consumes only matching
+        process-local observations. Changed inputs refuse as stale, without a hidden second start.
+        Provider starts are serial and disposable. One completed small no-tool answer is checked per
+        provider and credential, not per agent. Native binding and marked callable-tool proof retain
+        their action-time authority. No overall verify deadline bounds these serial boot checks.
+        Swarm verify is stateless source validation and never opens a store. The --run and --portable
+        flags are removed, not aliases. Missing or malformed declared configuration remains a refusal.
       immutable_context: >
         Source bytes, effective source identity, selected model/catalog and admitted configuration
         are frozen once. Shared projections consume those values instead of reloading the file or
@@ -9847,16 +9851,16 @@ engine:
         live_readiness: not_evaluated. Text and quiet show the success asterisk and
         "store admission: not evaluated — no selected store at <path> (created on first serve)";
         JSON retains the exact path and typed not_run_cause. All store-independent checks still run.
-        Verify carries the inherited --swarm-dir value and explicit-set bit into the frozen config
+        The check stage carries the inherited --swarm-dir value and explicit-set bit into the frozen config
         resolver, preserving flag > config paths.swarm_dir > default and the separate explicit
         SQLite path override. Boot remains the independent creation and execution authority.
-        Portable success reports structural scope and admission_complete: false,
-        including whether --portable was explicitly requested or no deployment context existed.
+        Stateless verify reports structural scope and admission_complete: false, explicitly naming
+        the unperformed deployment observations independently of whether configuration exists.
     structural_validation:
       owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify
       source_owner: internal/runtime.AdmitEffectiveSourceProjection over internal/packadmission.FromBundle metadata
       rule: >
-        Explicit portable verify, verify without deployment context, describe, describe --graph and
+        Stateless verify, describe, describe --graph and
         describe routes validate one admitted effective source,
         including provider/channel declarations. Structural validation is an explicit validation purpose,
         not a live or mock execution selection. It acquires no credential owner, probes no MCP/Claude/Docker,
@@ -22849,8 +22853,9 @@ run_model:
       removal use that same domain law. Run-fork and conversation-fork reconstruction consume this owner in chronological
       mutation order for the exact source run and revision; neither installs its own key parser or compatibility behavior.
     drift_detection: >-
-      swarm verify --run <run_id> reads physical entity_mutations and canonical current state for one run in one
-      selected-store read-only snapshot. The shared constructed-header projection owns exact membership and pairing:
+      Boot's check stage reads physical entity_mutations and canonical current state for each active live or
+      paused run in its selected-store read-only snapshot. Stateless verify does not inspect a run.
+      The shared constructed-header projection owns exact membership and pairing:
       flow_instances supplies lifecycle, bookkeeping and accumulator; an optional correctly paired entity_state
       row supplies declared business fields only. Fieldless headers are complete members without field rows; stale
       non-authoritative field-row lifecycle copies cannot override or veto header progress. Inventory includes final
@@ -28184,7 +28189,7 @@ cli_specification:
                 object with ok, source_root, validation_scope (structural or deployment), live_readiness,
                 admission_complete, bundle_hash, source_label, members, optional manifest,
                 observations and execution_obligations. The deployment_context observation records
-                whether --portable was explicitly requested or deployment configuration was absent.
+                that stateless source validation never performs deployment checks or opens a store.
                 The object also includes pack_inventory, errors, warnings, and lint_evidence.
                 workspace_backend and operational capability_subjects are retired from structural verify.
                 Structural verification does not claim deployment readiness. `errors`, `warnings`,
@@ -30456,7 +30461,7 @@ cli_specification:
       command: swarm verify [directory] [flags]
       group: author_validate
       tier: must_have
-      behavior: Local contract-file validation, or --run <run_id> read-only state/history comparison through run_model.mutation_log.drift_detection; --portable and --run are mutually exclusive.
+      behavior: Stateless local contract-file validation; never opens a store. The --run and --portable flags are removed. Active-run state/history drift checking belongs to boot's check stage through run_model.mutation_log.drift_detection.
     runs:
       command: swarm run list [filters]
       group: run_operate
