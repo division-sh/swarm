@@ -91,3 +91,13 @@ func CopyWrappedLexicalAddressing(t testing.TB, higherOwner bool) string {
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	return root
 }
+
+func CopyUnselectedHigherCompositionConnect(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	copyTree(t, CopyCompositionConnect(t, CompositionConnectValid), filepath.Join(root, "envelope"))
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "envelope/schema.yaml", "stages: []\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "connect:\n  - {event: deploy.done, from: envelope/producer, to: envelope/consumer, rename: deploy.completed}\n")
+	return root
+}

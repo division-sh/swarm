@@ -2317,14 +2317,18 @@ func resolveAuthoredCompositionConnect(source semanticview.Source, connect runti
 		return resolvedCompositionConnect{}, issue
 	}
 	if owner, lca := connectOwnerFlowPath(connect), lowestCommonFlowPath(connectPinFlowPath(from), connectPinFlowPath(to)); owner != lca {
-		requiredOwner := lca
-		if selectedOwner, found := keyedAncestorConnectOwner(source, connect, from, to); found {
-			requiredOwner = selectedOwner
+		requiredOwner, reselecting := keyedAncestorConnectOwner(source, connect, from, to)
+		if !reselecting {
+			requiredOwner = lca
 		}
 		if owner != requiredOwner {
+			detail := fmt.Sprintf("connect belongs in %s/schema.yaml, the exact lowest common ancestor of %q and %q", flowSchemaPrefix(lca), connect.From, connect.To)
+			if reselecting {
+				detail = fmt.Sprintf("connect belongs in %s/schema.yaml, the lowest owner that can select keyed receiver %q", flowSchemaPrefix(requiredOwner), to.FlowID)
+			}
 			return resolvedCompositionConnect{}, ConnectRoutePlanIssue{
 				Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid,
-				Detail: fmt.Sprintf("connect belongs in %s/schema.yaml, the exact lowest common ancestor of %q and %q", flowSchemaPrefix(requiredOwner), connect.From, connect.To),
+				Detail: detail,
 			}
 		}
 	}

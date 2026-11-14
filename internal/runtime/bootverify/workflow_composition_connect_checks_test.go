@@ -2,8 +2,6 @@ package bootverify
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -447,20 +445,12 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	}
 	t.Run("located_unselected_higher_owner", func(t *testing.T) {
 		repo := repoRootForBootverifyTest(t)
-		root := canonicalrouting.CopyLexicalAddressing(t, false)
-		path := filepath.Join(root, "schema.yaml")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, append(raw, []byte("  - {event: ticket.done, from: account/ticket, to: account/audit}\n")...), 0600); err != nil {
-			t.Fatal(err)
-		}
+		root := canonicalrouting.CopyUnselectedHigherCompositionConnect(t)
 		bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
 		found := false
 		for _, finding := range report.Errors() {
-			if finding.CheckID == "composition_connect_validation" && strings.Contains(finding.Location, "schema.yaml") && strings.Contains(finding.Message, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()) && strings.Contains(finding.Message, "connect belongs in account/schema.yaml, the exact lowest common ancestor") {
+			if finding.CheckID == "composition_connect_validation" && strings.Contains(finding.Location, "schema.yaml") && strings.Contains(finding.Message, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()) && strings.Contains(finding.Message, "connect belongs in envelope/schema.yaml, the exact lowest common ancestor") {
 				found = true
 			}
 		}
