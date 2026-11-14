@@ -154,6 +154,7 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
+	ProviderBootChecks  *runtime.ManagedProviderBootChecks
 	RepoRoot            string
 	PlatformPackBases   *packartifact.PlatformPackBaseGenerationOwner
 	ExecutionPosture    executionposture.Posture
@@ -579,6 +580,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		scenarioDeclarations = append(scenarioDeclarations, located.Declaration)
 	}
 	runtimeDeps.Options = runtime.RuntimeOptions{
+		ProviderBootChecks:               req.ProviderBootChecks,
 		ExecutionPosture:                 posture,
 		PublicIngressAbsent:              req.PublicIngressAbsent,
 		EnableDeclaredClockBinding:       !req.Options.LocalRun,
@@ -881,6 +883,35 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	storeSelection := localState.StoreSelection
+	if opts.Dev && !opts.LocalRun {
+		scratch, err := cliapp.ResolveDevScratch(localState)
+		if err != nil {
+			presenter.fail(2, "serve_admission", err)
+			return 3
+		}
+		storeSelection = scratch.Selection
+	}
+	checkInput := cliapp.ServeCheckStageRequest{Repo: repo, Paths: resolvedPaths, Config: cfgResult, Options: opts, Selection: storeSelection, PackBases: platformPackBases}
+	checks, err := cliapp.InspectServeCheckStage(ctx, checkInput)
+	if err != nil {
+		checks.Write(opts.Output, opts.ErrorOutput)
+		presenter.fail(5, "local_preflight", err)
+		return 1
+	}
+	if failure := checks.Failure(); failure != nil {
+		checks.Write(opts.Output, opts.ErrorOutput)
+		presenter.fail(5, "local_preflight", failure)
+		return checks.ExitCode()
+	}
+	if opts.DryRun {
+		checks.Write(opts.Output, opts.ErrorOutput)
+		return checks.ExitCode()
+	}
+	if err := checks.Revalidate(ctx, checkInput); err != nil {
+		presenter.fail(5, "local_preflight", err)
+		return 3
+	}
+	apiAuth = checks.APIAuth
 	var scratchAuthority *devscratch.EpochAuthority
 	var scratchRegistrationGrant devscratch.RegistrationGrant
 	if opts.Dev && !opts.LocalRun {
@@ -933,6 +964,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	composition := runtimeCompositionRequest{
+		BootChecks: &checks, BootCheckInput: checkInput, AdmittedBundle: checks.Bundle,
 		Purpose: executionposture.Live, ProviderIngress: true,
 		Repo: repo, Options: opts, Config: cfgResult, ResolvedPaths: resolvedPaths,
 		LocalState: localState, SwarmDir: swarmDir, StoreSelection: storeSelection,
@@ -952,6 +984,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 // runtimeCompositionRequest contains command-admitted construction facts. It is
 // internal to the composition root, not a public runtime mode/configuration API.
 type runtimeCompositionRequest struct {
+	BootChecks           *cliapp.ServeCheckStageResult
+	BootCheckInput       cliapp.ServeCheckStageRequest
 	Purpose              executionposture.Posture
 	ProviderIngress      bool
 	Repo                 string
@@ -1245,6 +1279,12 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
+	if req.BootChecks != nil {
+		if err := req.BootChecks.Revalidate(ctx, req.BootCheckInput); err != nil {
+			presenter.fail(5, "local_preflight", err)
+			return 3
+		}
+	}
 	processEvidence, err := processCapability.Evidence()
 	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
@@ -1470,6 +1510,9 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			ProcessWorkOwner:    processWorkOwner,
 			NoticePresentation:  noticePresentation,
 			AccountHolderCommit: supervisor.refreshRegisteredAccount,
+		}
+		if req.BootChecks != nil {
+			request.ProviderBootChecks = req.BootChecks.ProviderChecks
 		}
 		contextDef, err := buildServeRuntimeBundleContext(request)
 		if err != nil {

@@ -356,6 +356,7 @@ func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRun
 	cmd.Flags().StringVar(&opts.PublicWebhookListen, "public-webhook-listen", opts.PublicWebhookListen, "Stable loopback ingress-only listener used by the external public origin")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")
 	cmd.Flags().BoolVar(&opts.SelfCheck, "self-check", opts.SelfCheck, "Run runtime self-check during boot")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Run boot checks and stop before startup")
 	cmd.Flags().BoolVar(&opts.Dev, "dev", opts.Dev, "Enable local development lifecycle: replace local scratch state and use concise boot output")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		if err.Error() == "unknown flag: --abandon-active-runs" {

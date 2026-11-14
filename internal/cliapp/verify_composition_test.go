@@ -12,9 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/backendselection"
@@ -210,6 +212,71 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 				if err != nil || before.Fresh || (len(before.MissingDeploymentTables) == 0) != prepared {
 					t.Fatalf("boot inspection: %+v %v", before, err)
 				}
+				t.Run(fmt.Sprintf("serve_stage_held=%t", prepared), func(t *testing.T) {
+					cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					paths, err := ResolveCLISourcePaths(root, CLISourcePathOptions{SourceRoot: root, ConfigPath: configPath})
+					if err != nil {
+						t.Fatal(err)
+					}
+					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, paths, cfg, cliSwarmDirOptions{}, semanticview.Wrap(bundle))
+					if err != nil {
+						t.Fatal(err)
+					}
+					base, err := LoadConfiguredPlatformPackBase(root, cfg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if prepared {
+						capability, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "stage-held-control", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
+						if err != nil {
+							t.Fatal(err)
+						}
+						before, err := capability.Evidence()
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer func() {
+							after, err := capability.Evidence()
+							if err != nil || !reflect.DeepEqual(before, after) {
+								t.Errorf("check changed held authority: %v", err)
+							}
+							if err := capability.Release(ctx); err != nil {
+								t.Error(err)
+							}
+						}()
+					}
+					opts := DefaultServeOptions()
+					opts.SourceRoot, opts.ConfigPath, opts.DryRun = root, configPath, true
+					opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
+					input := ServeCheckStageRequest{Repo: root, Paths: paths, Config: cfg, Options: opts, Selection: request.Selection, PackBases: bases}
+					stage, err := InspectServeCheckStage(ctx, input)
+					if err != nil || stage.Decision().FailureClass != "" {
+						t.Fatalf("serve-owned stage failed: err=%v report=%+v", err, stage.Validation.BootReport)
+					}
+					if err := stage.Revalidate(ctx, input); err != nil {
+						t.Fatalf("unchanged inputs refused: %v", err)
+					}
+					if err := os.WriteFile(path, append(append([]byte(nil), body...), '\n'), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := stage.Revalidate(ctx, input); err == nil {
+						t.Fatal("changed source reused check observations")
+					}
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					after, err := owner.InspectSchema(ctx, complete)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("stage changed native schema: %v", err)
+					}
+				})
 				var out, diagnostic bytes.Buffer
 				code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
 				var result verifyCommandResult
