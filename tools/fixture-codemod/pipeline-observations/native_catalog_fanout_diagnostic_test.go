@@ -64,7 +64,7 @@ func TestNativeCatalogFanOutDiagnosticKeepsFullContextFieldsAndLateCut(t *testin
 
 func TestNativeCatalogFanOutDiagnosticOwnersPreserveOriginalSQLAndRendering(t *testing.T) {
 	for _, owner := range []struct{ path, function, sql string }{
-		{"pipelinepersistence/owner_operations.go", "ReadSourceFanOutIntentDiagnosticRows", `SELECT status,cardinality,cursor,COALESCE(claim_owner,''),claim_generation,CAST(lease_expires_at AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2`},
+		{"pipelinepersistence/test_pipeline_receipt_observation_queries.go", "readSourceFanOutIntentDiagnosticRows", `SELECT status,cardinality,cursor,COALESCE(claim_owner,''),claim_generation,CAST(lease_expires_at AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2`},
 		{"eventpersistence/test_event_record_observation_queries.go", "readSourceRouteSettlementStorage", `SELECT COUNT(*),COUNT(DISTINCT CAST(route_settlement AS TEXT)),COALESCE(SUM(LENGTH(CAST(route_settlement AS TEXT))),0) FROM events WHERE run_id=$1 AND source_event_id=$2`},
 	} {
 		path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.path)
@@ -85,7 +85,7 @@ func TestNativeCatalogFanOutDiagnosticOwnersPreserveOriginalSQLAndRendering(t *t
 		if causalDeliveryQueryLiteral(t, source) != strings.Join(strings.Fields(owner.sql), "") {
 			t.Fatalf("%s changed exact physical SQL", fn.Name.Name)
 		}
-		if owner.function == "ReadSourceFanOutIntentDiagnosticRows" && (!strings.Contains(source, "append([]byte(nil), value...)") || !strings.Contains(source, "if err := rows.Close(); err != nil")) {
+		if owner.function == "readSourceFanOutIntentDiagnosticRows" && (!strings.Contains(source, "append([]byte(nil), value...)") || !strings.Contains(source, "if err := rows.Close(); err != nil")) {
 			t.Fatal("native lease bytes or final row-close refusal lost")
 		}
 	}

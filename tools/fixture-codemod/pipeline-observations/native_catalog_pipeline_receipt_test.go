@@ -82,7 +82,7 @@ func TestNativeCatalogPipelineReceiptRecipesPreserveCompleteAssertionAndReplayTa
 }
 
 func TestNativeCatalogPipelineReceiptOwnerPreservesExactLatestSelection(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "pipelinepersistence", "owner_operations.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "pipelinepersistence", "test_pipeline_receipt_observation_queries.go")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
