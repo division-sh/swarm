@@ -22,11 +22,11 @@ func (s *EventPostgresOwner) ReadSelectedCausalDiagnosticStorageForTest(ctx cont
 	var out SelectedCausalDiagnosticStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out.Events, err = eventrecord.ReadLifecycleDiagnosticEventLineage(ctx, tx, true, outboxID)
+		out.Events, err = readLifecycleDiagnosticEventLineage(ctx, tx, true, outboxID)
 		if err != nil {
 			return err
 		}
-		out.Projection, err = ReadLifecycleDiagnosticProjection(ctx, tx, outboxID)
+		out.Projection, err = readLifecycleDiagnosticProjection(ctx, tx, outboxID)
 		return err
 	})
 	if err != nil {
@@ -39,11 +39,11 @@ func (s *EventSQLiteOwner) ReadSelectedCausalDiagnosticStorageForTest(ctx contex
 	var out SelectedCausalDiagnosticStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out.Events, err = eventrecord.ReadLifecycleDiagnosticEventLineage(ctx, tx, false, outboxID)
+		out.Events, err = readLifecycleDiagnosticEventLineage(ctx, tx, false, outboxID)
 		if err != nil {
 			return err
 		}
-		out.Projection, err = ReadLifecycleDiagnosticProjection(ctx, tx, outboxID)
+		out.Projection, err = readLifecycleDiagnosticProjection(ctx, tx, outboxID)
 		return err
 	})
 	if err != nil {
@@ -56,11 +56,11 @@ func (s *EventPostgresOwner) ReadSelectedCausalDiagnosticConservationForTest(ctx
 	var out SelectedCausalDiagnosticConservation
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out.Events, err = eventrecord.CountLifecycleDiagnosticEvents(ctx, tx, true, outboxID)
+		out.Events, err = countLifecycleDiagnosticEvents(ctx, tx, true, outboxID)
 		if err != nil {
 			return err
 		}
-		out.Pending, err = CountPendingLifecycleDiagnostic(ctx, tx, outboxID)
+		out.Pending, err = countPendingLifecycleDiagnostic(ctx, tx, outboxID)
 		return err
 	})
 	if err != nil {
@@ -73,11 +73,11 @@ func (s *EventSQLiteOwner) ReadSelectedCausalDiagnosticConservationForTest(ctx c
 	var out SelectedCausalDiagnosticConservation
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out.Events, err = eventrecord.CountLifecycleDiagnosticEvents(ctx, tx, false, outboxID)
+		out.Events, err = countLifecycleDiagnosticEvents(ctx, tx, false, outboxID)
 		if err != nil {
 			return err
 		}
-		out.Pending, err = CountPendingLifecycleDiagnostic(ctx, tx, outboxID)
+		out.Pending, err = countPendingLifecycleDiagnostic(ctx, tx, outboxID)
 		return err
 	})
 	if err != nil {
@@ -90,7 +90,7 @@ func (s *EventPostgresOwner) ReadGlobalEventChronologyForTest(ctx context.Contex
 	var out []eventrecord.GlobalEventChronologyRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadGlobalEventChronologyTx(ctx, tx, true)
+		out, err = readGlobalEventChronologyTx(ctx, tx, true)
 		return err
 	})
 	if err != nil {
@@ -103,7 +103,7 @@ func (s *EventSQLiteOwner) ReadGlobalEventChronologyForTest(ctx context.Context)
 	var out []eventrecord.GlobalEventChronologyRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadGlobalEventChronologyTx(ctx, tx, false)
+		out, err = readGlobalEventChronologyTx(ctx, tx, false)
 		return err
 	})
 	if err != nil {
@@ -116,7 +116,7 @@ func (s *EventPostgresOwner) CountRunEventNameStorageForTest(ctx context.Context
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = eventrecord.CountRunEventNameStorage(ctx, tx, run, name)
+		count, err = countRunEventNameStorage(ctx, tx, run, name)
 		return err
 	})
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *EventSQLiteOwner) CountRunEventNameStorageForTest(ctx context.Context, 
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = eventrecord.CountRunEventNameStorage(ctx, tx, run, name)
+		count, err = countRunEventNameStorage(ctx, tx, run, name)
 		return err
 	})
 	if err != nil {
@@ -142,7 +142,7 @@ func (s *EventPostgresOwner) ReadSourceRouteSettlementStorageForTest(ctx context
 	var out eventrecord.SourceRouteSettlementStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadSourceRouteSettlementStorage(ctx, tx, runID, eventID)
+		out, err = readSourceRouteSettlementStorage(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *EventSQLiteOwner) ReadSourceRouteSettlementStorageForTest(ctx context.C
 	var out eventrecord.SourceRouteSettlementStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadSourceRouteSettlementStorage(ctx, tx, runID, eventID)
+		out, err = readSourceRouteSettlementStorage(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *EventPostgresOwner) CountChainDepthDiagnosticStorageForTest(ctx context
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = eventrecord.CountChainDepthDiagnosticStorage(ctx, tx, true, runID, entityID, handlerNode)
+		count, err = countChainDepthDiagnosticStorage(ctx, tx, true, runID, entityID, handlerNode)
 		return err
 	})
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *EventSQLiteOwner) CountChainDepthDiagnosticStorageForTest(ctx context.C
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = eventrecord.CountChainDepthDiagnosticStorage(ctx, tx, false, runID, entityID, handlerNode)
+		count, err = countChainDepthDiagnosticStorage(ctx, tx, false, runID, entityID, handlerNode)
 		return err
 	})
 	if err != nil {
@@ -194,7 +194,7 @@ func (s *EventPostgresOwner) ReadLatestHandlerErrorLogForTest(ctx context.Contex
 	var out json.RawMessage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadLatestHandlerErrorLog(ctx, tx, true)
+		out, err = readLatestHandlerErrorLog(ctx, tx, true)
 		return err
 	})
 	if err != nil {
@@ -207,7 +207,7 @@ func (s *EventSQLiteOwner) ReadLatestHandlerErrorLogForTest(ctx context.Context)
 	var out json.RawMessage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadLatestHandlerErrorLog(ctx, tx, false)
+		out, err = readLatestHandlerErrorLog(ctx, tx, false)
 		return err
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func (s *EventPostgresOwner) ReadCausalEventStorageSinceForTest(ctx context.Cont
 	var out []eventrecord.CausalObservationRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadCausalObservationSince(ctx, tx, true, since)
+		out, err = readCausalObservationSince(ctx, tx, true, since)
 		return err
 	})
 	if err != nil {
@@ -233,7 +233,7 @@ func (s *EventSQLiteOwner) ReadCausalEventStorageSinceForTest(ctx context.Contex
 	var out []eventrecord.CausalObservationRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = eventrecord.ReadCausalObservationSince(ctx, tx, false, since)
+		out, err = readCausalObservationSince(ctx, tx, false, since)
 		return err
 	})
 	if err != nil {
