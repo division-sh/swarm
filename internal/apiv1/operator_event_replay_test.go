@@ -1043,6 +1043,28 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 			t.Fatalf("seed operator replay delivery agent: %v", err)
 		}
 	}
+	identityArgs := []any{
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+	}
+	existingQuery := `SELECT session_id::text FROM agent_sessions
+		WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3 AND agent_name_source=$4
+		AND agent_route_presence=$5 AND flow_scope_key=$6 AND flow_instance_id=$7 AND flow_instance=$8
+		AND status <> 'terminated'`
+	if sqlite {
+		existingQuery = `SELECT session_id FROM agent_sessions
+			WHERE run_id=? AND agent_id=? AND agent_name_owner=? AND agent_name_source=?
+			AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?
+			AND status <> 'terminated'`
+	}
+	var existingSessionID string
+	err = db.QueryRowContext(ctx, existingQuery, append([]any{runID}, identityArgs...)...).Scan(&existingSessionID)
+	if err == nil {
+		return existingSessionID
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("read operator replay delivery session: %v", err)
+	}
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -1056,10 +1078,6 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 				flow_scope_key, flow_instance_id, flow_instance
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
-	}
-	identityArgs := []any{
-		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 	}
 	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
 	if _, err := db.ExecContext(ctx, query, sessionArgs...); err != nil {
