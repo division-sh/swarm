@@ -422,10 +422,9 @@ func assertAcceptedMCPTransportDuringDrain(t *testing.T, ctx context.Context, su
 	if !ok {
 		t.Fatal("synthetic turn has no capability surface")
 	}
-	owner := rt.WorkOccurrence()
-	parent, err := owner.Begin(worklifetime.WithOccurrence(turnCtx, owner))
-	if err != nil {
-		t.Fatal(err)
+	parent, lookup, err := manager.AcquireBundleHash(turnCtx, admission.BundleHash)
+	if err != nil || parent == nil || !lookup.Loaded() {
+		t.Fatalf("admit registered outer MCP work: loaded=%v error=%v", lookup.Loaded(), err)
 	}
 	release := sync.OnceFunc(func() {
 		if err := parent.Done(); err != nil {
@@ -433,7 +432,7 @@ func assertAcceptedMCPTransportDuringDrain(t *testing.T, ctx context.Context, su
 		}
 	})
 	defer release()
-	token := rt.MCPTurns.RegisterTurnContextWithCapabilitySurface(parent.Context(), time.Minute, surface)
+	token := rt.MCPTurns.RegisterTurnContextWithCapabilitySurface(parent.WorkContext(), time.Minute, surface)
 	if token == "" {
 		t.Fatal("register synthetic current provider turn")
 	}
@@ -484,7 +483,7 @@ func assertAcceptedMCPTransportDuringDrain(t *testing.T, ctx context.Context, su
 		case <-time.After(time.Millisecond):
 		}
 	}
-	if parent.Context().Err() != nil {
+	if parent.WorkContext().Err() != nil {
 		t.Fatal("accepted outer MCP parent canceled during grace")
 	}
 	if response := request(token); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "protocolVersion") {
