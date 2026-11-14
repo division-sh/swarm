@@ -274,6 +274,14 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				}
 				result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
 				if len(rpcErr) != 0 {
+					readAt := time.Now().UTC().Format(time.RFC3339Nano)
+					select {
+					case <-f.topology.capability.Done():
+						terminal, available := f.topology.capability.TerminalResult()
+						t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=true terminal_result=%+v terminal_result_available=%t; Done also closes on a clean release; read_at is when the test looked", readAt, terminal, available)
+					default:
+						t.Logf("the capability's terminal state as read by the test: read_at=%s done_closed=false; Done also closes on a clean release; read_at is when the test looked", readAt)
+					}
 					t.Fatalf("fixed-T pending receiver fork: %s", rpcErr)
 				}
 				if result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || result.DataPins[0].VersionID != wantVersion.VersionID {
