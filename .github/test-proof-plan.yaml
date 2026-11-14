@@ -329,7 +329,7 @@ units:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
-  core-structural-owner-guards:
+  core-structural-owner-guards: &core_structural_owner_guards
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
       - github.com/division-sh/swarm/internal/runtime
@@ -339,6 +339,12 @@ units:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
+  core-structural-owner-guards-without-release:
+    <<: *core_structural_owner_guards
+    packages:
+      - github.com/division-sh/swarm/internal/runtime
+      - github.com/division-sh/swarm/internal/serveapp
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
   local-release-golden-smoke:
     packages: [github.com/division-sh/swarm/internal/releasee2e]
     run: ^TestGoldenAgentWorkloadSQLiteSmoke$

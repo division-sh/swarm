@@ -102,6 +102,12 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if err != nil {
 		return RunPlan{}, err
 	}
+	if composeReleaseRest(profile, option.Venue, extraUnits) {
+		unitIDs, err = policy.composeReleaseRestCanaries(unitIDs)
+		if err != nil {
+			return RunPlan{}, err
+		}
+	}
 	if composeServeappChannel(profile, option.Venue, extraUnits) {
 		unitIDs, err = policy.composeServeappChannelCanaries(unitIDs)
 		if err != nil {
