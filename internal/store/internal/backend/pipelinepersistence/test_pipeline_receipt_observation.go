@@ -10,7 +10,7 @@ func (s *PipelinePostgresOwner) CountClosedSourceFanOutIssuanceForTest(ctx conte
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = CountClosedSourceFanOutIssuance(ctx, tx, runID, eventID, cardinality)
+		count, err = countClosedSourceFanOutIssuance(ctx, tx, runID, eventID, cardinality)
 		return err
 	})
 	if err != nil {
@@ -23,7 +23,7 @@ func (s *PipelineSQLiteOwner) CountClosedSourceFanOutIssuanceForTest(ctx context
 	var count int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		count, err = CountClosedSourceFanOutIssuance(ctx, tx, runID, eventID, cardinality)
+		count, err = countClosedSourceFanOutIssuance(ctx, tx, runID, eventID, cardinality)
 		return err
 	})
 	if err != nil {
@@ -36,7 +36,7 @@ func (s *PipelinePostgresOwner) ReadSourceFanOutIntentDiagnosticRowsForTest(ctx 
 	var rows []SourceFanOutIntentDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		rows, err = ReadSourceFanOutIntentDiagnosticRows(ctx, tx, runID, eventID)
+		rows, err = readSourceFanOutIntentDiagnosticRows(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -49,7 +49,7 @@ func (s *PipelineSQLiteOwner) ReadSourceFanOutIntentDiagnosticRowsForTest(ctx co
 	var rows []SourceFanOutIntentDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		rows, err = ReadSourceFanOutIntentDiagnosticRows(ctx, tx, runID, eventID)
+		rows, err = readSourceFanOutIntentDiagnosticRows(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func (s *PipelinePostgresOwner) ReadEarliestEventPipelineReceiptRowsForTest(ctx 
 	var rows []EventPipelineReceiptObservationRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		rows, err = ReadEarliestEventPipelineReceiptRows(ctx, tx)
+		rows, err = readEarliestEventPipelineReceiptRows(ctx, tx)
 		return err
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func (s *PipelineSQLiteOwner) ReadEarliestEventPipelineReceiptRowsForTest(ctx co
 	var rows []EventPipelineReceiptObservationRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		rows, err = ReadEarliestEventPipelineReceiptRows(ctx, tx)
+		rows, err = readEarliestEventPipelineReceiptRows(ctx, tx)
 		return err
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func (s *PipelinePostgresOwner) ReadLatestPlatformPipelineReceiptStorageForTest(
 	var receipt LatestPipelineReceiptStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		receipt, err = ReadLatestPlatformPipelineReceiptStorage(ctx, tx, true, eventID)
+		receipt, err = readLatestPlatformPipelineReceiptStorage(ctx, tx, true, eventID)
 		return err
 	})
 	if err != nil {
@@ -101,7 +101,7 @@ func (s *PipelineSQLiteOwner) ReadLatestPlatformPipelineReceiptStorageForTest(ct
 	var receipt LatestPipelineReceiptStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		receipt, err = ReadLatestPlatformPipelineReceiptStorage(ctx, tx, false, eventID)
+		receipt, err = readLatestPlatformPipelineReceiptStorage(ctx, tx, false, eventID)
 		return err
 	})
 	if err != nil {
