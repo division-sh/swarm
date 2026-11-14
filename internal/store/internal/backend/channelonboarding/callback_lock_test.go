@@ -249,6 +249,7 @@ func proveChangedActionDiscovery(t *testing.T) {
 }
 
 func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) {
+	t.Run("postgres/deployment", proveDeploymentParentInterleavings)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, kind := range []string{"card", "skip", "choice"} {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
@@ -630,6 +631,7 @@ type callbackLockConn struct {
 }
 
 func (c *callbackLockConn) before(ctx context.Context, query string, args []driver.NamedValue) {
+	observeDeploymentLockCut(ctx, query, args)
 	if cut, ok := ctx.Value(callbackDiscoveryKey{}).(*callbackDiscoveryCut); ok {
 		if actionParentLockQuery(query) {
 			if len(args) != 1 || args[0].Value != cut.parent {
@@ -707,14 +709,15 @@ type callbackSelectedOwners struct {
 	callbackIdentityStore
 }
 type callbackLockFixture struct {
-	ctx       context.Context
-	selected  callbackSelected
-	run       func(context.Context, func(context.Context, *sql.Tx) error) error
-	settle    func(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
-	postgres  bool
-	principal string
-	probe     *callbackLockProbe
-	logout    *logoutProcessFixture
+	ctx        context.Context
+	selected   callbackSelected
+	run        func(context.Context, func(context.Context, *sql.Tx) error) error
+	settle     func(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+	postgres   bool
+	principal  string
+	probe      *callbackLockProbe
+	logout     *logoutProcessFixture
+	deployment domain.OperationStore
 }
 
 func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
@@ -755,6 +758,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		f.selected, f.run, f.settle = callbackSelectedOwners{onboarding, identity}, b.RunTransaction, identity.SettleInboundClaimTx
+		f.deployment = onboarding.DeploymentOperations()
 	} else {
 		b, err := sqlitebackend.New(db)
 		if err != nil {
@@ -774,6 +778,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 			t.Fatal(err)
 		}
 		f.selected, f.settle = callbackSelectedOwners{onboarding, identity}, identity.SettleInboundClaimTx
+		f.deployment = onboarding.DeploymentOperations()
 		f.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 			return b.RunTransaction(ctx, "callback publication proof", fn)
 		}
