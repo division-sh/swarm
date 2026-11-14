@@ -17,6 +17,11 @@ func ObserveSQLiteInspectionAbsence(context.Context, string) (bool, error) {
 	return false, err
 }
 
+func inspectSQLiteCoordinate(ctx context.Context, path string) (string, bool, error) {
+	absent, err := ObserveSQLiteInspectionAbsence(ctx, path)
+	return path, absent, err
+}
+
 func probeSQLitePossession(context.Context, string, *SQLiteBackendIdentity) (bool, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return false, err

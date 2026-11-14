@@ -68,7 +68,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 				return nil, err
 			}
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
+			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg, bootCheck...), nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, "")

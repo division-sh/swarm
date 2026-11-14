@@ -120,6 +120,19 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 					if err != nil || report.RunID != id || report.EntitiesChecked != want || len(report.Rows) != 0 {
 						t.Fatalf("native drift read lost history/current reach: %+v %v", report, err)
 					}
+					stage, err := serveChecksForTest(t, ctx, root, root, config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					observed := false
+					for _, observation := range stage.Validation.BootReport.Observations {
+						if observation.CheckID == "run_mutation_drift" {
+							observed = observation.Status == "passed"
+						}
+					}
+					if !observed {
+						t.Fatal("boot's snapshot omitted the existing active-run mutation check")
+					}
 				}
 			}
 		})
