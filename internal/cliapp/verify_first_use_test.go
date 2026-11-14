@@ -63,7 +63,7 @@ func TestIssue2567VerifyMissingStoreFormatsAndFlagPrecedence(t *testing.T) {
 				}
 				writeRuntimeConfigText(t, config, body)
 				var out, errOut bytes.Buffer
-				if code := executeRootCommand(context.Background(), RepoRoot(), args, &out, &errOut); code != 0 {
+				if code := executeServeChecksForTest(t, context.Background(), RepoRoot(), args, &out, &errOut); code != 0 {
 					t.Fatalf("exit=%d stdout=%s stderr=%s", code, &out, &errOut)
 				}
 				if mode == "json" {
@@ -162,7 +162,7 @@ func TestIssue2567VerifyExistingBadStoreAndIndependentFailureStillRefuse(t *test
 				args = append(args, "--swarm-dir", "")
 			}
 			var out, errOut bytes.Buffer
-			if code := executeRootCommand(context.Background(), RepoRoot(), args, &out, &errOut); code == 0 {
+			if code := executeServeChecksForTest(t, context.Background(), RepoRoot(), args, &out, &errOut); code == 0 {
 				t.Fatalf("bad %s admitted: %s", shape, &out)
 			}
 			var result verifyCommandResult
@@ -223,7 +223,7 @@ func TestIssue2567VerifyDoctorRelativeSelectionAndExplicitStoreParity(t *testing
 				writeRuntimeConfigText(t, configPath, body)
 				var verifyOut, doctorOut, errOut bytes.Buffer
 				args := append([]string{"verify", source, "--config", configPath, "--json"}, flags...)
-				if code := executeRootCommand(context.Background(), invocation, args, &verifyOut, &errOut); code != 0 {
+				if code := executeServeChecksForTest(t, context.Background(), invocation, args, &verifyOut, &errOut); code != 0 {
 					t.Fatalf("verify exit=%d: %s %s", code, &verifyOut, &errOut)
 				}
 				var result verifyCommandResult
@@ -272,7 +272,7 @@ func TestIssue2567VerifyLocalProjectFirstUse(t *testing.T) {
 	configBody := "serve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"
 	writeRuntimeConfigText(t, configPath, configBody)
 	var out, errOut bytes.Buffer
-	if code := executeRootCommand(context.Background(), root, []string{"verify", ".", "--json"}, &out, &errOut); code != 0 {
+	if code := executeServeChecksForTest(t, context.Background(), root, []string{"verify", ".", "--json"}, &out, &errOut); code != 0 {
 		t.Fatalf("first project verify exit=%d: %s %s", code, &out, &errOut)
 	}
 	var result verifyCommandResult

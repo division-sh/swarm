@@ -179,6 +179,7 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 		// Verification borrows a revocable, consistent read-only inspection;
 		// construction and concrete backend handles remain forbidden here.
 		"internal/cliapp/verify_deployment_store.go": true,
+		"internal/cliapp/serve_check_stage.go":       true,
 		"internal/cliapp/verify_run.go":              true,
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")

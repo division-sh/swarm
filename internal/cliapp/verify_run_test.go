@@ -56,75 +56,112 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 			runID := "abcdefab-1234-4000-8000-abcdefabcdef"
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
 			for _, withMutations := range []bool{false, true} {
-				if withMutations {
-					fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-					if err != nil {
-						t.Fatal(err)
-					}
-					runtimeID := uuid.NewString()
-					constructionContext := correlation.WithRuntimeInstanceID(ctx, runtimeID)
-					constructionContext = correlation.WithSourceArtifactFact(constructionContext, fact)
-					constructionContext = authoractivity.WithScope(constructionContext, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
-					constructionContext = effects.WithExecutionMode(correlation.WithRunID(constructionContext, runID), effects.ExecutionModeLive)
-					at := time.Now().UTC()
-					// Typed component construction supplies nonempty mutation history;
-					// it is a UUID-admission witness, not the required S03 workload.
-					command, err := flowactivationfixture.Command(constructionContext, pipeline.WorkflowInstance{
-						InstanceID: runID, StorageRef: runID, EntityID: runID,
-						WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
-						Mode:         bundle.RootSchema.EffectiveMode(),
-						CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
-						Fields: map[string]any{"verdict": "original"},
-					}, pipeline.WorkflowLifecycleMutationPlan{}, at)
-					if err != nil {
-						t.Fatal(err)
-					}
-					committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(constructionContext, command)
-					if err != nil || !committed.Acknowledged || !committed.Created {
-						t.Fatalf("construct mutation-bearing run: %+v %v", committed, err)
-					}
-					if history := storetest.ObserveEntityMutationHistory(t, constructionContext, selected, runID); len(history) == 0 {
-						t.Fatal("UUID fixture has no mutations")
-					}
-					ctx = constructionContext
-				}
-				for _, missing := range []bool{false, true} {
-					id := runID
-					if missing {
-						id = uuid.NewString()
-					}
-					cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: config})
-					if err != nil {
-						t.Fatal(err)
-					}
-					request, _, err := prepareVerifySelectedStoreInspection(ctx, root, CLISourcePaths{SourceRoot: root}, cfg, cliSwarmDirOptions{}, semanticview.Wrap(bundle))
-					if err != nil {
-						t.Fatal(err)
-					}
-					inspection, err := storeselected.OpenAdmissionInspection(ctx, request)
-					if err != nil {
-						t.Fatal(err)
-					}
-					var report mutationlog.DriftReport
-					_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
-						var err error
-						report, err = snapshot.InspectRunMutationDrift(ctx, id)
-						return err
-					})
-					err = errors.Join(err, inspection.Close())
-					if missing {
-						failure, ok := failures.As(verifyRunFailure(id, err))
-						if !ok || failure.Failure.Detail.Code != "run_not_found" || failure.Failure.Retryable {
-							t.Fatalf("missing native run lost typed refusal: %v", err)
-						}
-						continue
-					}
-					want := 0
+				t.Run(fmt.Sprintf("mutations_%t", withMutations), func(t *testing.T) {
 					if withMutations {
-						want = 1
+						fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+						if err != nil {
+							t.Fatal(err)
+						}
+						runtimeID := uuid.NewString()
+						constructionContext := correlation.WithRuntimeInstanceID(ctx, runtimeID)
+						constructionContext = correlation.WithSourceArtifactFact(constructionContext, fact)
+						constructionContext = authoractivity.WithScope(constructionContext, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
+						constructionContext = effects.WithExecutionMode(correlation.WithRunID(constructionContext, runID), effects.ExecutionModeLive)
+						at := time.Now().UTC()
+						// Typed component construction supplies nonempty mutation history;
+						// it is a UUID-admission witness, not the required S03 workload.
+						command, err := flowactivationfixture.Command(constructionContext, pipeline.WorkflowInstance{
+							InstanceID: runID, StorageRef: runID, EntityID: runID,
+							WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
+							Mode:         bundle.RootSchema.EffectiveMode(),
+							CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
+							Fields: map[string]any{"verdict": "original"},
+						}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+						if err != nil {
+							t.Fatal(err)
+						}
+						committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(constructionContext, command)
+						if err != nil || !committed.Acknowledged || !committed.Created {
+							t.Fatalf("construct mutation-bearing run: %+v %v", committed, err)
+						}
+						if history := storetest.ObserveEntityMutationHistory(t, constructionContext, selected, runID); len(history) == 0 {
+							t.Fatal("UUID fixture has no mutations")
+						}
+						ctx = constructionContext
 					}
-					if err != nil || report.RunID != id || report.EntitiesChecked != want || len(report.Rows) != 0 {
-						t.Fatalf("native drift read lost history/current reach: %+v %v", report, err)
+					for _, missing := range []bool{false, true} {
+						t.Run(fmt.Sprintf("missing_%t", missing), func(t *testing.T) {
+							id := runID
+							if missing {
+								id = uuid.NewString()
+							}
+							cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: config})
+							if err != nil {
+								t.Fatal(err)
+							}
+							request, _, err := prepareVerifySelectedStoreInspection(ctx, root, CLISourcePaths{SourceRoot: root}, cfg, cliSwarmDirOptions{}, semanticview.Wrap(bundle))
+							if err != nil {
+								t.Fatal(err)
+							}
+							inspection, err := storeselected.OpenAdmissionInspection(ctx, request)
+							if err != nil {
+								t.Fatal(err)
+							}
+							var report mutationlog.DriftReport
+							_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
+								var err error
+								report, err = snapshot.InspectRunMutationDrift(ctx, id)
+								return err
+							})
+							err = errors.Join(err, inspection.Close())
+							if missing {
+								failure, ok := failures.As(verifyRunFailure(id, err))
+								if !ok || failure.Failure.Detail.Code != "run_not_found" || failure.Failure.Retryable {
+									t.Fatalf("missing native run lost typed refusal: %v", err)
+								}
+								return
+							}
+							want := 0
+							if withMutations {
+								want = 1
+							}
+							if err != nil || report.RunID != id || report.EntitiesChecked != want || len(report.Rows) != 0 {
+								t.Fatalf("native drift read lost history/current reach: %+v %v", report, err)
+							}
+							stage, err := serveChecksForTest(t, ctx, root, root, config)
+							if err != nil {
+								t.Fatal(err)
+							}
+							observed := false
+							for _, observation := range stage.Validation.BootReport.Observations {
+								if observation.CheckID == "run_mutation_drift" {
+									observed = observation.Status == "passed"
+								}
+							}
+							if !observed {
+								t.Fatal("boot's snapshot omitted the existing active-run mutation check")
+							}
+						})
+					}
+				})
+			}
+			if t.Failed() {
+				return
+			}
+			history := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID)
+			if err := storetest.CorruptRegistryVerdict(ctx, selected, runID, runID, "hostile-drift"); err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateCancelled} {
+				t.Run("drift_"+string(state), func(t *testing.T) {
+					if state != runlifecycle.StateRunning {
+						if state == runlifecycle.StatePaused {
+							if _, err := selected.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: state}); err != nil {
+								t.Fatal(err)
+							}
+						} else if _, _, err := selected.MarkTerminalRun(ctx, runlifecycle.TerminalRequest{RunID: runID, State: state, EndedAt: time.Now().UTC()}); err != nil {
+							t.Fatal(err)
+						}
 					}
 					stage, err := serveChecksForTest(t, ctx, root, root, config)
 					if err != nil {
@@ -132,53 +169,25 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 					}
 					observed := false
 					for _, observation := range stage.Validation.BootReport.Observations {
-						if observation.CheckID == "run_mutation_drift" {
-							observed = observation.Status == "passed"
+						if observation.CheckID != "run_mutation_drift" {
+							continue
+						}
+						observed = true
+						if state == runlifecycle.StateCancelled {
+							if observation.Status != "passed" {
+								t.Fatalf("terminal history entered active boot checks: %+v", observation)
+							}
+						} else if observation.Status != "failed" || !strings.Contains(observation.Reason, runID) || !strings.Contains(observation.Reason, "verdict") || !strings.Contains(observation.Reason, "hostile-drift") || !strings.Contains(observation.Reason, "original") {
+							t.Fatalf("%s stage lost exact hostile drift refusal: %+v", state, observation)
 						}
 					}
 					if !observed {
-						t.Fatal("boot's snapshot omitted the existing active-run mutation check")
+						t.Fatal("stage omitted active-run drift predicate")
 					}
-				}
-			}
-			history := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID)
-			if err := storetest.CorruptRegistryVerdict(ctx, selected, runID, runID, "hostile-drift"); err != nil {
-				t.Fatal(err)
-			}
-			for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateCancelled} {
-				if state != runlifecycle.StateRunning {
-					if state == runlifecycle.StatePaused {
-						if _, err := selected.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: state}); err != nil {
-							t.Fatal(err)
-						}
-					} else if _, _, err := selected.MarkTerminalRun(ctx, runlifecycle.TerminalRequest{RunID: runID, State: state, EndedAt: time.Now().UTC()}); err != nil {
-						t.Fatal(err)
+					if after := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID); !reflect.DeepEqual(history, after) {
+						t.Fatal("read-only stage changed mutation history")
 					}
-				}
-				stage, err := serveChecksForTest(t, ctx, root, root, config)
-				if err != nil {
-					t.Fatal(err)
-				}
-				observed := false
-				for _, observation := range stage.Validation.BootReport.Observations {
-					if observation.CheckID != "run_mutation_drift" {
-						continue
-					}
-					observed = true
-					if state == runlifecycle.StateCancelled {
-						if observation.Status != "passed" {
-							t.Fatalf("terminal history entered active boot checks: %+v", observation)
-						}
-					} else if observation.Status != "failed" || !strings.Contains(observation.Reason, runID) || !strings.Contains(observation.Reason, "verdict") || !strings.Contains(observation.Reason, "hostile-drift") || !strings.Contains(observation.Reason, "original") {
-						t.Fatalf("%s stage lost exact hostile drift refusal: %+v", state, observation)
-					}
-				}
-				if !observed {
-					t.Fatal("stage omitted active-run drift predicate")
-				}
-				if after := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID); !reflect.DeepEqual(history, after) {
-					t.Fatal("read-only stage changed mutation history")
-				}
+				})
 			}
 		})
 	}

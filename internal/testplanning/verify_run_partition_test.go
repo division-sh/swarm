@@ -58,12 +58,11 @@ func verifyRunPublicChildren() []string {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mutations := range []bool{false, true} {
 			for _, missing := range []bool{false, true} {
-				for _, mode := range []string{"json", "text", "quiet"} {
-					for _, uppercase := range []bool{false, true} {
-						children = append(children, fmt.Sprintf("%s/mutations_%t/missing_%t/%s/uppercase_%t", backend, mutations, missing, mode, uppercase))
-					}
-				}
+				children = append(children, fmt.Sprintf("%s/mutations_%t/missing_%t", backend, mutations, missing))
 			}
+		}
+		for _, state := range []string{"running", "paused", "cancelled"} {
+			children = append(children, backend+"/drift_"+state)
 		}
 	}
 	return children

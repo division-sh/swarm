@@ -143,7 +143,7 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 			return out, ctx.Err()
 		}
 	}
-	blueprints, err := manager.ResolveStaticTopologyBlueprints(manager.AgentManagerOptions{
+	blueprints, err := manager.ResolveAgentDeclarationPreflightBlueprints(manager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, LLMBackend: out.Options.LLMProfile.ID,
 		ModelAliases: out.Options.ModelAliases, RequireModelResolution: true,
 	}, out.Source)
