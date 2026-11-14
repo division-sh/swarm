@@ -127,6 +127,16 @@ func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineD
 				if err != nil || len(discovered.CommittedGateCards) != 1 || discovered.CommittedGateCards[0].CardID != card.CardID || discovered.CommittedGateCards[0].DecisionEventID != mutation.decide.DecisionEventID {
 					t.Fatalf("upgrade discovery lost the exact committed card: %+v err=%v", discovered.CommittedGateCards, err)
 				}
+				anchor := mustStageGateAnchor(t, card)
+				var owners []runbundle.UpgradeInstance
+				for _, instance := range discovered.Instances {
+					if instance.EntityID == anchor.EntityID && instance.Route.InstancePath == anchor.Route.InstancePath {
+						owners = append(owners, instance)
+					}
+				}
+				if len(owners) != 1 || owners[0].Route != anchor.Route {
+					t.Fatalf("upgrade discovery changed the exact anchor route: anchor=%+v selected=%+v all=%+v", anchor, owners, discovered.Instances)
+				}
 				err = fixture.UpgradeSource(ctx, candidate)
 				if order == "answer_first_equal" {
 					if err != nil {
