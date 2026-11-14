@@ -90,8 +90,8 @@ func (r pipelineEngineStateRepo) validateMutationTransition(ctx context.Context,
 	if card.Status != decisioncard.StatusDecided || card.DecisionEventID != mutation.TriggerEventID || card.Verdict != edge.Verdict || mutation.TriggerEventType != string(workflowGateDecisionEventType) {
 		return fmt.Errorf("gate transition contradicts the accepted decision")
 	}
-	if pin := workflowGateBundleHash(ctx, r.coordinator); pin == "" || pin != card.BundleHash {
-		return fmt.Errorf("gate transition requires its recorded bundle pin")
+	if _, err := r.coordinator.prepareGateOffer(ctx, card, current, activation); err != nil {
+		return err
 	}
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
