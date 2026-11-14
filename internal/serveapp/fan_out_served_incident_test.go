@@ -135,9 +135,9 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			// Recheck this still-running run through the public control path.
 			// Its immutable bad input still fails on the next attempt; continue
 			// neither skips it nor replays any earlier ordinal or run transition.
-			stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{"control", "continue", opened.RunID})
-			if code != 0 {
-				t.Fatalf("control continue exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+			stdout, stderr, exitCode := runServedCLICommand(t, rt.Endpoint, []string{"control", "continue", opened.RunID})
+			if exitCode != 0 {
+				t.Fatalf("control continue exit=%d stdout=%s stderr=%s", exitCode, stdout, stderr)
 			}
 			var resumed fanoutobligation.ListPage
 			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
