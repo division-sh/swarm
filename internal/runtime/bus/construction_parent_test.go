@@ -375,12 +375,15 @@ func proveLexicalAddressGeometries(t *testing.T) {
 			t.Fatal(err)
 		}
 		repo := canonicalrouting.RepoRoot(t)
-		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		missingKey, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil {
+			err = missingKey.ConnectionInputs().ValidateBindings()
+		}
 		if err == nil || !strings.Contains(err.Error(), "account_id") || !strings.Contains(err.Error(), "schema.yaml") {
 			t.Fatalf("missing ancestor key lost located teaching: %v", err)
 		}
 
-		lexicalRoot := lexicalAddressFixture(t, false)
+		lexicalRoot := canonicalrouting.CopyLexicallyBoundAccountConnection(t)
 		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
 		if err != nil {
 			t.Fatalf("lexical-key negative needs an admitted control: %v", err)
@@ -393,9 +396,15 @@ func proveLexicalAddressGeometries(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		control, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
 		if err != nil {
 			t.Fatalf("typed lexical-key evidence needs an admitted control: %v", err)
+		}
+		pin, present := control.FlowInputEventPin("account", "ticket.done")
+		schema, bound := pin.ProducerEventSchema()
+		field, declared := schema.StructuralField("account_id")
+		if !present || !bound || !declared || field.IsOptional || field.TypeRef != "text" {
+			t.Fatalf("lexical key lacks required compatible producer evidence: %+v", field)
 		}
 		if err := os.WriteFile(filepath.Join(lexicalRoot, "account", "nodes.yaml"), []byte("receiver:\n  root.audit: {}\n  ticket.done: {}\n"), 0600); err != nil {
 			t.Fatal(err)
@@ -408,12 +417,31 @@ func proveLexicalAddressGeometries(t *testing.T) {
 		// The edge is account-local: its account is already the sender's
 		// lexical owner, so payload cannot select a different account.
 		row := "  - {event: ticket.done, from: ticket, to: ., resolution: select, key_from: payload.account_id}\n"
-		if err := os.WriteFile(path, append(raw, []byte(row)...), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "  - {event: ticket.done, from: ticket, to: .}\n", row, 1)), 0600); err != nil {
 			t.Fatal(err)
 		}
 		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
 		if err == nil || !strings.Contains(err.Error(), "bound by context") || !strings.Contains(err.Error(), "account/schema.yaml") {
 			t.Fatalf("supplied key for lexical account lost located refusal: %v", err)
+		}
+	})
+	t.Run("C08_different_name_for_lexical_account", func(t *testing.T) {
+		root := canonicalrouting.CopyLexicallyBoundAccountConnection(t)
+		repo := canonicalrouting.RepoRoot(t)
+		control, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("different-name lexical control: %v", err)
+		}
+		pin, present := control.FlowInputEventPin("account", "ticket.done")
+		schema, bound := pin.ProducerEventSchema()
+		field, declared := schema.StructuralField("target_account_id")
+		if !present || !bound || !declared || field.IsOptional || field.TypeRef != "text" {
+			t.Fatalf("different-name key lacks required compatible producer evidence: %+v", field)
+		}
+		canonicalrouting.SetLexicalAccountKeySource(t, root, "payload.target_account_id")
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil || !strings.Contains(err.Error(), "`account` is bound by context") || !strings.Contains(err.Error(), "account/schema.yaml") {
+			t.Fatalf("different-name source reselected the lexical account: %v", err)
 		}
 	})
 }
