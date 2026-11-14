@@ -1,10 +1,13 @@
 package serveapp
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +40,14 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var capture struct {
+					sync.Mutex
+					calls  int
+					result any
+					err    error
+					domain gateCompletionDomain
+					cardID string
+				}
 				upgrade := func() {
 					t.Helper()
 					body = append(body, []byte("\n# immutable source changes; offered contract does not\n")...)
@@ -44,7 +55,28 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					previous := rt.BundleHash
+					captured := captureSelectedResetSupervisor(t)
 					rt, owner = restart()
+					supervisor := <-captured
+					supervisor.mu.Lock()
+					original := supervisor.execution["mailbox.decide"]
+					if original == nil {
+						supervisor.mu.Unlock()
+						t.Fatal("restarted supervisor has no mailbox.decide handler")
+					}
+					supervisor.execution["mailbox.decide"] = func(ctx context.Context, req apiv1.Request) (any, error) {
+						key, _ := req.Params["idempotency_key"].(string)
+						cardID, _ := req.Params["card_id"].(string)
+						domain := gateCompletionDomain{Method: req.Method, Actor: req.OperatorPrincipalID, Key: key, Hash: req.RequestHash}
+						result, err := original(ctx, req)
+						capture.Lock()
+						capture.calls++
+						capture.result, capture.err = result, err
+						capture.domain, capture.cardID = domain, cardID
+						capture.Unlock()
+						return result, err
+					}
+					supervisor.mu.Unlock()
 					if rt.BundleHash == previous {
 						t.Fatal("restart did not admit the new source")
 					}
@@ -75,8 +107,19 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				answer := func() {
 					t.Helper()
 					if transport == "api" {
+						response := requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", params)
+						if response.Error != nil {
+							capture.Lock()
+							calls, result, cause, domain, cardID := capture.calls, capture.result, capture.err, capture.domain, capture.cardID
+							capture.Unlock()
+							t.Logf("GATE_UPGRADE_ORIGINAL_RETURN calls=%d result=%#v error_type=%T error=%v domain=%+v card_id=%s", calls, result, cause, cause, domain, cardID)
+							gateCompletionRead(t, rt, "original_error_sequential_readback", before.RunID, cardID, domain)
+							t.Fatalf("mailbox.decide error = %#v", response.Error)
+						}
 						var result map[string]any
-						requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
+						if err := json.Unmarshal(response.Result, &result); err != nil {
+							t.Fatalf("decode mailbox.decide result: %v\n%s", err, response.Result)
+						}
 						return
 					}
 					out, errOut := &lockedBuffer{}, &lockedBuffer{}
