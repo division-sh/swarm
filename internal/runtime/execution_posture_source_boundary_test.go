@@ -106,6 +106,8 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 			switch rel {
 			case "internal/runtime/runfork/preparation.go":
 				predicate = "RequiresProbe"
+			case "internal/runtime/runtime_claude_startup.go":
+				predicate, operator, expected = "validateManagedProviderPreflightConfigs", token.EQL, 1
 			case "internal/runtime/pipeline/activity_recovery_result.go":
 				predicate, operator, expected = "admitActivityRecoveryRequest", token.NEQ, 2
 			case "internal/store/internal/startupownership/activity_recovery_native.go":

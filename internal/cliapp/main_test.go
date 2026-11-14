@@ -760,7 +760,7 @@ func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 		{name: "version", args: []string{"version"}, want: "Swarm dev"},
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
 		{name: "serve help", args: []string{"serve", ".", "--help"}, want: "For serve-owned HTTPS, opt in through the deployment's `swarm.yaml` under `serve.public_webhook`. With neither `certificate_file` nor `private_key_file` configured, serve uses autocert with Let's Encrypt for exactly the configured name, accepting its terms; contact is omitted unless `email` is set."},
-		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files or compare a run's state with its history"},
+		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files without opening a store."},
 		{name: "run help", args: []string{"run", "start", "--help"}, want: "Publish into a served flow's live run, or reattach to one."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

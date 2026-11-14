@@ -375,7 +375,7 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	cmd := &cobra.Command{
 		Use:     "verify [directory]",
 		Short:   "Validate contract files without opening a store.",
-		Example: "  swarm verify\n  swarm verify ./contracts --json",
+		Example: "  swarm verify",
 		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
