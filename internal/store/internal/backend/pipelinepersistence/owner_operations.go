@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -1289,7 +1288,7 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEventInGroup(ctx context.Co
 	var releaseRun func()
 	if runID, exact := runtimepipelineobligation.PublicationRunFromContext(ctx); exact && runID != "" && purpose == runtimepipelineobligation.PurposePublication {
 		var admitted bool
-		releaseRun, admitted = registry.recoveryTransitions.reservePublication(runID, worklifetime.HasAcceptedRun(ctx, runID))
+		releaseRun, admitted = registry.recoveryTransitions.reservePublication(runID)
 		if !admitted {
 			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 		}
@@ -1535,7 +1534,7 @@ func (s *PipelineSQLiteOwner) claimSQLitePipelineEventInGroup(ctx context.Contex
 	var releaseRun func()
 	if runID, exact := runtimepipelineobligation.PublicationRunFromContext(ctx); exact && runID != "" && purpose == runtimepipelineobligation.PurposePublication {
 		var admitted bool
-		releaseRun, admitted = s.recoveryTransitions.reservePublication(runID, worklifetime.HasAcceptedRun(ctx, runID))
+		releaseRun, admitted = s.recoveryTransitions.reservePublication(runID)
 		if !admitted {
 			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 		}

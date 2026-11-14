@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -51,6 +52,39 @@ func TestInstanceClockRequiresHandoffOwnerBeforeAdmissionOrOccurrence(t *testing
 	}
 	if _, err := lifecycle.fire(lease.Context(), wake); err == nil || store.commitCalls != 0 || planner.prepareCalls != 0 || dispatcher.calls != 0 {
 		t.Fatalf("restored clock bypassed handoff admission: commits=%d prepares=%d dispatches=%d err=%v", store.commitCalls, planner.prepareCalls, dispatcher.calls, err)
+	}
+}
+
+func TestInstanceClockFireRefusesBeforePreparationUnderRunFence(t *testing.T) {
+	activation := instanceRecoveryActivation(t)
+	owner, _ := instanceRecoveryWorkOwner(t, activation.Command.RunID)
+	ctx := worklifetime.WithOccurrence(correlation.WithRunID(t.Context(), activation.Command.RunID), owner)
+	store := &lifecycleProofStore{activation: activation}
+	lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopLifecycleProof(t, lifecycle) })
+	wakeup, err := activation.Wakeup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	release, err := owner.BeginRunTransition(wait, activation.Command.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := lifecycle.fire(ctx, wakeup); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("fenced instance fire = %v, want native admission refusal", err)
+	}
+	if store.prepareCalls != 0 {
+		t.Fatalf("fenced instance fire prepared %d durable occurrences", store.prepareCalls)
+	}
+	release()
+	if _, err := lifecycle.fire(ctx, wakeup); err == nil || store.prepareCalls != 1 {
+		t.Fatalf("released instance fire did not reach preparation: calls=%d err=%v", store.prepareCalls, err)
 	}
 }
 

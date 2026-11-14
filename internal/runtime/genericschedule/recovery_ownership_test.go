@@ -26,19 +26,19 @@ type recoveryOwnershipScheduler struct {
 	seen     chan recoveryRegistration
 }
 
-func (s *recoveryOwnershipScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup) error {
-	owner, _ := worklifetime.OccurrenceFromContext(ctx)
+func (s *recoveryOwnershipScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup, owner OwnerKind) error {
+	occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 	s.mu.Lock()
 	fail := s.failures > 0
 	if fail {
 		s.failures--
 	}
 	s.mu.Unlock()
-	s.seen <- recoveryRegistration{owner: owner, err: ctx.Err(), wakeup: wakeup}
+	s.seen <- recoveryRegistration{owner: occurrence, err: ctx.Err(), wakeup: wakeup}
 	if fail {
 		return errors.New("injected registration failure")
 	}
-	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup, owner)
 }
 
 type recoveryOwnershipStore struct {

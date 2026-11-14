@@ -58,7 +58,7 @@ func (d *publishedJoinSourceDriver) BindGenericScheduleLifecycle(callback func(c
 	d.callback = callback
 	return nil
 }
-func (d *publishedJoinSourceDriver) RegisterGenericScheduleWakeup(_ context.Context, wakeup genericschedule.Wakeup) error {
+func (d *publishedJoinSourceDriver) RegisterGenericScheduleWakeup(_ context.Context, wakeup genericschedule.Wakeup, _ genericschedule.OwnerKind) error {
 	d.wakeup = wakeup
 	return wakeup.Validate()
 }
