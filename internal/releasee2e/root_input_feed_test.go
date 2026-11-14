@@ -30,7 +30,7 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 				writeReleaseFile(t, config, string(rawConfig)+fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n", filepath.Join(root, "api-token"), filepath.Join(root, "api-token")))
 				writeReleaseFile(t, filepath.Join(root, "rows.jsonl"), "{\"slug\":\"one\",\"name\":\"One\",\"eng_roles\":8}\n{\"slug\":\"two\",\"name\":\"Two\",\"eng_roles\":2}\n")
 				assertGoldenProcessHasNoExternalExecutables(t, env)
-				verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
+				verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--json")
 				assertFullLifecycleVerifySuccess(t, verify)
 				localID := uuid.NewString()
 				local := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,

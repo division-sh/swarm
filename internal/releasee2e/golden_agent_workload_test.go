@@ -153,7 +153,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	}
 
 	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
-		"verify", contracts, "--config", configPath, "--portable", "--json")
+		"verify", contracts, "--config", configPath, "--json")
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}
@@ -400,7 +400,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 
 			contracts := filepath.Join(test.root, "contracts")
-			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--portable", "--json")
+			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", contracts, "--json")
 			if verify.err != nil {
 				t.Fatalf("relative invocation-root verify failed: %v\n%s", verify.err, verify.output)
 			}
@@ -732,7 +732,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
-	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--portable", "--json")
+	verify := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, "verify", contractsOperand, "--config", configOperand, "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
 	}

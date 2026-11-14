@@ -150,7 +150,7 @@ func runJoinedRetainedState(t *testing.T, binary, root string, store goldenStore
 	s.spec = releaseProcessSpec{BinaryPath: binary, WorkingDir: root, ConfigPath: config, Source: source, Store: store.name,
 		TokenFile: "api-token", Token: goldenAPIToken, Env: env, DefaultExecutionSelection: true, ShutdownGrace: goldenShutdownGrace,
 		RedactValues: []string{"joined-model-key", "joined-bot-token", "joined-signing-secret"}}
-	verified := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
+	verified := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--json")
 	assertFullLifecycleVerifySuccess(t, verified)
 	s.start()
 	t.Cleanup(func() {

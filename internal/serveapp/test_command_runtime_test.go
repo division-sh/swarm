@@ -92,7 +92,7 @@ normalized_events:
       to: {from: to, schema: {type: string, pattern: '^\+[1-9][0-9]{1,14}$'}}
 `)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests/pattern.yaml"), "name: explicit pattern fixture\nderive:\n  flow: '.'\n  input: inbound.partner.message\n  payload: {"+tc.payload+"}\n")
-			for _, args := range [][]string{{"verify", root, "--portable"}, {"test", root}} {
+			for _, args := range [][]string{{"verify", root}, {"test", root}} {
 				t.Run(args[0], func(t *testing.T) {
 					var out, errOut bytes.Buffer
 					code := executeCLIFrom(t.Context(), repoRootForTest(), args, &out, &errOut, nil)
@@ -739,7 +739,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	opts.ConfigPath = configPath
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"verify", sourceRoot, "--portable", "--config", configPath,
+		"verify", sourceRoot, "--config", configPath,
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
 	}
@@ -1120,7 +1120,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	sourceRoot := scaffoldConformanceArchetype(t, archetype)
 	defer unchangedPrivateTestDeployment(t, sourceRoot)()
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--portable"}, &verifyOut, &verifyErr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe

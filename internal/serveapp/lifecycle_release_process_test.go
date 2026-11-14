@@ -173,7 +173,7 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 // Public-boundary proofs receive no authority to inspect the server's store.
 func startReleaseServeEndpoint(t *testing.T, binary string, backend servedparity.Backend, root, config string, env []string) string {
 	t.Helper()
-	verify := exec.Command(binary, "verify", root, "--portable", "--config", config)
+	verify := exec.Command(binary, "verify", root, "--config", config)
 	verify.Dir, verify.Env = repoRootForTest(), env
 	if output, err := verify.CombinedOutput(); err != nil {
 		t.Fatalf("public verify failed: %v\n%s", err, output)

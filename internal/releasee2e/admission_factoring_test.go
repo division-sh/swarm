@@ -15,7 +15,7 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	config, env := clockReleaseConfig(t, root, "sqlite")
 	source := copyFactoringStandingSource(t)
 	for _, args := range [][]string{
-		{"verify", "--portable", "--json"}, {"verify", "--json"},
+		{"verify", "--json"}, {"verify", "--json"},
 		{"describe"}, {"describe", "--json"}, {"describe", "--quiet"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestAdmissionFactoringCompiledStructuralSurfaces(t *testing.T) {
 	// The authored source gate stays intact: describe/verify must not bypass
 	// malformed recursive definitions simply to produce a projection.
 	writeReleaseFile(t, filepath.Join(source, "tools.yaml"), "schema_guard:\n  description: schema admission guard\n  input_schema: {type: array}\n")
-	result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--portable", "--json", "--config", config)
+	result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--json", "--config", config)
 	if result.err == nil || !strings.Contains(result.output, "array requires items") {
 		t.Fatalf("compiled verify did not reach canonical schema refusal: %v\n%s", result.err, result.output)
 	}

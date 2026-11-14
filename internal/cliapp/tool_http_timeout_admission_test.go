@@ -28,7 +28,7 @@ func TestVerifyToolHTTPTimeoutDurationParity(t *testing.T) {
 			}
 			writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "budget_probe:\n  description: Observe the admitted request budget.\n  handler_type: http\n  http: {method: GET, url: 'https://example.invalid'"+field+"}\n")
 			var out, diagnostic bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &out, &diagnostic, defaultRootCommandOptions())
+			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &out, &diagnostic, defaultRootCommandOptions())
 			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), root, contracts.DefaultPlatformSpecFile(RepoRoot()))
 			if !row.valid {
 				if code != CLIExitValidation || err == nil {

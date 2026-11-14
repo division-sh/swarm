@@ -57,7 +57,7 @@ func TestStandingRootTreePublicRestartAndResetBothStores(t *testing.T) {
 			native, config, env := prepareStandingRootTreeAccounts(t, binary, root, contracts, store)
 			token := filepath.Join(root, "api-token")
 			writeReleaseFile(t, token, goldenAPIToken+"\n")
-			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--portable", "--json")
+			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
 			start := func(source, storedHash string) *releaseServeProcess {
 				t.Helper()

@@ -58,7 +58,8 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 				configBody := withTestProviderTriggerPlatformInventory(t, "llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n")
 				switch selection {
 				case "explicit":
-					args = append(args, "--config", writeTestVerifyRuntimeConfig(t))
+					configPath = writeTestVerifyRuntimeConfig(t)
+					args = append(args, "--config", configPath)
 				case "project":
 					writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), configBody)
 				case "user_global":
@@ -73,11 +74,13 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 					configPath = writeTestVerifyRuntimeConfig(t)
 					t.Setenv("SWARM_CONFIG", configPath)
 				}
-				if portable {
-					args = append(args, "--portable")
-				}
 				var out, errOut bytes.Buffer
-				code := executeRootCommand(context.Background(), root, args, &out, &errOut)
+				var code int
+				if portable {
+					code = executeRootCommand(context.Background(), root, args, &out, &errOut)
+				} else {
+					code = renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &errOut)
+				}
 				var result verifyCommandResult
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 					t.Fatalf("result: %v exit=%d stdout=%s stderr=%s", err, code, out.String(), errOut.String())
@@ -86,11 +89,11 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 					t.Fatalf("fabricated readiness or unobserved completeness: %#v", result)
 				}
 				configured := selection == "explicit" || selection == "deployment" || selection == "locator"
-				if !configured || portable {
+				if portable {
 					if code != 0 || !result.OK || result.ValidationScope != "structural" {
 						t.Fatalf("portable admission failed: exit=%d result=%#v", code, result)
 					}
-				} else {
+				} else if configured {
 					if code == 0 || result.OK || result.ValidationScope != "deployment" {
 						t.Fatalf("unchecked deployment became success: exit=%d result=%#v", code, result)
 					}
@@ -203,7 +206,7 @@ func TestVerifyDeploymentManagedCatalogConsumesLoadedSourceWithoutExecution(t *t
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t,
 		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"))
 	var out, diagnostic bytes.Buffer
-	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 	var result verifyCommandResult
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
@@ -242,7 +245,7 @@ func TestVerifyFreshSQLiteSchemaAccountsAbsenceWithoutClaimingPossession(t *test
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, fmt.Sprintf(
 		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\nstore: {backend: sqlite, sqlite: {path: %q}}\n", storePath)))
 	var out, diagnostic bytes.Buffer
-	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 	var result verifyCommandResult
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)
@@ -273,7 +276,7 @@ func TestVerifyFreshPostgresSchemaAccountsAbsenceWithoutClaimingPossession(t *te
 		"llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\nstore: {backend: postgres}\ndatabase: {host: %q, port: %d, name: %q, user: %q, password_env: SWARM_VERIFY_TEST_PASSWORD, sslmode: %q}\n",
 		parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)))
 	var out, diagnostic bytes.Buffer
-	code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+	code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 	var result verifyCommandResult
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatalf("public result: %v exit=%d stderr=%s", err, code, &diagnostic)

@@ -49,11 +49,11 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 					copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity_activity"), activityRoot)
 					// This structural control never dispatches the authored HTTP activity.
 					// The public served proof below uses only system nodes.
-					activity := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", activityRoot, "--config", config, "--portable", "--json")
+					activity := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", activityRoot, "--config", config, "--json")
 					if activity.err != nil {
 						t.Fatalf("legitimate activity ID rejected: %v\n%s", activity.err, activity.output)
 					}
-					verified := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", root, "--config", config, "--portable", "--json")
+					verified := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", root, "--config", config, "--json")
 					if verified.err != nil {
 						t.Fatalf("verify: %v\n%s", verified.err, verified.output)
 					}

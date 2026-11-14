@@ -70,7 +70,7 @@ func TestSingleDeploymentConfigReleaseRelativePackSelection(t *testing.T) {
 				t.Run("inventory/"+command, func(t *testing.T) {
 					args := []string{"packs", "list", source, "--json"}
 					if command == "verify" {
-						args = []string{"verify", source, "--portable", "--json"}
+						args = []string{"verify", source, "--json"}
 					}
 					result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, selector...)...)
 					payload := json.RawMessage(result.output)
@@ -127,7 +127,7 @@ func TestSingleDeploymentConfigReleaseRelativePackSelection(t *testing.T) {
 			}{
 				{"list", []string{"packs", "list", source}},
 				{"show", []string{"packs", "show", embedded.Packs[0].ID, source}},
-				{"verify", []string{"verify", source, "--portable"}},
+				{"verify", []string{"verify", source}},
 			} {
 				t.Run("missing/"+command.name, func(t *testing.T) {
 					result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(command.args, selector...)...)
