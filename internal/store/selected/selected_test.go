@@ -1,6 +1,8 @@
 package selected
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"path/filepath"
@@ -62,7 +64,7 @@ func TestPostgresFailedPingClosesTheConstructedPool(t *testing.T) {
 		t.Fatalf("serialize missing PostgreSQL database DSN: %v", err)
 	}
 
-	selected, _, err := construction.OpenPostgres(missingDSN)
+	selected, _, err := construction.OpenPostgres(missingDSN, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +151,7 @@ func TestOwnerActivatedCloseRequiresExactProcessReceipt(t *testing.T) {
 
 func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) {
 	owner, err := OpenRuntime(context.Background(), RuntimeRequest{
-		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")},
+		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, ProviderFacts: channelfixture.Facts,
 	})
 	if err != nil {
 		t.Fatalf("OpenRuntime: %v", err)
@@ -176,7 +178,7 @@ func TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce(t *test
 	dsn, _, _ := testutil.StartEmptyPostgres(t)
 	owner, err := OpenRuntime(context.Background(), RuntimeRequest{
 		Selection:   storebackend.Selection{Backend: storebackend.BackendPostgres},
-		PostgresDSN: dsn,
+		PostgresDSN: dsn, ProviderFacts: channelfixture.Facts,
 	})
 	if err != nil {
 		t.Fatalf("OpenRuntime: %v", err)

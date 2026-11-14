@@ -521,7 +521,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 	if unheld {
 		var out, errOut lockedBuffer
-		if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
+		if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, &out, &errOut, nil, nil, ChannelRegistrations()); code != 0 {
 			t.Fatalf("read unheld account exit=%d err=%s", code, errOut.String())
 		}
 		var listed struct {
@@ -615,7 +615,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		registrations, confirmations := provider.OnboardingCounts()
 		out, errOut := &lockedBuffer{}, &lockedBuffer{}
 		restoreInput := installChannelOnboardingCLIInput(t, "bot-token\n")
-		code := executeCLI(t.Context(), []string{"--config", configPath, "channel", "connect", "telegram", "--yes", "--client-language", "en",
+		code := executeTelegramRuntimeCLI(t.Context(), []string{"--config", configPath, "channel", "connect", "telegram", "--yes", "--client-language", "en",
 			"--idempotency-key", "registered-enrollment-refusal", "--api-server", endpoint}, out, errOut, nil)
 		restoreInput()
 		if code == 0 || !strings.Contains(errOut.String(), "telegram account 420079 is registered to this deployment") || strings.Contains(out.String(), "READY") {
@@ -702,7 +702,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		var delayedParent channelnative.TransportParent
 		h.registration = connectDeploymentChannelFixtureOperator(t, h, "bot-token", 901209, 1002, 7002, "private", func() {
 			var out, errOut lockedBuffer
-			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration); code != 0 {
+			if code := cliapp.Execute(t.Context(), []string{"--config", configPath, "channel", "list", "--api-server", endpoint, "--json"}, &out, &errOut, nil, nil, ChannelRegistrations()); code != 0 {
 				t.Fatalf("read pending successor exit=%d err=%s", code, errOut.String())
 			}
 			var pending struct {

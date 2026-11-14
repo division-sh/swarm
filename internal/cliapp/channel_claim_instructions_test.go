@@ -2,18 +2,22 @@ package cliapp
 
 import (
 	"bytes"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
+const whatsAppReadyTeaching = "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`."
+
 func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.T) {
 	expires := time.Date(2026, 11, 6, 22, 42, 17, 123000, time.UTC)
-	displayed, err := time.Parse("2006-01-02 15:04:05 MST (-07:00)", channelClaimDeadline(expires))
+	displayed, err := time.Parse("2006-01-02 15:04:05 MST (-07:00)", channelprovider.ClaimDeadline(expires))
 	if err != nil || displayed.After(expires) || expires.Sub(displayed) >= time.Second {
 		t.Fatal("human deadline rounded later than its stored expiry", displayed, expires, err)
 	}
@@ -23,12 +27,13 @@ func TestWhatsAppClaimInstructionsCarryExactDestinationCodeAndExpiry(t *testing.
 			IdentityOperation: &operatorchannel.Operation{Challenge: "00007", ExpiresAt: expires},
 			Connection:        &channelonboarding.SessionConnectionReadback{AccountPresentation: "+15551234567"},
 		}
+		result = result.WithProviderFacts(channelfixture.For("whatsapp"))
 		if registered {
 			result.Operation.AccountReference = "+15551234567"
 			result.Connection.AccountPresentation = "not the destination"
 		}
 		var out bytes.Buffer
-		if err := writeWhatsAppClaimInstructions(&out, result); err != nil {
+		if err := writeChannelClaimInstructions(&out, result); err != nil {
 			t.Fatal(err)
 		}
 		text := out.String()
@@ -55,11 +60,12 @@ func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.
 		IdentityOperation: &operatorchannel.Operation{Challenge: "00007", ExpiresAt: expires},
 		Connection:        &channelonboarding.SessionConnectionReadback{AccountPresentation: "420079", AccountName: "SwarmTestBot"},
 	}
+	result = result.WithProviderFacts(channelfixture.For("telegram"))
 	var out bytes.Buffer
-	if err := writeTelegramClaimInstructions(&out, result); err != nil {
+	if err := writeChannelClaimInstructions(&out, result); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Send the code 00007 to @SwarmTestBot", channelClaimDeadline(expires), "SEND-CODE LINK: https://t.me/SwarmTestBot?text=00007"} {
+	for _, want := range []string{"Send the code 00007 to @SwarmTestBot", channelprovider.ClaimDeadline(expires), "SEND-CODE LINK: https://t.me/SwarmTestBot?text=00007"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %q", want, out.String())
 		}
@@ -79,7 +85,7 @@ func TestTelegramClaimInstructionsCarryAuthenticatedBotCodeAndExpiry(t *testing.
 		copy.Connection = &connection
 		mutate(&copy)
 		out.Reset()
-		if err := writeTelegramClaimInstructions(&out, copy); err == nil || out.Len() != 0 {
+		if err := writeChannelClaimInstructions(&out, copy); err == nil || out.Len() != 0 {
 			t.Fatal("instructions inferred a bot destination from incomplete/foreign evidence")
 		}
 	}
@@ -90,7 +96,8 @@ func TestWhatsAppClaimInstructionsRefuseMissingOrMaskedDestination(t *testing.T)
 		var out bytes.Buffer
 		result := channelOnboardingResult{Operation: channelonboarding.Operation{Provider: "whatsapp", AccountReference: account},
 			IdentityOperation: &operatorchannel.Operation{Challenge: "12345", ExpiresAt: time.Now().Add(time.Minute)}}
-		if err := writeWhatsAppClaimInstructions(&out, result); err == nil || out.Len() != 0 {
+		result = result.WithProviderFacts(channelfixture.For("whatsapp"))
+		if err := writeChannelClaimInstructions(&out, result); err == nil || out.Len() != 0 {
 			t.Fatal("instructions guessed a destination", account, out.String(), err)
 		}
 	}
@@ -98,7 +105,8 @@ func TestWhatsAppClaimInstructionsRefuseMissingOrMaskedDestination(t *testing.T)
 
 func TestWhatsAppReadyTeachingUsesRuledCommands(t *testing.T) {
 	var out bytes.Buffer
-	writeWhatsAppConnection(&out, nil, true)
+	binding, _ := channelfixture.Facts("whatsapp")
+	writeProviderConnection(&out, binding, nil, true)
 	const want = "WhatsApp ready. Run `swarm serve` to answer customers. Decisions: answer them in the terminal with `swarm mailbox decide`.\n"
 	if out.String() != want {
 		t.Fatalf("readiness teaching=%q", out.String())

@@ -66,8 +66,11 @@ func (w *sittingCLIWriter) Write(p []byte) (int, error) {
 		w.qr.Do(func() { close(w.qrRendered) })
 	}
 	for _, stage := range []struct{ prefix, name string }{{"Linked to ", "preview"}, {"Send the code ", "challenge"}, {"Code received from ", "confirmation"}} {
-		if strings.HasPrefix(text, stage.prefix) {
-			return n, w.pause(stage.name, text)
+		for remaining := text; remaining != ""; {
+			if strings.HasPrefix(remaining, stage.prefix) {
+				return n, w.pause(stage.name, remaining)
+			}
+			_, remaining, _ = strings.Cut(remaining, "\n")
 		}
 	}
 	return n, nil
@@ -163,7 +166,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				}
 			}()
 			go func() {
-				done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, writer, errOut, nil, nil, factory)
+				done <- cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, writer, errOut, nil, nil, fixtureRegistration(factory))
 			}()
 			var pairing channelonboarding.Result
 			select {
@@ -272,10 +275,14 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 				Accounts []channelonboarding.Result `json:"accounts"`
 			}
 			var listed, listErr bytes.Buffer
-			if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, OpenChannelRegistration); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
+			if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &listed, &listErr, nil, nil, ChannelRegistrations()); code != 0 || json.Unmarshal(listed.Bytes(), &listing) != nil || len(listing.Accounts) != 1 {
 				t.Fatal("public account readback failed", code, listErr.String())
 			}
-			registered := listing.Accounts[0]
+			selected, found := ChannelRegistrations().Select(listing.Accounts[0].Operation.Provider)
+			if !found {
+				t.Fatal("public account readback has no exact installed provider facts")
+			}
+			registered := listing.Accounts[0].WithProviderFacts(selected.Facts)
 			if registered.Operation.OperationID != pairing.Operation.OperationID || registered.Operation.Phase != channelonboarding.PhaseSucceeded || !registered.Operation.AccountConfirmed || registered.Operation.IdentityOperationID == "" || registered.Binding == nil || registered.Binding.ExternalAccountRef != "15551234568@s.whatsapp.net" {
 				t.Fatal("public enrollment lost the original account or exact operator")
 			}

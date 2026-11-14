@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime/trace"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -138,8 +139,8 @@ func (o *Owner) GetDevice(ctx context.Context, jid types.JID) (*store.Device, er
 
 func (o *Owner) LIDMap() store.LIDStore { return &sdkLIDStorage{lids: o.container.LIDMap} }
 
-func (o *Owner) Captures(ctx context.Context, connectionID string) (*CaptureStore, error) {
-	return newCaptureStore(ctx, o.db, connectionID)
+func (o *Owner) Captures(ctx context.Context, connectionID string, facts channelprovider.Binding) (*CaptureStore, error) {
+	return newCaptureStore(ctx, o.db, connectionID, facts)
 }
 
 // The SDK's container can initialize schema and open storage. Devices expose

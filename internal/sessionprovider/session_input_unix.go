@@ -54,7 +54,7 @@ func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Op
 				op.AccountConfirmed && input.OperationID == op.OperationID && op.SessionAccount == input.Account &&
 				op.PrincipalID == input.PrincipalID && op.Revision >= input.OperationRevision &&
 				coordinate.Validate() == nil && coordinate.DurableIdentity().Matches(input.Source) &&
-				input.ActivationRevision == 0 && input.TargetSelector != "" && op.ValidateSessionAccount() == nil
+				input.ActivationRevision == 0 && input.TargetSelector != "" && op.ValidateSessionAccount(op.ProviderFacts()) == nil
 		}
 		return input.Scope == channelonboarding.SessionInputOnboarding && input.OperationID == op.OperationID &&
 			op.AccountConfirmed && op.SessionAccount == input.Account && op.PrincipalID == input.PrincipalID &&
@@ -66,17 +66,17 @@ func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Op
 
 func (input nativeSessionInput) matchesRuntimeOperation(op channelonboarding.Operation, coordinate channelonboarding.ChannelRuntimeContextCoordinate, awaitingIdentity bool) bool {
 	activationCurrent := op.ActivationRevision == input.ActivationRevision
-	if input.Scope == channelonboarding.SessionInputOnboarding && input.ActivationRevision == 0 && op.AccountConnection() &&
+	if input.Scope == channelonboarding.SessionInputOnboarding && input.ActivationRevision == 0 && op.AccountConnection(op.ProviderFacts()) &&
 		op.IdentityOperationID != "" && awaitingIdentity {
 		activationCurrent = true
 	}
 	return op.OperationID == input.OperationID && op.Posture == channelonboarding.ActivationSessionConnection &&
-		(input.Scope != channelonboarding.SessionInputBusiness || input.AccountOnly == op.AccountConnection()) &&
+		(input.Scope != channelonboarding.SessionInputBusiness || input.AccountOnly == op.AccountConnection(op.ProviderFacts())) &&
 		!slices.Contains([]channelonboarding.Phase{channelonboarding.PhaseFailed, channelonboarding.PhaseRetired}, op.Phase) && op.Coordinate.MatchesDeclaration(coordinate) &&
 		op.SessionAccount == input.Account && activationCurrent &&
 		op.TargetSelector == input.TargetSelector && op.PrincipalID == input.PrincipalID &&
 		op.Coordinate.DurableIdentity().Matches(input.Source) && op.BindingRevision == input.BindingRevision &&
-		op.ValidateSessionAccount() == nil && slices.Contains([]channelonboarding.SessionInputScope{channelonboarding.SessionInputOnboarding, channelonboarding.SessionInputBusiness}, input.Scope)
+		op.ValidateSessionAccount(op.ProviderFacts()) == nil && slices.Contains([]channelonboarding.SessionInputScope{channelonboarding.SessionInputOnboarding, channelonboarding.SessionInputBusiness}, input.Scope)
 }
 
 // The reader owns actual provider state and the private capture handoff. It
@@ -95,6 +95,10 @@ func newSessionInputReader(state *sessionState, spool *captureStore) (*sessionIn
 
 func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
 	return r.readRetainedInput(ctx, reference, "")
+}
+
+func (r *sessionInputReader) capturePublications() retainedPublicationOwner {
+	return r.spool
 }
 
 func (r *sessionInputReader) readPendingBusinessInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {

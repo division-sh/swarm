@@ -231,7 +231,7 @@ func registryProofVerifyJSON(t *testing.T, phase, runID, entityID, out string) {
 func registryProofCLI(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := executeCLIFrom(context.Background(), repoRootForTest(), args, &out, &errOut, nil)
+	code := executeCLIFrom(context.Background(), repoRootForTest(), args, &out, &errOut, nil, ChannelRegistrations())
 	return out.String(), errOut.String(), code
 }
 

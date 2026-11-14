@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"database/sql"
@@ -31,7 +33,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -6716,7 +6717,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 		}
-		selected, err := store.NewSQLiteRuntimeStore(path)
+		selected, err := store.NewSQLiteRuntimeStore(path, channelfixture.Facts)
 		if err != nil {
 			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 		}
@@ -6843,7 +6844,7 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 				if err != nil {
 					t.Fatalf("generate platform table DDLs: %v", err)
 				}
-				selected, err := store.NewSQLiteRuntimeStore(path)
+				selected, err := store.NewSQLiteRuntimeStore(path, channelfixture.Facts)
 				if err != nil {
 					t.Fatalf("open SQLite selected store: %v", err)
 				}
@@ -7014,7 +7015,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	if code != serveExitDataIntegrity {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
 	}
-	assertServeRuntimeRunStillActive(t, ctx, storetest.NewPostgresStoreForTest(db), persistedMissingRunID)
+	assertServeRuntimeRunStillActive(t, ctx, storetest.NewPostgresStoreForTest(db, channelfixture.Facts), persistedMissingRunID)
 	if strings.Contains(out.String(), "ready") {
 		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
 	}
@@ -7071,7 +7072,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
 	}
 	t.Cleanup(cleanup)
-	runtimePG, err := store.NewPostgresStore(dsn)
+	runtimePG, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
@@ -7305,7 +7306,7 @@ func TestInitializeStateStoresDoesNotPlanGeneratedEntityTables(t *testing.T) {
 func TestInitializeStateStoresSQLiteDoesNotCreateGeneratedEntityTables(t *testing.T) {
 	ctx := context.Background()
 	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
-	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
+	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"), channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
 	}
@@ -7331,7 +7332,7 @@ func TestInitializeStateStoresPostgresDoesNotCreateGeneratedEntityTables(t *test
 	bundle := workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t)
 	dsn, db, cleanup := testutil.StartEmptyPostgres(t)
 	t.Cleanup(cleanup)
-	pg, err := store.NewPostgresStore(dsn)
+	pg, err := store.NewPostgresStore(dsn, channelfixture.Facts)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
@@ -8297,7 +8298,7 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 		RepoRoot,
 		fixtureRoot,
 		platformSpec,
-		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory},
 	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
@@ -8313,7 +8314,7 @@ func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimeco
 		RepoRoot,
 		fixtureRoot,
 		platformSpec,
-		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: ChannelRegistrations().AdmitInventory},
 	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)

@@ -38,9 +38,8 @@ func (t ToolInProcessTarget) Provider() string {
 	switch t {
 	case ToolInProcessWhatsAppReadAccount, ToolInProcessWhatsAppSendText:
 		return "whatsapp"
-	default:
-		return ""
 	}
+	return ""
 }
 
 func (t ToolInProcessTarget) contract() (ToolCategory, ActivityEffectClass) {
@@ -52,6 +51,11 @@ func (t ToolInProcessTarget) contract() (ToolCategory, ActivityEffectClass) {
 	default:
 		return ToolCategoryUnspecified, ""
 	}
+}
+
+func (t ToolInProcessTarget) IsWrite() bool {
+	category, effect := t.contract()
+	return category == ToolCategoryProviderConnector && effect == ActivityEffectClassNonIdempotentWrite
 }
 
 func WithToolInProcessTarget(target ToolInProcessTarget) ToolSchemaEntryOption {

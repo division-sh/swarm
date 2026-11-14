@@ -55,7 +55,7 @@ func (a CompiledActivation) Validate() error {
 	if a.Source == ActivationSourceRegistered {
 		profile, found := a.Plan.OnboardingProfile()
 		if !found || a.OnboardingRevision < 1 || a.OnboardingOperationID == "" || a.ActivationRevision != 0 ||
-			(AccountReference{Provider: profile.Provider(), Account: a.OperatorAccount}).Validate() != nil {
+			(AccountReference{Provider: profile.Provider(), Account: a.OperatorAccount}).Validate(a.Plan.ProviderFacts()) != nil {
 			return fmt.Errorf("registered activation requires its confirmed deployment account, not a learned runtime activation")
 		}
 	}
@@ -129,7 +129,7 @@ func CompileRegisteredActivation(candidate Candidate, op Operation) (CompiledAct
 	}
 	if !op.DeploymentRegistration || !op.AccountConfirmed || op.Provider != candidate.Provider ||
 		op.Phase != PhaseSucceeded && op.Phase != PhaseAwaitingExternalIdentity && op.Phase != PhaseAwaitingOperatorConfirmation ||
-		op.ValidateSessionAccount() != nil || op.LogoutCompleted {
+		op.ValidateSessionAccount(op.ProviderFacts()) != nil || op.LogoutCompleted {
 		return CompiledActivation{}, ErrRevisionConflict
 	}
 	keys := map[string]string{}

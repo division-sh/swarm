@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -174,7 +176,7 @@ func TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores(t *testing
 					if !useSQLite {
 						return admitTestPostgresStore(t, db)
 					}
-					store := NewSQLiteRuntimeStoreForTest(db)
+					store := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 					if err := store.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 						t.Fatal(err)
 					}

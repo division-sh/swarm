@@ -14,7 +14,7 @@ func TestDeploymentRecoveryControlLifetimeRefusals(t *testing.T) {
 	for _, kind := range []string{"closed", "canceled", "foreign"} {
 		t.Run(kind, func(t *testing.T) {
 			process := worklifetime.NewProcess()
-			c := &DeploymentChannelControl{process: process, store: &selected.Owner{}, provider: "whatsapp", borrowed: true}
+			c := &DeploymentChannelControl{process: process, store: &selected.Owner{}, provider: selectedChannelFacts(channelRegistrationFixture{}, "whatsapp"), borrowed: true}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			switch kind {

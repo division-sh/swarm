@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -321,10 +322,10 @@ func (p *serveLifecyclePresenter) recordDefaultAPITokenWarning() {
 	p.operatorWarnings = append(p.operatorWarnings, "using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener")
 }
 
-func (p *serveLifecyclePresenter) recordWhatsAppAccountMismatch() {
+func (p *serveLifecyclePresenter) recordAccountMismatch(binding channelprovider.Binding) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.operatorWarnings = append(p.operatorWarnings, whatsAppAccountMismatchWarning)
+	p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf("This flow's operator_account does not match the registered %s account; customer messages on the unmatched account will not reach this flow. Check the configured account.", binding.DisplayName()))
 }
 
 func (p *serveLifecyclePresenter) recordPublicIngressDisabledHint() {
@@ -358,8 +359,9 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 	defer p.mu.Unlock()
 	for _, binding := range bindings {
 		if binding.BlockReason == runtimerunlifecycle.StandingBindingSessionRequired {
-			if binding.Provider == "whatsapp" {
-				p.operatorWarnings = append(p.operatorWarnings, "Not linked: run swarm channel connect whatsapp")
+			provider, _ := installedChannelFactsFor(binding.Provider)
+			if provider.NotLinked() != "" {
+				p.operatorWarnings = append(p.operatorWarnings, provider.NotLinked())
 				continue
 			}
 			p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
@@ -827,11 +829,8 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 	}
 	for _, account := range accounts {
 		provider := account.Provider
-		switch provider {
-		case "whatsapp":
-			provider = "WhatsApp"
-		case "telegram":
-			provider = "Telegram"
+		if binding, installed := installedChannelFactsFor(provider); installed {
+			provider = binding.DisplayName()
 		}
 		label := provider + " " + account.Account
 		if len(account.Holders) == 1 {

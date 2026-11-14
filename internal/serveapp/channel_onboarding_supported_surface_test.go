@@ -38,6 +38,14 @@ const channelSharedConfirmationText = "Swarm channel connected. Future notices, 
 
 type channelOnboardingTelegramProvider = telegramapi.Double
 
+func executeTelegramRuntimeCLI(ctx context.Context, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner) int {
+	facts, found := installedChannelFactsFor("telegram")
+	if !found {
+		panic("Telegram runtime fixture requires its installed provider facts")
+	}
+	return cliapp.ExecuteWithChannelReadbackFact(ctx, args, out, errOut, runServe, RunTestSession, facts)
+}
+
 func TestChannelConnectTelegramFirstUserJourney(t *testing.T) {
 	scenarios := []servedparity.Scenario{
 		servedparity.MustScenario(servedparity.ScenarioConnectedChannelOnboardingLifecycle),
@@ -200,7 +208,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		t.Fatalf("%s restarted reset readback = %#v, want current-evidence proof-restored identity without activation/readiness", backend, restartedIdentity)
 	}
 	listOut, listErr := &lockedBuffer{}, &lockedBuffer{}
-	if code := executeCLI(context.Background(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", endpoint}, listOut, listErr, nil); code != 0 {
+	if code := executeTelegramRuntimeCLI(context.Background(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", endpoint}, listOut, listErr, nil); code != 0 {
 		t.Fatalf("%s reset channel list exited %d: %s", backend, code, listErr.String())
 	}
 	if !strings.Contains(listOut.String(), "channel telegram: identity verified, activation lost with store - run swarm channel reconnect telegram") {
@@ -209,7 +217,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	deleteChannelOnboardingCredentialsExcept(t, credentialPath, bootCredentials, string(backend)+" credential loss after proof restore")
 	registrationsBeforeBlock, deliveriesBeforeBlock := provider.OnboardingCounts()
 	blockedOut, blockedErr := &lockedBuffer{}, &lockedBuffer{}
-	blockedCode := executeCLI(context.Background(), []string{
+	blockedCode := executeTelegramRuntimeCLI(context.Background(), []string{
 		"--config", opts.ConfigPath, "channel", "reconnect", "telegram", "--yes", "--api-server", endpoint,
 	}, blockedOut, blockedErr, nil)
 	blockedSurface := blockedOut.String() + "\n" + blockedErr.String()
@@ -224,11 +232,11 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		t.Fatalf("%s E2E-04 blocked readback = %#v", backend, blockedRow)
 	}
 	blockedHumanOut, blockedHumanErr := &lockedBuffer{}, &lockedBuffer{}
-	if code := executeCLI(context.Background(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", endpoint}, blockedHumanOut, blockedHumanErr, nil); code != 0 || !strings.Contains(blockedHumanOut.String(), blockedResumeCommand) || !strings.Contains(blockedHumanOut.String(), blockedOperationID) {
+	if code := executeTelegramRuntimeCLI(context.Background(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", endpoint}, blockedHumanOut, blockedHumanErr, nil); code != 0 || !strings.Contains(blockedHumanOut.String(), blockedResumeCommand) || !strings.Contains(blockedHumanOut.String(), blockedOperationID) {
 		t.Fatalf("%s E2E-04 human list code=%d\nstdout:\n%s\nstderr:\n%s", backend, code, blockedHumanOut.String(), blockedHumanErr.String())
 	}
 	secondOut, secondErr := &lockedBuffer{}, &lockedBuffer{}
-	secondCode := executeCLI(context.Background(), []string{
+	secondCode := executeTelegramRuntimeCLI(context.Background(), []string{
 		"--config", opts.ConfigPath, "channel", "reconnect", "telegram", "--yes", "--api-server", endpoint,
 	}, secondOut, secondErr, nil)
 	if secondCode == 0 || !strings.Contains(secondErr.String(), "operation_pending") {
@@ -742,7 +750,7 @@ func runChannelOnboardingReconnectJourney(t *testing.T, configPath, endpoint str
 		}
 		os.Stdin = input
 	}
-	code := executeCLI(context.Background(), args, stdout, stderr, nil)
+	code := executeTelegramRuntimeCLI(context.Background(), args, stdout, stderr, nil)
 	if code != 0 {
 		t.Fatalf("channel reconnect exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
@@ -781,7 +789,7 @@ func runRejectedChannelOnboardingReplacement(t *testing.T, configPath, endpoint,
 		t.Fatal(err)
 	}
 	os.Stdin = input
-	code := executeCLI(context.Background(), []string{
+	code := executeTelegramRuntimeCLI(context.Background(), []string{
 		"--config", configPath, "channel", "reconnect", "telegram", "--yes", "--credential-stdin", "--api-server", endpoint,
 	}, stdout, stderr, nil)
 	if code == 0 {
@@ -819,7 +827,7 @@ func runChannelOnboardingResumeJourney(t *testing.T, configPath, endpoint string
 func runChannelOnboardingUnbindJourney(t *testing.T, configPath, endpoint, selector string) {
 	t.Helper()
 	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-	code := executeCLI(context.Background(), []string{
+	code := executeTelegramRuntimeCLI(context.Background(), []string{
 		"--config", configPath, "channel", "unbind", selector, "--api-server", endpoint,
 	}, stdout, stderr, nil)
 	if code != 0 {
@@ -830,7 +838,7 @@ func runChannelOnboardingUnbindJourney(t *testing.T, configPath, endpoint, selec
 func runChannelOnboardingProofRevokeJourney(t *testing.T, configPath, endpoint, selector string) {
 	t.Helper()
 	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-	code := executeCLI(context.Background(), []string{
+	code := executeTelegramRuntimeCLI(context.Background(), []string{
 		"--config", configPath, "channel", "revoke-proof", selector, "--api-server", endpoint,
 	}, stdout, stderr, nil)
 	if code != 0 {
@@ -938,7 +946,7 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 		_ = input.Close()
 	})
 	go func() {
-		done <- executeCLI(context.Background(), args, stdout, stderr, nil)
+		done <- executeTelegramRuntimeCLI(context.Background(), args, stdout, stderr, nil)
 	}()
 
 	challenge := waitChannelOnboardingChallenge(t, stdout, stderr, done)
@@ -1051,7 +1059,7 @@ func readChannelOnboardingOperationRow(t *testing.T, configPath, endpoint, opera
 func readChannelOnboardingRows(t *testing.T, configPath, endpoint string) []channelOnboardingJourneyReadback {
 	t.Helper()
 	listOut, listErr := &lockedBuffer{}, &lockedBuffer{}
-	code := executeCLI(context.Background(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, listOut, listErr, nil)
+	code := executeTelegramRuntimeCLI(context.Background(), []string{"--config", configPath, "channel", "list", "--json", "--api-server", endpoint}, listOut, listErr, nil)
 	if code != 0 {
 		t.Fatalf("channel list exited %d: %s", code, listErr.String())
 	}

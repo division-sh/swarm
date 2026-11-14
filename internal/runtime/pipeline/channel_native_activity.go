@@ -127,7 +127,7 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 		return nil, nil, err
 	}
 	target, native := tool.InProcess()
-	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText {
+	if !native || !activation.Plan.ProviderFacts().NativeWrite(target.String()) {
 		return nil, nil, fmt.Errorf("native activity has no installed exact write target")
 	}
 	if err := tool.InputSchema().Validate(intent.Input.Interface()); err != nil {
@@ -274,18 +274,18 @@ func (p NativeChannelActivityPermit) ValidateBusinessTarget(ctx context.Context,
 	if p.launch.activation.Source == channelonboarding.ActivationSourceRegistered {
 		values, object := p.Input().ObjectMap()
 		account, present := values["account"].String()
-		if !object || !present || account != op.AccountReference || p.launch.activation.OperatorAccount != account || !expected.MatchesOperation(op) {
+		if !object || !present || account != op.AccountReference || p.launch.activation.OperatorAccount != account || !expected.MatchesOperation(op, op.ProviderFacts()) {
 			return fmt.Errorf("native activity lost its exact registered account")
 		}
 		return nil
 	}
-	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountBusiness(op, activation) {
+	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountBusiness(op, activation, op.ProviderFacts()) {
 		return nil
 	}
 	if op.Phase != channelonboarding.PhaseSucceeded {
 		return fmt.Errorf("native activity requires completed channel readiness")
 	}
-	if !expected.MatchesBusinessBinding(op, activation, binding, activation.BindingRevision) {
+	if !expected.MatchesBusinessBinding(op, activation, binding, activation.BindingRevision, op.ProviderFacts()) {
 		return fmt.Errorf("native activity lost its original selected business binding")
 	}
 	return nil

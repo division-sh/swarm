@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func mutateNativeReceiptRequest(t *testing.T, original inbound.Request, mutation
 	case "missing_capture":
 		request.OriginalTransportMetadata = json.RawMessage(`{}`)
 	case "capture_occurrence", "capture_body", "capture_source":
-		capture, err := sessioncapture.PublicationCaptureProvenance(request)
+		capture, err := sessioncapture.PublicationCaptureProvenance(request, channelfixture.For("whatsapp"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +109,7 @@ func mutateNativeReceiptRequest(t *testing.T, original inbound.Request, mutation
 		if err := json.Unmarshal(request.OriginalTransportMetadata, &fields); err != nil {
 			t.Fatal(err)
 		}
-		fields[sessioncapture.CaptureProvenanceKey], err = json.Marshal(capture)
+		fields["whatsapp_capture"], err = json.Marshal(capture)
 		if err != nil {
 			t.Fatal(err)
 		}

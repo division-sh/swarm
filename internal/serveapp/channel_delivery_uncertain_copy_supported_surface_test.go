@@ -197,7 +197,7 @@ func assertUncertainCopyLogoutConnectFence(t *testing.T, h *channelOnboardingE2E
 func logoutDeploymentChannelFixtureAccount(t *testing.T, h *channelOnboardingE2EHarness) {
 	t.Helper()
 	var out, errOut lockedBuffer
-	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "logout", "telegram", "420079", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "logout", "telegram", "420079", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, ChannelRegistrations())
 	var result channelonboarding.Result
 	if code != 0 || json.Unmarshal([]byte(out.String()), &result) != nil || result.Operation.OperationID != h.registration.OperationID ||
 		!result.Operation.LogoutCompleted || result.Operation.Phase != channelonboarding.PhaseRetired {
@@ -205,7 +205,7 @@ func logoutDeploymentChannelFixtureAccount(t *testing.T, h *channelOnboardingE2E
 	}
 	h.registration = result.Operation
 	out, errOut = lockedBuffer{}, lockedBuffer{}
-	code = cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, OpenChannelRegistration)
+	code = cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &out, &errOut, nil, nil, ChannelRegistrations())
 	var listing struct {
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
@@ -236,7 +236,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 		if h.registration.IdentityOperationID == "" {
 			args = append(args, "420079")
 		}
-		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, OpenChannelRegistration)
+		code := cliapp.Execute(ctx, args, out, errOut, nil, nil, ChannelRegistrations())
 		done <- code
 		progress <- code
 	}()
@@ -267,7 +267,7 @@ func connectDeploymentChannelFixtureOperator(t *testing.T, h *channelOnboardingE
 		Accounts []channelonboarding.Result `json:"accounts"`
 	}
 	var listed, listErr lockedBuffer
-	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil, nil, OpenChannelRegistration)
+	code := cliapp.Execute(t.Context(), []string{"--config", h.opts.ConfigPath, "channel", "list", "--api-server", h.endpoint, "--json"}, &listed, &listErr, nil, nil, ChannelRegistrations())
 	if code != 0 || json.Unmarshal([]byte(listed.String()), &listing) != nil || len(listing.Accounts) != 1 ||
 		listing.Accounts[0].Binding == nil || listing.Accounts[0].Binding.ConversationRef != fmt.Sprint(chatID) ||
 		!listing.Accounts[0].Operation.DeploymentRegistration || !listing.Accounts[0].Operation.AccountConfirmed ||

@@ -29,7 +29,7 @@ func recoveryNativeFixture(t *testing.T, backend string, registered bool) (*acti
 	} else {
 		f = newNativeConfirmationFixture(t, backend)
 		ctx := f.confirmationContext(t)
-		executor := sessionChannelExecutor{owner: f.authority, plan: f.channel}
+		executor := sessionChannelExecutor{owner: f.authority, state: f.state, plan: f.channel}
 		proveNativeJournalWrite(t, f, ctx, "Swarm channel connected.", true, func() (registration.DeliveryResult, error) {
 			return executor.DeliverChannelConfirmation(ctx, "deliver", map[string]any{"destination": f.binding.ConversationRef, "text": "Swarm channel connected."}, nil)
 		})

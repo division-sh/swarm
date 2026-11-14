@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelprovider"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -40,7 +41,7 @@ import (
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
 )
 
-func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresStore, error) {
+func newPostgresStoreComposition(backend *postgresbackend.Backend, providerFacts channelprovider.FactsLookup) (*PostgresStore, error) {
 	schemaOwner, err := storeschema.NewPostgres(backend)
 	if err != nil {
 		return nil, err
@@ -87,7 +88,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
-	channelOnboarding, err := storechannelonboarding.NewPostgres(backend, store.requireCurrentSchema)
+	channelOnboarding, err := storechannelonboarding.NewPostgres(backend, store.requireCurrentSchema, providerFacts)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	store.lLMPostgresOwner = llmOwner
 	store.llmMethods = llmOwner
-	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
+	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +239,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData)
+	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -366,19 +367,19 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 
 // ComposePostgresStore is the exact process-construction entrypoint. Runtime
 // consumers receive only the resulting typed facade.
-func ComposePostgresStore(backend *postgresbackend.Backend) (*PostgresStore, error) {
-	return newPostgresStoreComposition(backend)
+func ComposePostgresStore(backend *postgresbackend.Backend, providerFacts channelprovider.FactsLookup) (*PostgresStore, error) {
+	return newPostgresStoreComposition(backend, providerFacts)
 }
 
-func newPostgresStoreWithBackend(backend *postgresbackend.Backend) *PostgresStore {
-	store, err := newPostgresStoreComposition(backend)
+func newPostgresStoreWithBackend(backend *postgresbackend.Backend, providerFacts channelprovider.FactsLookup) *PostgresStore {
+	store, err := newPostgresStoreComposition(backend, providerFacts)
 	if err != nil {
 		panic(err)
 	}
 	return store
 }
 
-func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, backendIdentity *storestartupownership.SQLiteBackendIdentity) (*SQLiteRuntimeStore, error) {
+func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, backendIdentity *storestartupownership.SQLiteBackendIdentity, providerFacts channelprovider.FactsLookup) (*SQLiteRuntimeStore, error) {
 	if schema == nil {
 		return nil, fmt.Errorf("sqlite schema store is required")
 	}
@@ -434,7 +435,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
-	channelOnboarding, err := storechannelonboarding.NewSQLite(backend, store.requireCurrentSchema)
+	channelOnboarding, err := storechannelonboarding.NewSQLite(backend, store.requireCurrentSchema, providerFacts)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +546,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	store.lLMSQLiteOwner = llmOwner
 	store.llmMethods = llmOwner
-	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
+	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -576,7 +577,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, store.now)
+	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, store.now, channelOnboarding)
 	if err != nil {
 		return nil, err
 	}
@@ -705,15 +706,15 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 // ComposeSQLiteRuntimeStore is reserved for read-only inspection and explicit
 // test construction. Mutable process construction must bind the backend file
 // identity through ComposeSQLiteRuntimeStoreWithBackendIdentity.
-func ComposeSQLiteRuntimeStore(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend) (*SQLiteRuntimeStore, error) {
-	return newSQLiteStoreComposition(schema, backend, nil)
+func ComposeSQLiteRuntimeStore(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, providerFacts channelprovider.FactsLookup) (*SQLiteRuntimeStore, error) {
+	return newSQLiteStoreComposition(schema, backend, nil, providerFacts)
 }
 
 // ComposeSQLiteRuntimeStoreWithBackendIdentity is the exact mutable process-
 // construction entrypoint. Runtime consumers receive only the typed facade.
-func ComposeSQLiteRuntimeStoreWithBackendIdentity(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, identity *storestartupownership.SQLiteBackendIdentity) (*SQLiteRuntimeStore, error) {
+func ComposeSQLiteRuntimeStoreWithBackendIdentity(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, identity *storestartupownership.SQLiteBackendIdentity, providerFacts channelprovider.FactsLookup) (*SQLiteRuntimeStore, error) {
 	if identity == nil {
 		return nil, fmt.Errorf("SQLite backend identity is required")
 	}
-	return newSQLiteStoreComposition(schema, backend, identity)
+	return newSQLiteStoreComposition(schema, backend, identity, providerFacts)
 }

@@ -3,6 +3,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"encoding/json"
 	"fmt"
@@ -164,7 +166,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				if !ok {
 					return nil
 				}
-				event, err := captureSDKMessage(scope, originalSource, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+				event, err := captureSDKMessage(scope, originalSource, occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond), channelfixture.For("whatsapp"))
 				if err != nil {
 					return err
 				}
@@ -202,6 +204,12 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			owner, err := newSessionInputOwner(selected, selected, reader, op.OperationID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, err := newSessionInputOwner(selected, selected, (*sessionInputReader)(nil), op.OperationID); err == nil {
+				t.Fatal("typed-nil provider reader acquired an input issuer")
+			}
+			if _, err := newSessionAuthorityOwner((*sessionState)(nil), selected, op, nil, nil); err == nil {
+				t.Fatal("typed-nil provider account reader acquired an authority issuer")
 			}
 			reference := SessionInputReference{ConnectionID: connectionID, OccurrenceID: occurrence.occurrenceID,
 				Conversation: event.Conversation, EventID: event.EventID, Kind: event.Kind}

@@ -57,13 +57,15 @@ func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 		if digest != pins[fn.Name.Name] && !(path == "internal/runtime/pipeline/fork_fan_out_crash_external_test.go" &&
 			fn.Name.Name == "TestIssue642MixedFanOutCrashRestartBothStores" &&
 			(digest == "c183201c71250e318f7729b79a03aff654808fdadfd25e7597daa6220f782646" ||
-				digest == "4849633c665d959004143ed4397f35e0c90ac3cb5152137d95408ae3a6778c74")) &&
+				digest == "4849633c665d959004143ed4397f35e0c90ac3cb5152137d95408ae3a6778c74" ||
+				digest == "123216df5c0867be9d9cb7edc24845f9959aa21fc1b5f1ccca47895bcd6e9bde")) &&
 			!(path == "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go" &&
 				fn.Name.Name == "verifyPublishedBarrierCompletionFailure" &&
 				digest == "b90175cd26c9c8019b43ccb0705a8a27e5e26bbb28f26e711fd7724715ee22aa") &&
 			!(path == "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go" &&
 				fn.Name.Name == "verifyBarrierCrashRestartBothStores" &&
-				digest == "b50acc5f065717e346be2c4c1b31ec536ca2d9040d2a3129cbc353bc3daa99f0") {
+				(digest == "b50acc5f065717e346be2c4c1b31ec536ca2d9040d2a3129cbc353bc3daa99f0" ||
+					digest == "2ed975737f7f89467c65b7433bead5608f1724375eb33fd81184825f8120c566")) {
 			return false
 		}
 		seen[fn.Name.Name] = true

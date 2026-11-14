@@ -1,6 +1,10 @@
 package channelonboarding
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+)
 
 func TestAccountReferenceCanonicalIdentity(t *testing.T) {
 	for _, cell := range []struct{ provider, account, want string }{
@@ -8,8 +12,9 @@ func TestAccountReferenceCanonicalIdentity(t *testing.T) {
 		{"whatsapp", "+15550100124", "+15550100124"},
 		{"telegram", "123456789", "123456789"},
 	} {
-		got, err := CanonicalAccount(cell.provider, cell.account)
-		if err != nil || got.Account != cell.want || got.Provider != cell.provider || got.Validate() != nil {
+		facts := channelfixture.For(cell.provider)
+		got, err := CanonicalAccount(facts, cell.account)
+		if err != nil || got.Account != cell.want || got.Provider != cell.provider || got.Validate(facts) != nil {
 			t.Fatalf("canonical account %q: %+v, %v", cell.provider, got, err)
 		}
 	}
@@ -20,11 +25,11 @@ func TestAccountReferenceCanonicalIdentity(t *testing.T) {
 		{"telegram", "00123"}, {"telegram", "-123"}, {"telegram", "0"}, {"telegram", "@bot"},
 		{"telegram", " 123"}, {"WHATSAPP", "+123"}, {" whatsapp", "+123"}, {"other", "+123"},
 	} {
-		if _, err := CanonicalAccount(cell.provider, cell.account); err == nil {
+		if _, err := CanonicalAccount(channelfixture.For(cell.provider), cell.account); err == nil {
 			t.Fatalf("invalid provider/account accepted: %+v", cell)
 		}
 	}
-	if (AccountReference{Provider: "whatsapp", Account: "+1 234"}).Validate() == nil {
+	if (AccountReference{Provider: "whatsapp", Account: "+1 234"}).Validate(channelfixture.For("whatsapp")) == nil {
 		t.Fatal("noncanonical persisted identity was accepted")
 	}
 }

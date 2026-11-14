@@ -37,7 +37,7 @@ func TestCatalogRequiredVerifyAll(t *testing.T) {
 		fixture := fixture
 		t.Run(fixture.RelativePath, func(t *testing.T) {
 			t.Setenv("SWARM_BOOT_WARNINGS_FATAL", catalogWarningsFatal(fixture))
-			opts := defaultVerifyCommandOptions()
+			opts := defaultVerifyCommandOptionsForTest()
 			opts.portable = true
 			opts.sourceRoot = fixture.Root
 			opts.configPath = configPath
@@ -308,7 +308,7 @@ func verifyRequiredPassingBundles(ctx context.Context, repoRoot string, bundles 
 				continue
 			}
 		}
-		opts := defaultVerifyCommandOptions()
+		opts := defaultVerifyCommandOptionsForTest()
 		opts.portable = true
 		opts.sourceRoot = bundle.Root
 		opts.configPath = bundle.ConfigPath

@@ -1584,7 +1584,7 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 	var targets []StandingTarget
 	var activations []StandingActivation
 	if op.DeploymentRegistration {
-		holders, holderErr := m.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference})
+		holders, holderErr := m.AccountHolders(ctx, channelonboarding.AccountReference{Provider: op.Provider, Account: op.AccountReference}, op.ProviderFacts())
 		if holderErr != nil {
 			return holderErr
 		}

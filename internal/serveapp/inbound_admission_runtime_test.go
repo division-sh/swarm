@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -111,7 +113,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 						t.Fatal(err)
 					}
 					if backend == "postgres" {
-						postgresStore, err = store.NewPostgresStore(postgresDSN)
+						postgresStore, err = store.NewPostgresStore(postgresDSN, channelfixture.Facts)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -183,7 +185,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		postgresDSN = dsn
 		t.Cleanup(cleanup)
-		postgresStore, err = store.NewPostgresStore(dsn)
+		postgresStore, err = store.NewPostgresStore(dsn, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -368,14 +370,14 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	var artifacts sourceArtifactReader
 	if backend == "postgres" {
-		postgresStore, err = store.NewPostgresStore(postgresDSN)
+		postgresStore, err = store.NewPostgresStore(postgresDSN, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}
 		storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
 		artifacts = postgresStore
 	} else {
-		sqliteStore, err = store.NewSQLiteRuntimeStore(inboundAdmissionSQLitePathFromConfig(t, configPath))
+		sqliteStore, err = store.NewSQLiteRuntimeStore(inboundAdmissionSQLitePathFromConfig(t, configPath), channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -432,13 +434,13 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 
 	if backend == "sqlite" {
 		sqlitePath := inboundAdmissionSQLitePathFromConfig(t, configPath)
-		sqliteStore, err = store.NewSQLiteRuntimeStore(sqlitePath)
+		sqliteStore, err = store.NewSQLiteRuntimeStore(sqlitePath, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer sqliteStore.Close()
 	} else {
-		postgresStore, err = store.NewPostgresStore(postgresDSN)
+		postgresStore, err = store.NewPostgresStore(postgresDSN, channelfixture.Facts)
 		if err != nil {
 			t.Fatal(err)
 		}

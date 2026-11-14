@@ -13,7 +13,7 @@ import (
 	identityowner "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 )
 
-func RegisteredConfirmationCurrent(ctx context.Context, q queryer, a effects.Authority, postgres, lock bool) (bool, error) {
+func registeredConfirmationCurrent(ctx context.Context, owner providerFactReader, q queryer, a effects.Authority, postgres, lock bool) (bool, error) {
 	if !a.Valid() || a.Kind != effects.AuthorityChannelConfirmation || a.ChannelConfirmation.TransportParent == nil {
 		return false, nil
 	}
@@ -30,13 +30,13 @@ func RegisteredConfirmationCurrent(ctx context.Context, q queryer, a effects.Aut
 			return false, err
 		}
 	}
-	op, found, err := loadOperation(ctx, q, logoutDialect(postgres), parent.ID, lock, true)
+	op, found, err := loadOperation(owner, ctx, q, logoutDialect(postgres), parent.ID, lock, true)
 	if err != nil || !found {
 		return false, err
 	}
 	if op.Revision != parent.Revision || op.IdentityOperationID != parent.BindingOperationID ||
 		op.Phase != domain.PhaseAwaitingOperatorConfirmation || !op.AccountConfirmed || op.LogoutCompleted || op.FailureCode != "" ||
-		op.PrincipalID != c.PrincipalID || op.ValidateSessionAccount() != nil {
+		op.PrincipalID != c.PrincipalID || op.ValidateSessionAccount(owner.providerFact(op.Provider)) != nil {
 		return false, nil
 	}
 	binding, child, err := identityowner.ReadEffectBinding(ctx, q, postgres, lock, op.Interface, parent.BindingOperationID)

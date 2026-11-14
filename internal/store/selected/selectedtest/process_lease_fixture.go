@@ -1,6 +1,8 @@
 package selectedtest
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"errors"
 	"time"
@@ -41,7 +43,7 @@ func (f *ProcessLeaseFixture) Close() error { return f.close() }
 
 func OpenProcessLeaseFixture(ctx context.Context, scope backendselection.Selection, dsn string) (*ProcessLeaseFixture, error) {
 	if scope.Backend == backendselection.BackendSQLite {
-		owner, _, err := construction.OpenSQLiteRuntimeForServing(ctx, scope.SQLitePath)
+		owner, _, err := construction.OpenSQLiteRuntimeForServing(ctx, scope.SQLitePath, channelfixture.Facts)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +51,7 @@ func OpenProcessLeaseFixture(ctx context.Context, scope backendselection.Selecti
 			RunFixtureStore: owner, Store: owner, ChannelStore: owner, close: owner.Close}, nil
 	}
 	if scope.Backend == backendselection.BackendPostgres {
-		owner, _, err := construction.OpenPostgresRuntime(ctx, dsn)
+		owner, _, err := construction.OpenPostgresRuntime(ctx, dsn, channelfixture.Facts)
 		if err != nil {
 			return nil, err
 		}
@@ -60,11 +62,13 @@ func OpenProcessLeaseFixture(ctx context.Context, scope backendselection.Selecti
 }
 
 func OpenProcessLeaseInspection(ctx context.Context, scope backendselection.Selection, dsn string) (*selected.AdmissionInspection, error) {
-	return selected.OpenAdmissionInspection(ctx, selected.AuthorityRequest{Selection: scope, PostgresDSN: dsn})
+	return selected.OpenAdmissionInspection(ctx, selected.AuthorityRequest{Selection: scope, PostgresDSN: dsn, ProviderFacts:
+
+	// Inspection consumes the same native owner's canonical singleton reader, not
+	// the path a test may have replaced or a second generation decoder.
+	channelfixture.Facts})
 }
 
-// Inspection consumes the same native owner's canonical singleton reader, not
-// the path a test may have replaced or a second generation decoder.
 func InspectProcessLeaseSnapshot(ctx context.Context, owner startupownership.Store) (startupownership.AuthorityInspection, error) {
 	inspection, ok := owner.(interface {
 		InspectAuthority(context.Context) (startupownership.AuthorityInspection, error)

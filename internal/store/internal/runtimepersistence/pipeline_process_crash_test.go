@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"database/sql/driver"
@@ -179,7 +181,7 @@ func openPipelineCrashStore(t *testing.T, backend, location string, instrumentat
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := newSQLiteStoreComposition(schema, b, identity)
+	store, err := newSQLiteStoreComposition(schema, b, identity, channelfixture.Facts)
 	if err != nil {
 		t.Fatal(err)
 	}

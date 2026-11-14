@@ -1,6 +1,7 @@
 package packfixture
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"os"
 	"path/filepath"
 	"testing"
@@ -138,5 +139,5 @@ func WhatsAppSessionProvider(t testing.TB, platformSpecPath string, trigger []by
 	if err != nil {
 		t.Fatal(err)
 	}
-	return catalog, plan
+	return catalog, plan.WithProviderFacts(channelfixture.For("whatsapp"))
 }

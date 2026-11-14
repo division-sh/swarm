@@ -172,6 +172,7 @@ type validatedRuntimeDeps struct {
 	ManagedCredentials         runtimemanagedcredentials.Store
 	MockConnectorResponses     *providerconnectors.MockResponsePlan
 	BootEffectReachability     runtimebootverify.SourceBootEffectReachability
+	AdmittedCredentials        runtimebootverify.AdmittedCredentialInspector
 	ExecutionPosture           executionposture.Posture
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	ProviderCredentialSource   runtimecredentials.SourceFact
@@ -834,7 +835,7 @@ func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile,
 	return ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, nil)
 }
 
-func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, modelAliases llmselection.ModelAliases, admitted ...runtimebootverify.AdmittedCredentialInspector) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -852,6 +853,10 @@ func ensureWorkflowBootWiringWithModelAliases(opts RuntimeOptions, profile llmse
 	validationOpts.LLMProfile = profile
 	validationOpts.ModelAliases = modelAliases
 	validationOpts.ChannelPlans = opts.ChannelPlans
+	validationOpts.ChannelOnboardingStore = opts.ChannelOnboardingStore
+	if len(admitted) != 0 {
+		validationOpts.admittedCredentials = admitted[0]
+	}
 	validationOpts.ChannelActivationPublication = opts.DeclaredChannelPublication
 	if !validationOpts.ChannelActivationPublication.Generation().Valid() {
 		validationOpts.ChannelActivationPublication = opts.ChannelActivationPublication
@@ -969,7 +974,8 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models)
+	admittedCredentials := bootAdmittedCredentials(source, opts.ChannelOnboardingStore, opts.ProviderCredentials, opts.ChannelPlans)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithModelAliases(opts, profile, posture, cfg.LLM.Models, admittedCredentials)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -1004,6 +1010,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		ManagedCredentials:         opts.ManagedCredentials,
 		MockConnectorResponses:     mockConnectorResponses,
 		BootEffectReachability:     bootEffectReachability,
+		AdmittedCredentials:        admittedCredentials,
 		ExecutionPosture:           posture,
 		ProviderCredentialResolver: providerCredentialResolver,
 		ProviderCredentialSource:   providerCredentialSource,
@@ -1511,9 +1518,10 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		},
 	})
 	credentialValidationOptions := runtimebootverify.Options{
-		Credentials:        rt.Credentials,
-		ManagedCredentials: rt.ManagedCredentials,
-		EffectReachability: boot.BootEffectReachability,
+		Credentials:         rt.Credentials,
+		AdmittedCredentials: boot.AdmittedCredentials,
+		ManagedCredentials:  rt.ManagedCredentials,
+		EffectReachability:  boot.BootEffectReachability,
 	}
 	if observed, err := runtimebootverify.InspectStaticCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
 		return nil, fmt.Errorf("credential validation failed: %w", err)

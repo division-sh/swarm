@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/channelprovider"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -38,7 +38,7 @@ func verifyAbsentSQLiteStoreCause(err error) *bootverify.AdmissionNotRunCause {
 	return &bootverify.AdmissionNotRunCause{Kind: bootverify.AdmissionAbsentSQLiteStore, Path: absent.Path}
 }
 
-func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult, facts channelprovider.FactsLookup) {
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
 	var schemaRequest store.SchemaBootstrapRequest
@@ -54,7 +54,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		})
 	}()
 	opened := verifyDeploymentObservation(ctx, result, "selected_store_access", bootverify.SelectedStoreAccessOwner, subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-		request, schema, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, swarmDir, source)
+		request, schema, err := prepareVerifySelectedStoreInspection(ctx, repo, paths, cfg, swarmDir, source, facts)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func accountVerifyStoreAccessFailure(result *runtime.WorkflowContractValidationR
 	})
 }
 
-func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDirOpts cliSwarmDirOptions, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
+func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDirOpts cliSwarmDirOptions, source semanticview.Source, facts channelprovider.FactsLookup) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
 	root, err := NewInvocationRoot(repo)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
@@ -165,7 +165,7 @@ func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, path
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
-	request, err := selectedAuthorityRequest(ctx, local.StoreSelection, cfg.Config)
+	request, err := selectedAuthorityRequest(ctx, local.StoreSelection, cfg.Config, facts)
 	if err != nil {
 		return request, store.SchemaBootstrapRequest{}, err
 	}
@@ -200,7 +200,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return startupownership.AdmitAuthorityInspection(inspection)
 	})
 	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
+		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases, cfg.AdmitPackInventory)
 		return err
 	})
 	verifyDeploymentObservation(ctx, result, "retained_source_integrity", "internal/runtime/startuprecovery.Inspect", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
@@ -245,6 +245,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		if err != nil {
 			return err
 		}
+		loader.AdmitPackInventory = cfg.AdmitPackInventory
 		forks, err := runforkexecution.InspectSelectedForkRecoveries(ctx, snapshot, loader)
 		if err != nil {
 			return err
@@ -283,7 +284,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	return retained
 }
 
-func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, artifacts runforkexecution.SourceArtifactSelectedContractSourceStore, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) (*runbundle.UpgradePlan, error) {
+func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, artifacts runforkexecution.SourceArtifactSelectedContractSourceStore, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver, admit func(sourceartifact.RootedSource, *packartifact.EffectivePackInventory, contracts.PlatformSpecDocument) (contracts.PackAdmissionProjection, error)) (*runbundle.UpgradePlan, error) {
 	return runbundle.AdmitPinnedSources(ctx, reader, candidate, func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 		rooted, err := artifacts.GetRootedSource(ctx, reference)
 		if err != nil {
@@ -297,7 +298,7 @@ func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, a
 			return nil, err
 		}
 		retained, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, spec, contracts.WorkflowContractLoadOptions{
-			PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
+			PlatformPackBases: packBases, AdmitPackInventory: admit,
 		})
 		return semanticview.Wrap(retained), err
 	})

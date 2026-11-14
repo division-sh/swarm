@@ -1,6 +1,8 @@
 package sessionprovider
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -217,7 +219,7 @@ func (f *sessionPublicationFixture) captureVariant(t *testing.T, kind string, gr
 	}
 	originalSource := captureFixture(t).Source
 	originalSource.Coordinate.BundleHash = scope.Source.BundleHash
-	event, err := captureSDKMessage(scope, originalSource, uuid.NewString(), message, captureFixture(t).ReceivedAt)
+	event, err := captureSDKMessage(scope, originalSource, uuid.NewString(), message, captureFixture(t).ReceivedAt, channelfixture.For("whatsapp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +302,7 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 							if err != nil || !result.Acknowledged || result.Record.Created || len(result.Publications) != 0 || f.plans != plans {
 								t.Fatalf("duplicate created another publication/dispatch plan: %+v %v", result, err)
 							}
-							original, err := publicationCaptureProvenance(result.Record.Request)
+							original, err := publicationCaptureProvenance(result.Record.Request, channelfixture.For("whatsapp"))
 							if err != nil || !original.SameCapture(event) {
 								t.Fatal("history lost exact original capture occurrence", err)
 							}

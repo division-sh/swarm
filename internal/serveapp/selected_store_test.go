@@ -23,7 +23,7 @@ func openSelectedPostgresOwner(t testing.TB, dsn string, db *sql.DB, cfg *config
 	owner, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{
 		Selection:      storebackend.Selection{Backend: storebackend.BackendPostgres},
 		PostgresDSN:    dsn,
-		SessionLockTTL: runtimeSessionLockTTL(cfg),
+		SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor,
 	})
 	if err != nil {
 		t.Fatalf("open PostgreSQL selected store: %v", err)
@@ -40,7 +40,7 @@ func openSelectedSQLiteOwner(t testing.TB, path string, cfg *config.Config) *sel
 	t.Helper()
 	owner, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{
 		Selection:      storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path},
-		SessionLockTTL: runtimeSessionLockTTL(cfg),
+		SessionLockTTL: runtimeSessionLockTTL(cfg), ProviderFacts: installedChannelFactsFor,
 	})
 	if err != nil {
 		t.Fatalf("open SQLite selected store: %v", err)

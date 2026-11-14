@@ -7,7 +7,6 @@ import (
 	"errors"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
 func (s *serveSessionBootstrap) PrepareSessionLogout(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionLogoutPreparation, error) {
@@ -31,8 +30,9 @@ func (s *serveSessionBootstrap) DispatchSessionLogout(ctx context.Context, op ch
 
 // Business authority is deliberately retired. This lookup retains only the
 // original construction/cleanup owner, never a new connection or fresh account.
-func (s *serveSessionBootstrap) originalLogoutConnection(ctx context.Context, target channelonboarding.SessionLogoutTarget) (*sessionprovider.RuntimeConnection, error) {
-	if s == nil || ctx == nil || target.Validate() != nil {
+func (s *serveSessionBootstrap) originalLogoutConnection(ctx context.Context, target channelonboarding.SessionLogoutTarget) (serveSessionConnection, error) {
+	facts, _ := installedChannelFactsFor(target.Account.Provider)
+	if s == nil || ctx == nil || target.Validate(facts) != nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
 	if ctx.Err() != nil {

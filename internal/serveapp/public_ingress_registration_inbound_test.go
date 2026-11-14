@@ -97,7 +97,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), ".")
 	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), sourceRoot, nil, ChannelRegistrations().AdmitInventory)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -248,8 +248,13 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
 		PlanGeneration: planGeneration,
 	}
+	providerFacts, hasProviderFacts := installedChannelFactsFor(target.Provider)
+	if !hasProviderFacts {
+		t.Fatal("fixture registration requires its installed provider facts")
+	}
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		ProviderFacts: providerFacts,
+		BindingID:     "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram.telegram_bot_token": "telegram.telegram_bot_token"},
 		Target: runtimepublicingress.RegistrationTarget{

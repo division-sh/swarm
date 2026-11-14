@@ -20,7 +20,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -133,6 +132,7 @@ func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retE
 // The test caller owns source selection and explicit execution posture. Retained
 // live-node recovery must not relabel existing work as mock-only execution.
 func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts cliapp.ServeOptions, auth apiv1.AuthTokenResolution, posture executionposture.Posture, storedHash string) (int, error) {
+	opts.ChannelRegistration = ChannelRegistrations()
 	if storedHash != "" && (opts.SourceRoot != "" || opts.Dev) {
 		return 1, errors.New("retained artifact proof requires one exact stored hash, no directory or dev scratch")
 	}
@@ -160,7 +160,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		}
 		ctx = scoped
 	}
-	configResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: opts.ConfigPath})
+	configResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: opts.ConfigPath, ChannelRegistration: opts.ChannelRegistration})
 	if err != nil {
 		return 1, err
 	}
@@ -227,7 +227,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 			return 1, errors.New("retained artifact proof read a different source")
 		}
 		admitted, err = runtimecontracts.LoadWorkflowContractBundleFromRootedSource(root, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
-			PlatformPackBases: bases, AdmitPackInventory: packadmission.AdmitInventory,
+			PlatformPackBases: bases, AdmitPackInventory: configResult.AdmitPackInventory,
 		})
 		if err != nil {
 			return 1, err
@@ -508,5 +508,5 @@ func executeScenarioInOwnedLifecycle(t *testing.T, root string, args []string, e
 					return cliapp.TestProviderPublication{EventID: eventID, RunID: runID}, handled, err
 				},
 			})
-		})
+		}, ChannelRegistrations())
 }

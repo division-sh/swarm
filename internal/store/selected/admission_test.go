@@ -1,6 +1,8 @@
 package selected
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -33,7 +35,7 @@ import (
 func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent", "store.db")
 	inspection, err := OpenAdmissionInspection(context.Background(), AuthorityRequest{
-		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path},
+		Selection: storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path}, ProviderFacts: channelfixture.Facts,
 	})
 	if err == nil {
 		inspection.Close()
@@ -64,12 +66,12 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 	}}
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			selection := AuthorityRequest{Selection: storebackend.Selection{Backend: backend}}
+			selection := AuthorityRequest{Selection: storebackend.Selection{Backend: backend}, ProviderFacts: channelfixture.Facts}
 			var bootstrap store.SchemaBootstrapper
 			var db *sql.DB
 			if backend == storebackend.BackendSQLite {
 				selection.Selection.SQLitePath = filepath.Join(t.TempDir(), "store.db")
-				selected, handle, err := storeconstruction.OpenSQLiteRuntime(selection.Selection.SQLitePath)
+				selected, handle, err := storeconstruction.OpenSQLiteRuntime(selection.Selection.SQLitePath, channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -77,7 +79,7 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				bootstrap, db = selected, handle
 			} else {
 				selection.PostgresDSN, _, _ = testutil.StartEmptyPostgres(t)
-				selected, handle, err := storeconstruction.OpenPostgres(selection.PostgresDSN)
+				selected, handle, err := storeconstruction.OpenPostgres(selection.PostgresDSN, channelfixture.Facts)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/tests/support/channelfixture"
+
 	"context"
 	"database/sql"
 	"errors"
@@ -419,7 +421,7 @@ func requireRunningSQLiteRunForTest(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	selected := NewSQLiteRuntimeStoreForTest(db)
+	selected := NewSQLiteRuntimeStoreForTest(db, channelfixture.Facts)
 	if err := selected.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}

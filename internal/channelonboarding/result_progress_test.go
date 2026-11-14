@@ -24,7 +24,11 @@ func TestOnboardingSelectedProviderRequirementSurvivesReadback(t *testing.T) {
 			t.Fatal(err)
 		}
 		var decoded Result
-		if err := json.Unmarshal(body, &decoded); err != nil || decoded.Operation.ValidateSessionAccount() != nil ||
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		decoded = decoded.WithProviderFacts(candidate.ProviderFacts())
+		if decoded.Operation.ValidateSessionAccount(decoded.Operation.ProviderFacts()) != nil ||
 			strings.Contains(string(body), `"coordinate"`) || strings.Contains(string(body), `"target"`) || decoded.Readiness != nil {
 			t.Fatalf("deployment readback acquired runtime scope: %s, %v", body, err)
 		}
@@ -51,6 +55,7 @@ func TestOnboardingSelectedProviderRequirementSurvivesReadback(t *testing.T) {
 		if err := json.Unmarshal(body, &readback); err != nil {
 			t.Fatal(err)
 		}
+		readback = readback.WithProviderFacts(c.ProviderFacts())
 		if got, err := readback.ProviderCredentialRequirement(); err != nil || got != role {
 			t.Fatal("selected role changed across readback", got, err)
 		}

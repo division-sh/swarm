@@ -31,20 +31,6 @@ var errRuntimeConnection = errors.New("WhatsApp connection requires its retained
 var errRuntimeIngressUnavailable = errors.New("WhatsApp runtime incoming publication is not installed")
 var errTerminalAccountRefusal = errors.New("WhatsApp account transport has a terminal refusal")
 
-type RuntimeConnectionOptions struct {
-	operatorAccount    channelonboarding.AccountReference
-	operatorBinding    func(context.Context, channelonboarding.Operation) (channelonboarding.Result, error)
-	Directory          string
-	InvocationState    *InvocationState
-	OperationID        string
-	Store              channelonboarding.Store
-	Credentials        operatorchannel.CredentialCurrentness
-	Plan               packs.SatisfactionPlan
-	Incoming           *RuntimeIncomingOptions
-	RegisteredBusiness RegisteredBusinessSelector
-	ProcessBinding     processbinding.Binding
-}
-
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
@@ -143,7 +129,7 @@ func runtimeConnectionReservation(ctx context.Context, opts RuntimeConnectionOpt
 	if ctx.Err() != nil || op.OperationID != opts.OperationID || op.Provider != "whatsapp" ||
 		op.Posture != channelonboarding.ActivationSessionConnection || op.Revision < 1 ||
 		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired ||
-		op.ValidateSessionAccount() != nil ||
+		op.ValidateSessionAccount(op.ProviderFacts()) != nil ||
 		op.Coordinate.ValidateContext() != nil || op.Interface.Validate() != nil || uuid.Validate(op.PrincipalID) != nil ||
 		op.Coordinate.RuntimeInstanceID != identity.RuntimeInstanceID || op.Coordinate.BundleHash != identity.BundleHash ||
 		source.BundleHash() != identity.BundleHash {
@@ -222,7 +208,7 @@ func (c *RuntimeConnection) open(incoming *RuntimeIncomingOptions) error {
 		}
 		return err
 	}
-	c.captures, err = newCaptureStore(c.ctx, c.state.database, c.operation.SessionConnectionID)
+	c.captures, err = newCaptureStore(c.ctx, c.state.database, c.operation.SessionConnectionID, c.plan.ProviderFacts())
 	if err != nil {
 		return err
 	}
@@ -286,7 +272,7 @@ func (c *RuntimeConnection) currentOperationScope(ctx context.Context) (channelo
 		op.DeploymentRegistration != c.operation.DeploymentRegistration ||
 		op.DeploymentRegistration && (op.Coordinate != c.operation.Coordinate || op.ExpectedAccount != c.operation.ExpectedAccount) ||
 		!op.DeploymentRegistration && !op.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) ||
-		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
+		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount(op.ProviderFacts()) != nil {
 		return op, errRuntimeConnection
 	}
 	return op, nil
@@ -596,7 +582,7 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 	if err != nil {
 		return result, err
 	}
-	executor := sessionChannelExecutor{owner: owner, plan: c.plan}
+	executor := sessionChannelExecutor{owner: owner, state: c.state, plan: c.plan}
 	if op.DeploymentRegistration {
 		executor.deployment = c.operatorBinding
 		if executor.deployment == nil {
@@ -623,7 +609,7 @@ func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operatio
 	if err != nil {
 		return nil, err
 	}
-	return (sessionChannelExecutor{owner: owner, plan: c.plan}).ExecuteChannelActivity(work.Context(), operation, toolID, tool, input)
+	return (sessionChannelExecutor{owner: owner, state: c.state, plan: c.plan}).ExecuteChannelActivity(work.Context(), operation, toolID, tool, input)
 }
 
 func (c *RuntimeConnection) joinRetirement() {

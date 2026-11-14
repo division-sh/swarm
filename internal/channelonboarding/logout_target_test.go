@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +20,7 @@ func TestSessionLogoutTargetRequiresConsistentOriginalProcessAttribution(t *test
 		ProcessStamp: processbinding.LeaseStamp{LeaseIdentity: processbinding.LeaseIdentity{LeaseID: binding.ProcessAuthorityID,
 			OwnerID: binding.ProcessOwnerID, BootID: binding.ProcessBootID, RuntimeInstanceID: binding.RuntimeInstanceID,
 			Backend: processbinding.SQLiteLeaseBackend}, Generation: 1}}
-	if err := target.Validate(); err != nil {
+	if err := target.Validate(channelfixture.For("whatsapp")); err != nil {
 		t.Fatal("consistent original target refused", err)
 	}
 	for _, cell := range []struct {
@@ -41,7 +42,7 @@ func TestSessionLogoutTargetRequiresConsistentOriginalProcessAttribution(t *test
 		t.Run(cell.name, func(t *testing.T) {
 			changed := target
 			cell.edit(&changed)
-			if changed.Validate() == nil {
+			if changed.Validate(channelfixture.For("whatsapp")) == nil {
 				t.Fatal("contradictory original process target admitted")
 			}
 		})

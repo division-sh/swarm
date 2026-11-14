@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
-func (c *deploymentChannelSession) acknowledgeRegisteredTelegram(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) (err error) {
+func (c *telegramDeploymentSession) acknowledgeRegisteredTelegram(ctx context.Context, op channelonboarding.Operation, child operatorchannel.Operation, binding operatorchannel.Binding) (err error) {
 	work, err := c.opts.Process.Begin(ctx)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func (c *deploymentChannelSession) acknowledgeRegisteredTelegram(ctx context.Con
 	return err
 }
 
-func (c *deploymentChannelSession) validateRegisteredTelegramAcknowledgement(ctx context.Context, op channelonboarding.Operation, childID string, evidence credentials.ValueEvidence) error {
+func (c *telegramDeploymentSession) validateRegisteredTelegramAcknowledgement(ctx context.Context, op channelonboarding.Operation, childID string, evidence credentials.ValueEvidence) error {
 	retained, err := c.opts.Operations.GetChannelOnboarding(ctx, op.OperationID)
 	if err != nil || retained.Revision != op.Revision || retained.PrincipalID != op.PrincipalID || retained.AccountReference != op.AccountReference ||
 		retained.IdentityOperationID != childID || retained.FailureCode != "" || retained.LogoutCompleted {

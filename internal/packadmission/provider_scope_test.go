@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
 )
@@ -278,10 +279,11 @@ func TestS1ProviderSourceDoesNotPromoteVisibilityToHolderOwnership(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		admitted, err := AdmitProviderSource(captured, bundle.Platform)
+		projection, err := AdmitInventory(captured, bundle.PackInventory, bundle.Platform)
 		if err != nil {
 			t.Fatal(err)
 		}
+		admitted := projection.(Projection).WithProviderFacts(channelfixture.For("whatsapp")).providerSource
 		scope, err := admitted.Scope(".")
 		if err != nil {
 			t.Fatal(err)

@@ -2,6 +2,7 @@ package channelonboarding
 
 import (
 	"errors"
+	"github.com/division-sh/swarm/tests/support/channelfixture"
 	"strings"
 	"testing"
 
@@ -243,5 +244,5 @@ func testCandidate(hashSuffix, flow string) Candidate {
 			AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog")), SigningCredentialKey: "telegram_signing"},
 		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAuthenticatedTextChallenge,
 		ProviderCredentialRole: "bot_token", SigningCredentialRole: "webhook_signing", ConfirmationOperation: "deliver",
-	}
+	}.WithProviderFacts(channelfixture.For("telegram"))
 }
