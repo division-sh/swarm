@@ -80,18 +80,8 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 			EntityID: instance.EntityID, FlowID: entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, instance.StorageRef),
 			Status: instance.Status, Stage: instance.CurrentState, Fields: instance.Fields, StateBuckets: instance.StateBuckets,
 		})
-		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, instance.StateBuckets)
-		if err != nil {
+		if err := collectUpgradeCommittedGateCards(instance.StateBuckets, committedGates); err != nil {
 			return runbundle.UpgradeState{}, err
-		}
-		activations, err := gateruntime.List(carrier.StateBuckets)
-		if err != nil {
-			return runbundle.UpgradeState{}, err
-		}
-		for _, activation := range activations {
-			if activation.Status == gateruntime.StatusDecisionCommitted {
-				committedGates[activation.CardID] = true
-			}
 		}
 	}
 	state.Deliveries, err = owner.ReadActiveRunDeliverySnapshotsTx(ctx, tx, runID)
@@ -135,6 +125,23 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 		return runbundle.UpgradeState{}, err
 	}
 	return state, nil
+}
+
+func collectUpgradeCommittedGateCards(buckets map[string]any, committed map[string]bool) error {
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, buckets)
+	if err != nil {
+		return err
+	}
+	activations, err := gateruntime.List(carrier.StateBuckets)
+	if err != nil {
+		return err
+	}
+	for _, activation := range activations {
+		if activation.Status == gateruntime.StatusDecisionCommitted {
+			committed[activation.CardID] = true
+		}
+	}
+	return nil
 }
 
 func requireUpgradeSourceTx(ctx context.Context, tx *sql.Tx, sqlite bool, runID string, source semanticview.Source) error {
