@@ -109,3 +109,110 @@ func TestSelectedGracefulDrainRetainsAcceptedPublicationHandoff(t *testing.T) {
 		t.Fatal("selected drain failed to join the released accepted producer")
 	}
 }
+
+func TestSelectedGracefulDrainRetainsNativePublicationHandoffBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newActivityForkFixture(t, backend)
+			ctx, request, _ := q1GateComponentSource(t, fixture.owner, true, false, true)
+			attachment := q1StageBranchPointComponent(t, ctx, request)
+			p, container := attachment.prepared, attachment.container
+			if err := p.retainedRuntime.startExecution(container.attachment.ctx, container.attachment.pipeline, container.diagnostics, false); err != nil {
+				t.Fatal(err)
+			}
+			reconcile, err := container.selectedBarrierReconciler()
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := p.operation.selected
+			coordinator, err := deliverycontinuation.NewSelected(p.owner.ports.busDurable.DeliveryLifecycle, container.attachment.deliveryAuthority, selected, container.attachment.runtime.bus, nil, reconcile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = coordinator.Retire(context.Background()) })
+			if err := container.attachment.runtime.bus.SetDeliveryContinuationOwner(coordinator); err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.Start(container.attachment.ctx); err != nil {
+				t.Fatal(err)
+			}
+			finish, err := p.owner.beginSelectedOrchestration(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer finish()
+			held, err := selected.Begin(p.operation.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer held.Done()
+			inputs, err := container.commitSelectedInputs()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				for _, input := range inputs {
+					if err := container.attachment.runtime.bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared); err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+			var proofs []deliverylifecycle.DurableHandoffProof
+			for _, input := range inputs {
+				committed, err := input.prepared.CommittedDeliveryHandoffs()
+				if err != nil {
+					t.Fatal(err)
+				}
+				proofs = append(proofs, committed...)
+			}
+			if len(proofs) == 0 {
+				t.Fatal("selected graceful handoff lacks a real native publication")
+			}
+			drainCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			drained := make(chan error, 1)
+			go func() { drained <- p.owner.DrainSelectedContexts(drainCtx) }()
+			for {
+				probe, err := selected.Begin(ctx)
+				if probe != nil {
+					_ = probe.Done()
+				}
+				if err == worklifetime.ErrAdmissionFenced {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-drainCtx.Done():
+					t.Fatal("selected native drain did not seal fresh admission")
+				case <-time.After(time.Millisecond):
+				}
+			}
+			_ = coordinator.Synchronize(drainCtx)
+			if err := coordinator.AcceptCommitted(proofs); err != nil {
+				t.Errorf("selected drain refused native committed handoffs: %v", err)
+			}
+			for _, proof := range proofs {
+				row, err := p.owner.ports.busDurable.DeliveryLifecycle.Snapshot(ctx, proof.DeliveryID())
+				if err != nil || row.EventID != proof.EventID() {
+					t.Fatalf("native handoff lost its exact publication: %+v %v", row, err)
+				}
+			}
+			if held.Context().Err() != nil || drainCtx.Err() != nil {
+				t.Fatal("native handoff outlived its original accepted context or drain")
+			}
+			_ = held.Done()
+			finish()
+			_ = p.operation.releaseOrchestration()
+			select {
+			case err := <-drained:
+				if err != nil {
+					t.Error(err)
+				}
+			case <-drainCtx.Done():
+				t.Fatal("native handoff drain did not join accepted work")
+			}
+		})
+	}
+}

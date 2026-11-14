@@ -184,6 +184,19 @@ func (s *processLifecycleSupervisor) serveMCP(w http.ResponseWriter, r *http.Req
 		return
 	}
 	handler := s.currentRT.ToolGateway.Handler()
+	if owner := s.currentRT.WorkOccurrence(); owner != nil {
+		accepted, release, err := s.currentRT.ToolGateway.AcquireAcceptedRuntimeRequest(r, owner)
+		if err != nil || accepted != nil {
+			s.mu.RUnlock()
+			if err != nil {
+				http.Error(w, "runtime execution is unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			defer release()
+			handler.ServeHTTP(w, r.WithContext(accepted))
+			return
+		}
+	}
 	use, _, err := s.runtimeContexts.AcquireBundleHash(r.Context(), s.currentSourceArtifactFact.BundleHash())
 	s.mu.RUnlock()
 	if err != nil || use == nil {

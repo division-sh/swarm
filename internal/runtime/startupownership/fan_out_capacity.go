@@ -266,6 +266,31 @@ func (r *FanOutServingRegistration) Close() {
 	<-r.done
 }
 
+// Drain seals selection without revoking an admitted turn's context. The same
+// shutdown deadline still cancels it, and real grant/process loss keeps Close's
+// existing cancellation and mandatory handoff join.
+func (r *FanOutServingRegistration) Drain(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	p := r.grant.owner
+	p.mu.Lock()
+	r.turnsClosing = true
+	p.mu.Unlock()
+	r.Wake()
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(canceled)
+		r.cancel()
+	})
+	r.turns.Wait()
+	r.Close()
+	if !stop() {
+		<-canceled
+	}
+	return ctx.Err()
+}
+
 // BeginTurn is nonblocking on capacity. Its lease covers the finite turn,
 // including post-commit handoff. It is not a substitute for the store's current
 // generation, run and claim checks inside mutation admission.

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -147,14 +148,71 @@ func (g *Gateway) ActivationProbeToken(r *http.Request) (runtimeeffects.Lifecycl
 	return turn.LifecycleToken, true
 }
 
+type acceptedRuntimeRequestContextKey struct{}
+
+type acceptedRuntimeRequest struct {
+	gateway *Gateway
+	owner   *worklifetime.RuntimeOccurrence
+}
+
+// AcquireAcceptedRuntimeRequest composes the registered turn's original work
+// owner with transport cancellation. Startup and unregistered requests retain
+// their existing, separate admission paths.
+func (g *Gateway) AcquireAcceptedRuntimeRequest(r *http.Request, expected *worklifetime.RuntimeOccurrence) (context.Context, func(), error) {
+	if g == nil || r == nil {
+		return nil, nil, nil
+	}
+	if err := r.Context().Err(); err != nil {
+		return nil, nil, err
+	}
+	if admitted, ok := r.Context().Value(acceptedRuntimeRequestContextKey{}).(acceptedRuntimeRequest); ok && admitted.gateway == g && (expected == nil || expected == admitted.owner) {
+		return r.Context(), func() {}, r.Context().Err()
+	}
+	if r.Method != http.MethodPost || g.authorize(r) != nil {
+		return nil, nil, nil
+	}
+	turn, err := g.runtimeTurnContextForRequest(r, "mcp.accepted_turn_admission")
+	if err != nil || turn.original == nil || turn.CapabilitySurface == nil ||
+		turn.CapabilitySurface.Authority.Kind != managedcapabilities.AuthorityProviderTurn ||
+		turn.CapabilitySurface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent ||
+		!turn.HasEffectAuthority || turn.EffectAuthority.Kind != runtimeeffects.AuthorityNormalAgent ||
+		!turn.EffectAuthority.Valid() || !turn.EffectAuthority.LeaseExpiresAt.After(time.Now()) ||
+		turn.EffectAuthority.Normal.Identity != turn.Actor.Identity ||
+		!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(turn.EffectAuthority.Target, *turn.CapabilitySurface) ||
+		!turn.HasExecutionAdmission || !turn.ExecutionAdmission.AuthorizesNormal() ||
+		turn.CapabilitySurface.Authority.ExecutionAuthorityID != turn.ExecutionAdmission.ExecutionAuthorityID {
+		return nil, nil, nil
+	}
+	ctx, cancel := context.WithCancel(turn.original)
+	stop := context.AfterFunc(r.Context(), cancel)
+	lease, err := worklifetime.BeginAcceptedRuntimeWork(ctx, expected)
+	if err != nil {
+		stop()
+		cancel()
+		return nil, nil, err
+	}
+	release := func() { stop(); cancel(); _ = lease.Done() }
+	owner, _ := worklifetime.RuntimeOccurrenceFromContext(lease.Context())
+	if owner.Identity().BundleHash != turn.ExecutionAdmission.BundleHash {
+		release()
+		return nil, nil, worklifetime.ErrAdmissionFenced
+	}
+	return context.WithValue(lease.Context(), acceptedRuntimeRequestContextKey{}, acceptedRuntimeRequest{gateway: g, owner: owner}), release, nil
+}
+
 func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteJSON(w, http.StatusMethodNotAllowed, ToolGatewayResponse{OK: false, Error: "method not allowed"})
 		return
 	}
 	if g.runtimeShutdownAdmissionClosed() {
-		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime shutting down"})
-		return
+		ctx, release, err := g.AcquireAcceptedRuntimeRequest(r, nil)
+		if err != nil || ctx == nil {
+			WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime shutting down"})
+			return
+		}
+		defer release()
+		r = r.WithContext(ctx)
 	}
 	if g.runtimeIngressPaused(r.Context()) {
 		WriteJSON(w, http.StatusServiceUnavailable, ToolGatewayResponse{OK: false, Error: "runtime reset in progress"})
@@ -220,8 +278,13 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	case http.MethodPost:
 		if g.runtimeShutdownAdmissionClosed() {
-			WriteRPCError(w, nil, -32002, "runtime shutting down")
-			return
+			ctx, release, err := g.AcquireAcceptedRuntimeRequest(r, nil)
+			if err != nil || ctx == nil {
+				WriteRPCError(w, nil, -32002, "runtime shutting down")
+				return
+			}
+			defer release()
+			r = r.WithContext(ctx)
 		}
 		if g.runtimeIngressPaused(r.Context()) {
 			WriteRPCError(w, nil, -32002, "runtime reset in progress")

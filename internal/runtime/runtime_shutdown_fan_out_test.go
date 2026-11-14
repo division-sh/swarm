@@ -103,7 +103,63 @@ func assertShutdownFanOutPending(t *testing.T, shutdown <-chan error) {
 	}
 }
 
+func awaitShutdownFanOutFreshRefusal(t *testing.T, ctx context.Context, rt *Runtime, registration *startupownership.FanOutServingRegistration, permit *startupownership.FanOutTurnPermit) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		probe, err := rt.workOccurrence.Begin(ctx)
+		if probe != nil {
+			if doneErr := probe.Done(); doneErr != nil {
+				t.Fatal(doneErr)
+			}
+		}
+		captured := false
+		if rt.lifecycleMu.TryLock() {
+			captured = rt.fanOutServing == nil
+			rt.lifecycleMu.Unlock()
+		}
+		if err == worklifetime.ErrAdmissionFenced && captured {
+			break
+		}
+		if err != nil && err != worklifetime.ErrAdmissionFenced {
+			t.Fatal(err)
+		}
+		select {
+		case <-deadline:
+			t.Fatal("shutdown did not seal and capture the exact fan-out registration")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.startupGrant.ProveCurrent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	probe, found, err := registration.BeginTurn(ctx)
+	if probe != nil {
+		probe.Done()
+	}
+	if probe != nil || found || err != worklifetime.ErrAdmissionFenced || permit.Context().Err() != nil {
+		t.Fatalf("exact registration refusal lost its live accepted permit: found=%v err=%v permit_error=%v", found, err, permit.Context().Err())
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.startupGrant.ProveCurrent(ctx); err != nil {
+		t.Fatalf("fresh refusal lost its current generation: %v", err)
+	}
+}
+
 func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	verifyRuntimeShutdownFanOutCommittedTurn(t, open, false)
+}
+
+func VerifyRuntimeShutdownFanOutAcceptedPermitSurvivesDrainForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	verifyRuntimeShutdownFanOutCommittedTurn(t, open, true)
+}
+
+func verifyRuntimeShutdownFanOutCommittedTurn(t *testing.T, open RuntimeLogNativeOpenerForTest, requireLivePermit bool) {
 	store, fixture := newRuntimeShutdownDeliveryStore(t, open)
 	ctx := testAuthorActivityContext(fixture.Context)
 	bus, err := newRuntimeTestEventBus(t, nil)
@@ -203,7 +259,28 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- rt.ShutdownWithOptions(ShutdownOptions{Grace: 10 * time.Second}) }()
-	awaitShutdownFanOut(t, permit.Context().Done(), "registration cancellation")
+	if requireLivePermit {
+		deadline := time.After(5 * time.Second)
+		for {
+			next, _, err := registration.BeginTurn(ctx)
+			if next != nil {
+				next.Done()
+			}
+			if err != nil {
+				break
+			}
+			select {
+			case <-deadline:
+				t.Fatal("fan-out registration did not close fresh admission")
+			case <-time.After(time.Millisecond):
+			}
+		}
+		if err := permit.Context().Err(); err != nil {
+			t.Errorf("accepted fan-out turn canceled before Done during live shutdown grace: %v", context.Cause(permit.Context()))
+		}
+	} else {
+		awaitShutdownFanOutFreshRefusal(t, ctx, rt, registration, permit)
+	}
 	assertShutdownFanOutPending(t, shutdown)
 	if !rt.shutdownAdmissionClosed() {
 		t.Fatal("ingress must be closed while admitted fan-out work drains")
@@ -260,6 +337,11 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	if rt.workOccurrence.ActiveCount() != 0 {
 		t.Fatalf("shutdown leaked runtime work: active=%d", rt.workOccurrence.ActiveCount())
 	}
+	// The registration's separate standing lease ends only after its turn join;
+	// permit.Done alone cannot satisfy the zero-active assertion above.
+	if permit.Context().Err() != context.Canceled {
+		t.Fatalf("joined registration retained its completed permit context: %v", permit.Context().Err())
+	}
 }
 
 func TestRuntimeShutdownFanOutDoesNotJoinBufferedOccurrenceBeforeBusRetirement(t *testing.T) {
@@ -298,7 +380,7 @@ func TestRuntimeShutdownFanOutDoesNotJoinBufferedOccurrenceBeforeBusRetirement(t
 	}()
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- rt.ShutdownWithOptions(ShutdownOptions{Grace: 10 * time.Second}) }()
-	awaitShutdownFanOut(t, permit.Context().Done(), "registration cancellation with buffered work")
+	awaitShutdownFanOutFreshRefusal(t, ctx, rt, registration, permit)
 	assertShutdownFanOutPending(t, shutdown)
 	select {
 	case <-subscription.Retiring():
@@ -316,5 +398,10 @@ func TestRuntimeShutdownFanOutDoesNotJoinBufferedOccurrenceBeforeBusRetirement(t
 	}
 	if _, err := rt.workOccurrence.Begin(ctx); !errors.Is(err, worklifetime.ErrRetired) {
 		t.Fatalf("runtime occurrence not retired: %v", err)
+	}
+	// Zero active work also witnesses the registration's joined standing lease,
+	// independently of the child context canceled by permit.Done.
+	if permit.Context().Err() != context.Canceled {
+		t.Fatalf("joined buffered registration retained its completed permit context: %v", permit.Context().Err())
 	}
 }

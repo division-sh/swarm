@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -2755,6 +2756,152 @@ func TestGatewayHandleMCP_DeniesToolCallWhenRuntimeShutdownAdmissionClosed(t *te
 	}
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+}
+
+func TestGatewayAcceptedRegisteredTurnToolCallSurvivesShutdownDrain(t *testing.T) {
+	ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: "accepted-mcp-control", BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithProcess(worklifetime.WithOccurrence(ctx, owner), process)
+	accepted, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = accepted.Context()
+	t.Cleanup(func() {
+		_ = accepted.Done()
+		owner.Retire()
+		process.Retire()
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(join); err != nil {
+			t.Error(err)
+		}
+		if _, err := process.Join(join); err != nil {
+			t.Error(err)
+		}
+	})
+	registry := NewTurnContextRegistry(models.ActorFromContext)
+	token := registry.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+	if token == "" {
+		t.Fatal("register admitted current provider turn")
+	}
+	t.Cleanup(func() { registry.UnregisterTurnContext(token) })
+	closed := false
+	calls := 0
+	hooks := managedCLIGatewayHooks(registry)
+	hooks.RuntimeShutdownAdmissionClosed = func() bool { return closed }
+	gateway := NewGateway(testToolExecutor(func(context.Context, string, any) (any, error) {
+		calls++
+		return map[string]any{"ok": true}, nil
+	}), testGatewayToken, hooks)
+	// Observe the listed surface while the exact turn is current, before stop.
+	listed := callMCPGateway(t, gateway, token, RPCRequest{JSONRPC: "2.0", ID: "list-before-stop", Method: "tools/list"})
+	if listed.Error != nil {
+		t.Fatalf("list exact accepted surface: %+v", listed.Error)
+	}
+	before := callMCPGateway(t, gateway, token, RPCRequest{
+		JSONRPC: "2.0", ID: "accepted-before-stop", Method: "tools/call",
+		Params: map[string]any{"name": "write_file", "arguments": map[string]any{"path": "/workspace/retained.txt", "content": "synthetic"},
+			"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "accepted-before-stop"}},
+	})
+	if before.Error != nil || calls != 1 {
+		t.Fatalf("pre-stop tool control did not execute: calls=%d response=%+v", calls, before)
+	}
+	closed = true
+	if _, current := registry.ResolveTurnContext(token); !current || ctx.Err() != nil {
+		t.Fatal("fixture lost its current turn before the drain tool call")
+	}
+	response := callMCPGateway(t, gateway, token, RPCRequest{
+		JSONRPC: "2.0", ID: "accepted-during-drain", Method: "tools/call",
+		Params: map[string]any{"name": "write_file", "arguments": map[string]any{"path": "/workspace/retained.txt", "content": "synthetic"},
+			"_meta": map[string]any{claudeCodeToolUseIDMetaKey: "accepted-drain-tool"}},
+	})
+	if response.Error != nil || calls != 2 {
+		t.Fatalf("current pre-stop registered turn lost its tool call within grace: calls=%d error=%+v result=%+v", calls, response.Error, response.Result)
+	}
+}
+
+func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
+	for _, name := range []string{"accepted", "standing", "absent", "settled", "unregistered", "foreign", "wrong_source", "request_canceled"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
+			process := worklifetime.NewProcess()
+			owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: "exact-accepted-request", BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent, err := owner.Begin(ctx)
+			if name == "standing" {
+				_ = parent.Done()
+				parent, err = owner.BeginStanding(ctx)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = parent.Done()
+				owner.Retire()
+				process.Retire()
+				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if _, err := owner.RetireAndWait(join); err != nil {
+					t.Error(err)
+				}
+				if _, err := process.Join(join); err != nil {
+					t.Error(err)
+				}
+			})
+			original := parent.Context()
+			if name == "absent" {
+				original = worklifetime.WithOccurrence(ctx, owner)
+			}
+			if name == "wrong_source" {
+				admission, _ := managedexecution.FromContext(original)
+				admission.BundleHash = "bundle-v2:sha256:" + strings.Repeat("f", 64)
+				original = managedexecution.WithAdmission(original, admission)
+			}
+			registry := NewTurnContextRegistry(models.ActorFromContext)
+			token := registry.RegisterTurnContextWithCapabilitySurface(original, time.Minute, surface)
+			if token == "" {
+				t.Fatal("register exact synthetic provider turn")
+			}
+			t.Cleanup(func() { registry.UnregisterTurnContext(token) })
+			if name == "settled" {
+				_ = parent.Done()
+			}
+			if name == "unregistered" {
+				registry.UnregisterTurnContext(token)
+			}
+			expected := owner
+			if name == "foreign" {
+				expected = &worklifetime.RuntimeOccurrence{}
+			}
+			request := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), token)
+			authorizeGatewayRequest(request)
+			if name == "request_canceled" {
+				canceled, cancel := context.WithCancel(request.Context())
+				cancel()
+				request = request.WithContext(canceled)
+			}
+			gateway := NewGateway(testToolExecutor(nil), testGatewayToken, managedCLIGatewayHooks(registry))
+			if name == "accepted" {
+				if err := owner.Fence(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			admitted, release, err := gateway.AcquireAcceptedRuntimeRequest(request, expected)
+			if release != nil {
+				release()
+			}
+			if (admitted != nil && err == nil) != (name == "accepted") {
+				t.Fatalf("request admission=%v error=%v", admitted != nil, err)
+			}
+		})
 	}
 }
 

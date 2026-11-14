@@ -2294,16 +2294,18 @@ func (rt *Runtime) drainAdmittedIngress(ctx context.Context, grace time.Duration
 	rt.fanOutServing = nil
 	rt.fanOutContext = nil
 	rt.lifecycleMu.Unlock()
+	var drainErr error
 	if fanOutServing != nil {
-		fanOutServing.Close()
+		drainErr = fanOutServing.Drain(ctx)
 	}
 	if err := rt.shutdownGate.Wait(ctx); err != nil {
 		return errors.Join(
+			drainErr,
 			fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err),
 			rt.shutdownGate.Wait(context.Background()),
 		)
 	}
-	return nil
+	return drainErr
 }
 
 func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
