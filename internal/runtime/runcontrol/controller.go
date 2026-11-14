@@ -32,6 +32,9 @@ var (
 // IsNotPausedOnly permits a handler recheck only when no transaction or cleanup
 // failure accompanies the native live-run refusal.
 func IsNotPausedOnly(err error) bool {
+	if _, typed := failures.As(err); typed {
+		return false
+	}
 	return failures.OnlyBranches(err, func(cause error) bool { return cause == ErrNotPaused })
 }
 
@@ -359,25 +362,13 @@ func (c *Controller) resumeContinuedFanOut(ctx context.Context, runID string, re
 }
 
 func onlySelectedHandlerResumeRefusal(err error, runID string) bool {
-	switch cause := err.(type) {
-	case *runfork.SelectedForkControlUnsupported:
-		return cause != nil && cause.RunID == runID && cause.BindingID != "" && cause.Operation == runfork.ControlRunContinue
-	case interface{ Unwrap() []error }:
-		children := cause.Unwrap()
-		if len(children) == 0 {
-			return false
-		}
-		for _, child := range children {
-			if !onlySelectedHandlerResumeRefusal(child, runID) {
-				return false
-			}
-		}
-		return true
-	case interface{ Unwrap() error }:
-		return onlySelectedHandlerResumeRefusal(cause.Unwrap(), runID)
-	default:
+	if _, typed := failures.As(err); typed {
 		return false
 	}
+	return failures.OnlyBranches(err, func(branch error) bool {
+		cause, ok := branch.(*runfork.SelectedForkControlUnsupported)
+		return ok && cause != nil && cause.RunID == runID && cause.BindingID != "" && cause.Operation == runfork.ControlRunContinue
+	})
 }
 
 func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string, detachFirst bool) PostCommitRecovery {

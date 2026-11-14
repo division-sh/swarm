@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -240,6 +241,8 @@ func proveNotPausedFailureDoesNotResume(t *testing.T) {
 		{"mixed_cleanup", errors.Join(ErrNotPaused, cleanup), false},
 		{"mixed_connection_disposal", errors.Join(ErrNotPaused, driver.ErrBadConn), false},
 		{"wrapped_mixed_cleanup", fmt.Errorf("native outcome: %w", errors.Join(ErrNotPaused, cleanup)), false},
+		{"typed_uncertain", failures.Wrap(failures.ClassOutcomeUncertain, "native_outcome_uncertain", "test", "continue", nil, ErrNotPaused), false},
+		{"typed_independent", failures.Wrap(failures.ClassInternalFailure, "native_cleanup_failed", "test", "continue", nil, ErrNotPaused), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsNotPausedOnly(tc.failure); got != tc.benign {
@@ -275,6 +278,8 @@ func proveContinuedSelectedHandlerBoundary(t *testing.T) {
 		{"selected", refusal, fanoutobligation.ResumeResult{}, true},
 		{"wrapped_selected", errors.Join(fmt.Errorf("native owner: %w", refusal)), fanoutobligation.ResumeResult{}, true},
 		{"independent_cleanup", errors.Join(refusal, cleanup), fanoutobligation.ResumeResult{}, false},
+		{"typed_uncertain", failures.Wrap(failures.ClassOutcomeUncertain, "native_outcome_uncertain", "test", "continue", nil, refusal), fanoutobligation.ResumeResult{}, false},
+		{"typed_independent", failures.Wrap(failures.ClassInternalFailure, "native_cleanup_failed", "test", "continue", nil, refusal), fanoutobligation.ResumeResult{}, false},
 		{"different_run", &runfork.SelectedForkControlUnsupported{RunID: "run-2", BindingID: "binding-1", Operation: runfork.ControlRunContinue}, fanoutobligation.ResumeResult{}, false},
 		{"different_operation", &runfork.SelectedForkControlUnsupported{RunID: "run-1", BindingID: "binding-1", Operation: runfork.ControlAgentRestart}, fanoutobligation.ResumeResult{}, false},
 		{"missing_binding", &runfork.SelectedForkControlUnsupported{RunID: "run-1", Operation: runfork.ControlRunContinue}, fanoutobligation.ResumeResult{}, false},
