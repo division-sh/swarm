@@ -56,7 +56,7 @@ func admitDecisionCardRequest(ctx context.Context, owner decisionCardRequestSour
 	if err != nil {
 		return "", fact, err
 	}
-	if !fact.Matches(actual) || card.BundleHash != fact.BundleHash() {
+	if !fact.Matches(actual) || card.Anchor.Kind() != decisioncard.AnchorKindStageGate && card.BundleHash != fact.BundleHash() {
 		return "", fact, fmt.Errorf("card source differs from admitted runtime source")
 	}
 	return card.RunID, fact, nil

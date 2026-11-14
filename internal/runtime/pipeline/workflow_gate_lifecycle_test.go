@@ -475,7 +475,11 @@ func assertGateLifecycleState(t *testing.T, store *workflowInstanceStore, ctx co
 
 func gateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	return loadWorkflowTempBundle(t, map[string]string{
+	return loadWorkflowTempBundle(t, gateLifecycleDocuments())
+}
+
+func gateLifecycleDocuments() map[string]string {
+	return map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
 		"schema.yaml": `stages:
   awaiting_review:
@@ -498,7 +502,7 @@ func gateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle 
   ordinary.transition: {advances_to: operating}
   review.expired: {advances_to: operating}
 `,
-	})
+	}
 }
 
 func TestRootDeclarationConsumersUseAuthoredExecutionFlowNotDisplayName(t *testing.T) {

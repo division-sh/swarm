@@ -188,6 +188,15 @@ func LoadDecisionCardInTx(ctx context.Context, tx *sql.Tx, id string, postgres b
 	return loadDecisionCard(ctx, tx, id, postgres, true)
 }
 
+// ReadDecisionCardInTx keeps canonical decoding without acquiring a card lock
+// before the native caller's instance lock.
+func ReadDecisionCardInTx(ctx context.Context, tx *sql.Tx, id string, postgres bool) (decisioncard.Card, error) {
+	if tx == nil {
+		return decisioncard.Card{}, fmt.Errorf("decision card transaction is required")
+	}
+	return loadDecisionCard(ctx, tx, id, postgres, false)
+}
+
 func (s *DecisionPostgresOwner) LoadTx(ctx context.Context, attempt *mutationprotocol.Attempt, id string, forUpdate bool) (decisioncard.Card, error) {
 	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
 		return loadDecisionCard(txctx, tx, id, true, forUpdate)

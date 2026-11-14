@@ -70,6 +70,10 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 	pipeline.VerifyNativeWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailureForTest(t, pipelineDeliveryNativeFixture)
 }
 
+func TestWorkflowGateAnswerUpgradeNativeOrdersBothStores(t *testing.T) {
+	pipeline.VerifyGateAnswerUpgradeOrdersBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
 func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testing.T) {
 	pipeline.VerifyNativeWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
