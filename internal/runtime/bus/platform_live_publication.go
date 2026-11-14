@@ -76,7 +76,7 @@ func (eb *EventBus) planPlatformLivePublication(ctx context.Context, event event
 		combined.AuthorityOwner = plan.AuthorityOwner
 		combined.AddLiveRecipients(plan.LiveRecipients...)
 		combined.AddDeliveryIntents(plan.DeliveryIntents...)
-		combined.RoutedRecipients = append(combined.RoutedRecipients, plan.RoutedRecipients...)
+		combined.routedAgents = append(combined.routedAgents, plan.routedAgents...)
 		combined.SubscribedRecipients = append(combined.SubscribedRecipients, plan.SubscribedRecipients...)
 		combined.ActivationPlans = append(combined.ActivationPlans, plan.ActivationPlans...)
 		combined.ReplyCreations = append(combined.ReplyCreations, plan.ReplyCreations...)

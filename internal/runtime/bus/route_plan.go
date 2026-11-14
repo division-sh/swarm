@@ -77,7 +77,7 @@ type RoutePlan struct {
 	AuthorityOwner           routeIntentProducer
 	LiveRecipients           []RoutePlanLiveRecipient
 	DeliveryIntents          []RoutePlanDeliveryIntent
-	RoutedRecipients         []Subscriber
+	routedAgents             []Subscriber
 	SubscribedRecipients     []string
 	ExtraDetail              map[string]any
 	TargetFailure            runtimepinrouting.TargetFailure
@@ -163,6 +163,7 @@ func (a agentLifecycleAdmission) validate() error {
 }
 
 type RoutePlanDeliveryIntent struct {
+	nodeSubscribers   []Subscriber
 	Recipient         events.DeliveryRecipient
 	AgentIdentity     agentidentity.Identity
 	TargetBlueprint   events.RouteIdentity
@@ -180,6 +181,7 @@ type RoutePlanDeliveryIntent struct {
 }
 
 type DeliveryRouteBlueprint struct {
+	nodeSubscribers   []Subscriber
 	Recipient         events.DeliveryRecipient
 	AgentIdentity     agentidentity.Identity
 	Target            events.RouteIdentity
@@ -191,7 +193,8 @@ type DeliveryRouteBlueprint struct {
 
 func (r DeliveryRouteBlueprint) normalized() DeliveryRouteBlueprint {
 	return DeliveryRouteBlueprint{
-		Recipient: r.Recipient, AgentIdentity: r.AgentIdentity.Normalize(), Target: r.Target.Normalized(),
+		nodeSubscribers: append([]Subscriber(nil), r.nodeSubscribers...),
+		Recipient:       r.Recipient, AgentIdentity: r.AgentIdentity.Normalize(), Target: r.Target.Normalized(),
 		Handler: r.Handler, Context: r.Context.Normalized(), PayloadProjection: r.PayloadProjection.Normalized(), ConnectClaim: r.ConnectClaim,
 	}
 }
@@ -201,7 +204,7 @@ func normalizePlannedDeliveryRoutes(in []DeliveryRouteBlueprint) []DeliveryRoute
 		return nil
 	}
 	out := make([]DeliveryRouteBlueprint, 0, len(in))
-	seen := make(map[deliveryIntentKey]struct{}, len(in))
+	seen := make(map[deliveryIntentKey]int, len(in))
 	for _, route := range in {
 		route = route.normalized()
 		if route.Recipient.Empty() {
@@ -217,10 +220,11 @@ func normalizePlannedDeliveryRoutes(in []DeliveryRouteBlueprint) []DeliveryRoute
 			handler: route.Handler, contextIdentity: contextIdentity,
 			projection: route.PayloadProjection.Fingerprint(), connectClaim: route.ConnectClaim,
 		}
-		if _, ok := seen[key]; ok {
+		if index, ok := seen[key]; ok {
+			out[index].nodeSubscribers = dedupeSubscribers(append(out[index].nodeSubscribers, route.nodeSubscribers...))
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[key] = len(out)
 		out = append(out, route)
 	}
 	return out
@@ -235,7 +239,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.AuthorityOwner = p.AuthorityOwner.Normalized()
 	p.LiveRecipients = normalizeRoutePlanLiveRecipients(p.LiveRecipients)
 	p.DeliveryIntents = normalizeRoutePlanDeliveryIntents(p.DeliveryIntents)
-	p.RoutedRecipients = append([]Subscriber(nil), p.RoutedRecipients...)
+	p.routedAgents = append([]Subscriber(nil), p.routedAgents...)
 	p.SubscribedRecipients = uniqueStrings(p.SubscribedRecipients)
 	p.ExtraDetail = cloneStringAnyMap(p.ExtraDetail)
 	p.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), p.ActivationPlans...)
@@ -255,7 +259,7 @@ func (p RoutePlan) Normalized() RoutePlan {
 	if p.canonicalRouteFailedClosed() {
 		p.LiveRecipients = nil
 		p.DeliveryIntents = nil
-		p.RoutedRecipients = nil
+		p.routedAgents = nil
 		p.SubscribedRecipients = nil
 		p.ActivationPlans = nil
 		p.ReplyCreations = nil
@@ -283,7 +287,7 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer,
 	p.TargetFailure = failure
 	p.LiveRecipients = nil
 	p.DeliveryIntents = nil
-	p.RoutedRecipients = nil
+	p.routedAgents = nil
 	p.SubscribedRecipients = nil
 }
 
@@ -366,7 +370,7 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 	p = p.Normalized()
 	out := make([]events.DeliveryRoute, 0, len(p.DeliveryIntents))
 	for _, intent := range p.DeliveryIntents {
-		if !intent.Persist {
+		if !intent.Persist || intent.pendingNodeCandidate() {
 			continue
 		}
 		out = append(out, intent.deliveryRoute())
@@ -384,7 +388,7 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 	}
 	out := make([]events.DeliveryRoute, 0, len(p.DeliveryIntents))
 	for _, intent := range p.DeliveryIntents {
-		if !intent.Persist {
+		if !intent.Persist || intent.pendingNodeCandidate() {
 			continue
 		}
 		if intent.Recipient.IsAgent() && intent.AgentLifecycle.pending() {
@@ -404,6 +408,12 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 // LiveRecipients entry.
 func (p RoutePlan) ValidatePersistentDeliveries() error {
 	p = p.Normalized()
+	for _, intent := range p.DeliveryIntents {
+		if intent.pendingNodeCandidate() {
+			subscriber := intent.nodeSubscribers[0]
+			return fmt.Errorf("routed node %q at %q matched target-free event %q without exact same-instance, explicit-target, or compiled-connect authority", subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), p.Event.Type())
+		}
+	}
 	liveAgents := make(map[agentidentity.Identity]struct{})
 	for index, recipient := range p.LiveRecipients {
 		if !recipient.PersistAsDelivery {
@@ -542,7 +552,8 @@ func routePlanDeliveryIntentsFromRoutes(routes []DeliveryRouteBlueprint, produce
 	out := make([]RoutePlanDeliveryIntent, 0, len(routes))
 	for _, route := range routes {
 		out = append(out, RoutePlanDeliveryIntent{
-			Recipient: route.Recipient, AgentIdentity: route.AgentIdentity, TargetBlueprint: route.Target,
+			nodeSubscribers: append([]Subscriber(nil), route.nodeSubscribers...),
+			Recipient:       route.Recipient, AgentIdentity: route.AgentIdentity, TargetBlueprint: route.Target,
 			Handler: route.Handler, Context: route.Context, PayloadProjection: route.PayloadProjection, ConnectClaim: route.ConnectClaim,
 			Producer: producer, Persist: true,
 		})
@@ -691,6 +702,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 	out := make([]RoutePlanDeliveryIntent, 0, len(in))
 	indexByKey := make(map[deliveryIntentKey]int, len(in))
 	for _, intent := range in {
+		intent.nodeSubscribers = append([]Subscriber(nil), intent.nodeSubscribers...)
 		intent.AgentIdentity = intent.AgentIdentity.Normalize()
 		intent.TargetBlueprint = intent.TargetBlueprint.Normalized()
 		intent.ReceiverBlueprint = intent.ReceiverBlueprint.Normalized()
@@ -704,6 +716,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
+			out[idx].nodeSubscribers = dedupeSubscribers(append(out[idx].nodeSubscribers, intent.nodeSubscribers...))
 			if out[idx].Handler.Empty() {
 				out[idx].Handler = intent.Handler
 			}
@@ -720,7 +733,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 
 // Invalid intents remain separate so ordinary admission can report them.
 func deliveryIntentDeduplicationKey(intent RoutePlanDeliveryIntent) (deliveryIntentKey, bool) {
-	if intent.Recipient.Empty() {
+	if intent.Recipient.Empty() || intent.pendingNodeCandidate() {
 		return deliveryIntentKey{}, false
 	}
 	if intent.Recipient.IsAgent() {

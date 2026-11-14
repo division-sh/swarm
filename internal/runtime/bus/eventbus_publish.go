@@ -2440,9 +2440,6 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
-		return RoutePlan{}, err
-	}
 	routePlan := plan.Normalized()
 	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
 	routePlan, err = restoreSelectedForkRecipientContexts(ctx, evt, routePlan)
@@ -2473,17 +2470,17 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Context, evt events.Event, routePlan RoutePlan, planner deliveryPlanner) (RoutePlan, error) {
 	routePlan = routePlan.Normalized()
 	if eb == nil || eb.recipientPlanMaterializer == nil {
-		return routePlan, nil
+		return routePlan, routePlan.ValidatePersistentDeliveries()
 	}
 	if routePlan.CanonicalRouteOwnerMatched() {
-		return routePlan, nil
+		return routePlan, routePlan.ValidatePersistentDeliveries()
 	}
 	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
 	if err != nil {
 		return RoutePlan{}, err
 	}
 	if len(routes) == 0 {
-		return routePlan, nil
+		return routePlan, routePlan.ValidatePersistentDeliveries()
 	}
 	routePlan.recordOrdinaryRouteProducer()
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerOrdinary)...)
@@ -2491,7 +2488,11 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return planner.resolvePreparedRoutePlan(projection, routePlan)
+	routePlan, err = planner.resolvePreparedRoutePlan(projection, routePlan)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	return routePlan, routePlan.ValidatePersistentDeliveries()
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
@@ -2520,7 +2521,7 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 			!routePlan.TargetFailure.Empty() || classification.DeliberateNoSubscriber(),
 	}
 	if eb != nil {
-		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients)
+		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.routedRecipients())
 	}
 	return out
 }
@@ -2646,7 +2647,7 @@ func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Even
 		EventType:              strings.TrimSpace(string(evt.Type())),
 		EntityID:               strings.TrimSpace(evt.EntityID()),
 		ParentEventID:          strings.TrimSpace(evt.ParentEventID()),
-		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients),
+		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type()), routePlan.routedRecipients()),
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 	})
 }

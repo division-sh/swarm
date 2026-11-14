@@ -474,6 +474,33 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 	if len(wantTargets) != 0 {
 		t.Fatalf("missing routes: %#v", wantTargets)
 	}
+	t.Run("subscription consumes the composed admitted result", func(t *testing.T) {
+		candidate := plan.Normalized()
+		var receiver RoutePlanDeliveryIntent
+		for _, intent := range candidate.DeliveryIntents {
+			if intent.Recipient.LocalID() == "consumer-node" {
+				receiver = intent
+			}
+		}
+		subscriber := Subscriber{
+			Recipient: receiver.Recipient, Path: receiver.TargetOwnership.Route().FlowInstance,
+			routeSource: subscriberRouteSourceSubscription, handlerNode: receiver.Handler.Node(), targetHandler: receiver.Handler,
+		}
+		candidate.AddDeliveryIntents(RoutePlanDeliveryIntent{
+			Recipient: receiver.Recipient, Handler: receiver.Handler, nodeSubscribers: []Subscriber{subscriber},
+			Producer: routeIntentProducerOrdinary, Persist: true,
+		})
+		resolved, err := (publicationTargetOwnerEvidence{source: source}).resolveRoutePlan(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := resolved.ValidatePersistentDeliveries(); err != nil {
+			t.Fatalf("composed result did not admit its exact subscription: %v", err)
+		}
+		if !reflect.DeepEqual(resolved.DeliveryRoutes(), routes) {
+			t.Fatalf("candidate rewrote admitted target/context/claim/projection: got=%+v want=%+v", resolved.DeliveryRoutes(), routes)
+		}
+	})
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -3760,11 +3787,11 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if routePlan.TargetFailure != runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureInstanceSourceValueMissing) {
 		t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, runtimepinrouting.ConnectFailureInstanceSourceValueMissing)
 	}
-	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
+	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.routedRecipients()) != 0 ||
 		len(routePlan.SubscribedRecipients) != 0 || len(routePlan.RecipientIDs()) != 0 ||
 		len(routePlan.PersistedRecipientIDs()) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
 		t.Fatalf("fail-closed renamed instance-key route exposed lower-precedence fallback: live=%#v intents=%#v routed=%#v subscriptions=%#v recipients=%#v persisted=%#v routes=%#v",
-			routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.RoutedRecipients, routePlan.SubscribedRecipients,
+			routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.routedRecipients(), routePlan.SubscribedRecipients,
 			routePlan.RecipientIDs(), routePlan.PersistedRecipientIDs(), routePlan.DeliveryRoutes())
 	}
 
@@ -3852,11 +3879,11 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			if routePlan.TargetFailure != tc.wantFailure {
 				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
 			}
-			if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
+			if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.routedRecipients()) != 0 ||
 				len(routePlan.SubscribedRecipients) != 0 || len(routePlan.RecipientIDs()) != 0 ||
 				len(routePlan.PersistedRecipientIDs()) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
 				t.Fatalf("fail-closed instance-key route exposed lower-precedence fallback: live=%#v intents=%#v routed=%#v subscriptions=%#v recipients=%#v persisted=%#v routes=%#v",
-					routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.RoutedRecipients, routePlan.SubscribedRecipients,
+					routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.routedRecipients(), routePlan.SubscribedRecipients,
 					routePlan.RecipientIDs(), routePlan.PersistedRecipientIDs(), routePlan.DeliveryRoutes())
 			}
 

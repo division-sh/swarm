@@ -66,6 +66,15 @@ func (p deliveryPlanner) resolvePreparedRoutePlan(projection publicationTargetOw
 	if err != nil {
 		return RoutePlan{}, err
 	}
+	event := plan.Event
+	if p.preparedOwners != nil {
+		event = p.preparedOwners.event
+	}
+	for _, intent := range plan.DeliveryIntents {
+		if err := projection.admitIntentIngress(event, intent); err != nil {
+			return RoutePlan{}, err
+		}
+	}
 	if p.preparedOwners != nil {
 		var origins map[string]events.RouteIdentity
 		if len(plan.ReplyCreations) > 0 {
@@ -193,6 +202,9 @@ func (p publicationTargetOwnerEvidence) resolveRoutePlan(plan RoutePlan) (RouteP
 	}
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
+		if intent.pendingNodeCandidate() {
+			continue
+		}
 		if intent.Recipient.IsAgent() {
 			if intent.TargetOwnership.Empty() {
 				admitted, err := p.admitAgentTarget(plan.Event, *intent)
@@ -238,6 +250,7 @@ func (p publicationTargetOwnerEvidence) resolveRoutePlan(plan RoutePlan) (RouteP
 		}
 		return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: node intent escaped canonical preclassification", intent.Recipient.ID())
 	}
+	p.bindNodeCandidates(&plan)
 	if err := p.bindReceiverMaterializations(&plan); err != nil {
 		return RoutePlan{}, err
 	}
@@ -270,30 +283,30 @@ func validateAgentLifecycleTargetOwnership(intent RoutePlanDeliveryIntent) error
 func (p publicationTargetOwnerEvidence) resolveNodeTargetOwners(plan *RoutePlan, lookups []pipeline.DeliveryTargetLookup) error {
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
-		if intent.Recipient.IsAgent() {
+		if intent.Recipient.IsAgent() || intent.pendingNodeCandidate() {
 			continue
 		}
 		if err := p.prospective.ValidateTarget(intent.TargetBlueprint); err != nil {
 			return err
 		}
+		handler := intent.Handler
+		if handler.Empty() {
+			return fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
+		}
+		var lookup pipeline.DeliveryTargetLookup
+		if lookups != nil {
+			lookup = lookups[index]
+		} else {
+			var err error
+			lookup, err = pipeline.AdmitDeliveryTargetLookup(pipeline.DeliveryTargetOwnershipRequest{
+				Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
+				Handler: handler,
+			})
+			if err != nil {
+				return err
+			}
+		}
 		if intent.TargetOwnership.Empty() {
-			handler := intent.Handler
-			if handler.Empty() {
-				return fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
-			}
-			var lookup pipeline.DeliveryTargetLookup
-			if lookups != nil {
-				lookup = lookups[index]
-			} else {
-				var err error
-				lookup, err = pipeline.AdmitDeliveryTargetLookup(pipeline.DeliveryTargetOwnershipRequest{
-					Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-					Handler: handler,
-				})
-				if err != nil {
-					return err
-				}
-			}
 			candidates, err := p.decisionTargetCandidates(lookup.Coordinate())
 			if err != nil {
 				return err
@@ -310,6 +323,9 @@ func (p publicationTargetOwnerEvidence) resolveNodeTargetOwners(plan *RoutePlan,
 			}
 			if intent.TargetBlueprint.Normalized() != intent.TargetOwnership.Route() {
 				return fmt.Errorf("validate admitted delivery target for %s: blueprint and typed owner disagree: blueprint=%#v owner=%s %#v", intent.Recipient.ID(), intent.TargetBlueprint.Normalized(), intent.TargetOwnership.Code(), intent.TargetOwnership.Route())
+			}
+			if lookup.Coordinate() != intent.TargetOwnership.Route() {
+				return fmt.Errorf("validate admitted delivery target for %s: handler coordinate and typed owner disagree", intent.Recipient.ID())
 			}
 		}
 	}
