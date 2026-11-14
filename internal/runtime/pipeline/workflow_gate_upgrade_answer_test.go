@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -30,9 +32,14 @@ func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineD
 				}
 				card := nativeGateCardForTest(t, fixture, ctx)
 				now := time.Now().UTC()
-				principal := uuid.NewString()
-				request := apiidempotency.Request{Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(principal), ResourceID: card.CardID, IdempotencyKey: uuid.NewString(), RequestHash: "sha256:" + strings.Repeat("b", 64), Now: now, TTL: time.Hour}
-				mutation := NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal, ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: uuid.NewString(), Now: now})
+				principal, err := pc.decisionCards.(interface {
+					EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
+				}).EnsureOperatorPrincipal(ctx, now)
+				if err != nil {
+					t.Fatalf("admit actual operator principal: %v", err)
+				}
+				request := apiidempotency.Request{Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(principal.ID), ResourceID: card.CardID, IdempotencyKey: uuid.NewString(), RequestHash: "sha256:" + strings.Repeat("b", 64), Now: now, TTL: time.Hour}
+				mutation := NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal.ID, ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: uuid.NewString(), Now: now})
 				lease, err := pc.workflowStore.cardMutations.AcquireDecisionCardMutation(ctx, request, mutation)
 				if err != nil {
 					t.Fatal(err)
