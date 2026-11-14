@@ -22,7 +22,7 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 		return runtimeinbound.CommitResult{}, err
 	}
 	request := command.Request.Normalized()
-	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite inbound publication", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
+	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite inbound publication", inboundNeedsCandidateHandoff(command.Publications), func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
 		txctx, release := command.WithNativeLifetime(txctx)
 		defer release()
 		var result runtimeinbound.CommitResult

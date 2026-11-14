@@ -103,20 +103,20 @@ type exactJoinScheduleDriver struct {
 	runtimegenericschedule.Scheduler
 	mu      sync.Mutex
 	started bool
-	pending map[runtimegenericschedule.Wakeup]struct{}
+	pending map[runtimegenericschedule.Wakeup]runtimegenericschedule.OwnerKind
 }
 
-func (d *exactJoinScheduleDriver) RegisterGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) error {
+func (d *exactJoinScheduleDriver) RegisterGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup, owner runtimegenericschedule.OwnerKind) error {
 	if err := wakeup.Validate(); err != nil {
 		return err
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.started {
-		d.pending[wakeup] = struct{}{}
+		d.pending[wakeup] = owner
 		return nil
 	}
-	return d.Scheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+	return d.Scheduler.RegisterGenericScheduleWakeup(ctx, wakeup, owner)
 }
 
 func (d *exactJoinScheduleDriver) RetireGenericScheduleWakeup(wakeup runtimegenericschedule.Wakeup) error {
@@ -129,8 +129,8 @@ func (d *exactJoinScheduleDriver) RetireGenericScheduleWakeup(wakeup runtimegene
 func (d *exactJoinScheduleDriver) Resume(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	for wakeup := range d.pending {
-		if err := d.Scheduler.RegisterGenericScheduleWakeup(ctx, wakeup); err != nil {
+	for wakeup, owner := range d.pending {
+		if err := d.Scheduler.RegisterGenericScheduleWakeup(ctx, wakeup, owner); err != nil {
 			return err
 		}
 		delete(d.pending, wakeup)
@@ -151,7 +151,7 @@ func newExactJoinScheduleLifecycleForTest(t *testing.T, ctx context.Context, sel
 	}
 	driver := &exactJoinScheduleDriver{
 		Scheduler: runtimepipeline.NewSchedulerWithWorkOwner(workOwner),
-		pending:   make(map[runtimegenericschedule.Wakeup]struct{}),
+		pending:   make(map[runtimegenericschedule.Wakeup]runtimegenericschedule.OwnerKind),
 	}
 	lifecycle, err := runtimegenericschedule.NewLifecycle(
 		store, driver, eventBus, eventBus.EngineDispatcher(), exactJoinScheduleLogger{t: t}, executionposture.Live,

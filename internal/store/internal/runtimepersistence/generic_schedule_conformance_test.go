@@ -40,7 +40,7 @@ func (s *selectedStoreLifecycleScheduler) BindGenericScheduleLifecycle(callback 
 	return nil
 }
 
-func (s *selectedStoreLifecycleScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup runtimegenericschedule.Wakeup) error {
+func (s *selectedStoreLifecycleScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup runtimegenericschedule.Wakeup, _ runtimegenericschedule.OwnerKind) error {
 	s.registered = append(s.registered, wakeup)
 	return nil
 }

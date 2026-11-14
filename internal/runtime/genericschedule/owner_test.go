@@ -528,7 +528,7 @@ func (s *restoreScheduler) BindGenericScheduleLifecycle(callback func(context.Co
 	s.callback = callback
 	return nil
 }
-func (s *restoreScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup Wakeup) error {
+func (s *restoreScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup Wakeup, _ OwnerKind) error {
 	s.registered = append(s.registered, wakeup)
 	return nil
 }
@@ -616,6 +616,7 @@ type lifecycleProofStore struct {
 	prepared      PreparedOccurrence
 	prepareErr    error
 	prepareReject bool
+	prepareCalls  int
 	commit        func(CommitCommand) (CommitResult, error)
 	commitCalls   int
 	released      []Wakeup
@@ -641,6 +642,7 @@ func (s *lifecycleProofStore) ListActiveGenericScheduleActivations(context.Conte
 	return []Activation{s.activation}, nil
 }
 func (s *lifecycleProofStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparationCommit, error) {
+	s.prepareCalls++
 	return PreparationCommit{Result: s.prepared, Acknowledged: !s.prepareReject}, s.prepareErr
 }
 func (s *lifecycleProofStore) CommitGenericScheduleOccurrence(_ context.Context, command CommitCommand) (CommitResult, error) {
@@ -690,7 +692,7 @@ type lifecycleProofScheduler struct {
 	registerSeen chan error
 }
 
-func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup) error {
+func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup, owner OwnerKind) error {
 	if s.order != nil {
 		*s.order = append(*s.order, "register")
 	}
@@ -700,7 +702,7 @@ func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Cont
 		s.registerErrs = s.registerErrs[1:]
 	}
 	if result == nil {
-		result = s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+		result = s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup, owner)
 	}
 	if s.registerSeen != nil {
 		s.registerSeen <- result
