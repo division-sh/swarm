@@ -88,7 +88,7 @@ func (m *DockerManager) PrepareClaudeStartupObservation(ctx context.Context, act
 	}
 	args := []string{"create", "--name", name, "--label", workspaceAdmissionProbeLabel + "=" + id,
 		"--pull=never", "--no-healthcheck", "--log-driver", "none",
-		"--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+		"--cap-drop", "ALL", "--cap-add", "CHOWN", "--security-opt", "no-new-privileges:true",
 		"--tmpfs", ClaudeStateDirectory + ":rw,mode=0700,uid=10001,gid=10001",
 		"--tmpfs", "/tmp:rw,mode=1777",
 		"--mount", "type=bind,source=" + projection.PrivateRoot() + ",destination=" + m.cfg.SourceMountPoint + ",readonly"}
