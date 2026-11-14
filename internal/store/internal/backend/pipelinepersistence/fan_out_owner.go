@@ -1210,25 +1210,10 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 		FROM fan_out_intents WHERE run_id=$1`, summary.RunID, now.UTC()).Scan(&summary.Intents, &summary.Open, &summary.Blocked, &summary.Cardinality, &summary.Cursor, &summary.Owed, &summary.MinNextChunk, &summary.MaxNextChunk, &oldestRaw, &summary.ReadWaiting, &oldestReadRaw); err != nil {
 		return summary, err
 	}
-	oldestRead, knownRead, err := sqliteTimeValue(oldestReadRaw)
+	var err error
+	summary.OldestReadWaitMS, err = fanOutReadWaitAge(ctx, db, postgres, oldestReadRaw, now)
 	if err != nil {
-		return summary, errors.New("fan-out read wait summary has invalid observed failure time")
-	}
-	if knownRead {
-		// A retry may commit between the caller's timestamp and this snapshot.
-		// Observe after the row read rather than inventing a zero/negative age.
-		observed, err := fanOutAdmissionTime(ctx, db, postgres, time.Now)
-		if err != nil {
-			return summary, err
-		}
-		if observed.Before(now) {
-			observed = now
-		}
-		if oldestRead.After(observed) {
-			return summary, errors.New("fan-out read failure is later than its native observation")
-		}
-		age := observed.Sub(oldestRead).Milliseconds()
-		summary.OldestReadWaitMS = &age
+		return summary, err
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN outcome_kind IN ('committed','continued') THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN outcome_kind='semantic_rejected' THEN 1 ELSE 0 END),0) FROM fan_out_outcomes WHERE run_id=$1`, summary.RunID).Scan(&summary.Committed, &summary.SemanticRejected); err != nil {
 		return summary, err

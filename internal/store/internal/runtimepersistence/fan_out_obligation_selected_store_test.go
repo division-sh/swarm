@@ -1173,7 +1173,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 				t.Fatalf("serve newer intent: %v", err)
 			}
 
-			_, expiringClaim, found, err := secondOwner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+			expiringIntent, expiringClaim, found, err := secondOwner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "process-b", BundleHash: slow.bundleHash, Now: base.Add(15 * time.Second), Lease: 100 * time.Millisecond,
 			})
 			if err != nil || !found || expiringClaim.Key.ElementRef.SemanticPath != fast.semanticPath {
@@ -1182,6 +1182,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 			if remaining := time.Until(expiringClaim.LeaseUntil.Add(10 * time.Millisecond)); remaining > 0 {
 				time.Sleep(remaining)
 			}
+			waitFanOutReadPacingForTest(t, ctx, expiringIntent)
 			_, reclaimed, found, err := firstOwner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "process-a", BundleHash: slow.bundleHash, Now: base.Add(18 * time.Second), Lease: 5 * time.Second,
 			})

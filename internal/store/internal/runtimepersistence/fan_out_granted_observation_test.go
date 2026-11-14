@@ -97,7 +97,7 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 					t.Fatalf("runtime observation=%+v want=%s/%v", got, reason, eligible)
 				}
 			}
-			_, claim, found, err := turn.owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "read-snapshot-proof", BundleHash: fixture.bundleHash, Candidate: &turn.key, Now: time.Now().UTC(), Lease: time.Minute})
+			intent, claim, found, err := turn.owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "read-snapshot-proof", BundleHash: fixture.bundleHash, Candidate: &turn.key, Now: time.Now().UTC(), Lease: time.Minute})
 			if err != nil || !found {
 				t.Fatalf("claim: found=%v err=%v", found, err)
 			}
@@ -132,6 +132,7 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 			if _, err := turn.owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
+			waitFanOutReadPacingForTest(t, ctx, intent)
 			assertReason("eligible", true)
 			control := selected.(interface {
 				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)

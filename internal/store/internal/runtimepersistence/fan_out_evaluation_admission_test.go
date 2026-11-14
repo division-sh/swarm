@@ -106,6 +106,7 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 					if _, err := f.owner.ReleaseFanOutClaim(f.ctx, f.claim); err != nil {
 						t.Fatal(err)
 					}
+					waitFanOutReadPacingForTest(t, f.ctx, f.intent)
 					key := f.claim.Key
 					var found bool
 					var err error
