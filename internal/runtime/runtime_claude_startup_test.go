@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -723,6 +726,13 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 		if check.Actor.Identity != candidates[i].config.Identity || check.Plan != candidates[i].plan {
 			t.Fatalf("check/runtime owner census differs at %d", i)
 		}
+		if _, err := check.Actor.Prompt.Text(check.Actor.Intent); err != nil {
+			t.Fatalf("check snapshot lost its immutable derived prompt: %v", err)
+		}
+	}
+	checks[0].Actor.Config[0] = '['
+	if candidates[0].config.Config[0] != '{' {
+		t.Fatal("check target mutation changed the runtime input snapshot")
 	}
 	conflicting := append([]runtimeactors.AgentConfig(nil), manager.ListAgentConfigs()...)
 	other := conflicting[0]
@@ -751,6 +761,71 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 	if len(wantRuns) != 0 {
 		t.Fatalf("unexamined live runs = %#v", wantRuns)
 	}
+	t.Run("one_answer_per_credential_and_stale_inputs", func(t *testing.T) {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer check-credential" {
+				t.Errorf("wrong provider request identity: path=%s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+		}))
+		defer server.Close()
+		cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendOpenAICompatible,
+			Models:           llmselection.ModelAliases{llmselection.ModelAliasRegular: {llmselection.BackendOpenAICompatible: "check-model"}},
+			OpenAICompatible: config.OpenAICompatibleConfig{BaseURL: server.URL + "/v1"},
+		}}
+		profile, err := cfg.LLMBackendProfile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{SourceArtifact: artifact})
+		var targets []ManagedProviderCheckTarget
+		for _, candidate := range candidates {
+			actor := candidate.config
+			actor.LLMBackend, actor.Model = profile.ID, llmselection.ModelAliasRegular
+			resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, cfg.LLM.Models, actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			targets = append(targets, ManagedProviderCheckTarget{Actor: resolved.Actor, Plan: candidate.plan})
+		}
+		credentialKey := llm.ProviderCredentialKey(profile)
+		t.Setenv(credentialKey, "")
+		credentials := testProviderCredentialStore(t, credentialKey, "check-credential")
+		options := WorkflowContractValidationOptions{LLMProfile: profile, ProviderCredentials: credentials}
+		checks, err := ObserveManagedProviderBootChecks(context.Background(), cfg, source, options, targets, nil, nil, nil, "")
+		if err != nil || calls.Load() != 1 {
+			t.Fatalf("two actors sharing one provider/credential made %d calls: %v", calls.Load(), err)
+		}
+		resolver := llm.NewProviderCredentialResolver(credentials)
+		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err != nil {
+			t.Fatal(err)
+		}
+		copy := *cfg
+		copy.LLM.OpenAICompatible.BaseURL += "/changed"
+		if err := checks.ValidateConfiguration(context.Background(), &copy, resolver); err == nil {
+			t.Fatal("changed check inputs reused a paid observation")
+		}
+		if err := credentials.Set(context.Background(), credentialKey, "changed-credential"); err != nil {
+			t.Fatal(err)
+		}
+		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err == nil || calls.Load() != 1 {
+			t.Fatalf("changed credential did not refuse without a hidden second call: calls=%d err=%v", calls.Load(), err)
+		}
+	})
 
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
 	regularWorkspaceCalls := 0
