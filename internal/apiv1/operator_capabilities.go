@@ -31,6 +31,10 @@ type DecisionCardAuthority interface {
 	) (json.RawMessage, bool, error)
 }
 
+type DecisionCardCompletionReplay interface {
+	ReplayDecisionCardMutation(context.Context, apiidempotency.Request, runtimepipeline.DecisionCardMutation) (json.RawMessage, bool, error)
+}
+
 type RuntimePublicationReader interface {
 	CurrentPublication() (runtime.RuntimeContextPublicationSnapshot, error)
 }
@@ -139,6 +143,7 @@ type DecisionCardHandlerOptions struct {
 	Mailbox               MailboxAPIStore
 	NoticeAcknowledgment  MailboxNoticeAcknowledgmentStore
 	Authority             DecisionCardAuthority
+	CompletionReplay      DecisionCardCompletionReplay
 	SourceArtifact        SourceArtifactAdmitter
 	RuntimeContexts       *runtime.RuntimeContextManager
 }

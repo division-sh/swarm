@@ -313,6 +313,20 @@ func mailboxTokenlessMutation(ctx context.Context, rt servedControlProofRuntime,
 	if err != nil {
 		return nil, false, err
 	}
+	card, err := owner.GetDecisionCard(ctx, req.ResourceID)
+	if err != nil {
+		return nil, false, err
+	}
+	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+		selected, ok := owner.(runtimepipeline.WorkflowPersistenceOwner)
+		if !ok {
+			return nil, false, fmt.Errorf("selected workflow owner is required")
+		}
+		response, replayed, err := runtimepipeline.NewWorkflowPersistence(selected).ReplayDecisionCardMutation(ctx, req, mutation)
+		if err != nil || replayed {
+			return response, replayed, err
+		}
+	}
 	return rt.Runtime.Pipeline.CommitDecisionCardMutation(ctx, req, mutation)
 }
 
