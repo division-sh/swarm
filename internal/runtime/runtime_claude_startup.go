@@ -215,6 +215,14 @@ func managedProviderPreflightAgentConfigs(manager *runtimemanager.AgentManager) 
 	if manager == nil {
 		return nil, nil
 	}
+	blueprints, err := manager.PreRunAgentMaterializationBlueprints()
+	if err != nil {
+		return nil, fmt.Errorf("compile managed provider preflight blueprints: %w", err)
+	}
+	return managedProviderPreflightConfigs(manager.ListAgentConfigs(), blueprints)
+}
+
+func managedProviderPreflightConfigs(live []runtimeactors.AgentConfig, blueprints []runtimemanager.AgentMaterializationBlueprint) ([]managedProviderPreflightAgent, error) {
 	type candidateOwner struct {
 		live runtimeagentidentity.Identity
 		plan runtimeagentidentity.Plan
@@ -244,7 +252,7 @@ func managedProviderPreflightAgentConfigs(manager *runtimemanager.AgentManager) 
 		byOwner[owner] = candidate{config: config, plan: plan, revision: revision, owner: owner}
 		return nil
 	}
-	for _, config := range manager.ListAgentConfigs() {
+	for _, config := range live {
 		identity, err := config.ConcreteIdentity()
 		if err != nil {
 			return nil, fmt.Errorf("managed provider preflight live agent %q: %w", strings.TrimSpace(config.ID), err)
@@ -256,10 +264,6 @@ func managedProviderPreflightAgentConfigs(manager *runtimemanager.AgentManager) 
 		if err := add(candidateOwner{live: identity.Normalize()}, identity.Description(), config, plan); err != nil {
 			return nil, err
 		}
-	}
-	blueprints, err := manager.PreRunAgentMaterializationBlueprints()
-	if err != nil {
-		return nil, fmt.Errorf("compile managed provider preflight blueprints: %w", err)
 	}
 	for _, blueprint := range blueprints {
 		plan := blueprint.Identity.Normalize()
