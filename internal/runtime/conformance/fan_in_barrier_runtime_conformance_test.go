@@ -248,7 +248,10 @@ func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceSt
 	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "output: payload.revenue", "output: payload.report", 1)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	reportSchema := "  report:\n    operating_id: text\n    portfolio_id: text\n    period_id: text\n    revenue: integer\n"
+	if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("OperatingReport:\n  operating_id: text\n  portfolio_id: text\n  period_id: text\n  revenue: integer\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reportSchema := "  report: OperatingReport\n"
 	for _, label := range []string{"events.yaml", "ingress/events.yaml", "operating/events.yaml", "portfolio/events.yaml"} {
 		path := filepath.Join(root, label)
 		raw, err := os.ReadFile(path)
