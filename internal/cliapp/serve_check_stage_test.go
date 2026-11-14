@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
@@ -80,4 +82,18 @@ func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, c
 	opts := defaultVerifyCommandOptions()
 	opts.output.asJSON, opts.output.quiet = format == "json", format == "quiet"
 	return renderVerifyCommandResult(opts, view, stage.Validation, decision, out, diagnostic)
+}
+
+func TestServeCheckStageGeneratedBoundaryModePolicy(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://stale.invalid/mcp")
+	for _, mode := range []ServeOptions{{}, {Dev: true}, {LocalRun: true}} {
+		result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation, SourceArtifactHash: "source"}}
+		options := runtime.WorkflowContractValidationOptions{FatalBootWarnings: true}
+		inspectServeGeneratedBoundary(context.Background(), mode, &result, &options)
+		decision := (ServeCheckStageResult{Validation: result, Options: options}).Decision()
+		local := mode.Dev || mode.LocalRun
+		if (decision.FailureClass == "") != local || len(result.BootReport.Warnings()) != boolCount(local) {
+			t.Fatalf("mode=%+v decision=%+v report=%+v", mode, decision, result.BootReport)
+		}
+	}
 }

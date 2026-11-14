@@ -709,7 +709,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 				Selection: selection, PostgresDSN: postgresDSN, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck),
 			})
 		} else {
-			stores, err = oldBuildStores(ctx, selection, cfg)
+			stores, err = oldBuildStores(ctx, selection, cfg, bootCheck...)
 		}
 		if err == nil {
 			db = selectedStoreDatabaseForTest(t, stores)
@@ -1051,7 +1051,6 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
 		priorBuildStores := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			storetest.BootstrapPostgresRuntimeStore(t, reopened)
 			return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg, bootCheck...), nil
 		}
 		t.Cleanup(func() { buildStoresForServe = priorBuildStores })

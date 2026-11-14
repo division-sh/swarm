@@ -88,6 +88,9 @@ func ObserveProviderStartupAnswer(ctx context.Context, cfg *config.Config, profi
 		return err
 	}
 	if response.StatusCode >= 300 {
+		if credential.Value != "" {
+			body = []byte(strings.ReplaceAll(string(body), credential.Value, "[redacted]"))
+		}
 		return providerStatusFailure(profile.Provider, response.StatusCode, body)
 	}
 	answer, err := decode(body)
