@@ -64,64 +64,6 @@ type EventDeliveryDiagnosticRow struct {
 	SubscriberType, SubscriberID, Status, Reason, FlowInstance, EntityID string
 }
 
-func ReadNodeDeadLetterDiagnosticLinesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
-	query := `SELECT COALESCE(handler_node, ''), COALESCE(json_extract(failure, '$.class'), ''), COALESCE(failure, '')
-FROM dead_letters WHERE original_event_id = ? ORDER BY created_at ASC`
-	if postgres {
-		query = `SELECT COALESCE(handler_node, ''), COALESCE(failure->>'class', ''), COALESCE(failure::text, '')
-FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at ASC`
-	}
-	rows, err := tx.QueryContext(ctx, query, eventID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var node, failure, message string
-		if err := rows.Scan(&node, &failure, &message); err != nil {
-			return nil, err
-		}
-		out = append(out, node+" failure="+failure+" detail="+message)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func ReadNodeDeliveryDiagnosticLinesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
-	query := `SELECT subscriber_id, COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(delivery_target_route, '')
-FROM event_deliveries WHERE event_id = ? ORDER BY subscriber_id, delivery_target_route`
-	if postgres {
-		query = `SELECT subscriber_id, COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(delivery_target_route::text, '')
-FROM event_deliveries WHERE event_id = $1::uuid ORDER BY subscriber_id, delivery_target_route::text`
-	}
-	rows, err := tx.QueryContext(ctx, query, eventID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var subscriber, status, reason, target string
-		if err := rows.Scan(&subscriber, &status, &reason, &target); err != nil {
-			return nil, err
-		}
-		out = append(out, subscriber+" status="+status+" reason="+reason+" target="+target)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 type PipelineHandoffDeliveryFacts struct {
 	EventID        string
 	Active         bool

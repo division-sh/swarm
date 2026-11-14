@@ -18,9 +18,7 @@ import (
 
 type LatestPipelineReceiptStorage = pipelinepersistence.LatestPipelineReceiptStorage
 
-type NodeDeliveryDiagnosticStorage struct {
-	Rows, DeadLetters, Receipts []string
-}
+type NodeDeliveryDiagnosticStorage = pipelinepersistence.NodeDeliveryDiagnosticStorage
 
 func ReadServedRunDeliverySummaryForTest(ctx context.Context, selected any, runID string) (runtimedelivery.RunSummary, error) {
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {
@@ -60,28 +58,14 @@ func ReadNodeDeliveryDiagnosticStorageForTest(ctx context.Context, selected any,
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return NodeDeliveryDiagnosticStorage{}, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var out NodeDeliveryDiagnosticStorage
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out.Rows, err = delivery.ReadNodeDeliveryDiagnosticLinesTx(ctx, tx, postgres, eventID)
-		if err != nil {
-			return fmt.Errorf("delivery dump: %w", err)
-		}
-		out.DeadLetters, err = delivery.ReadNodeDeadLetterDiagnosticLinesTx(ctx, tx, postgres, eventID)
-		if err != nil {
-			return fmt.Errorf("dead letter dump: %w", err)
-		}
-		out.Receipts, err = pipelinepersistence.ReadNodeReceiptDiagnosticLinesTx(ctx, tx, postgres, eventID)
-		if err != nil {
-			return fmt.Errorf("receipt dump: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return NodeDeliveryDiagnosticStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadNodeDeliveryDiagnosticStorageForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadNodeDeliveryDiagnosticStorageForTest(ctx, eventID)
+	default:
+		return NodeDeliveryDiagnosticStorage{}, fmt.Errorf("node delivery diagnostic requires the original native owner")
 	}
-	return out, nil
 }
 
 type CausalDeliveryStatusCount = delivery.CausalDeliveryStatusCount
