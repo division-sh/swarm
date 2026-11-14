@@ -2470,17 +2470,17 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Context, evt events.Event, routePlan RoutePlan, planner deliveryPlanner) (RoutePlan, error) {
 	routePlan = routePlan.Normalized()
 	if eb == nil || eb.recipientPlanMaterializer == nil {
-		return routePlan, routePlan.ValidatePersistentDeliveries()
+		return routePlan, routePlan.requireAdmittedNodeIntents()
 	}
 	if routePlan.CanonicalRouteOwnerMatched() {
-		return routePlan, routePlan.ValidatePersistentDeliveries()
+		return routePlan, routePlan.requireAdmittedNodeIntents()
 	}
 	routes, err := eb.recipientPlanMaterializer(ctx, evt, eb.publishRecipientPlan(evt, routePlan))
 	if err != nil {
 		return RoutePlan{}, err
 	}
 	if len(routes) == 0 {
-		return routePlan, routePlan.ValidatePersistentDeliveries()
+		return routePlan, routePlan.requireAdmittedNodeIntents()
 	}
 	routePlan.recordOrdinaryRouteProducer()
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerOrdinary)...)
@@ -2492,7 +2492,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return routePlan, routePlan.ValidatePersistentDeliveries()
+	return routePlan, routePlan.requireAdmittedNodeIntents()
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {

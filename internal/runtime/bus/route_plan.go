@@ -408,11 +408,8 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 // LiveRecipients entry.
 func (p RoutePlan) ValidatePersistentDeliveries() error {
 	p = p.Normalized()
-	for _, intent := range p.DeliveryIntents {
-		if intent.pendingNodeCandidate() {
-			subscriber := intent.nodeSubscribers[0]
-			return fmt.Errorf("routed node %q at %q matched target-free event %q without exact same-instance, explicit-target, or compiled-connect authority", subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), p.Event.Type())
-		}
+	if err := p.requireAdmittedNodeIntents(); err != nil {
+		return err
 	}
 	liveAgents := make(map[agentidentity.Identity]struct{})
 	for index, recipient := range p.LiveRecipients {

@@ -15,6 +15,18 @@ func (i RoutePlanDeliveryIntent) pendingNodeCandidate() bool {
 	return i.Recipient.IsNode() && len(i.nodeSubscribers) != 0 && i.TargetBlueprint.Empty() && i.TargetOwnership.Empty()
 }
 
+// Closing a provisional plan requires a result for each candidate. This does
+// not compare receiver lists or admit any new delivery authority.
+func (p RoutePlan) requireAdmittedNodeIntents() error {
+	for _, intent := range p.DeliveryIntents {
+		if intent.pendingNodeCandidate() {
+			subscriber := intent.nodeSubscribers[0]
+			return fmt.Errorf("routed node %q at %q matched target-free event %q without exact same-instance, explicit-target, or compiled-connect authority", subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), p.Event.Type())
+		}
+	}
+	return nil
+}
+
 func (p RoutePlan) routedRecipients() []Subscriber {
 	out := append([]Subscriber(nil), p.routedAgents...)
 	for _, intent := range p.DeliveryIntents {
