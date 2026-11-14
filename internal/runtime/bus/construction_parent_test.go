@@ -277,52 +277,7 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 
 func lexicalAddressFixture(t *testing.T, crossAccount bool) string {
 	t.Helper()
-	root := t.TempDir()
-	documents := map[string]string{
-		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml": `inputs: [opened, root.audit]
-connect:
-  - {event: opened, from: ., to: account, resolution: select-or-create, key_from: payload.account_id}
-  - {event: root.audit, from: ., to: account, resolution: select, key_from: payload.account_id}
-  - {event: root.audit, from: ., to: account/audit}
-`,
-		"events.yaml":           "opened:\n  account_id: text\n  ticket_id: text\nroot.audit:\n  account_id: text\n",
-		"account/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"account/schema.yaml": `instance: account_id
-inputs: [opened, root.audit]
-connect:
-  - {event: opened, from: ., to: ticket, resolution: select-or-create, key_from: payload.ticket_id}
-  - {event: ticket.done, from: ticket, to: audit}
-`,
-		"account/state.yaml":           "account_id: text\n",
-		"account/nodes.yaml":           "receiver:\n  root.audit: {}\n",
-		"account/ticket/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"account/ticket/schema.yaml":   "instance: ticket_id\ninputs: [opened]\noutputs: [ticket.done]\n",
-		"account/ticket/state.yaml":    "ticket_id: text\n",
-		"account/ticket/events.yaml":   "ticket.done:\n",
-		"account/ticket/nodes.yaml":    "reporter:\n  opened:\n    emit: {event: ticket.done}\n",
-		"account/audit/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
-		"account/audit/schema.yaml":    "stages: []\ninputs: [ticket.done, root.audit]\n",
-		"account/audit/nodes.yaml":     "audit:\n  ticket.done: {}\n  root.audit: {}\n",
-	}
-	if crossAccount {
-		documents["schema.yaml"] += "  - {event: ticket.cross, from: account/ticket, to: account, resolution: select, key_from: payload.target_account_id}\n"
-		documents["account/schema.yaml"] = strings.Replace(documents["account/schema.yaml"], "inputs: [opened, root.audit]", "inputs: [opened, root.audit, ticket.cross]", 1)
-		documents["account/nodes.yaml"] += "  ticket.cross: {}\n"
-		documents["account/ticket/schema.yaml"] = strings.Replace(documents["account/ticket/schema.yaml"], "outputs: [ticket.done]", "outputs: [ticket.done, ticket.cross]", 1)
-		documents["account/ticket/events.yaml"] += "ticket.cross:\n  target_account_id: text\n"
-		documents["account/ticket/nodes.yaml"] += "cross-reporter:\n  opened:\n    emit: {event: ticket.cross, fields: {target_account_id: payload.account_id}}\n"
-	}
-	for label, body := range documents {
-		path := filepath.Join(root, label)
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
+	return canonicalrouting.CopyLexicalAddressing(t, crossAccount)
 }
 
 func proveLexicalAddressGeometries(t *testing.T) {
@@ -363,14 +318,20 @@ func proveLexicalAddressGeometries(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			testSource, testGraph := source, graph
+			testIndex := index
 			if test.name == "C53_explicit_other_account" {
 				testSource = loadConnectRoutePlanCanonicalSource(t, lexicalAddressFixture(t, true))
 				testGraph = pinrouting.CompileConnectGraph(testSource)
 				if issues := testGraph.Issues(); len(issues) != 0 {
 					t.Fatalf("frozen C53 root edge was not admitted: %+v", issues)
 				}
+				testIndex.observations = nil
+				for _, observed := range index.observations {
+					testIndex.observations = append(testIndex.observations, constructionIndexObservation(t, testSource, busInternalTestRunID, observed.Identity(), observed.InstanceKey()))
+				}
 			}
-			owner := connectInstanceSelector{source: testSource, index: index}
+			owner := connectInstanceSelector{source: testSource, index: testIndex}
+			resolver := connectRoutePlanResolver{lifecycle: owner}
 			ctx := withConnectRoutePlanPreview(constructionIndexContext(t, testSource))
 			routing := eventtest.ConcreteTemplateRoutingSource(test.source.TemplateID, test.source.InstancePath, test.source.EntityID)
 			eventType := test.source.InstancePath + "/" + test.event
@@ -398,7 +359,7 @@ func proveLexicalAddressGeometries(t *testing.T) {
 					target = plan
 				}
 			}
-			materialized, selected, _, err := owner.Materialize(ctx, event, target, values)
+			materialized, selected, err := resolver.materializeConnectRoutePlan(ctx, event, target, values)
 			if err != nil || !materialized.Failure.Empty() || selected.Identity() != test.want {
 				t.Fatalf("exact edge selected another account: selected=%+v materialized=%+v want=%+v err=%v", selected, materialized, test.want, err)
 			}

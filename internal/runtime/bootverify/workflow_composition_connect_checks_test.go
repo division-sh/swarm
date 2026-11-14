@@ -2,6 +2,8 @@ package bootverify
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,6 +70,15 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 	if reportContains(report.Errors(), "template_instance_validation", "") {
 		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
 	}
+	t.Run("C53_keyed_ancestor_reselection", func(t *testing.T) {
+		repo := repoRootForBootverifyTest(t)
+		root := canonicalrouting.CopyLexicalAddressing(t, true)
+		bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		if reportContains(report.Errors(), "composition_connect_validation", "") {
+			t.Fatalf("frozen C53 retained the false path-only LCA refusal: %+v", report.Errors())
+		}
+	})
 }
 
 func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
@@ -434,6 +445,29 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 			}
 		})
 	}
+	t.Run("located_unselected_higher_owner", func(t *testing.T) {
+		repo := repoRootForBootverifyTest(t)
+		root := canonicalrouting.CopyLexicalAddressing(t, false)
+		path := filepath.Join(root, "schema.yaml")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(raw, []byte("  - {event: ticket.done, from: account/ticket, to: account/audit}\n")...), 0600); err != nil {
+			t.Fatal(err)
+		}
+		bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		report := Run(t.Context(), semanticview.Wrap(bundle), Options{})
+		found := false
+		for _, finding := range report.Errors() {
+			if finding.CheckID == "composition_connect_validation" && strings.Contains(finding.Location, "schema.yaml") && strings.Contains(finding.Message, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()) && strings.Contains(finding.Message, "connect belongs in account/schema.yaml, the exact lowest common ancestor") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("higher-owner refusal lost classification/location/teaching: %+v", report.Errors())
+		}
+	})
 }
 
 func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {

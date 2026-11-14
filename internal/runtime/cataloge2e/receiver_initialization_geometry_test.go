@@ -11,7 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -218,7 +220,92 @@ func TestReceiverInitializationNestedGeometryBothStores(t *testing.T) {
 					t.Fatalf("absent-parent publication must be a counted no-route outcome: %+v err=%v", public[id], err)
 				}
 			})
+			t.Run("C53_cross_account_delivery", func(t *testing.T) {
+				proveCrossAccountDelivery(t, backend)
+			})
 		})
+	}
+}
+
+func proveCrossAccountDelivery(t *testing.T, backend catalogRuntimeBackend) {
+	t.Helper()
+	h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyLexicalAddressing(t, true), backend, true)
+	seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+	ctx := catalogRunContext(h, catalogRuntimeRunID)
+	for _, key := range []string{"7", "8"} {
+		h.publishAndWait(catalogTriggerStep{Event: "opened", Payload: map[string]any{"account_id": key, "ticket_id": "42"}}, catalogRuntimePublishTimeout)
+	}
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+	load := func() map[string]pipeline.WorkflowInstance {
+		t.Helper()
+		instances, err := h.workflow.ListWorkflowInstances(ctx, catalogRuntimeRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byPath := make(map[string]pipeline.WorkflowInstance, len(instances))
+		for _, instance := range instances {
+			byPath[instance.StorageRef] = instance
+		}
+		return byPath
+	}
+	before := load()
+	accounts := map[string]pipeline.WorkflowInstance{}
+	for _, instance := range before {
+		if instance.WorkflowName == "account" {
+			key, _ := instance.Fields["account_id"].(string)
+			accounts[key] = instance
+		}
+	}
+	if len(accounts) != 2 || accounts["7"].EntityID == "" || accounts["8"].EntityID == "" || accounts["7"].EntityID == accounts["8"].EntityID {
+		t.Fatalf("cross-account proof lost distinct native owners: %+v", accounts)
+	}
+	tickets := map[string]pipeline.WorkflowInstance{}
+	for _, instance := range before {
+		if instance.WorkflowName == "account/ticket" && instance.Fields["ticket_id"] == "42" {
+			tickets[instance.ParentEntityID] = instance
+		}
+	}
+	sender, found := tickets[accounts["7"].EntityID]
+	if !found || len(tickets) != 2 || tickets[accounts["8"].EntityID].EntityID == sender.EntityID {
+		t.Fatalf("same ticket key collapsed structural parents: %+v", tickets)
+	}
+	id := uuid.NewString()
+	h.publishAndWait(catalogTriggerStep{Event: "cross.requested", eventID: id, Payload: map[string]any{"source_account_id": "7", "ticket_id": "42", "target_account_id": "8"}}, catalogRuntimePublishTimeout)
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+	public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossCount := 0
+	for _, event := range public {
+		if !strings.HasSuffix(event.EventName, "/ticket.cross") {
+			continue
+		}
+		crossCount++
+		if event.SourceEventID != id || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || event.Deliveries[0].Route.Target.Route().FlowInstance != accounts["8"].StorageRef || len(event.DeadLetters) != 0 || event.NoDelivery != nil {
+			t.Fatalf("cross-account publication selected a foreign or extra receiver: %+v", event)
+		}
+		var selected any = h.pg
+		if h.sqlite != nil {
+			selected = h.sqlite
+		}
+		native, present, err := storetest.ReadCanonicalEventRecord(ctx, selected, event.EventID)
+		if err != nil || !present || native.SourceRoute().FlowInstance != sender.StorageRef || native.SourceRoute().EntityID != sender.EntityID {
+			t.Fatalf("cross-account event lost its actual ticket sender: %+v present=%t err=%v", native, present, err)
+		}
+	}
+	if crossCount != 1 {
+		t.Fatalf("cross-account handler emitted %d publications, want one", crossCount)
+	}
+	after := load()
+	if len(after) != len(before) || after[accounts["8"].StorageRef].Fields["cross_count"] != int64(1) {
+		t.Fatalf("selected account did not execute exactly once: %+v", after)
+	}
+	for path, old := range before {
+		current := after[path]
+		if current.EntityID != old.EntityID || current.Life != old.Life || current.ParentEntityID != old.ParentEntityID || path != accounts["8"].StorageRef && !reflect.DeepEqual(current.Fields, old.Fields) {
+			t.Fatalf("cross-account delivery changed unrelated identity/fields: before=%+v after=%+v", old, current)
+		}
 	}
 }
 
