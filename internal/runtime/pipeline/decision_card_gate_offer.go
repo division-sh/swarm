@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -10,6 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
+
+var ErrGateOfferChanged = errors.New("issued gate offer differs from the current execution contract")
 
 // PreparedGateOffer is a request-local observation, not mutation authority. The
 // native owner checks it again against its locked source, instance and issuance.
@@ -65,7 +68,7 @@ func (p PreparedGateOffer) require(ctx context.Context, card decisioncard.Card, 
 		return err
 	}
 	if !issued.Equal(p.offer) {
-		return fmt.Errorf("issued gate offer differs from the current execution contract")
+		return ErrGateOfferChanged
 	}
 	return nil
 }
