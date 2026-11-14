@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -240,6 +241,53 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		observed.VisibleTools = []string{"Bash"}
 		if err := validateStartupCLIObservation(planned, observed); err == nil {
 			t.Fatal("raw observation accepted a foreign provider builtin")
+		}
+	})
+	t.Run("completed_answer_without_execution_authority", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "answer.sh")
+		if err := os.WriteFile(path, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\"}'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		copy := *cfg
+		copy.Workspace.DockerBin = path
+		copy.LLM.OpenAICompatible.BaseURL = "http://127.0.0.1:1/v1"
+		copy.LLM.OpenAIResponses.BaseURL = "http://127.0.0.1:1/v1"
+		profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := &workspace.Target{Container: "swarm-admission-probe", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
+		if err := ObserveProviderStartupAnswer(context.Background(), &copy, profile, llmselection.ResolvedModel{ConcreteModel: "selected-model"}, runtime.providerCredentials, target); err != nil {
+			t.Fatalf("completed answer: %v", err)
+		}
+		for _, backend := range []string{llmselection.BackendAnthropic, llmselection.BackendOpenAICompatible, llmselection.BackendOpenAIResponses} {
+			profile, err := llmselection.ResolveActiveBackend(backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, decode, err := startupAnswerRequest(context.Background(), &copy, profile, llmselection.ResolvedModel{ConcreteModel: "selected-model"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Body.Close()
+			if strings.Contains(string(body), `"tools":[{`) || !strings.Contains(string(body), "selected-model") || !strings.Contains(string(body), cliStartupProbePrompt) {
+				t.Fatalf("answer request has tools or lost selected model/prompt: %s", body)
+			}
+			response := `{"content":[{"type":"text","text":"ok"}],"choices":[{"message":{"content":"ok"}}],"output":[{"type":"message","content":[{"text":"ok"}]}]}`
+			answer, err := decode([]byte(response))
+			if err != nil || validateStartupAnswer(answer) != nil {
+				t.Fatalf("%s completed answer: %+v %v", backend, answer, err)
+			}
+		}
+		if validateStartupAnswer(Response{Message: Message{Content: "ready"}}) != nil {
+			t.Fatal("a completed answer was required to have one particular spelling")
+		}
+		if validateStartupAnswer(Response{}) == nil || validateStartupAnswer(Response{Message: Message{Content: "ok"}, ToolCalls: []ToolCall{{Name: "write_file"}}}) == nil {
+			t.Fatal("an absent answer or a tool request counted as a completed no-tool answer")
 		}
 	})
 }
