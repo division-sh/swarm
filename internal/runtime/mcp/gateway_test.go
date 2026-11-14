@@ -2914,6 +2914,13 @@ func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
 				}
 			}
 			admitted, release, err := gateway.AcquireAcceptedRuntimeRequest(request, expected)
+			if name == "manager" && admitted != nil {
+				child, childErr := worklifetime.BeginAcceptedRuntimeWork(admitted, owner)
+				if childErr != nil {
+					t.Fatalf("accepted transport lost exact manager descendant custody: %v", childErr)
+				}
+				_ = child.Done()
+			}
 			if release != nil {
 				release()
 			}
