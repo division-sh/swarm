@@ -104,6 +104,44 @@ func TestRuntimeRunTransitionJoinsOnlySelectedRunAndAcceptedDescendants(t *testi
 	}
 }
 
+func TestRuntimeRunTransitionDoesNotWaitForStandingCustody(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	process := NewProcess()
+	runtime, err := process.NewRuntime(ctx, RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.NewString()
+	standing, err := runtime.BeginStanding(correlation.WithRunID(ctx, runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HasAcceptedRun(standing.Context(), runID) {
+		t.Fatal("standing custody acquired source-run work admission")
+	}
+	done, err := runtime.BeginRunTransition(ctx, runID)
+	if err != nil {
+		t.Fatalf("run transition waited for standing custody: %v", err)
+	}
+	if _, err := runtime.BeginDispatch(correlation.WithRunID(ctx, runID)); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("fresh source dispatch crossed run transition: %v", err)
+	}
+	if _, err := runtime.BeginAcceptedDescendant(correlation.WithRunID(standing.Context(), runID)); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("standing custody admitted source descendant: %v", err)
+	}
+	done()
+	if err := standing.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Join(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunlessPlatformDeliveryBelongsToItsRoutedRunOccurrence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

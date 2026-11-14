@@ -54,10 +54,19 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 	if eb == nil {
 		return nil
 	}
-	ctx, lease, err := eb.beginRuntimeWork(ctx)
+	admittedCtx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
+	owner := eb.workOwnerForContext(admittedCtx)
+	if owner == nil {
+		return errors.New("outbox sweeper requires a process work occurrence")
+	}
+	lease, err := owner.BeginStanding(admittedCtx)
+	if err != nil {
+		return fmt.Errorf("admit outbox sweeper: %w", err)
+	}
+	ctx = bindWorkContext(admittedCtx, lease, owner, eb.carryMutationContext)
 	closeLease := true
 	defer func() {
 		if closeLease {
