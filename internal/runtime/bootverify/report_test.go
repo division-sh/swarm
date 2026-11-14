@@ -3321,6 +3321,30 @@ func TestRun_PublicRootInputHasNoHarnessRole(t *testing.T) {
 	if reportContains(report.Errors(), "input_pin_wiring", "item.received") || reportContains(report.Warnings(), "event_producer_exists", "item.received") {
 		t.Fatalf("ordinary root input lost producer proof: errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 	}
+	t.Run("internal_producer_keeps_explicit_input", func(t *testing.T) {
+		before := source.FlowInputEventPins(".")
+		if len(before) != 1 || before[0].EventType() != "item.received" {
+			t.Fatalf("dual-use fixture did not begin with one declared input: %+v", before)
+		}
+		owner := bundleExecutableNodeByLocalID(t, bundle, "item-observer")
+		writeBundleHandler(t, bundle, owner, "item.processed", runtimecontracts.SystemNodeEventHandler{
+			AdvancesTo: "done",
+			Emit: runtimecontracts.EmitSpec{Event: "item.received", Fields: map[string]runtimecontracts.ExpressionValue{
+				"item_id": runtimecontracts.LiteralExpression("retry-item"),
+			}},
+		})
+		recompileBootverifySemantics(t, bundle)
+		after := semanticview.Wrap(bundle)
+		pins := after.FlowInputEventPins(".")
+		pin, public := semanticview.SelectedRootInputPin(after, "item.received")
+		if len(pins) != 1 || !public || pin.Digest() != before[0].Digest() {
+			t.Fatalf("adding an internal producer changed the explicit interface: %+v public=%t", pins, public)
+		}
+		report := Run(context.Background(), after, Options{})
+		if reportContains(report.Errors(), "input_pin_wiring", "item.received") || reportContains(report.Warnings(), "event_producer_exists", "item.received") {
+			t.Fatalf("dual-use input lost its declared producer authority: errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+		}
+	})
 }
 
 func TestRun_RootInputRoleDoesNotClearUnrelatedDeadEvent(t *testing.T) {
