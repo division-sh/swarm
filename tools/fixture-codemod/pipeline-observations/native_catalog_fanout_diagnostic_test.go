@@ -65,7 +65,7 @@ func TestNativeCatalogFanOutDiagnosticKeepsFullContextFieldsAndLateCut(t *testin
 func TestNativeCatalogFanOutDiagnosticOwnersPreserveOriginalSQLAndRendering(t *testing.T) {
 	for _, owner := range []struct{ path, function, sql string }{
 		{"pipelinepersistence/owner_operations.go", "ReadSourceFanOutIntentDiagnosticRows", `SELECT status,cardinality,cursor,COALESCE(claim_owner,''),claim_generation,CAST(lease_expires_at AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2`},
-		{"eventrecord/causal_observation.go", "ReadSourceRouteSettlementStorage", `SELECT COUNT(*),COUNT(DISTINCT CAST(route_settlement AS TEXT)),COALESCE(SUM(LENGTH(CAST(route_settlement AS TEXT))),0) FROM events WHERE run_id=$1 AND source_event_id=$2`},
+		{"eventpersistence/test_event_record_observation_queries.go", "readSourceRouteSettlementStorage", `SELECT COUNT(*),COUNT(DISTINCT CAST(route_settlement AS TEXT)),COALESCE(SUM(LENGTH(CAST(route_settlement AS TEXT))),0) FROM events WHERE run_id=$1 AND source_event_id=$2`},
 	} {
 		path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.path)
 		data, err := os.ReadFile(path)

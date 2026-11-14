@@ -23,7 +23,7 @@ func TestNativeBusGlobalChronologyRetainsScopeFieldsOrderAndCompleteJourney(t *t
 		strings.Count(root, "ReadGlobalEventChronology(context.Background(), pg)") != 2 {
 		t.Fatal("nested chronology or construction retains raw/foreign authority")
 	}
-	owner := selectedCausalObservationBody(t, "internal/store/internal/backend/eventrecord/causal_observation.go", "ReadGlobalEventChronologyTx")
+	owner := selectedCausalObservationBody(t, "internal/store/internal/backend/eventpersistence/test_event_record_observation_queries.go", "readGlobalEventChronologyTx")
 	queries := eventDeliveryDiagnosticSQL(t, owner)
 	if len(queries) != 2 || !reflect.DeepEqual(queries[1:], eventDeliveryDiagnosticSQL(t, "func proof(){ _ = `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,'') FROM events ORDER BY created_at ASC, event_id ASC` }")) ||
 		!strings.Contains(owner, "rows.Scan(&row.Name, &row.EntityID, &row.FlowInstance)") ||

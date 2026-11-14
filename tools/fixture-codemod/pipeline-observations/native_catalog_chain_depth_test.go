@@ -107,7 +107,7 @@ func TestNativeCatalogChainDepthOwnersKeepEveryOriginalSQLPredicate(t *testing.T
 	}
 	for i, owner := range []struct{ path, function string }{
 		{"delivery/dead_letter_owner.go", "ReadChainDepthDeadLetterStorage"},
-		{"eventrecord/causal_observation.go", "CountChainDepthDiagnosticStorage"},
+		{"eventpersistence/test_event_record_observation_queries.go", "countChainDepthDiagnosticStorage"},
 		{"authoractivity/readadapter/read.go", "CountRecordedDeadLetterStorage"},
 	} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.path))
