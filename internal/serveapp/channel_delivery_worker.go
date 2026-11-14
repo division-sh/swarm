@@ -557,6 +557,17 @@ func (w *serveChannelDeliveryWorker) beginSend(ctx context.Context) (*worklifeti
 	return w.owner.Begin(w.workCtx)
 }
 
+func (w *serveChannelDeliveryWorker) finishSend(selectionCtx context.Context, lease *worklifetime.Lease, result error) error {
+	selectionEnded := selectionCtx.Err() != nil
+	settlementErr := lease.Done()
+	if selectionEnded {
+		w.err = errors.Join(w.err, result, settlementErr)
+	} else {
+		w.err = errors.Join(w.err, settlementErr)
+	}
+	return errors.Join(result, settlementErr)
+}
+
 func (w *serveChannelDeliveryWorker) Drain(ctx context.Context) error {
 	if w == nil {
 		return nil

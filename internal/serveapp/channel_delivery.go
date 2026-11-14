@@ -608,10 +608,10 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		if err != nil {
 			return err
 		}
+		selectionCtx := ctx
 		ctx = lease.Context()
 		defer func() {
-			result = errors.Join(result, lease.Done())
-			d.worker.err = errors.Join(d.worker.err, result)
+			result = d.worker.finishSend(selectionCtx, lease, result)
 		}()
 	}
 	if selected, plan, deployment, err := d.deploymentDelivery(ctx, candidate); deployment || err != nil {
