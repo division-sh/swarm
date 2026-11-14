@@ -418,6 +418,42 @@ func proveLexicalAddressGeometries(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "account_id") || !strings.Contains(err.Error(), "schema.yaml") {
 			t.Fatalf("missing ancestor key lost located teaching: %v", err)
 		}
+
+		lexicalRoot := lexicalAddressFixture(t, false)
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("lexical-key negative needs an admitted control: %v", err)
+		}
+		for label, body := range map[string]string{
+			"account/ticket/events.yaml": "ticket.done:\n  account_id: text\n",
+			"account/ticket/nodes.yaml":  "reporter:\n  opened:\n    emit: {event: ticket.done, fields: {account_id: payload.account_id}}\n",
+		} {
+			if err := os.WriteFile(filepath.Join(lexicalRoot, label), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("typed lexical-key evidence needs an admitted control: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(lexicalRoot, "account", "nodes.yaml"), []byte("receiver:\n  root.audit: {}\n  ticket.done: {}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		path = filepath.Join(lexicalRoot, "account", "schema.yaml")
+		raw, err = os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The edge is account-local: its account is already the sender's
+		// lexical owner, so payload cannot select a different account.
+		row := "  - {event: ticket.done, from: ticket, to: ., resolution: select, key_from: payload.account_id}\n"
+		if err := os.WriteFile(path, append(raw, []byte(row)...), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, lexicalRoot, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil || !strings.Contains(err.Error(), "bound by context") || !strings.Contains(err.Error(), "account/schema.yaml") {
+			t.Fatalf("supplied key for lexical account lost located refusal: %v", err)
+		}
 	})
 }
 

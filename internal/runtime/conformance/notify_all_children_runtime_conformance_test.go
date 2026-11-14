@@ -576,8 +576,8 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 					if err != nil || settlement.Unsettled == 0 || settlement.BarrierArmed == 0 {
 						t.Fatalf("issuance/header census closed a held delivery: %+v %v", settlement, err)
 					}
-					var completions int
-					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed")).Scan(&completions); err != nil || completions != 0 {
+					completions, err := storetest.CountRunEventNameStorage(ctx, selected, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
+					if err != nil || completions != 0 {
 						t.Fatalf("held hundred-item outcome published early: %d %v", completions, err)
 					}
 					gate.release(held)
