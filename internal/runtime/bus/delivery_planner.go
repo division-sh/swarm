@@ -174,8 +174,8 @@ type deliveryPlanner struct {
 	preparedOwners  *publicationTargetOwnerEvidence
 }
 
-// planRecipients returns a provisional plan; publish callers
-// must validate routed-node authority after adding materialized delivery intents.
+// planRecipients retains unresolved candidates until composed or materialized
+// node results are available. Only resolved results become executable routes.
 func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {
@@ -347,7 +347,7 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = 0
 	}
-	routePlan.RoutedRecipients = routing.RoutedRecipients
+	routePlan.describeRoutedCandidates(routing.RoutedRecipients)
 	routePlan.SubscribedRecipients = routing.SubscribedRecipients
 	routePlan.ExtraDetail = extraDetail
 	return routePlan.Normalized(), nil
@@ -407,7 +407,7 @@ func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan 
 	connectPlan.ordinarySource = localPlan.ordinarySource
 	connectPlan.AddLiveRecipients(localPlan.LiveRecipients...)
 	connectPlan.AddDeliveryIntents(localPlan.DeliveryIntents...)
-	connectPlan.RoutedRecipients = dedupeSubscribers(append(connectPlan.RoutedRecipients, localPlan.RoutedRecipients...))
+	connectPlan.routedAgents = dedupeSubscribers(append(connectPlan.routedAgents, localPlan.routedAgents...))
 	connectPlan.SubscribedRecipients = uniqueStrings(append(connectPlan.SubscribedRecipients, localPlan.SubscribedRecipients...))
 	if len(localPlan.ExtraDetail) > 0 {
 		if connectPlan.ExtraDetail == nil {
@@ -429,7 +429,7 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 		routePlan.AddLiveRecipients(connectPlan.LiveRecipients...)
 		routePlan.AddDeliveryIntents(connectPlan.DeliveryIntents...)
 	}
-	routePlan.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
+	routePlan.describeRoutedCandidates(connectPlan.RoutedRecipients)
 	routePlan.ExtraDetail = connectPlan.ExtraDetail
 	routePlan.ReplyContextConsumed = connectPlan.ReplyContextConsumed
 	routePlan.ActivationPlans = connectPlan.ActivationPlans
@@ -450,6 +450,9 @@ func (p deliveryPlanner) materializedPublicationTargetOwners(ctx context.Context
 		var targets []events.RouteIdentity
 		var owners []runtimeflowidentity.RunScopedFlowInstance
 		for index, intent := range plan.DeliveryIntents {
+			if intent.pendingNodeCandidate() {
+				continue
+			}
 			if intent.Recipient.IsAgent() {
 				identity := intent.AgentIdentity.Normalize()
 				if identity.Validate() != nil || identity.RunID != evt.RunID() || identity.AgentID() != intent.Recipient.ID() {
@@ -886,98 +889,6 @@ func agentDeliveryRoutesForCandidates(
 		out = append(out, admitted.deliveryRoute())
 	}
 	return events.NormalizeDeliveryRoutes(out), nil
-}
-
-func validateRoutedNodeDeliveryAuthority(source semanticview.Source, evt events.Event, routed []Subscriber, plan RoutePlan) error {
-	// Ingress authenticates the declaring scope, not an arbitrary delivery address.
-	if evt.AdmissionClass() == events.EventAdmissionRootIngress || evt.AdmissionClass() == events.EventAdmissionOperatorInjected {
-		sourceFlow := evt.RoutingSource().Route().FlowID
-		if evt.RoutingSource().Kind() == events.RoutingSourceRoot {
-			sourceFlow = semanticview.RootExecutionFlowID(source)
-		}
-		for _, intent := range plan.DeliveryIntents {
-			if intent.Producer == routeIntentProducerConnectRoutePlan && !intent.ConnectClaim.Empty() {
-				continue
-			}
-			target := intent.TargetOwnership.Route().Normalized()
-			if target.Empty() {
-				target = intent.TargetBlueprint.Normalized()
-			}
-			if target.FlowID != "" && target.FlowID != sourceFlow {
-				return fmt.Errorf("ingress source %q cannot authorize private delivery to %q without a compiled connection", sourceFlow, target.FlowID)
-			}
-		}
-	}
-	if len(routed) == 0 {
-		return nil
-	}
-	hasExplicitTargets := len(eventDeliveryTargetRoutes(evt)) > 0
-	root := rootExecutionCoordinate(source, evt.RunID())
-	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() || hasExplicitTargets || subscriber.routeSource != subscriberRouteSourceSubscription {
-			continue
-		}
-		handler := routedSubscriberTargetHandler(subscriber, evt.Type())
-		authorized := false
-		for _, intent := range plan.DeliveryIntents {
-			if routePlanIntentAuthorizesRoutedSubscriber(intent, subscriber, root, handler) {
-				authorized = true
-				break
-			}
-		}
-		if authorized {
-			continue
-		}
-		return fmt.Errorf(
-			"routed node %q at %q matched target-free event %q without exact same-instance, explicit-target, or compiled-connect authority",
-			subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), evt.Type(),
-		)
-	}
-	return nil
-}
-
-func routePlanIntentAuthorizesRoutedSubscriber(
-	intent RoutePlanDeliveryIntent,
-	subscriber Subscriber,
-	root semanticview.RootExecutionCoordinate,
-	handler runtimepipeline.DeliveryTargetHandler,
-) bool {
-	if !intent.Recipient.IsNode() || intent.Recipient != subscriber.Recipient || !intent.Handler.Equal(handler) {
-		return false
-	}
-	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {
-		return true
-	}
-	target := intent.TargetBlueprint.Normalized()
-	if target.Empty() {
-		target = intent.TargetOwnership.Route().Normalized()
-	}
-	if routeMatchesInternalSubscriber(target, subscriber, root) {
-		return true
-	}
-	return resolvedSelectedRunRootIntentMatchesSubscriber(intent, subscriber, root, target)
-}
-
-func resolvedSelectedRunRootIntentMatchesSubscriber(
-	intent RoutePlanDeliveryIntent,
-	subscriber Subscriber,
-	root semanticview.RootExecutionCoordinate,
-	target events.RouteIdentity,
-) bool {
-	// Root static routing uses its semantic path while ownership resolves to the selected run ID.
-	owner := intent.TargetOwnership
-	node, present := intent.Recipient.Node()
-	if owner.Empty() || owner.Validate() != nil || owner.Route() != target ||
-		!root.Matches(target.FlowID, target.FlowInstance) || intent.Handler.Empty() ||
-		!present || !node.Equal(subscriber.handlerNode) {
-		return false
-	}
-	handlerFlowID := subscriber.handlerNode.FlowPath()
-	if handlerFlowID == "" {
-		handlerFlowID = target.FlowID
-	}
-	return handlerFlowID != "" && strings.Trim(strings.TrimSpace(subscriber.Path), "/") == handlerFlowID &&
-		intent.Handler.Node().Equal(subscriber.handlerNode) && target.FlowID == handlerFlowID
 }
 
 func eventTargetsRoutedSubscriber(source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
