@@ -1,11 +1,16 @@
 package cataloge2e
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -183,6 +188,36 @@ func TestReceiverInitializationNestedGeometryBothStores(t *testing.T) {
 			if ready != 4 {
 				t.Fatalf("creation events=%d after restart and reuse, want exactly four", ready)
 			}
+			t.Run("absent_parent_no_route", func(t *testing.T) {
+				root := canonicalrouting.CopyNestedKeyedConnectionSelection(t)
+				path := filepath.Join(root, "schema.yaml")
+				body, err := os.ReadFile(path)
+				if err != nil || strings.Count(string(body), "to: parent, resolution: select-or-create") != 1 {
+					t.Fatalf("absent-parent fixture: %s %v", body, err)
+				}
+				if err := os.WriteFile(path, []byte(strings.Replace(string(body), "to: parent, resolution: select-or-create", "to: parent, resolution: select", 1)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				h := newRuntimeHarnessForBackend(t, root, backend, true)
+				seedCatalogRootStateForRun(t, h, catalogRuntimeRunID)
+				ctx := catalogRunContext(h, catalogRuntimeRunID)
+				before, err := h.workflow.ListWorkflowInstances(ctx, catalogRuntimeRunID)
+				if err != nil || len(before) != 1 {
+					t.Fatalf("absent-parent initial tree: %+v %v", before, err)
+				}
+				id := uuid.NewString()
+				if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "start", Payload: map[string]any{"parent_key": "missing", "leaf_key": "same"}, eventID: id, createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}, catalogRuntimePublishTimeout, true); err != nil {
+					t.Fatal(err)
+				}
+				after, err := h.workflow.ListWorkflowInstances(ctx, catalogRuntimeRunID)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("absent ancestor manufactured receiver state: before=%+v after=%+v err=%v", before, after, err)
+				}
+				public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+				if err != nil || public[id].EventID != id || public[id].NoDelivery == nil || public[id].NoDelivery.Reason != events.NoDeliveryResolutionBlocked.Code() || len(public[id].Deliveries) != 0 || len(public[id].DeadLetters) != 1 || public[id].DeadLetters[0].Failure.Class != failures.ClassTargetUnreachable {
+					t.Fatalf("absent-parent publication must be a counted no-route outcome: %+v err=%v", public[id], err)
+				}
+			})
 		})
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -206,11 +209,112 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			if err != nil || len(results) != 2 || results[0] != int64(11) || results[1] != int64(22) {
 				t.Fatalf("barrier results = %#v err=%v, want declared membership order [11 22]", results, err)
 			}
+			t.Run("three_whole_members", func(t *testing.T) {
+				selected, selectedDB := tc.setup(t)
+				proveThreeWholeFanInMembers(t, selected, selectedDB)
+			})
 		})
 	}
 }
 
-func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance) {
+func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB) {
+	t.Helper()
+	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
+	path := filepath.Join(root, "portfolio", "period", "nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Count(string(raw), "output: payload.revenue") != 1 {
+		t.Fatalf("whole-member fixture: %s %v", raw, err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "output: payload.revenue", "output: payload", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(canonicalrouting.RepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
+	ctx = originalConformanceFixtureContext(t, ctx, backend)
+	seedFanInBarrierRun(t, ctx, backend, source, runID)
+	runtime := newFanInBarrierRuntime(t, backend, source)
+	const period, portfolio = "2026-Q4", "whole-portfolio"
+	members := []string{"op-a", "op-b", "op-c"}
+	setupID := uuid.NewString()
+	publishFanInBarrierEvent(t, ctx, runtime.bus, source, setupID, ".", "portfolio.setup", map[string]any{
+		"portfolio_id": portfolio, "period_id": period, "expected_operating_ids": members,
+	})
+	routes, err := backend.ListEventDeliveryRoutes(ctx, setupID)
+	if err != nil || len(routes) != 1 || routes[0].Target.Route().FlowID != "portfolio" {
+		t.Fatalf("whole-member parent route: %+v %v", routes, err)
+	}
+	initial := loadFanInBarrierActivation(t, ctx, loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period), period)
+	if initial.Status != joinruntime.StatusOpen || initial.Completed() != 0 || initial.Expected() != 3 {
+		t.Fatalf("whole-member initial arm: %+v", initial)
+	}
+	arrive := func(member string, revenue int) {
+		publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "ingress", "operating.report.requested", map[string]any{
+			"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": revenue,
+		})
+	}
+	arrive("op-b", 22)
+	before := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
+	partial := loadFanInBarrierActivation(t, ctx, before, period)
+	if partial.Status != joinruntime.StatusOpen || partial.Completed() != 1 || !partial.JoinRef().Equal(initial.JoinRef()) {
+		t.Fatalf("whole-member partial arm: %+v", partial)
+	}
+	// A fresh admitted publication carries the same business member; this is
+	// not publication-ID replay suppression.
+	arrive("op-b", 22)
+	after := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("same business member changed the retained join")
+	}
+	if err := runtime.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.schedules.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.grant.Retire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	runtime = newFanInBarrierRuntime(t, backend, source, 2)
+	arrive("op-c", 33)
+	partial = loadFanInBarrierActivation(t, ctx, loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period), period)
+	if partial.Status != joinruntime.StatusOpen || partial.Completed() != 2 || !partial.JoinRef().Equal(initial.JoinRef()) {
+		t.Fatalf("restarted two-member arm: %+v", partial)
+	}
+	arrive("op-a", 11)
+	deadline := time.Now().Add(10 * time.Second)
+	var final runtimepipeline.WorkflowInstance
+	for {
+		final = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
+		if final.CurrentState == "complete" || !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	arm := loadFanInBarrierActivation(t, ctx, final, period)
+	if final.CurrentState != "complete" || arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || arm.Completed() != 3 || !arm.JoinRef().Equal(initial.JoinRef()) {
+		t.Fatalf("whole-member closure: instance=%+v arm=%+v", final, arm)
+	}
+	results, err := arm.Results()
+	want := make([]any, 0, 3)
+	for i, member := range members {
+		want = append(want, map[string]any{"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": int64(11 * (i + 1))})
+	}
+	if err != nil || !reflect.DeepEqual(results, want) {
+		t.Fatalf("whole-member results: got=%#v want=%#v err=%v", results, want, err)
+	}
+	requireFanInBarrierReportTargets(t, ctx, backend, db, 4, routes[0].Target.Route(), conformanceNode(t, "portfolio", "portfolio-router").Key())
+	requireA2NestedPeriodReadback(t, ctx, backend, db, routes[0].Target.Route(), final, 4)
+}
+
+func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance, expectedArrivals ...int) {
 	t.Helper()
 	query := `SELECT event_id::text FROM events WHERE event_name LIKE $1 ORDER BY created_at, event_id`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
@@ -231,7 +335,11 @@ func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fa
 	}
 	err = rows.Err()
 	rows.Close()
-	if err != nil || len(ids) != 2 {
+	wantArrivals := 2
+	if len(expectedArrivals) != 0 {
+		wantArrivals = expectedArrivals[0]
+	}
+	if err != nil || len(ids) != wantArrivals {
 		t.Fatalf("forwarded period arrivals: ids=%#v err=%v", ids, err)
 	}
 	want := (events.RouteIdentity{FlowID: "portfolio/period", FlowInstance: period.StorageRef, EntityID: period.EntityID}).Normalized()

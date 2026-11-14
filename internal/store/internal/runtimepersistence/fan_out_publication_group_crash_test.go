@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -166,14 +167,18 @@ func TestIssue2394PublicationGroupSIGKILLRecoveryBothStores(t *testing.T) {
 		return
 	}
 	runPublicationGroupCrashCases(t, []string{"after_chunk_commit", "before_commit", "after_commit_before_ack"})
+	t.Run("preclaim_barrier", func(t *testing.T) {
+		runPublicationGroupCrashCases(t, []string{"after_chunk_commit"}, true)
+	})
 }
 
 func TestIssue2394PublicationGroupMemberReturnSIGKILLBothStores(t *testing.T) {
 	runPublicationGroupCrashCases(t, []string{"after_member_1", "after_member_2", "after_member_3"})
 }
 
-func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
+func runPublicationGroupCrashCases(t *testing.T, cuts []string, barrierVariant ...bool) {
 	t.Helper()
+	withBarrier := len(barrierVariant) != 0 && barrierVariant[0]
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, cut := range cuts {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
@@ -182,8 +187,8 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 					location, _, _ = testutil.StartPostgres(t)
 				}
 				fixture := openFanOutCrashStore(t, backend, location)
-				root := canonicalrouting.CopyForkFanOutConsumer(t, false, false)
-				ctx, seeded, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, 3, time.Now().UTC(), false, false, root, nil, nil)
+				root := canonicalrouting.CopyForkFanOutConsumer(t, false, withBarrier)
+				ctx, seeded, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, 3, time.Now().UTC(), withBarrier, false, root, nil, nil)
 				requirePublicationGroupCrashWorkflowLoad(t, ctx, fixture, seeded.runID)
 				setup, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
 				if err != nil {
@@ -196,6 +201,26 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 					"SWARM_FAN_OUT_CRASH_ROOT=" + root, "SWARM_FAN_OUT_CRASH_RUN=" + seeded.runID, "SWARM_FAN_OUT_CRASH_CUT=" + cut}
 				cmd, evidence, exited := startPublicationGroupCrashChild(t, "predecessor", env)
 				old := awaitFanOutCrashEvidence(t, evidence)
+				if withBarrier {
+					assertFanOutCursorAndOutcomeCount(t, ctx, fixture.db, seeded, 3, 3)
+					assertFanOutBarrierState(t, ctx, fixture.db, seeded.runID, seeded.deliveryID, seeded.semanticPath, fanoutbarrier.StatusArmed, nil, "")
+					ids := fanOutCrashOutcomeIDs(t, ctx, fixture.db, seeded.runID)
+					if len(ids) != 3 {
+						t.Fatalf("preclaim group membership=%v", ids)
+					}
+					for _, id := range ids {
+						view, err := fixture.store.(interface {
+							LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+						}).LoadOperatorEvent(ctx, id)
+						if err != nil || len(view.Deliveries) != 1 {
+							t.Fatalf("preclaim ordinal %s: %+v %v", id, view, err)
+						}
+						delivery, err := fixture.store.(deliverylifecycle.Store).Snapshot(ctx, view.Deliveries[0].DeliveryID)
+						if err != nil || delivery.Status != deliverylifecycle.StatusPending || delivery.ClaimVersion != 0 || !delivery.StartedAt.IsZero() {
+							t.Fatalf("ordinal claimed before preclaim SIGKILL: %+v err=%v", delivery, err)
+						}
+					}
+				}
 				if err := cmd.Process.Kill(); err != nil {
 					t.Fatal(err)
 				}
@@ -244,6 +269,19 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 					t.Fatalf("recovery changed committed identities: before=%v after=%v", ids, got)
 				}
 				assertPublicationGroupCrashEffects(t, ctx, fixture, seeded.runID, ids, 3, 3, false)
+				if withBarrier {
+					advanceFanOutBarriersForTest(t, ctx, fixture.store.(storeTestDurableEventBusStore), seeded.runID, time.Now().UTC())
+					summary := fanoutbarrier.Summary{Total: 3, Succeeded: 3}
+					var status string
+					var raw []byte
+					if err := fixture.db.QueryRowContext(ctx, `SELECT status,summary FROM fan_out_obligation_barriers WHERE run_id=$1`, seeded.runID).Scan(&status, &raw); err != nil || status != string(fanoutbarrier.StatusClosedPending) {
+						t.Fatalf("recovered preclaim barrier status=%s err=%v", status, err)
+					}
+					var actual fanoutbarrier.Summary
+					if err := json.Unmarshal(raw, &actual); err != nil || actual != summary {
+						t.Fatalf("recovered preclaim outcomes=%+v want=%+v err=%v", actual, summary, err)
+					}
+				}
 				t.Logf("real group SIGKILL at %s, exact selected-store takeover, exact ordinal-prefix effects and missing-suffix handler executions, final public recipient effects/receipts, startup candidate discovery; not deferred-agent B15 signal recovery", cut)
 			})
 		}
