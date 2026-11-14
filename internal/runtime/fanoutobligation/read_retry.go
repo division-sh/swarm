@@ -51,15 +51,19 @@ func (r *ReadRetry) NextAttempt(now time.Time) ReadRetry {
 	return next
 }
 
-func (r *ReadRetry) ObserveFailure(now time.Time, failure runtimefailures.Envelope) error {
+func (r *ReadRetry) ObserveFailure(admittedAt, now time.Time, failure runtimefailures.Envelope) error {
+	wait := r.NotBefore.Sub(admittedAt)
+	if admittedAt.IsZero() || now.Before(admittedAt) || wait < max(InitialReadRetryDelay, r.Delay/2) || wait > r.Delay {
+		return errors.New("fan-out read failure requires its exact admitted retry interval")
+	}
 	if r.Since == nil {
 		at := now.UTC()
 		r.Since = &at
 	}
 	r.Failure = &failure
-	if r.NotBefore.Before(now) {
-		r.NotBefore = now.UTC().Add(r.Delay)
-	}
+	// Keep the once-drawn interval, but wait from the actual failure. The
+	// native claim's updated_at supplies admission; no timestamp is guessed.
+	r.NotBefore = now.UTC().Add(wait)
 	return r.Validate()
 }
 

@@ -20,8 +20,16 @@ func TestReadRetryRetainsPacingAcrossRestartWithoutInventingFailure(t *testing.T
 		if attempt == 0 && (next.Since != nil || next.Failure != nil) {
 			t.Fatal("admitted attempt fabricated observed failure")
 		}
-		if err := next.ObserveFailure(now, failure); err != nil {
+		wait := next.NotBefore.Sub(now)
+		observed := now.Add(100 * time.Millisecond)
+		if err := next.ObserveFailure(now, observed, failure); err != nil {
 			t.Fatal(err)
+		}
+		if !next.NotBefore.Equal(observed.Add(wait)) || next.NotBefore.Sub(observed) < InitialReadRetryDelay {
+			t.Fatal("confirmed failure shortened or redrew its admitted wait")
+		}
+		if attempt == 0 && !next.Since.Equal(observed) {
+			t.Fatal("failure age started before its observation")
 		}
 		if episode != nil && !next.Since.Equal(*episode.Since) {
 			t.Fatal("retry reset observed failure age")

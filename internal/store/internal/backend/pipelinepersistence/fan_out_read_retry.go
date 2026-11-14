@@ -80,7 +80,7 @@ func fanOutRetryReleaseEvidence(intent fanoutobligation.Intent, request pipeline
 	if intent.ReadRetry == nil {
 		return nil, errors.New("read retry requires its admitted attempt pacing")
 	}
-	if err := intent.ReadRetry.ObserveFailure(now, request.Failure); err != nil {
+	if err := intent.ReadRetry.ObserveFailure(intent.UpdatedAt, now, request.Failure); err != nil {
 		return nil, err
 	}
 	since, cause, err := encodeFanOutReadFailure(*intent.ReadRetry)

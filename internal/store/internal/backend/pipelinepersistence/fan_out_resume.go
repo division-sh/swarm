@@ -49,8 +49,11 @@ func resumeRunFanOut(ctx context.Context, runID string, postgres bool, grant sta
 		inventory, err = loadFanOutResumeInventory(ctx, tx, admission, grant, runID)
 		return err
 	})
-	if err != nil || !acknowledged {
-		return result, errors.Join(err, unacknowledgedFanOutResume(acknowledged))
+	if !acknowledged && err == nil {
+		err = unacknowledgedFanOutResume(false)
+	}
+	if err != nil {
+		return result, err
 	}
 	result.Observed, result.Admitted = len(inventory), true
 	result.Unresolved = len(inventory)
