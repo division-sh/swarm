@@ -559,6 +559,11 @@ func validateManagedProviderPreflightWithChecks(ctx context.Context, cfg *config
 }
 
 func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Config, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, preflightConfigs []managedProviderPreflightAgent, authority ManagedProviderPreflightAuthority, checks *ManagedProviderBootChecks, credentials llm.ProviderCredentialResolver) ([]string, error) {
+	if checks != nil {
+		if err := checks.validateTargets(ctx, cfg, credentials, preflightConfigs); err != nil {
+			return nil, err
+		}
+	}
 	if len(preflightConfigs) == 0 {
 		return nil, nil
 	}

@@ -16,6 +16,17 @@ import (
 type ProviderCredentialResolver struct {
 	Store     runtimecredentials.Store
 	EnvLookup llmselection.EnvLookup
+	captured  *ProviderCredential
+}
+
+// Capture binds a check's request and its evidence to the same credential read.
+// It does not establish currentness; the caller revalidates the original store.
+func (r ProviderCredentialResolver) Capture(ctx context.Context, profile llmselection.Profile) (ProviderCredentialResolver, ProviderCredential, error) {
+	credential, err := r.Resolve(ctx, profile)
+	if err != nil {
+		return ProviderCredentialResolver{}, ProviderCredential{}, err
+	}
+	return ProviderCredentialResolver{captured: &credential}, credential, nil
 }
 
 type ProviderCredential struct {
@@ -106,6 +117,15 @@ func IsMissingProviderCredential(err error) bool {
 
 func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmselection.Profile) (ProviderCredential, error) {
 	key := ProviderCredentialKey(profile)
+	if r.captured != nil {
+		if err := ctx.Err(); err != nil {
+			return ProviderCredential{}, err
+		}
+		if key != r.captured.Key {
+			return ProviderCredential{}, fmt.Errorf("captured provider credential does not match selected profile")
+		}
+		return *r.captured, nil
+	}
 	if !profile.Credential.Required {
 		return ProviderCredential{Key: key}, nil
 	}
