@@ -868,6 +868,8 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 
 func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
 	chdirForTest(t, t.TempDir())
 	root := t.TempDir()
 
@@ -881,6 +883,9 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "verify ok: source=") {
 		t.Fatalf("verify output missing success marker:\n%s", buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(cache, "swarm", "embedded-assets")); !os.IsNotExist(err) {
+		t.Fatalf("source admission materialized the embedded spec before checks: %v", err)
 	}
 }
 
