@@ -295,6 +295,7 @@ func proveSelectedResolutionMode(t *testing.T, backend, originalMode, selectedMo
 		"worker/nodes.yaml":    "receiver:\n  item.created: {}\n  item.requested: {}\n",
 	}
 	if originalMode == "select" {
+		documents["schema.yaml"] = strings.Replace(documents["schema.yaml"], "  - {event: item.created, from: ., to: worker, resolution: select-or-create}\n", "", 1)
 		documents["schema.yaml"] += "  - {event: item.requested, from: ., to: worker, rename: item.created, resolution: select-or-create}\n"
 	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
@@ -399,12 +400,13 @@ func proveSelectedResolutionMode(t *testing.T, backend, originalMode, selectedMo
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.ctx, targetFact), rooted.Admission())
+	targetCtx := correlation.WithRootAdmission(correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(artifact.BundleHash()), targetFact), rooted.Admission())
 	targetScope, err := authoractivity.BundleScopeForTarget(f.ctx, artifact.BundleHash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	targetCtx = authoractivity.WithScope(targetCtx, targetScope)
+	targetCtx = originalStoreFixtureContext(t, targetCtx, f.store)
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: artifact.BundleHash()}
 	request := prepareSelectedStoreMaterializationForTest(t, targetCtx, f.store, runID, checkpoint.ID(), selection, artifact.BundleHash())
 	owner := f.store.(runforkexecution.SelectedContractForkLifecycle)

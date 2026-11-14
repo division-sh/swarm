@@ -228,6 +228,14 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 			if err := os.WriteFile(path, append(raw, []byte("hub.result: {hub_id: text, value: text}\n")...), 0600); err != nil {
 				t.Fatal(err)
 			}
+			path = filepath.Join(root, "hub", "events.yaml")
+			raw, err = os.ReadFile(path)
+			if err != nil || strings.Count(string(raw), "hub.result: {hub_id: text, value: text}\n") != 1 {
+				t.Fatalf("final-stage result catalog: %s %v", raw, err)
+			}
+			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "hub.result: {hub_id: text, value: text}\n", "", 1)), 0600); err != nil {
+				t.Fatal(err)
+			}
 			p := newIssue2564Provider(t, "a")
 			p.scripts["a"] = []*issue2564ProviderStep{
 				newIssue2564Step(),
