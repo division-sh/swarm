@@ -19,36 +19,34 @@ func PrepareReceiverNullableConstructionObservationForTest(ctx context.Context, 
 	if err != nil || id == uuid.Nil || id.String() != entityID {
 		return fmt.Errorf("nullable receiver observation requires an exact entity")
 	}
-	return runReceiverConstructionObservationFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET entity_type=NULL WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, owner.RunID, owner.Route.InstancePath, entityID)
-		if err != nil {
-			return err
-		}
-		if count, err := result.RowsAffected(); err != nil || count != 1 {
-			return fmt.Errorf("nullable receiver observation requires its exact existing header: rows=%d err=%v", count, err)
-		}
-		result, err = tx.ExecContext(ctx, `DELETE FROM flow_instance_runtime_readiness WHERE run_id=$1 AND instance_path=$2`, owner.RunID, owner.Route.InstancePath)
-		if err != nil {
-			return err
-		}
-		if count, err := result.RowsAffected(); err != nil || count != 1 {
-			return fmt.Errorf("nullable receiver observation requires its exact attachment: rows=%d err=%v", count, err)
-		}
-		return nil
-	})
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.PrepareReceiverNullableConstructionObservationForTest(ctx, owner, entityID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.PrepareReceiverNullableConstructionObservationForTest(ctx, owner, entityID)
+	default:
+		return fmt.Errorf("receiver observation fault requires the original native owner")
+	}
 }
 
 func SetReceiverConstructionObservationUnavailableForTest(ctx context.Context, selected any, unavailable bool) error {
-	return runReceiverConstructionObservationFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		statement := `ALTER TABLE flow_instances RENAME TO unavailable_construction_readback`
-		if !unavailable {
-			statement = `ALTER TABLE unavailable_construction_readback RENAME TO flow_instances`
-		}
-		_, err := tx.ExecContext(ctx, statement)
+	if err := validateChannelObservationOwner(selected); err != nil {
 		return err
-	})
+	}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.SetReceiverConstructionObservationUnavailableForTest(ctx, unavailable)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.SetReceiverConstructionObservationUnavailableForTest(ctx, unavailable)
+	default:
+		return fmt.Errorf("receiver observation fault requires the original native owner")
+	}
 }
 
+// Retained for the distinct fork-predecessor and receipt-correspondence cuts.
 func runReceiverConstructionObservationFault(ctx context.Context, selected any, write func(context.Context, *sql.Tx) error) error {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return err
