@@ -160,6 +160,11 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 
 func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restartable ...bool) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
 	t.Helper()
+	return newWorkflowTargetConstructionFixtureDocuments(t, backend, len(restartable) == 1 && restartable[0], nil)
+}
+
+func newWorkflowTargetConstructionFixtureDocuments(t *testing.T, backend string, withAgents bool, extra map[string]string) (receiverConfigActivationFixture, runtimepipeline.FlowInstanceActivationPlan) {
+	t.Helper()
 	documents := map[string]string{
 		"schema.yaml":        "stages: []\n",
 		"review/schema.yaml": "instance: account_id\nstages:\n  active: {}\n  done: {}\n  settled: {}\ninputs: [review.created]\n",
@@ -172,12 +177,14 @@ func newWorkflowTargetConstructionFixture(t *testing.T, backend string, restarta
     advances_to: settled
 `, "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
-	withAgents := len(restartable) == 1 && restartable[0]
 	if withAgents {
 		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  active: {}", "  active:\n    timers:\n      - {after: 1h, emit: timer.elapsed}", 1)
 		documents["review/schema.yaml"] = strings.Replace(documents["review/schema.yaml"], "  done: {}", "  done: {final: true}", 1)
 		documents["review/events.yaml"] += "timer.elapsed:\ntask.started:\n"
 		documents["review/agents.yaml"] = "reviewer:\n  model: regular\n  memory: true\n  intent: {inline: Review the task.}\n  subscriptions: [task.started]\n"
+	}
+	for name, contents := range extra {
+		documents[name] = contents
 	}
 	var f receiverConfigActivationFixture
 	if withAgents {

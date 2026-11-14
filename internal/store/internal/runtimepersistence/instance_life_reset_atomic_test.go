@@ -41,6 +41,9 @@ import (
 
 func TestInstanceLifeResetCommitBeforeFinalizeReplayBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/field_and_finished_child_history", func(t *testing.T) {
+			proveInstanceResetFieldAndChildHistory(t, backend)
+		})
 		t.Run(backend+"/fieldless_history", func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithOwnership(t, backend, false, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": "stages: []\n",
@@ -707,7 +710,7 @@ func nativeInstanceResetFixture(t *testing.T, backend string, explicitStatus ...
 	return f, prepareNativeResetPlan(t, f, first), actor
 }
 
-func finishNativeResetLife(t *testing.T, f receiverConfigActivationFixture, plan pipeline.FlowInstanceActivationPlan) {
+func finishNativeResetLife(t *testing.T, f receiverConfigActivationFixture, plan pipeline.FlowInstanceActivationPlan, fields ...map[string]any) {
 	t.Helper()
 	current, found, err := f.workflows.LoadConstructedFlowInstance(f.ctx, planOwner(plan), identity.NormalizeEntityID(plan.Identity.EntityID))
 	if err != nil || !found {
@@ -721,12 +724,72 @@ func finishNativeResetLife(t *testing.T, f receiverConfigActivationFixture, plan
 	state.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
 	state.ExpectedRevision, state.ExpectedState = current.Revision, current.CurrentState
 	state.CurrentState = "done"
+	if len(fields) == 1 {
+		state.Fields, err = json.Marshal(fields[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	state.EnteredStageAt, state.UpdatedAt = time.Now().UTC(), time.Now().UTC()
 	var claim deliverylifecycle.Claim
 	state = workflowTargetMutationEntry(t, f, state, "finish.requested", &claim)
 	_, err = f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: state, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func proveInstanceResetFieldAndChildHistory(t *testing.T, backend string) {
+	t.Helper()
+	f, first := newWorkflowTargetConstructionFixtureDocuments(t, backend, true, map[string]string{
+		"review/child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"review/child/schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
+		"review/child/state.yaml":    "handled: false\n",
+		"review/child/events.yaml":   "finish.requested:\n",
+		"review/child/nodes.yaml":    "progress:\n  finish.requested:\n    advances_to: done\n",
+	})
+	committer := agentFixtureFlowActivationCommitter{store: f.store}
+	if _, err := committer.CommitFlowInstanceActivation(f.ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Children) != 1 {
+		t.Fatal("history proof requires one actually constructed descendant")
+	}
+	child := first.Children[0]
+	finishNativeResetLife(t, f, child, map[string]any{"handled": true})
+	finishNativeResetLife(t, f, first, map[string]any{"account_id": "preserved", "handled": true})
+	reader := f.store.(interface {
+		LoadOperatorEntityAtLife(context.Context, string, string, int64) (operatorread.OperatorEntityFull, error)
+	})
+	childBefore, err := reader.LoadOperatorEntityAtLife(f.ctx, child.Identity.EntityID, first.Readiness.RunID, 1)
+	if err != nil || childBefore.Entity.CurrentState == nil || *childBefore.Entity.CurrentState != "done" || childBefore.Fields["handled"] != true {
+		t.Fatalf("finished descendant missing before parent reset: %+v err=%v", childBefore, err)
+	}
+	parentBefore, err := reader.LoadOperatorEntityAtLife(f.ctx, first.Identity.EntityID, first.Readiness.RunID, 1)
+	if err != nil || parentBefore.Fields["handled"] != true {
+		t.Fatalf("non-key field was not changed before reset: %+v err=%v", parentBefore, err)
+	}
+	reset := prepareNativeResetPlan(t, f, first)
+	committed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
+	if err != nil || !committed.StartedOver {
+		t.Fatalf("reset parent: %+v err=%v", committed, err)
+	}
+	for _, life := range []int64{1, 2} {
+		parent, err := reader.LoadOperatorEntityAtLife(f.ctx, first.Identity.EntityID, first.Readiness.RunID, life)
+		if err != nil || parent.Entity.Life == nil || *parent.Entity.Life != life || parent.Fields["handled"] != (life == 1) || parent.Fields["account_id"] != "preserved" {
+			t.Fatalf("reset initializer or preceding-life field history changed at life %d: %+v err=%v", life, parent, err)
+		}
+		if life == 1 && !reflect.DeepEqual(parentBefore, parent) {
+			t.Fatal("parent reset rewrote its preceding-life history")
+		}
+	}
+	childAfter, err := reader.LoadOperatorEntityAtLife(f.ctx, child.Identity.EntityID, first.Readiness.RunID, 1)
+	if err != nil || !reflect.DeepEqual(childBefore, childAfter) {
+		t.Fatalf("parent reset changed finished descendant identity, state or history: before=%+v after=%+v err=%v", childBefore, childAfter, err)
+	}
+	observed, found, err := f.workflows.LoadConstructedFlowInstance(f.ctx, planOwner(child), identity.NormalizeEntityID(child.Identity.EntityID))
+	if err != nil || !found || observed.EntityID != child.Identity.EntityID || observed.StorageRef != child.Identity.InstancePath || observed.Life != 1 || observed.CurrentState != "done" {
+		t.Fatalf("parent reset reconstructed or changed current finished child: %+v found=%t err=%v", observed, found, err)
 	}
 }
 
