@@ -256,7 +256,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if !found || rootPlan.Decision != "root_review" {
 				t.Fatal("root gate declaration has no exact admitted plan")
 			}
-			rootOutcomes, err := decisioncard.ResolveGateOutcomes(rootBundle, rootPlan)
+			rootOutcomes, err := decisioncard.ResolveGateOutcomes(semanticview.Wrap(rootBundle), rootPlan)
 			if err != nil {
 				t.Fatal(err)
 			}
