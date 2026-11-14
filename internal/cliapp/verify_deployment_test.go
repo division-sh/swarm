@@ -500,6 +500,22 @@ func TestVerifyListenerDriverProvesOccupiedAndReleasedExactBindings(t *testing.T
 			if decision := result.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{}); decision.Complete == occupied {
 				t.Fatalf("occupied bindings were admitted or valid observations incomplete: %+v", decision)
 			}
+			dryRun := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+			inspectVerifyListeners(context.Background(), root, cfg, &dryRun, ServeOptions{DryRun: true, APIListenAddr: addresses[0], MCPListenAddr: addresses[1]})
+			for _, observation := range dryRun.BootReport.Observations {
+				if observation.CheckID == "listener_availability" {
+					want := bootverify.AdmissionPassed
+					if occupied {
+						want = bootverify.AdmissionNotRun
+					}
+					if observation.Status != want {
+						t.Fatalf("dry run fabricated port evidence: %+v", observation)
+					}
+				}
+			}
+			if dryRun.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{}).Complete == occupied || len(dryRun.BootReport.ExecutionObligations) != 2 {
+				t.Fatal("dry run lost not-checked status or real listener obligation")
+			}
 			if !occupied {
 				for _, address := range addresses {
 					listener, err := net.Listen("tcp", address)
@@ -513,4 +529,31 @@ func TestVerifyListenerDriverProvesOccupiedAndReleasedExactBindings(t *testing.T
 			}
 		})
 	}
+	t.Run("dry_run_keeps_own_binding_collision", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		root := t.TempDir()
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := listener.Addr().String()
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+		inspectVerifyListeners(context.Background(), root, cfg, &result, ServeOptions{DryRun: true, APIListenAddr: addr, MCPListenAddr: addr})
+		failed := false
+		for _, observation := range result.BootReport.Observations {
+			if observation.CheckID == "listener_availability" && observation.Status == bootverify.AdmissionFailed {
+				failed = true
+			}
+		}
+		if !failed {
+			t.Fatal("dry run excused its own API/MCP collision")
+		}
+	})
 }
