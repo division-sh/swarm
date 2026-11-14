@@ -36,14 +36,6 @@ type ReceiverDeliveryStorageRow struct {
 
 type StandaloneAgentDeliveryStorage struct{ Status, RunStatus string }
 
-func ReadStopPendingDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, runID).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
 type CausalDeliveryStatusCount struct {
 	Class, Subscriber, Status, Reason string
 	Count                             int

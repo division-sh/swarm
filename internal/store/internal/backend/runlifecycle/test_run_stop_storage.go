@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -47,7 +46,7 @@ func readRunStopStorageTxForTest(ctx context.Context, tx *sql.Tx, runID string) 
 		return RunStopStorage{}, err
 	}
 	out.Status, out.Control = state.Status, state.Control
-	out.Pending, err = delivery.ReadStopPendingDeliveryCountTx(ctx, tx, runID)
+	out.Pending, err = readStopPendingDeliveryCountTx(ctx, tx, runID)
 	if err != nil {
 		return RunStopStorage{}, err
 	}
@@ -56,4 +55,12 @@ func readRunStopStorageTxForTest(ctx context.Context, tx *sql.Tx, runID string) 
 		return RunStopStorage{}, err
 	}
 	return out, nil
+}
+
+func readStopPendingDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, runID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
