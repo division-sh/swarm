@@ -622,54 +622,20 @@ units:
       - github.com/division-sh/swarm/internal/cliapp
     required_children:
       TestVerifyRunPublicAdmissionBothStores:
-        - sqlite/mutations_false/missing_false/json/uppercase_false
-        - sqlite/mutations_false/missing_false/json/uppercase_true
-        - sqlite/mutations_false/missing_false/text/uppercase_false
-        - sqlite/mutations_false/missing_false/text/uppercase_true
-        - sqlite/mutations_false/missing_false/quiet/uppercase_false
-        - sqlite/mutations_false/missing_false/quiet/uppercase_true
-        - sqlite/mutations_false/missing_true/json/uppercase_false
-        - sqlite/mutations_false/missing_true/json/uppercase_true
-        - sqlite/mutations_false/missing_true/text/uppercase_false
-        - sqlite/mutations_false/missing_true/text/uppercase_true
-        - sqlite/mutations_false/missing_true/quiet/uppercase_false
-        - sqlite/mutations_false/missing_true/quiet/uppercase_true
-        - sqlite/mutations_true/missing_false/json/uppercase_false
-        - sqlite/mutations_true/missing_false/json/uppercase_true
-        - sqlite/mutations_true/missing_false/text/uppercase_false
-        - sqlite/mutations_true/missing_false/text/uppercase_true
-        - sqlite/mutations_true/missing_false/quiet/uppercase_false
-        - sqlite/mutations_true/missing_false/quiet/uppercase_true
-        - sqlite/mutations_true/missing_true/json/uppercase_false
-        - sqlite/mutations_true/missing_true/json/uppercase_true
-        - sqlite/mutations_true/missing_true/text/uppercase_false
-        - sqlite/mutations_true/missing_true/text/uppercase_true
-        - sqlite/mutations_true/missing_true/quiet/uppercase_false
-        - sqlite/mutations_true/missing_true/quiet/uppercase_true
-        - postgres/mutations_false/missing_false/json/uppercase_false
-        - postgres/mutations_false/missing_false/json/uppercase_true
-        - postgres/mutations_false/missing_false/text/uppercase_false
-        - postgres/mutations_false/missing_false/text/uppercase_true
-        - postgres/mutations_false/missing_false/quiet/uppercase_false
-        - postgres/mutations_false/missing_false/quiet/uppercase_true
-        - postgres/mutations_false/missing_true/json/uppercase_false
-        - postgres/mutations_false/missing_true/json/uppercase_true
-        - postgres/mutations_false/missing_true/text/uppercase_false
-        - postgres/mutations_false/missing_true/text/uppercase_true
-        - postgres/mutations_false/missing_true/quiet/uppercase_false
-        - postgres/mutations_false/missing_true/quiet/uppercase_true
-        - postgres/mutations_true/missing_false/json/uppercase_false
-        - postgres/mutations_true/missing_false/json/uppercase_true
-        - postgres/mutations_true/missing_false/text/uppercase_false
-        - postgres/mutations_true/missing_false/text/uppercase_true
-        - postgres/mutations_true/missing_false/quiet/uppercase_false
-        - postgres/mutations_true/missing_false/quiet/uppercase_true
-        - postgres/mutations_true/missing_true/json/uppercase_false
-        - postgres/mutations_true/missing_true/json/uppercase_true
-        - postgres/mutations_true/missing_true/text/uppercase_false
-        - postgres/mutations_true/missing_true/text/uppercase_true
-        - postgres/mutations_true/missing_true/quiet/uppercase_false
-        - postgres/mutations_true/missing_true/quiet/uppercase_true
+        - sqlite/mutations_false/missing_false
+        - sqlite/mutations_false/missing_true
+        - sqlite/mutations_true/missing_false
+        - sqlite/mutations_true/missing_true
+        - sqlite/drift_running
+        - sqlite/drift_paused
+        - sqlite/drift_cancelled
+        - postgres/mutations_false/missing_false
+        - postgres/mutations_false/missing_true
+        - postgres/mutations_true/missing_false
+        - postgres/mutations_true/missing_true
+        - postgres/drift_running
+        - postgres/drift_paused
+        - postgres/drift_cancelled
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

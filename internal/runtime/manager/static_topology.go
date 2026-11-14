@@ -1052,12 +1052,21 @@ func (am *AgentManager) PreRunAgentMaterializationBlueprints() ([]AgentMateriali
 	if am == nil {
 		return nil, nil
 	}
-	blueprints, err := staticAgentDeclarationPreflightBlueprints(am.semanticSource)
+	return ResolveAgentDeclarationPreflightBlueprints(AgentManagerOptions{
+		ExecutionPosture: am.executionPosture, LLMBackend: am.llmBackend,
+		ModelAliases: am.modelAliases, RequireModelResolution: am.requireModelResolution,
+	}, am.semanticSource)
+}
+
+// ResolveAgentDeclarationPreflightBlueprints includes non-executable child-flow
+// declarations, unlike the root-only static materialization population.
+func ResolveAgentDeclarationPreflightBlueprints(options AgentManagerOptions, source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
+	blueprints, err := staticAgentDeclarationPreflightBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
 	for i := range blueprints {
-		if err := am.resolveAgentModel(&blueprints[i].Config); err != nil {
+		if err := resolveAgentModel(&blueprints[i].Config, options.ExecutionPosture, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
 			return nil, err
 		}
 	}

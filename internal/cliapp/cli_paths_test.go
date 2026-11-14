@@ -5,10 +5,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t *testing.T) {
@@ -63,10 +65,7 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	if want := mustInvocationRootForTest(sourceRoot).Path(); got.SourceRoot != want {
 		t.Fatalf("contracts path = %q, want %q", got.SourceRoot, want)
 	}
-	want, err := EmbeddedPlatformSpecPath()
-	if err != nil {
-		t.Fatalf("embedded platform spec path: %v", err)
-	}
+	want := platform.PlatformSpecDisplayPath
 	_, bundle, err := NewSwarmWorkflowModule(outsideRepo, got.SourceRoot)
 	if err != nil {
 		t.Fatalf("load source with embedded spec: %v", err)
@@ -74,14 +73,18 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	if bundle.Paths.PlatformSpecFile != want {
 		t.Fatalf("platform spec path = %q, want embedded %q", bundle.Paths.PlatformSpecFile, want)
 	}
-	data, err := os.ReadFile(bundle.Paths.PlatformSpecFile)
+	embedded, err := contracts.ParsePlatformSpecDocument(platform.PlatformSpecYAML(), want)
 	if err != nil {
-		t.Fatalf("read embedded platform spec materialization: %v", err)
+		t.Fatal(err)
 	}
-	if !bytes.Contains(data, []byte("cli_specification:")) {
-		t.Fatalf("materialized platform spec missing cli_specification")
+	var actual, expected map[string]any
+	if err := bundle.Platform.SourceValue().Project(&actual); err != nil {
+		t.Fatal(err)
 	}
-	if !bytes.Equal(data, platform.PlatformSpecYAML()) {
+	if err := embedded.SourceValue().Project(&expected); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(actual, expected) || actual["cli_specification"] == nil {
 		t.Fatal("default spec differs from the binary's embedded bytes")
 	}
 }
