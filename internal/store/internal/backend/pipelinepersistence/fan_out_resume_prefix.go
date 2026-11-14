@@ -73,7 +73,14 @@ func refuseInheritedFanOutResume(ctx context.Context, db rowQueryer, intent fano
 }
 
 func readFanOutResumePrefix(ctx context.Context, db eventReadQueryer, intent fanoutobligation.Intent) ([]fanoutobligation.Outcome, error) {
-	predicate, args := fanOutKeyPredicate("", intent.Request.Key, 1)
+	key := intent.Request.Key
+	// Outcomes carry the two disjoint exact keys, not the intent's origin_kind.
+	predicate := `run_id=$1 AND deployment_feed_id=$2`
+	args := []any{key.RunID, key.DeploymentFeedID}
+	if key.DeploymentFeedID == "" {
+		predicate = `run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`
+		args = []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath}
+	}
 	rows, err := db.QueryContext(ctx, `SELECT ordinal,outcome_kind,COALESCE(CAST(event_id AS TEXT),''),COALESCE(CAST(source_event_id AS TEXT),''),COALESCE(inherited_disposition,''),failure,created_at FROM fan_out_outcomes WHERE `+predicate+` ORDER BY ordinal`, args...)
 	if err != nil {
 		return nil, err
