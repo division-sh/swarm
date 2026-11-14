@@ -184,6 +184,7 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 			assertRecoveredPostureMatrix(t, fixture.db, fixture.sqlite, mock)
 			assertProviderRecoveryCompletionRows(t, fixture.db, fixture.sqlite, mock)
 
+			retireStoreTestWorkFixture(t)
 			fixture = backend.open(t)
 			live := beginProviderRecoveryPostureMatrix(t, fixture, executionmode.Live, now.Add(time.Minute))
 			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)
