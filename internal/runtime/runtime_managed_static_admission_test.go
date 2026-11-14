@@ -59,7 +59,7 @@ func TestManagedStartupStaticCensusRejectsBeforeExecutionAuthorityOrPersistence(
 					tools = staticAdmissionActorTools{executor}
 				}
 				if seam == "normal" {
-					_, err = validateManagedProviderPreflightConfigs(testAuthorActivityContext(context.Background()), cfg, toolgateway.Binding{}, runtimes, nil, tools, candidates, ManagedProviderPreflightAuthority{})
+					_, err = validateManagedProviderPreflightConfigs(testAuthorActivityContext(context.Background()), cfg, toolgateway.Binding{}, runtimes, nil, tools, candidates, ManagedProviderPreflightAuthority{}, nil, llm.ProviderCredentialResolver{})
 				} else {
 					_, err = PrepareSelectedForkProviderCatalog(testAuthorActivityContext(context.Background()), runtimes, tools, blueprints)
 				}

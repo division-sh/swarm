@@ -20,7 +20,11 @@ func CompileManagedProviderCheckTargets(live []actors.AgentConfig, blueprints []
 	}
 	targets := make([]ManagedProviderCheckTarget, len(configs))
 	for i, candidate := range configs {
-		targets[i] = ManagedProviderCheckTarget{Actor: candidate.config, Plan: candidate.plan}
+		actor, err := clonePreparedProviderActor(candidate.config)
+		if err != nil {
+			return nil, err
+		}
+		targets[i] = ManagedProviderCheckTarget{Actor: actor, Plan: candidate.plan}
 	}
 	return targets, nil
 }
