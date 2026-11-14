@@ -24,131 +24,168 @@ func bootAdmittedCredentials(source semanticview.Source, store channelonboarding
 		if use.Kind != "tool" || store == nil {
 			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
 		}
-		bundle, present := semanticview.Bundle(source)
-		if !present || bundle == nil || bundle.SourceArtifact == nil {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
-		}
-		providers, err := packadmission.ProviderSourceForBundle(bundle)
-		if err != nil {
+		selection, err := selectBootCredentialUse(source, use)
+		if err != nil || selection == nil {
 			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
 		}
-		flow := use.FlowID
-		if flow == "" {
-			flow = semanticview.RootExecutionFlowID(source)
-		}
-		scope, err := providers.Scope(flow)
-		if err != nil {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-		}
-		definition, account, accountErr := scope.ConnectionAccount(bundle)
-		if !definition.Valid() {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, accountErr
-		}
-		plan, _ := definition.ChannelPlan()
-		connector, _ := definition.ConnectorDescriptor()
-		declared, owned := connector.Tools[use.Name]
-		if !owned {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
-		}
-		want, err := declared.CanonicalHash()
-		got, actualErr := use.Entry.CanonicalHash()
-		bound, independent := bootCredentialUseBound(source, bundle, flow, use.Name, account.Policy, got, plan)
-		if err != nil || actualErr != nil || want != got || !bound {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
-		}
-		registration, registered := plan.Registration()
-		if !registered || !slices.Contains(append(registration.ProviderCredentials(), registration.SigningCredential()), use.Role) {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
-		}
-		if inspect, present := frozen[flow]; present {
-			observed, admitted, err := inspect(ctx, use)
-			if independent {
-				admitted = runtimebootverify.PartiallyAdmittedCredential
-			}
-			return observed, admitted, err
-		}
-		ref := channelonboarding.AccountReference{Provider: plan.Provider(), Account: account.Policy}
-		var op channelonboarding.Operation
-		var operations channelonboarding.OperationStore
-		if accountErr == nil && account.FromPolicy {
-			selected, ok := store.(interface {
-				DeploymentChannelOperations() channelonboarding.OperationStore
-			})
-			if !ok {
-				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, channelonboarding.ErrInvalidRequest
-			}
-			operations = selected.DeploymentChannelOperations()
-			op, err = channelonboarding.RegisteredAccount(ctx, operations, ref, plan.ProviderFacts())
-			if errors.Is(err, channelonboarding.ErrNotFound) {
-				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, nil
-			}
-		} else {
-			learned, readErr := currentStandingCredentialAdmissions(ctx, store, source, plans, bundle.SourceArtifact.BundleHash())
-			if readErr != nil {
-				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, readErr
-			}
-			admission, present := learned[standingIngressSelector(flow, plan.Provider())]
-			if !present {
-				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, accountErr
-			}
-			op, err = store.GetChannelOnboarding(ctx, admission.operationID)
-		}
-		if err != nil {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-		}
-		required := append(registration.ProviderCredentials(), registration.SigningCredential())
-		if _, err := (standingCredentialPlanScope{required: required}).admit(op.CredentialAdmissions); err != nil {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-		}
-		owner, err := credentials.NewSnapshotOwner(values)
-		if err != nil {
-			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-		}
-		projection := owner.BeginSecretBindingProjection()
-		expected := channelonboarding.AdmissionResponsibility{DeploymentRegistration: op.DeploymentRegistration, OperationID: op.OperationID,
-			OperationRevision: op.Revision, ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
-			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-		if !op.DeploymentRegistration && op.ActivationRevision > 0 {
-			activation, err := store.GetConnectedChannelActivation(ctx, op.SlotKey)
-			if err != nil {
+		inspect, present := frozen[selection.flow]
+		if !present {
+			inspect, err = freezeBootCredentialObservation(ctx, source, store, values, plans, *selection)
+			if err != nil || inspect == nil {
 				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
 			}
-			expected.OperationRevision, expected.ActivationRevision = activation.OperationRevision, activation.Revision
+			frozen[selection.flow] = inspect
 		}
-		inspect := func(ctx context.Context, use credentials.RequirementUse) (credentials.AdmittedSnapshot, runtimebootverify.CredentialAdmissionExtent, error) {
-			var observed credentials.AdmittedSnapshot
-			for _, admission := range op.CredentialAdmissions {
-				snapshot, current, err := observeStandingCredentialRole(ctx, projection, admission.StoreKey, admission, true)
-				if err != nil || !current {
-					return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, fmt.Errorf("admitted boot credential is not current: %w", errors.Join(operatorchannel.ErrCredentialStale, err))
-				}
-				if admission.Role == use.Role {
-					observed = snapshot
-				}
-			}
-			if op.DeploymentRegistration {
-				current, err := channelonboarding.RegisteredAccount(ctx, operations, ref, plan.ProviderFacts())
-				if err != nil {
-					return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-				}
-				if !expected.MatchesOperation(current, plan.ProviderFacts()) || current.PrincipalID != op.PrincipalID || current.Interface.Normalized() != op.Interface.Normalized() {
-					return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, channelonboarding.ErrRevisionConflict
-				}
-			} else if current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, store, expected, true); err != nil || !current {
-				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, errors.Join(channelonboarding.ErrRevisionConflict, err)
-			}
-			if err := projection.ValidateCurrent(ctx); err != nil {
-				return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
-			}
-			return observed, runtimebootverify.FullyAdmittedCredential, nil
-		}
-		frozen[flow] = inspect
 		observed, admitted, err := inspect(ctx, use)
-		if independent {
+		if selection.independent {
 			admitted = runtimebootverify.PartiallyAdmittedCredential
 		}
 		return observed, admitted, err
 	}
+}
+
+type bootCredentialSelection struct {
+	bundle       *contracts.WorkflowContractBundle
+	flow         string
+	plan         packs.SatisfactionPlan
+	account      contracts.FlowOperatorAccount
+	accountErr   error
+	registration packs.CompiledChannelRegistration
+	independent  bool
+}
+
+func selectBootCredentialUse(source semanticview.Source, use credentials.RequirementUse) (*bootCredentialSelection, error) {
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil || bundle.SourceArtifact == nil {
+		return nil, nil
+	}
+	providers, err := packadmission.ProviderSourceForBundle(bundle)
+	if err != nil {
+		return nil, err
+	}
+	flow := use.FlowID
+	if flow == "" {
+		flow = semanticview.RootExecutionFlowID(source)
+	}
+	scope, err := providers.Scope(flow)
+	if err != nil {
+		return nil, err
+	}
+	definition, account, accountErr := scope.ConnectionAccount(bundle)
+	if !definition.Valid() {
+		return nil, accountErr
+	}
+	plan, _ := definition.ChannelPlan()
+	connector, _ := definition.ConnectorDescriptor()
+	declared, owned := connector.Tools[use.Name]
+	if !owned {
+		return nil, nil
+	}
+	want, err := declared.CanonicalHash()
+	got, actualErr := use.Entry.CanonicalHash()
+	bound, independent := bootCredentialUseBound(source, bundle, flow, use.Name, account.Policy, got, plan)
+	if err != nil || actualErr != nil || want != got || !bound {
+		return nil, nil
+	}
+	registration, registered := plan.Registration()
+	if !registered || !slices.Contains(append(registration.ProviderCredentials(), registration.SigningCredential()), use.Role) {
+		return nil, nil
+	}
+	return &bootCredentialSelection{bundle: bundle, flow: flow, plan: plan, account: account, accountErr: accountErr,
+		registration: registration, independent: independent}, nil
+}
+
+func freezeBootCredentialObservation(ctx context.Context, source semanticview.Source, store channelonboarding.Store, values credentials.Store, plans []packs.SatisfactionPlan, selection bootCredentialSelection) (runtimebootverify.AdmittedCredentialInspector, error) {
+	ref := channelonboarding.AccountReference{Provider: selection.plan.Provider(), Account: selection.account.Policy}
+	var op channelonboarding.Operation
+	var operations channelonboarding.OperationStore
+	var err error
+	if selection.accountErr == nil && selection.account.FromPolicy {
+		selected, ok := store.(interface {
+			DeploymentChannelOperations() channelonboarding.OperationStore
+		})
+		if !ok {
+			return nil, channelonboarding.ErrInvalidRequest
+		}
+		operations = selected.DeploymentChannelOperations()
+		op, err = channelonboarding.RegisteredAccount(ctx, operations, ref, selection.plan.ProviderFacts())
+		if errors.Is(err, channelonboarding.ErrNotFound) {
+			return nil, nil
+		}
+	} else {
+		learned, readErr := currentStandingCredentialAdmissions(ctx, store, source, plans, selection.bundle.SourceArtifact.BundleHash())
+		if readErr != nil {
+			return nil, readErr
+		}
+		admission, present := learned[standingIngressSelector(selection.flow, selection.plan.Provider())]
+		if !present {
+			return nil, selection.accountErr
+		}
+		op, err = store.GetChannelOnboarding(ctx, admission.operationID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	required := append(selection.registration.ProviderCredentials(), selection.registration.SigningCredential())
+	if _, err := (standingCredentialPlanScope{required: required}).admit(op.CredentialAdmissions); err != nil {
+		return nil, err
+	}
+	owner, err := credentials.NewSnapshotOwner(values)
+	if err != nil {
+		return nil, err
+	}
+	projection := owner.BeginSecretBindingProjection()
+	expected := channelonboarding.AdmissionResponsibility{DeploymentRegistration: op.DeploymentRegistration, OperationID: op.OperationID,
+		OperationRevision: op.Revision, ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+	if !op.DeploymentRegistration && op.ActivationRevision > 0 {
+		activation, err := store.GetConnectedChannelActivation(ctx, op.SlotKey)
+		if err != nil {
+			return nil, err
+		}
+		expected.OperationRevision, expected.ActivationRevision = activation.OperationRevision, activation.Revision
+	}
+	observation := frozenBootCredentialObservation{op: op, operations: operations, ref: ref, plan: selection.plan,
+		expected: expected, projection: projection, store: store}
+	return observation.inspect, nil
+}
+
+type frozenBootCredentialObservation struct {
+	op         channelonboarding.Operation
+	operations channelonboarding.OperationStore
+	ref        channelonboarding.AccountReference
+	plan       packs.SatisfactionPlan
+	expected   channelonboarding.AdmissionResponsibility
+	projection *credentials.SecretBindingProjection
+	store      channelonboarding.Store
+}
+
+func (f frozenBootCredentialObservation) inspect(ctx context.Context, use credentials.RequirementUse) (credentials.AdmittedSnapshot, runtimebootverify.CredentialAdmissionExtent, error) {
+	var observed credentials.AdmittedSnapshot
+	for _, admission := range f.op.CredentialAdmissions {
+		snapshot, current, err := observeStandingCredentialRole(ctx, f.projection, admission.StoreKey, admission, true)
+		if err != nil || !current {
+			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, fmt.Errorf("admitted boot credential is not current: %w", errors.Join(operatorchannel.ErrCredentialStale, err))
+		}
+		if admission.Role == use.Role {
+			observed = snapshot
+		}
+	}
+	if f.op.DeploymentRegistration {
+		current, err := channelonboarding.RegisteredAccount(ctx, f.operations, f.ref, f.plan.ProviderFacts())
+		if err != nil {
+			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
+		}
+		if !f.expected.MatchesOperation(current, f.plan.ProviderFacts()) || current.PrincipalID != f.op.PrincipalID || current.Interface.Normalized() != f.op.Interface.Normalized() {
+			return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, channelonboarding.ErrRevisionConflict
+		}
+	} else if current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, f.store, f.expected, true); err != nil || !current {
+		return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	if err := f.projection.ValidateCurrent(ctx); err != nil {
+		return credentials.AdmittedSnapshot{}, runtimebootverify.NoAdmittedCredential, err
+	}
+	return observed, runtimebootverify.FullyAdmittedCredential, nil
 }
 
 func bootCredentialUseBound(source semanticview.Source, bundle *contracts.WorkflowContractBundle, flow, tool, account, hash string, plan packs.SatisfactionPlan) (bool, bool) {

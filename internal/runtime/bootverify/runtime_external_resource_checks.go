@@ -149,43 +149,52 @@ func InspectStaticCredentialRequirements(ctx context.Context, source semanticvie
 	keys := sortedSetKeysLocal(index)
 	out := make([]runtimecredentials.Descriptor, 0, len(keys))
 	for _, key := range keys {
-		var requirements []runtimecredentials.Requirement
-		for _, use := range index[key] {
-			if !requiresLiveCredential(opts, use.Kind, use.Name) {
-				continue
-			}
-			if opts.AdmittedCredentials != nil {
-				observed, admitted, err := opts.AdmittedCredentials(ctx, use)
-				if err != nil {
-					return nil, staticCredentialInspectionError(key, err)
-				}
-				if admitted != NoAdmittedCredential {
-					descriptor := observed.Descriptor()
-					descriptor.RequiredBy = []runtimecredentials.Requirement{use.Requirement}
-					out = append(out, descriptor)
-					if admitted == FullyAdmittedCredential {
-						continue
-					}
-				}
-			}
-			if !slices.Contains(requirements, use.Requirement) {
-				requirements = append(requirements, use.Requirement)
-			}
-		}
-		if len(requirements) == 0 {
-			continue
-		}
-		if opts.Credentials == nil {
-			return nil, staticCredentialInspectionError(key, fmt.Errorf("credential store is not configured"))
-		}
-		descriptor, err := runtimecredentials.Describe(ctx, opts.Credentials, source, key)
+		observed, err := inspectStaticCredentialKey(ctx, source, opts, key, index[key])
 		if err != nil {
-			return nil, staticCredentialInspectionError(key, err)
+			return nil, err
 		}
-		descriptor.RequiredBy = requirements
-		out = append(out, descriptor)
+		out = append(out, observed...)
 	}
 	return out, nil
+}
+
+func inspectStaticCredentialKey(ctx context.Context, source semanticview.Source, opts Options, key string, uses []runtimecredentials.RequirementUse) ([]runtimecredentials.Descriptor, error) {
+	var out []runtimecredentials.Descriptor
+	var requirements []runtimecredentials.Requirement
+	for _, use := range uses {
+		if !requiresLiveCredential(opts, use.Kind, use.Name) {
+			continue
+		}
+		if opts.AdmittedCredentials != nil {
+			observed, admitted, err := opts.AdmittedCredentials(ctx, use)
+			if err != nil {
+				return nil, staticCredentialInspectionError(key, err)
+			}
+			if admitted != NoAdmittedCredential {
+				descriptor := observed.Descriptor()
+				descriptor.RequiredBy = []runtimecredentials.Requirement{use.Requirement}
+				out = append(out, descriptor)
+				if admitted == FullyAdmittedCredential {
+					continue
+				}
+			}
+		}
+		if !slices.Contains(requirements, use.Requirement) {
+			requirements = append(requirements, use.Requirement)
+		}
+	}
+	if len(requirements) == 0 {
+		return out, nil
+	}
+	if opts.Credentials == nil {
+		return nil, staticCredentialInspectionError(key, fmt.Errorf("credential store is not configured"))
+	}
+	descriptor, err := runtimecredentials.Describe(ctx, opts.Credentials, source, key)
+	if err != nil {
+		return nil, staticCredentialInspectionError(key, err)
+	}
+	descriptor.RequiredBy = requirements
+	return append(out, descriptor), nil
 }
 
 func staticCredentialInspectionError(key string, cause error) error {
