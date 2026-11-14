@@ -71,8 +71,12 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 	}
 	committedGates := map[string]bool{}
 	for _, instance := range instances {
+		persisted, err := flowidentity.StoredPersisted(source, instance.WorkflowName, instance.StorageRef, instance.StorageRef, instance.InstanceID, instance.EntityID, instance.ParentEntityID)
+		if err != nil {
+			return runbundle.UpgradeState{}, err
+		}
 		state.Instances = append(state.Instances, runbundle.UpgradeInstance{
-			Route:    flowidentity.RouteForInstancePath(instance.StorageRef),
+			Route:    persisted.Route(),
 			EntityID: instance.EntityID, FlowID: entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, instance.StorageRef),
 			Status: instance.Status, Stage: instance.CurrentState, Fields: instance.Fields, StateBuckets: instance.StateBuckets,
 		})
