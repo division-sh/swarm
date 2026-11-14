@@ -333,6 +333,15 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			return nil, err
 		}
 	}
+	if err == nil && card.Anchor.Kind() == decisioncard.AnchorKindStageGate && opts.CompletionReplay != nil {
+		response, replayed, replayErr := opts.CompletionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
+		if replayErr != nil {
+			return nil, decisionCardAPIError(cardID, replayErr)
+		}
+		if replayed {
+			return decisionCardMutationResponse(cardID, response, true)
+		}
+	}
 	authority := opts.Authority
 	bundleSource := opts.SourceArtifact
 	if err == nil && runtimeContextManager(opts.RuntimeContexts) != nil {

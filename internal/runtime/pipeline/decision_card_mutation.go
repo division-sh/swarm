@@ -336,6 +336,7 @@ func (r CommittedDecisionCardMutation) Validate() error {
 
 type DecisionCardMutationOwner interface {
 	AcquireDecisionCardMutation(context.Context, apiidempotency.Request, DecisionCardMutation) (DecisionCardMutationLease, error)
+	ReplayDecisionCardMutation(context.Context, apiidempotency.Request, DecisionCardMutation) (json.RawMessage, bool, error)
 }
 
 type DecisionCardMutationLease interface {

@@ -46,6 +46,7 @@ type serveChannelDeliveryDispatcher struct {
 	activations        channelonboarding.Store
 	manager            *runtime.RuntimeContextManager
 	selectedDecisions  selectedChannelDecisionOwner
+	completionReplay   apiv1.DecisionCardCompletionReplay
 	ingress            *runtimepublicingress.ReadinessOwner
 	effects            runtimeeffects.Store
 	credentials        *runtimecredentials.SnapshotOwner
@@ -209,6 +210,12 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 	if d.selectedDecisions != nil {
 		response, replayed, selected, err := d.selectedDecisions.CommitSelectedDecisionCardMutation(ctx, card.RunID, request, mutation)
 		if selected || err != nil {
+			return response, replayed, err
+		}
+	}
+	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate && d.completionReplay != nil {
+		response, replayed, err := d.completionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
+		if err != nil || replayed {
 			return response, replayed, err
 		}
 	}
