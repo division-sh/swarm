@@ -86,6 +86,9 @@ func TestHelpExamplesUseCurrentDirectory(t *testing.T) {
 				strings.Contains(stdout.String(), "swarm "+example.command+" .") {
 				t.Fatalf("help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
+			if example.command == "serve" && (!strings.Contains(stdout.String(), "Let's Encrypt") || !strings.Contains(stdout.String(), "accepting its terms")) {
+				t.Fatalf("serve help must name Let's Encrypt and its accepted terms: %s", stdout.String())
+			}
 		})
 	}
 }
