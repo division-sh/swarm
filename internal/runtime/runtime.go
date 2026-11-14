@@ -2463,7 +2463,7 @@ func (rt *Runtime) drainAndJoinDeliveryContinuations(ctx context.Context, grace 
 	if rt.Manager != nil {
 		result = rt.Manager.WaitForQuiescence(ctx)
 	}
-	if ctx.Err() != nil {
+	if result != nil && ctx.Err() != nil {
 		if !errors.Is(result, ctx.Err()) {
 			result = errors.Join(result, ctx.Err())
 		}
