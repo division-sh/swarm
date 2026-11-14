@@ -44,6 +44,9 @@ func TestInstanceLifeResetCommitBeforeFinalizeReplayBothStores(t *testing.T) {
 		t.Run(backend+"/field_and_finished_child_history", func(t *testing.T) {
 			proveInstanceResetFieldAndChildHistory(t, backend)
 		})
+		t.Run(backend+"/quiescence", func(t *testing.T) {
+			proveInstanceResetQuiescence(t, backend)
+		})
 		t.Run(backend+"/fieldless_history", func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithOwnership(t, backend, false, map[string]string{
 				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": "stages: []\n",

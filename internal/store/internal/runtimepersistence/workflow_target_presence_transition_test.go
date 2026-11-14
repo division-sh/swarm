@@ -219,12 +219,16 @@ func newWorkflowTargetConstructionFixtureDocuments(t *testing.T, backend string,
 }
 
 func workflowTargetMutationEntry(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string, capture ...*runtimedelivery.Claim) runtimepipeline.WorkflowEngineStateRecord {
+	return workflowTargetMutationEntryPayload(t, f, record, localEvent, []byte(`{}`), capture...)
+}
+
+func workflowTargetMutationEntryPayload(t *testing.T, f receiverConfigActivationFixture, record runtimepipeline.WorkflowEngineStateRecord, localEvent string, payload json.RawMessage, capture ...*runtimedelivery.Claim) runtimepipeline.WorkflowEngineStateRecord {
 	t.Helper()
 	// This is the native writer/contender proof, not handler execution: retain
 	// stage-entry authority from an actual declared and claimed occurrence.
 	flowID := record.Identity.Route.ScopeKey
 	node := mustPersistenceNode(flowID, "progress")
-	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(flowID+"/"+localEvent), "fixture", "", []byte(`{}`), 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(flowID+"/"+localEvent), "fixture", "", payload, 0, record.Identity.RunID, events.EventEnvelope{}, record.UpdatedAt)
 	target, err := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: record.Identity.Route.InstancePath, EntityID: record.EntityID}).WithLife(record.Life)
 	if err != nil {
 		t.Fatal(err)
