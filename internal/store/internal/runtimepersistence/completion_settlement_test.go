@@ -1535,6 +1535,7 @@ func proveCompletionOwnExpiryIsNotAbandonment(t *testing.T, fixture completionSe
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
 	if state != runtimeeffects.StateAuthorized {
 		if err := handle.MarkLaunched(ctx); err != nil {
 			t.Fatal(err)
@@ -1583,6 +1584,7 @@ func proveCompletionOwnExpiryIsNotAbandonment(t *testing.T, fixture completionSe
 	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("accepted return after own expiry and late renewal: %v", err)
 	}
+	assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
 	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
 }
 

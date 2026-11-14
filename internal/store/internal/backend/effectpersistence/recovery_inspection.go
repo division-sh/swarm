@@ -50,9 +50,9 @@ func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, deli
 	}
 	var attempts []completionRecoveryAttempt
 	if postgres {
-		attempts, err = loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, "", nil, mode)
+		attempts, err = loadCompletionRecoveryAttemptsPostgres(ctx, tx, delivery, now, "", nil, mode)
 	} else {
-		attempts, err = loadCompletionRecoveryAttemptsSQLite(ctx, tx, now, "", nil, mode)
+		attempts, err = loadCompletionRecoveryAttemptsSQLite(ctx, tx, delivery, now, "", nil, mode)
 	}
 	if err != nil {
 		return effects.StartupRecoveryCounts{}, err

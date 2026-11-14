@@ -17,87 +17,115 @@ import (
 
 // Recovery observes revocation, not the attempt's renewable wall-clock lease.
 // Its caller owns the read snapshot or the complete native mutation prefix.
-func selectAbandonedCompletionAttempts(ctx context.Context, tx *sql.Tx, attempts []completionRecoveryAttempt, now time.Time, sqlite bool) ([]completionRecoveryAttempt, error) {
-	actors := make(map[agentidentity.Identity]agentpersistence.AgentExecutionObservation)
-	runs := make(map[string]bool)
-	var process *processbinding.LeaseStamp
+func selectAbandonedCompletionAttempts(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, attempts []completionRecoveryAttempt, now time.Time, sqlite bool) ([]completionRecoveryAttempt, error) {
+	observations := completionRecoveryObservations{
+		actors: make(map[agentidentity.Identity]agentpersistence.AgentExecutionObservation),
+		runs:   make(map[string]bool),
+	}
 	selected := make([]completionRecoveryAttempt, 0, len(attempts))
 	for _, row := range attempts {
-		if row.AuthorityKind == string(effects.AuthoritySelectedContractFork) {
-			selected = append(selected, row)
-			continue
+		var abandoned bool
+		var err error
+		switch row.AuthorityKind {
+		case string(effects.AuthoritySelectedContractFork):
+			abandoned = true
+		case string(effects.AuthorityConversationForkChat):
+			abandoned, err = completionForkChatParentAbandoned(ctx, tx, row, now, sqlite)
+		default:
+			abandoned, err = observations.ordinaryAbandoned(ctx, tx, delivery, row, now, sqlite)
 		}
-		if row.AuthorityKind == string(effects.AuthorityConversationForkChat) {
-			abandoned, err := completionForkChatParentAbandoned(ctx, tx, row, now, sqlite)
-			if err != nil {
-				return nil, err
-			}
-			if abandoned {
-				selected = append(selected, row)
-			}
-			continue
-		}
-		attempt, _, err := completionRecoverySettlement(row, effects.StateTerminalFailure, nil, now)
 		if err != nil {
 			return nil, err
 		}
-		if attempt.Authority.Kind != effects.AuthorityNormalAgent || !attempt.Authority.Valid() {
-			return nil, fmt.Errorf("completion recovery has invalid ordinary authority for %s", row.AttemptID)
-		}
-		token := attempt.Authority.Normal
-		actor, found := actors[token.Identity]
-		if !found {
-			actor, err = agentpersistence.ReadAgentExecution(ctx, tx, token, sqlite)
-			if err != nil {
-				return nil, err
-			}
-			actors[token.Identity] = actor
-		}
-		if !actor.Found || actor.State.RuntimeEpoch != token.RuntimeEpoch || actor.State.Generation != token.Generation || actor.State.Phase != manager.AgentLifecycleRunning {
-			selected = append(selected, row)
-			continue
-		}
-		if process == nil {
-			stamp, err := generationauthority.ReadProcessGeneration(ctx, tx, sqlite)
-			if err != nil {
-				return nil, err
-			}
-			if err := stamp.Validate(); err != nil {
-				return nil, fmt.Errorf("completion recovery process evidence: %w", err)
-			}
-			process = &stamp
-		}
-		binding := actor.State.ProcessBinding
-		coordinates := processbinding.LeaseCoordinates{LeaseID: binding.ProcessAuthorityID, OwnerID: binding.ProcessOwnerID, BootID: binding.ProcessBootID}
-		if process.Coordinates() != coordinates {
-			selected = append(selected, row)
-			continue
-		}
-		cancellation, err := readProviderOriginCancellation(ctx, tx, !sqlite, attempt, true, recoveryInspection)
-		if err != nil {
-			return nil, err
-		}
-		if cancellation.disposition != providerOriginNotCanceled {
-			selected = append(selected, row)
-			continue
-		}
-		runID := token.Identity.RunID
-		active, known := runs[runID]
-		if !known {
-			query := `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id=$1 AND status IN (` + runLifecycleActiveStateSQLValues + `))`
-			if !sqlite {
-				query = strings.ReplaceAll(query, "run_id=$1", "run_id=$1::uuid")
-			}
-			if err := tx.QueryRowContext(ctx, query, runID).Scan(&active); err != nil {
-				return nil, fmt.Errorf("completion recovery run admission: %w", err)
-			}
-			runs[runID] = active
-		}
-		if !active {
+		if abandoned {
 			selected = append(selected, row)
 		}
 	}
 	return selected, nil
+}
+
+type completionRecoveryObservations struct {
+	actors  map[agentidentity.Identity]agentpersistence.AgentExecutionObservation
+	runs    map[string]bool
+	process *processbinding.LeaseStamp
+}
+
+func (o *completionRecoveryObservations) ordinaryAbandoned(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, row completionRecoveryAttempt, now time.Time, sqlite bool) (bool, error) {
+	attempt, _, err := completionRecoverySettlement(row, effects.StateTerminalFailure, nil, now)
+	if err != nil {
+		return false, err
+	}
+	if attempt.Authority.Kind != effects.AuthorityNormalAgent || !attempt.Authority.Valid() {
+		return false, fmt.Errorf("completion recovery has invalid ordinary authority for %s", row.AttemptID)
+	}
+	abandoned, err := o.actorAbandoned(ctx, tx, attempt.Authority.Normal, sqlite)
+	if err != nil || abandoned {
+		return abandoned, err
+	}
+	abandoned, err = completionRecoverySessionAbandoned(ctx, tx, attempt, sqlite)
+	if err != nil || abandoned {
+		return abandoned, err
+	}
+	cancellation, err := readProviderOriginCancellation(ctx, tx, !sqlite, attempt, true, recoveryInspection)
+	if err != nil {
+		return false, err
+	}
+	if cancellation.disposition != providerOriginNotCanceled {
+		return true, nil
+	}
+	if attempt.Origin.Kind == effects.CompletionOriginDelivery {
+		abandoned, err = delivery.ProviderOriginRecoveryAbandonedTx(ctx, tx, attempt.Origin.Delivery)
+		if err != nil || abandoned {
+			return abandoned, err
+		}
+	}
+	return o.runAbandoned(ctx, tx, attempt.Authority.Normal.Identity.RunID, sqlite)
+}
+
+func (o *completionRecoveryObservations) actorAbandoned(ctx context.Context, tx *sql.Tx, token effects.LifecycleToken, sqlite bool) (bool, error) {
+	actor, found := o.actors[token.Identity]
+	if !found {
+		var err error
+		actor, err = agentpersistence.ReadAgentExecution(ctx, tx, token, sqlite)
+		if err != nil {
+			return false, err
+		}
+		o.actors[token.Identity] = actor
+	}
+	if !actor.Found || actor.State.RuntimeEpoch != token.RuntimeEpoch || actor.State.Generation != token.Generation || actor.State.Phase != manager.AgentLifecycleRunning {
+		return true, nil
+	}
+	if o.process == nil {
+		stamp, err := generationauthority.ReadProcessGeneration(ctx, tx, sqlite)
+		if err != nil {
+			return false, err
+		}
+		if err := stamp.Validate(); err != nil {
+			return false, fmt.Errorf("completion recovery process evidence: %w", err)
+		}
+		o.process = &stamp
+	}
+	binding := actor.State.ProcessBinding
+	coordinates := processbinding.LeaseCoordinates{LeaseID: binding.ProcessAuthorityID, OwnerID: binding.ProcessOwnerID, BootID: binding.ProcessBootID}
+	if err := coordinates.Validate(); err != nil {
+		return false, fmt.Errorf("completion recovery actor process evidence: %w", err)
+	}
+	return o.process.Coordinates() != coordinates, nil
+}
+
+func (o *completionRecoveryObservations) runAbandoned(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) (bool, error) {
+	active, known := o.runs[runID]
+	if !known {
+		query := `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id=$1 AND status IN (` + runLifecycleActiveStateSQLValues + `))`
+		if !sqlite {
+			query = strings.ReplaceAll(query, "run_id=$1", "run_id=$1::uuid")
+		}
+		if err := tx.QueryRowContext(ctx, query, runID).Scan(&active); err != nil {
+			return false, fmt.Errorf("completion recovery run admission: %w", err)
+		}
+		o.runs[runID] = active
+	}
+	return !active, nil
 }
 
 func completionForkChatParentAbandoned(ctx context.Context, tx *sql.Tx, row completionRecoveryAttempt, now time.Time, sqlite bool) (bool, error) {
