@@ -1457,6 +1457,12 @@ func completionAttemptLease(t *testing.T, fixture completionSettlementFixture, a
 
 func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
+	for _, state := range []runtimeeffects.State{runtimeeffects.StateAuthorized, runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved} {
+		t.Run("own_expiry_"+string(state), func(t *testing.T) {
+			current := newCompletionSettlementFixture(t, fixture.store, fixture.db, fixture.sqlite, fixture.original)
+			proveCompletionOwnExpiryIsNotAbandonment(t, current, state)
+		})
+	}
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "ordinary-recovery:authorized")
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
 	authorized, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("authorized"))
@@ -1518,6 +1524,66 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	}
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, launched.Attempt().AttemptID, runtimeeffects.StateLaunched)
 	requireCompletionRecoveryRows(t, fixture, launched.Attempt().AttemptID, 0, 0, 1)
+}
+
+func proveCompletionOwnExpiryIsNotAbandonment(t *testing.T, fixture completionSettlementFixture, state runtimeeffects.State) {
+	t.Helper()
+	const adapter = "anthropic_api"
+	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "current-process:"+string(state))
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, adapter)
+	handle, err := beginManagedCompletionForTest(t, ctx, adapter, []byte("current-process"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != runtimeeffects.StateAuthorized {
+		if err := handle.MarkLaunched(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state == runtimeeffects.StateResponseObserved {
+		if err := handle.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "current-process-response"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Minute))
+	before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	reader := fixture.store.(startupRecoveryInspector)
+	counts, err := reader.InspectStartupRecovery(context.Background(), now, true)
+	if err != nil || counts != (runtimeeffects.StartupRecoveryCounts{}) {
+		t.Fatalf("own-expiry inspection abandoned current process: counts=%+v error=%v", counts, err)
+	}
+	historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
+	if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
+		t.Fatalf("own-expiry recovery abandoned current process: summary=%+v error=%v", summary, err)
+	}
+	historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, state)
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 1)
+	if err := handle.Heartbeat(ctx, 2*time.Minute); err != nil {
+		t.Fatalf("late renewal of current process: %v", err)
+	}
+	if !completionAttemptLease(t, fixture, handle.Attempt().AttemptID).After(now) {
+		t.Fatal("late renewal did not advance the expired attempt")
+	}
+	if state == runtimeeffects.StateAuthorized {
+		failure := runtimefailures.FromError(context.Canceled, "completion-test", "prelaunch-cleanup")
+		if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if state == runtimeeffects.StateLaunched {
+		if err := handle.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "current-process-response"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "provider-head-current", "provider-head-after-expiry")
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
+		t.Fatalf("accepted return after own expiry and late renewal: %v", err)
+	}
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
 }
 
 func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture completionSettlementFixture) {
