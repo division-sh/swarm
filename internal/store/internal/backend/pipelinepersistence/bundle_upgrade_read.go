@@ -15,8 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -66,12 +69,26 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 	if err != nil {
 		return runbundle.UpgradeState{}, err
 	}
+	committedGates := map[string]bool{}
 	for _, instance := range instances {
 		state.Instances = append(state.Instances, runbundle.UpgradeInstance{
 			Route:    flowidentity.RouteForInstancePath(instance.StorageRef),
 			EntityID: instance.EntityID, FlowID: entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, instance.StorageRef),
 			Status: instance.Status, Stage: instance.CurrentState, Fields: instance.Fields, StateBuckets: instance.StateBuckets,
 		})
+		buckets, err := joinruntime.PersistedBuckets(instance.StateBuckets)
+		if err != nil {
+			return runbundle.UpgradeState{}, err
+		}
+		activations, err := gateruntime.List(buckets)
+		if err != nil {
+			return runbundle.UpgradeState{}, err
+		}
+		for _, activation := range activations {
+			if activation.Status == gateruntime.StatusDecisionCommitted {
+				committedGates[activation.CardID] = true
+			}
+		}
 	}
 	state.Deliveries, err = owner.ReadActiveRunDeliverySnapshotsTx(ctx, tx, runID)
 	if err != nil {
@@ -85,6 +102,13 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 		for _, card := range cards {
 			if card.Status == "pending" {
 				state.Cards = append(state.Cards, card)
+			}
+			if committedGates[card.CardID] && card.Status == decisioncard.StatusDecided && card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
+				full, err := decisionpersistence.ReadDecisionCardInTx(ctx, tx, card.CardID, !sqlite)
+				if err != nil {
+					return runbundle.UpgradeState{}, err
+				}
+				state.CommittedGateCards = append(state.CommittedGateCards, full)
 			}
 		}
 		if next == "" {

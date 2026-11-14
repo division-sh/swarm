@@ -75,7 +75,7 @@ func FreezeRoutes(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, 
 			}
 			route.EmitSchema = schema
 		}
-		if err := validateRoute(verdict, route, outcome.Input); err != nil {
+		if err := ValidateRoute(verdict, route, outcome.Input); err != nil {
 			return "", err
 		}
 		encoded, err := routeSemanticValue(route)
@@ -196,7 +196,8 @@ func validateTransition(verdict string, route Route) error {
 	return nil
 }
 
-func validateRoute(verdict string, route Route, inputs map[string]runtimecontracts.WorkflowGateInputField) error {
+// ValidateRoute checks the continuation against the inputs in its issued offer.
+func ValidateRoute(verdict string, route Route, inputs map[string]runtimecontracts.WorkflowGateInputField) error {
 	if err := validateTransition(verdict, route); err != nil {
 		return err
 	}
