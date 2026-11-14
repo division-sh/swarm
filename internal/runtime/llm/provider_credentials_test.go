@@ -47,6 +47,26 @@ func TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles(t *testing
 			if observation.calls != 1 {
 				t.Fatalf("provider value and source used %d native observations, want 1", observation.calls)
 			}
+			captured, admitted, err := resolver.Capture(context.Background(), profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := resolver.Store.Set(context.Background(), key, "replacement"); err != nil {
+				t.Fatal(err)
+			}
+			actual, err := captured.Resolve(context.Background(), profile)
+			if err != nil || actual.Value != admitted.Value || observation.calls != 2 {
+				t.Fatalf("request did not retain its exact captured read: reads=%d err=%v", observation.calls, err)
+			}
+			current, err := resolver.Resolve(context.Background(), profile)
+			if err != nil || current.Value == admitted.Value {
+				t.Fatalf("original resolver failed to observe replacement: %v", err)
+			}
+			foreign := profile
+			foreign.Credential.EnvVar = "FOREIGN_KEY"
+			if _, err := captured.Resolve(context.Background(), foreign); err == nil {
+				t.Fatal("captured credential accepted a foreign key")
+			}
 		})
 	}
 }

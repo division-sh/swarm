@@ -814,6 +814,24 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err != nil {
 			t.Fatal(err)
 		}
+		var required []managedProviderPreflightAgent
+		for _, target := range targets {
+			required = append(required, managedProviderPreflightAgent{config: target.Actor, plan: target.Plan})
+		}
+		if err := checks.validateTargets(context.Background(), cfg, resolver, required); err != nil {
+			t.Fatal(err)
+		}
+		for _, missing := range []string{"target", "answer"} {
+			copy := *checks
+			if missing == "target" {
+				copy.targets = nil
+			} else {
+				copy.keys = nil
+			}
+			if err := copy.validateTargets(context.Background(), cfg, resolver, required); err == nil {
+				t.Fatalf("missing %s coverage accepted an unchecked API target", missing)
+			}
+		}
 		copy := *cfg
 		copy.LLM.OpenAICompatible.BaseURL += "/changed"
 		if err := checks.ValidateConfiguration(context.Background(), &copy, resolver); err == nil {
