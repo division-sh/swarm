@@ -28,11 +28,12 @@ import (
 // ManagedProviderBootChecks is process-local evidence, not a capability or a
 // durable startup receipt. Its records can only be filled by actual checks.
 type ManagedProviderBootChecks struct {
-	config string
-	source string
-	image  string
-	starts map[string]json.RawMessage
-	keys   map[string]llmselection.Profile
+	config  string
+	source  string
+	image   string
+	starts  map[string]json.RawMessage
+	keys    map[string]llmselection.Profile
+	targets map[string]struct{}
 }
 
 func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, source semanticview.Source, options WorkflowContractValidationOptions, targets []ManagedProviderCheckTarget, discovered map[string]mcp.DiscoveredTool, inspection workspace.Resolver, docker *workspace.DockerManager, listenAddr string) (_ *ManagedProviderBootChecks, retErr error) {
@@ -40,7 +41,7 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 	if err != nil {
 		return nil, err
 	}
-	checks := &ManagedProviderBootChecks{config: configHash, starts: map[string]json.RawMessage{}, keys: map[string]llmselection.Profile{}}
+	checks := &ManagedProviderBootChecks{config: configHash, starts: map[string]json.RawMessage{}, keys: map[string]llmselection.Profile{}, targets: map[string]struct{}{}}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || bundle.SourceArtifact == nil {
 		return nil, fmt.Errorf("managed provider startup requires bundle-backed source")
@@ -61,7 +62,7 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 		if selection.Profile.ID == llmselection.BackendMock {
 			continue // Mock admission retains its native, non-provider observation.
 		}
-		credential, err := credentials.Resolve(ctx, selection.Profile)
+		captured, credential, err := credentials.Capture(ctx, selection.Profile)
 		if err != nil {
 			return nil, err
 		}
@@ -114,11 +115,11 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 			if err != nil {
 				return nil, err
 			}
-			response, err := observeManagedProviderBootTarget(ctx, cfg, credentials, target, prompt, planned, delivered, docker, projection, checks.image, listenAddr)
+			response, err := observeManagedProviderBootTarget(ctx, cfg, captured, target, prompt, planned, delivered, docker, projection, checks.image, listenAddr)
 			if err != nil {
 				return nil, fmt.Errorf("claude cli startup probe failed for agent %s: %w", target.Actor.ID, err)
 			}
-			key, err := providerStartupCheckKey(ctx, cfg, credentials, checks.source, target, prompt, planned)
+			key, err := providerStartupCheckKey(cfg, credential, checks.source, target, prompt, planned)
 			if err != nil {
 				return nil, err
 			}
@@ -144,13 +145,18 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 						return fmt.Errorf("managed provider startup inputs changed")
 					}
 				}
-				return llm.ObserveProviderStartupAnswer(ctx, cfg, selection.Profile, model, credentials, resource)
+				return llm.ObserveProviderStartupAnswer(ctx, cfg, selection.Profile, model, captured, resource)
 			}()
 			if err != nil {
 				return nil, err
 			}
 			checks.keys[group] = selection.Profile
 		}
+		key, err := providerCheckHash(target)
+		if err != nil {
+			return nil, err
+		}
+		checks.targets[key] = struct{}{}
 	}
 	return checks, ctx.Err()
 }
@@ -244,7 +250,19 @@ func (c *ManagedProviderBootChecks) startupResponse(ctx context.Context, cfg *co
 	if err := c.ValidateConfiguration(ctx, cfg, credentials); err != nil {
 		return nil, err
 	}
-	key, err := providerStartupCheckKey(ctx, cfg, credentials, c.source, target, prompt, planned)
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return nil, err
+	}
+	selection, err := llm.ValidateAgentExecutionDescriptor(profile, target.Actor)
+	if err != nil {
+		return nil, err
+	}
+	credential, err := credentials.Resolve(ctx, selection.Profile)
+	if err != nil {
+		return nil, err
+	}
+	key, err := providerStartupCheckKey(cfg, credential, c.source, target, prompt, planned)
 	if err != nil {
 		return nil, err
 	}
@@ -259,15 +277,7 @@ func (c *ManagedProviderBootChecks) startupResponse(ctx context.Context, cfg *co
 	return &response, nil
 }
 
-func providerStartupCheckKey(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, source string, target ManagedProviderCheckTarget, prompt string, planned []managedcapabilities.PlannedTool) (string, error) {
-	profile, err := cfg.LLMBackendProfile()
-	if err != nil {
-		return "", err
-	}
-	credential, err := credentials.Resolve(ctx, profile)
-	if err != nil {
-		return "", err
-	}
+func providerStartupCheckKey(cfg *config.Config, credential llm.ProviderCredential, source string, target ManagedProviderCheckTarget, prompt string, planned []managedcapabilities.PlannedTool) (string, error) {
 	return providerCheckHash(struct {
 		Source      string
 		Config      *config.Config
@@ -279,6 +289,44 @@ func providerStartupCheckKey(ctx context.Context, cfg *config.Config, credential
 	}{source, cfg, target, prompt, planned, credential, []string{
 		os.Getenv("SWARM_CLAUDE_USE_MCP"), os.Getenv("SWARM_CLAUDE_PERMISSION_MODE"), os.Getenv("SWARM_CLAUDE_BYPASS_PERMISSIONS"),
 	}})
+}
+
+func (c *ManagedProviderBootChecks) validateTargets(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, candidates []managedProviderPreflightAgent) error {
+	if err := c.ValidateConfiguration(ctx, cfg, credentials); err != nil {
+		return err
+	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return err
+	}
+	for _, candidate := range candidates {
+		selection, err := llm.ValidateAgentExecutionDescriptor(profile, candidate.config)
+		if err != nil {
+			return err
+		}
+		if selection.Profile.ID == llmselection.BackendMock {
+			continue
+		}
+		key, err := providerCheckHash(ManagedProviderCheckTarget{Actor: candidate.config, Plan: candidate.plan})
+		if err != nil {
+			return err
+		}
+		if _, found := c.targets[key]; !found {
+			return fmt.Errorf("managed provider startup inputs changed")
+		}
+		credential, err := credentials.Resolve(ctx, selection.Profile)
+		if err != nil {
+			return err
+		}
+		group, err := providerCheckHash([]string{selection.Profile.Provider, credential.Key, credential.Value})
+		if err != nil {
+			return err
+		}
+		if _, found := c.keys[group]; !found {
+			return fmt.Errorf("managed provider startup inputs changed")
+		}
+	}
+	return nil
 }
 
 func providerCheckHash(value any) (string, error) {
