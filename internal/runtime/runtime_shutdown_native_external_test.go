@@ -16,6 +16,16 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	}
 }
 
+func TestRuntimeShutdownFanOutAcceptedPermitSurvivesDrain(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runtimepkg.VerifyRuntimeShutdownFanOutAcceptedPermitSurvivesDrainForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
+				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
+			})
+		})
+	}
+}
+
 func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
