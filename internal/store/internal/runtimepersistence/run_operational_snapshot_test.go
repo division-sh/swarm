@@ -5,9 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 )
@@ -52,9 +55,82 @@ func (p operationalSnapshotPipeline) ListFlowInstances(ctx context.Context, scop
 	return p.PipelineObligationSource.ListFlowInstances(ctx, scope)
 }
 
+type operationalClockPipeline struct {
+	operatorsurface.PipelineObligationSource
+	observe func(context.Context, time.Time)
+}
+
+func (p operationalClockPipeline) FanOutRunSummary(ctx context.Context, runID string, at time.Time) (fanoutobligation.RunSummary, error) {
+	p.observe(ctx, at)
+	return p.PipelineObligationSource.FanOutRunSummary(ctx, runID, at)
+}
+
+func (p operationalClockPipeline) ReadFanOutSettlement(ctx context.Context, runID string, at time.Time) (fanoutobligation.RunSettlement, error) {
+	p.observe(ctx, at)
+	return p.PipelineObligationSource.ReadFanOutSettlement(ctx, runID, at)
+}
+
+type operationalClockTimers struct {
+	operatorsurface.TimerObligationSource
+	observe func(context.Context, time.Time)
+}
+
+func (s operationalClockTimers) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, at time.Time) (timerobligation.Snapshot, error) {
+	s.observe(ctx, at)
+	return s.TimerObligationSource.ReadTimerObligations(ctx, scope, at)
+}
+
 func TestRunOperationalReportUsesOneSnapshotAcrossCommitBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Run("selected_store_clock", func(t *testing.T) {
+				f := newSnapshotOwnershipFixture(t, backend, false, false)
+				want := time.Date(2040, 1, 2, 3, 4, 5, 0, time.UTC)
+				clockCalls, observations := 0, 0
+				observe := func(ctx context.Context, at time.Time) {
+					t.Helper()
+					if s, ok := f.store.(*PostgresStore); ok {
+						var err error
+						want, err = s.pipelinePostgresOwner.ReadPostgresObservationTimeForTest(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					if !at.Equal(want) {
+						t.Fatalf("diagnostic used a different selected-store time: got=%s want=%s", at, want)
+					}
+					observations++
+				}
+				var reader operatorread.RunReader
+				var err error
+				switch s := f.store.(type) {
+				case *PostgresStore:
+					reader, err = operatorsurface.NewRunPostgres(s.backend, s.requireCurrentSchema,
+						operationalClockPipeline{s.pipelinePostgresOwner, observe}, operationalClockTimers{s.timerObligationPostgresReader, observe},
+						s.operatorObservabilityPostgres, s.sourceArtifactOwner)
+				case *SQLiteRuntimeStore:
+					reader, err = operatorsurface.NewRunSQLite(s.backend, s.requireCurrentSchema, func() time.Time {
+						clockCalls++
+						return want.Add(time.Duration(clockCalls-1) * time.Hour)
+					}, operationalClockPipeline{s.pipelineSQLiteOwner, observe}, operationalClockTimers{s.timerObligationSQLiteReader, observe},
+						s.operatorObservabilitySQLite, s.sourceArtifactOwner)
+				default:
+					t.Fatalf("unexpected selected owner %T", f.store)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				report, err := reader.LoadRunDebugReport(f.ctx, f.runID, operatorread.RunDebugQueryOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if report.OperationalFacts == nil || !report.OperationalFacts.ObservedAt.Equal(want) || observations != 4 {
+					t.Fatalf("quiescence, fan-out, timer and facts did not share one time: observations=%d facts=%+v", observations, report.OperationalFacts)
+				}
+				if _, sqlite := f.store.(*SQLiteRuntimeStore); sqlite && clockCalls != 1 {
+					t.Fatalf("diagnostic sampled the selected clock %d times, want one", clockCalls)
+				}
+			})
 			for _, cut := range []string{"before_snapshot", "during_snapshot", "during_warm_snapshot"} {
 				t.Run(cut, func(t *testing.T) {
 					f := newSnapshotOwnershipFixture(t, backend, false, false)
