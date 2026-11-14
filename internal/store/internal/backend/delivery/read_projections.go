@@ -72,18 +72,6 @@ type EventDeliveryDiagnosticRow struct {
 	SubscriberType, SubscriberID, Status, Reason, FlowInstance, EntityID string
 }
 
-func ReadNodeDeliveryTargetEncodingTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (string, error) {
-	query := `SELECT delivery_target_route FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-	if postgres {
-		query = `SELECT delivery_target_route::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-	}
-	var raw string
-	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&raw); err != nil {
-		return "", err
-	}
-	return raw, nil
-}
-
 func ReadNodeDeadLetterDiagnosticLinesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
 	query := `SELECT COALESCE(handler_node, ''), COALESCE(json_extract(failure, '$.class'), ''), COALESCE(failure, '')
 FROM dead_letters WHERE original_event_id = ? ORDER BY created_at ASC`
