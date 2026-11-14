@@ -115,13 +115,25 @@ func (m *DockerManager) PrepareClaudeStartupObservation(ctx context.Context, act
 		return nil, err
 	}
 	base.Container = name
-	base.ClaudeState = &startupObservationClaudeState{release: cleanup}
+	base.ClaudeState = &startupObservationClaudeState{release: cleanup, image: image}
 	base.release = cleanup
 	handedOff = true
 	return base, nil
 }
 
-type startupObservationClaudeState struct{ release func(context.Context) error }
+type startupObservationClaudeState struct {
+	release func(context.Context) error
+	image   string
+}
+
+func (t *Target) StartupObservationImage() string {
+	if t != nil {
+		if state, ok := t.ClaudeState.(*startupObservationClaudeState); ok {
+			return state.image
+		}
+	}
+	return ""
+}
 
 func (*startupObservationClaudeState) Directory() string { return ClaudeStateDirectory }
 func (*startupObservationClaudeState) CheckHead(context.Context, string) error {
