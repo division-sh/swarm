@@ -2,6 +2,7 @@ package startupownership
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -100,5 +101,40 @@ func TestFanOutRegistrationCloseRacesTurnAdmission(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFanOutRegistrationExpiredDrainCancelsAndJoinsAcceptedPermit(t *testing.T) {
+	release := make(chan struct{})
+	close(release)
+	f := newServingFixture(t, 1, release)
+	r := f.registrations[0]
+	permit, found, err := r.BeginTurn(context.Background())
+	if err != nil || !found {
+		t.Fatalf("admit exact permit: found=%v err=%v", found, err)
+	}
+	t.Cleanup(permit.Done)
+	deadline, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	drained := make(chan error, 1)
+	go func() { drained <- r.Drain(deadline) }()
+	select {
+	case <-permit.Context().Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("expired drain did not cancel its accepted permit")
+	}
+	select {
+	case err := <-drained:
+		t.Fatalf("drain escaped the unjoined permit: %v", err)
+	default:
+	}
+	permit.Done()
+	if err := <-drained; !errors.Is(err, context.DeadlineExceeded) || f.occurrences[0].ActiveCount() != 0 {
+		t.Fatalf("expired drain lost its deadline or registration join: active=%d err=%v", f.occurrences[0].ActiveCount(), err)
+	}
+	select {
+	case <-r.done:
+	default:
+		t.Fatal("drain returned before registration retirement joined")
 	}
 }

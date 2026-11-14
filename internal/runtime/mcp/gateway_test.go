@@ -2827,7 +2827,7 @@ func TestGatewayAcceptedRegisteredTurnToolCallSurvivesShutdownDrain(t *testing.T
 }
 
 func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
-	for _, name := range []string{"accepted", "standing", "absent", "settled", "unregistered", "foreign", "wrong_source", "request_canceled"} {
+	for _, name := range []string{"accepted", "manager", "standing", "absent", "settled", "unregistered", "foreign", "wrong_source", "request_canceled", "request_expired"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, surface, _ := managedClaudeProviderTurnTestContext(t, managedcapabilities.ExecutionNormalAgent)
 			process := worklifetime.NewProcess()
@@ -2836,6 +2836,15 @@ func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
 				t.Fatal(err)
 			}
 			parent, err := owner.Begin(ctx)
+			var managedOwner *worklifetime.ManagerRunOccurrence
+			if name == "manager" {
+				_ = parent.Done()
+				managedOwner, err = worklifetime.NewManagerRunOccurrence(ctx, owner, worklifetime.ManagerRunIdentity{Generation: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent, err = managedOwner.Begin(ctx, owner)
+			}
 			if name == "standing" {
 				_ = parent.Done()
 				parent, err = owner.BeginStanding(ctx)
@@ -2845,6 +2854,11 @@ func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
 			}
 			t.Cleanup(func() {
 				_ = parent.Done()
+				if managedOwner != nil {
+					if err := managedOwner.RetireAndWait(context.Background()); err != nil {
+						t.Error(err)
+					}
+				}
 				owner.Retire()
 				process.Retire()
 				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2888,8 +2902,13 @@ func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
 				cancel()
 				request = request.WithContext(canceled)
 			}
+			if name == "request_expired" {
+				expired, cancel := context.WithDeadline(request.Context(), time.Now().Add(-time.Second))
+				defer cancel()
+				request = request.WithContext(expired)
+			}
 			gateway := NewGateway(testToolExecutor(nil), testGatewayToken, managedCLIGatewayHooks(registry))
-			if name == "accepted" {
+			if name == "accepted" || name == "manager" {
 				if err := owner.Fence(); err != nil {
 					t.Fatal(err)
 				}
@@ -2898,7 +2917,7 @@ func TestGatewayAcceptedRequestRequiresExactLiveRuntimeLease(t *testing.T) {
 			if release != nil {
 				release()
 			}
-			if (admitted != nil && err == nil) != (name == "accepted") {
+			if (admitted != nil && err == nil) != (name == "accepted" || name == "manager") {
 				t.Fatalf("request admission=%v error=%v", admitted != nil, err)
 			}
 		})
