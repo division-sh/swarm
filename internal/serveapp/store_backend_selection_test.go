@@ -443,7 +443,10 @@ func TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners(t *testing.T)
 	}
 }
 
-type storeBackendSelectionNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+type storeBackendSelectionNoopLLMRuntime struct {
+	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
+}
 
 func (storeBackendSelectionNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.AnthropicAPIProviderContract()

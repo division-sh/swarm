@@ -814,6 +814,22 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err != nil {
 			t.Fatal(err)
 		}
+		t.Run("injected_observer_has_no_real_dispatch", func(t *testing.T) {
+			var observed atomic.Int32
+			base := startupAnswerRuntimeWithoutObserver{}
+			fake := startupAnswerRuntimeObserver{startupAnswerRuntimeWithoutObserver: base, calls: &observed}
+			if _, err := ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "", fake); err != nil || observed.Load() != 1 || calls.Load() != 1 {
+				t.Fatalf("injected group used a hidden real transport: observed=%d requests=%d err=%v", observed.Load(), calls.Load(), err)
+			}
+			fault := errors.New("startup observer refused")
+			fake.err = fault
+			if _, err := ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "", fake); !errors.Is(err, fault) || calls.Load() != 1 {
+				t.Fatalf("observer failure escaped or fell through to HTTP: %v", err)
+			}
+			if _, err := ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "", base); err == nil || !strings.Contains(err.Error(), "startup answer observer") || calls.Load() != 1 {
+				t.Fatalf("unsupported injection used real transport: %v", err)
+			}
+		})
 		var required []managedProviderPreflightAgent
 		for _, target := range targets {
 			required = append(required, managedProviderPreflightAgent{config: target.Actor, plan: target.Plan})
@@ -872,6 +888,23 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 			t.Fatalf("normal startup surface actor owner = %#v, want runless plan projection after run-scoped candidate census", surface)
 		}
 	}
+}
+
+type startupAnswerRuntimeWithoutObserver struct{ llm.NoopRuntime }
+
+func (startupAnswerRuntimeWithoutObserver) ProviderContract() llm.ProviderContract {
+	return llm.OpenAICompatibleProviderContract()
+}
+
+type startupAnswerRuntimeObserver struct {
+	startupAnswerRuntimeWithoutObserver
+	calls *atomic.Int32
+	err   error
+}
+
+func (r startupAnswerRuntimeObserver) ObserveStartupAnswer(context.Context, llmselection.Profile, llmselection.ResolvedModel) ([]byte, error) {
+	r.calls.Add(1)
+	return []byte(`{"choices":[{"message":{"role":"assistant","content":"ready"},"finish_reason":"stop"}]}`), r.err
 }
 
 func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnlySurface(t *testing.T) {

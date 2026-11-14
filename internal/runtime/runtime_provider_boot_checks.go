@@ -36,7 +36,7 @@ type ManagedProviderBootChecks struct {
 	targets map[string]struct{}
 }
 
-func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, source semanticview.Source, options WorkflowContractValidationOptions, targets []ManagedProviderCheckTarget, discovered map[string]mcp.DiscoveredTool, inspection workspace.Resolver, docker *workspace.DockerManager, listenAddr string) (_ *ManagedProviderBootChecks, retErr error) {
+func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, source semanticview.Source, options WorkflowContractValidationOptions, targets []ManagedProviderCheckTarget, discovered map[string]mcp.DiscoveredTool, inspection workspace.Resolver, docker *workspace.DockerManager, listenAddr string, injected ...llm.Runtime) (_ *ManagedProviderBootChecks, retErr error) {
 	configHash, err := providerCheckHash(cfg)
 	if err != nil {
 		return nil, err
@@ -48,6 +48,10 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 	}
 	checks.source = bundle.SourceArtifact.BundleHash()
 	credentials := llm.NewProviderCredentialResolver(options.ProviderCredentials)
+	var override llm.Runtime
+	if len(injected) != 0 {
+		override = injected[0]
+	}
 	var projection *sourceartifact.RuntimeProjection
 	defer func() {
 		if projection != nil {
@@ -62,6 +66,14 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 		if selection.Profile.ID == llmselection.BackendMock {
 			continue // Mock admission retains its native, non-provider observation.
 		}
+		if override != nil {
+			if _, err := llm.RequireProviderContractForProfile(selection.Profile, override); err != nil {
+				return nil, err
+			}
+			if _, ok := override.(llm.StartupAnswerObserver); !ok {
+				return nil, fmt.Errorf("injected runtime does not provide a startup answer observer")
+			}
+		}
 		captured, credential, err := credentials.Capture(ctx, selection.Profile)
 		if err != nil {
 			return nil, err
@@ -74,7 +86,7 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 		if err != nil {
 			return nil, err
 		}
-		if selection.Profile.ID == llmselection.BackendClaudeCLI && projection == nil {
+		if selection.Profile.ID == llmselection.BackendClaudeCLI && projection == nil && override == nil {
 			if docker == nil {
 				return nil, llm.ErrClaudeWorkspaceRequired
 			}
@@ -115,7 +127,12 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 			if err != nil {
 				return nil, err
 			}
-			response, err := observeManagedProviderBootTarget(ctx, cfg, captured, target, prompt, planned, delivered, docker, projection, checks.image, listenAddr)
+			var response *llm.Response
+			if override != nil {
+				response, err = llm.ObserveInjectedStartupPlan(ctx, override, selection.Profile, target.Actor, prompt, planned)
+			} else {
+				response, err = observeManagedProviderBootTarget(ctx, cfg, captured, target, prompt, planned, delivered, docker, projection, checks.image, listenAddr)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("claude cli startup probe failed for agent %s: %w", target.Actor.ID, err)
 			}
@@ -130,6 +147,9 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 		}
 		if _, answered := checks.keys[group]; !answered {
 			err := func() (retErr error) {
+				if override != nil {
+					return llm.ObserveInjectedStartupAnswer(ctx, cfg, selection.Profile, model, override)
+				}
 				var resource *workspace.Target
 				if selection.Profile.ID == llmselection.BackendClaudeCLI {
 					resource, retErr = docker.PrepareClaudeStartupObservation(ctx, target.Actor, projection)

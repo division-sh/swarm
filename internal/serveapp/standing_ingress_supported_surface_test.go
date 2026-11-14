@@ -40,6 +40,7 @@ import (
 )
 
 type telegramPhraseBotLLMRuntime struct {
+	servedStartupAnswerObservation
 	onContinue func(context.Context, *runtimellm.Session, runtimellm.Message) error
 }
 

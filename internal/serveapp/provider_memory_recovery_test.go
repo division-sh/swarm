@@ -67,6 +67,7 @@ type memoryConsumedPublisher struct {
 }
 type memoryConsumedRuntime struct {
 	*runtimellm.OpenAICompatibleRuntime
+	servedStartupAnswerObservation
 }
 
 func runMemoryConsumedProcess(t *testing.T, raw string) {

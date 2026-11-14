@@ -10,11 +10,37 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
 	"github.com/google/uuid"
 )
+
+type StartupPlanObserver interface {
+	ObserveStartupPlan(context.Context, actors.AgentConfig, string, []managedcapabilities.PlannedTool) (*Response, error)
+}
+
+func ObserveInjectedStartupPlan(ctx context.Context, runtime Runtime, profile llmselection.Profile, actor actors.AgentConfig, prompt string, planned []managedcapabilities.PlannedTool) (*Response, error) {
+	observer, ok := runtime.(StartupPlanObserver)
+	if !ok {
+		return nil, fmt.Errorf("injected runtime does not provide a startup plan observer")
+	}
+	if _, err := RequireProviderContractForProfile(profile, runtime); err != nil {
+		return nil, err
+	}
+	response, err := observer.ObserveStartupPlan(ctx, actor, prompt, planned)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateStartupCLIObservation(planned, response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
 
 // ObserveClaudeStartup consumes only a compiled plan and a disposable target.
 // It never constructs an execution runtime, capability authority or effect row.
