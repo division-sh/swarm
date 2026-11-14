@@ -9,12 +9,97 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 const admissionProbeTestImageID = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const admissionProbeTestContainerID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 func TestCLIImageAdmissionProbeRestrictionsAndCleanup(t *testing.T) {
+	t.Run("startup_private_projection", func(t *testing.T) {
+		projection, root := testRuntimeSourceProjection(t)
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, failure := range []string{"", "start", "cleanup"} {
+			t.Run("failure_"+failure, func(t *testing.T) {
+				manager := NewDockerManager()
+				cfg := DefaultDockerConfig()
+				cfg.WorkspaceNetwork = ""
+				manager.SetConfig(cfg)
+				manager.SetSemanticSource(semanticview.Wrap(&contracts.WorkflowContractBundle{SourceArtifact: artifact}))
+				created, removed := false, 0
+				var createArgs []string
+				manager.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
+					switch args[0] {
+					case "image":
+						if args[3] == "{{.Id}}" {
+							return admissionProbeTestImageID, nil
+						}
+						return "null", nil
+					case "create":
+						createArgs, created = slices.Clone(args), true
+						return admissionProbeTestContainerID, nil
+					case "start":
+						if failure == "start" {
+							return "", errors.New("start failed")
+						}
+						return "", nil
+					case "exec":
+						return "", nil
+					case "container":
+						if failure == "cleanup" {
+							return "", errors.New("cleanup unavailable")
+						}
+						if created {
+							return `"` + admissionProbeTestContainerID + `"`, nil
+						}
+						return "", nil
+					case "rm":
+						created, removed = false, removed+1
+						return "", nil
+					default:
+						t.Fatalf("production workspace preparation: %v", args)
+						return "", nil
+					}
+				})
+				target, err := manager.PrepareClaudeStartupObservation(context.Background(), actors.AgentConfig{WorkspaceClass: "system"}, projection)
+				if failure == "start" {
+					if err == nil || created || removed != 1 {
+						t.Fatalf("failed start cleanup: created=%t removed=%d err=%v", created, removed, err)
+					}
+					return
+				}
+				if err != nil || target.ClaudeState == nil || target.ClaudeState.CheckHead(context.Background(), "any-head") == nil {
+					t.Fatalf("check acquired a reusable head: target=%+v err=%v", target, err)
+				}
+				err = target.Release(context.Background())
+				if failure == "cleanup" {
+					if err == nil || !created || removed != 0 {
+						t.Fatalf("cleanup failure hidden: created=%t removed=%d err=%v", created, removed, err)
+					}
+					return
+				}
+				if err != nil || created || removed != 1 || target.ClaudeState.Release(context.Background()) != nil || removed != 1 {
+					t.Fatalf("private resource not released once: removed=%d err=%v", removed, err)
+				}
+				joined := strings.Join(createArgs, " ")
+				for _, forbidden := range []string{"--volumes-from", "type=volume", "/data", "--privileged"} {
+					if strings.Contains(joined, forbidden) {
+						t.Fatalf("production backing mounted: %v", createArgs)
+					}
+				}
+				if !strings.Contains(joined, "source="+projection.PrivateRoot()) || !strings.Contains(joined, "readonly") || !strings.Contains(joined, "--tmpfs "+ClaudeStateDirectory) {
+					t.Fatalf("private/source mount shape: %v", createArgs)
+				}
+			})
+		}
+	})
 	for _, outcome := range []string{"success", "create_failed", "start_failed", "canceled", "deadline", "malformed_state", "failed_state", "cleanup_failed"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
