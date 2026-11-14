@@ -28,6 +28,15 @@ import (
 
 var channelOnboardingExactChoicePattern = regexp.MustCompile(`source=.+? --interface (\S+) --target (\S+)`)
 
+func channelFixtureArguments(config string, args ...string) []string {
+	options := isolateDefaultServeProofDirectory(repoRootForTest(), cliapp.ServeOptions{ConfigPath: config})
+	prefix := []string{"--config", config}
+	if options.SwarmDirSet {
+		prefix = append(prefix, "--swarm-dir", options.SwarmDir)
+	}
+	return append(prefix, args...)
+}
+
 func registerChannelFixtureAccount(t *testing.T, config, token, account string, hitl ...*telegramapi.Double) channelonboarding.Operation {
 	t.Helper()
 	if len(hitl) != 0 {
@@ -48,7 +57,7 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 	os.Stdin = input
 	defer func() { os.Stdin = prior }()
 	out, errOut := &lockedBuffer{}, &lockedBuffer{}
-	args := []string{"--config", config, "channel", "connect", "telegram", "--yes", "--client-language", "en"}
+	args := channelFixtureArguments(config, "channel", "connect", "telegram", "--yes", "--client-language", "en")
 	if len(hitl) == 0 {
 		args = append(args, "--json")
 	}
@@ -102,7 +111,7 @@ func registerChannelFixtureAccount(t *testing.T, config, token, account string, 
 			t.Fatalf("deployment connect did not confirm the operator: %s", out.String())
 		}
 		out, errOut = &lockedBuffer{}, &lockedBuffer{}
-		code = cliapp.Execute(t.Context(), []string{"--config", config, "channel", "list", "--json"}, out, errOut, nil, nil, OpenChannelRegistration)
+		code = cliapp.Execute(t.Context(), channelFixtureArguments(config, "channel", "list", "--json"), out, errOut, nil, nil, OpenChannelRegistration)
 		var listed struct {
 			Accounts []channelonboarding.Result `json:"accounts"`
 		}
