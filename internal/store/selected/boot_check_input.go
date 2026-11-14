@@ -3,7 +3,7 @@ package selected
 import (
 	"context"
 	"errors"
-	"reflect"
+	"slices"
 
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -61,7 +61,10 @@ func (i *BootCheckInput) revalidate(ctx context.Context, reader bootCheckReader)
 		}
 		return errors.New("selected store appeared after boot checks")
 	}
-	if !reflect.DeepEqual(current, i.schema) {
+	if current.Target != i.schema.Target || current.Fresh != i.schema.Fresh ||
+		!sameBootCheckValue(current.Origin, i.schema.Origin) ||
+		(current.MissingDeploymentTables == nil) != (i.schema.MissingDeploymentTables == nil) ||
+		!slices.Equal(current.MissingDeploymentTables, i.schema.MissingDeploymentTables) {
 		return errors.New("selected store schema changed after boot checks")
 	}
 	if current.Fresh {
@@ -71,8 +74,18 @@ func (i *BootCheckInput) revalidate(ctx context.Context, reader bootCheckReader)
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(authority, i.authority) {
+	if authority.Status != i.authority.Status || authority.Backend != i.authority.Backend ||
+		!sameBootCheckValue(authority.Authority, i.authority.Authority) ||
+		!sameBootCheckValue(authority.Possession, i.authority.Possession) ||
+		!sameBootCheckValue(authority.Interrupted, i.authority.Interrupted) {
 		return errors.New("selected store generation changed after boot checks")
 	}
 	return nil
+}
+
+func sameBootCheckValue[T comparable](left, right *T) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
