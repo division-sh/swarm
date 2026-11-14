@@ -1687,7 +1687,6 @@ func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Contex
 	}
 	opts := defaultVerifyCommandOptions()
 	// These fixtures prove declaration semantics, not deployment readiness.
-	opts.portable = true
 	opts.sourceRoot = sourceRoot
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	return runVerifyCommandWithOutput(ctx, repo, opts, out, errOut)
@@ -1837,7 +1836,6 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -1862,7 +1860,6 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 
 	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -1927,7 +1924,6 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -2010,7 +2006,6 @@ func TestRunVerifyCommand_UnreachableStageUsesBlockingAnalyzerOutput(t *testing.
 	}
 
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	opts.configPath = writeTestVerifyRuntimeConfig(t)
 	opts.output.asJSON = true
@@ -2136,7 +2131,6 @@ func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 
 	var buf bytes.Buffer
 	opts := defaultVerifyCommandOptions()
-	opts.portable = true
 	opts.sourceRoot = root
 	code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &buf, &buf)
 	if code != 0 {
