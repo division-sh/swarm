@@ -146,6 +146,7 @@ func TestChannelWorkerKeepsInPassHintAndJoinsExactProcess(t *testing.T) {
 
 func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 	t.Run("subscription_shutdown", testChannelWorkerSubscriptionShutdown)
+	t.Run("expired_drain", testChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	process := worklifetime.NewProcess()
@@ -275,7 +276,7 @@ func testChannelWorkerSubscriptionShutdown(t *testing.T) {
 	}
 }
 
-func TestChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure(t *testing.T) {
+func testChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure(t *testing.T) {
 	for _, independent := range []bool{false, true} {
 		t.Run(fmt.Sprint(independent), func(t *testing.T) {
 			process := worklifetime.NewProcess()
