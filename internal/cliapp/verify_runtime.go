@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -48,14 +47,10 @@ type verifyFindingOutput struct {
 }
 
 type verifyCommandOptions struct {
-	sourceRoot   string
-	configPath   string
-	swarmDir     cliSwarmDirOptions
-	portable     bool
-	runID        string
-	runRequested bool
-	output       cliOutputOptions
-	logging      cliLoggingOptions
+	sourceRoot string
+	configPath string
+	output     cliOutputOptions
+	logging    cliLoggingOptions
 }
 
 func defaultVerifyCommandOptions() verifyCommandOptions {
@@ -73,13 +68,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 2
 	}
-	if opts.runRequested {
-		return runVerifyRunCommand(ctx, repo, opts, out, errOut)
-	}
 	purpose := runtimebootverify.StructuralValidation
-	if opts.configPath != "" && !opts.portable {
-		purpose = runtimebootverify.ExecutionValidation
-	}
 	refuse := func(checkID, owner, subject string, err error, artifact *sourceartifact.AdmittedSourceArtifact) int {
 		return renderVerifyAdmissionRefusal(ctx, opts, purpose, checkID, owner, subject, err, artifact, out, errOut)
 	}
@@ -87,9 +76,6 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		return refuse("verify_logging_options", "internal/cliapp.cliLoggingOptions.validate", "verify", err, nil)
 	}
 	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
-	if configResult.DeploymentConfigured() && !opts.portable {
-		purpose = runtimebootverify.ExecutionValidation
-	}
 	if err != nil {
 		subject := "configuration:" + repo
 		if opts.configPath != "" {
@@ -113,10 +99,6 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return refuse("source_loading", "internal/cliapp.LoadConfiguredPlatformPackBase", "source:"+sourceRoot, err, nil)
 	}
-	packBases, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
-	if err != nil {
-		return refuse("source_loading", "internal/packartifact.NewPlatformPackBaseGenerationOwner", "source:"+sourceRoot, err, nil)
-	}
 	if _, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, base); err != nil {
 		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithPackBase", "source:"+sourceRoot, err, nil)
 	} else {
@@ -125,25 +107,12 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		if err != nil {
 			return refuse("effective_source_admission", "internal/runtime.AdmitEffectiveSourceProjection", "source:"+bundle.SourceArtifact.BundleHash(), err, bundle.SourceArtifact)
 		}
-		if purpose == runtimebootverify.ExecutionValidation {
-			validationOpts, err = verifyDeploymentWorkflowOptions(ctx, configResult, bundle)
-			if err != nil {
-				return refuse("deployment_configuration", "internal/cliapp.verifyDeploymentWorkflowOptions", "source:"+bundle.SourceArtifact.BundleHash(), err, bundle.SourceArtifact)
-			}
-		}
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
-		if purpose == runtimebootverify.ExecutionValidation {
-			inspectVerifyDeployment(ctx, repo, resolvedPaths, configResult, opts.swarmDir, source, validationOpts, packBases, &result)
-		} else {
-			reason := "no explicit, project or local operator deployment configuration was selected"
-			if opts.portable {
-				reason = "--portable explicitly requests structural validation without deployment observations"
-			}
-			result.BootReport.Observations = append(result.BootReport.Observations, runtimebootverify.AdmissionObservation{
-				CheckID: "deployment_context", Owner: "internal/cliapp.RuntimeConfigLoadResult.DeploymentConfigured", Subject: "project:" + repo,
-				Class: runtimebootverify.AdmissionDeploymentObservation, Status: runtimebootverify.AdmissionNotRun, Reason: reason,
-			})
-		}
+		result.BootReport.Observations = append(result.BootReport.Observations, runtimebootverify.AdmissionObservation{
+			CheckID: "deployment_context", Owner: "internal/cliapp.runVerifyCommandWithOutput", Subject: "project:" + repo,
+			Class: runtimebootverify.AdmissionDeploymentObservation, Status: runtimebootverify.AdmissionNotRun,
+			Reason: "stateless source validation; boot checks run through swarm serve --dry-run",
+		})
 		decision := result.BootReport.AdmissionDecision(runtimebootverify.AdmissionFindingPolicy{
 			FatalWarnings: validationOpts.FatalBootWarnings, ExcludedFatalWarningChecks: validationOpts.ExcludedFatalBootWarningChecks,
 		})

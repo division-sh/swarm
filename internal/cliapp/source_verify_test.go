@@ -88,7 +88,6 @@ func Test2376VerifyJSONExactMemberTable(t *testing.T) {
 		}
 		var out, errOut bytes.Buffer
 		opts := defaultVerifyCommandOptions()
-		opts.portable = true
 		opts.sourceRoot, opts.configPath, opts.output.asJSON = root, writeTestVerifyRuntimeConfig(t), true
 		if code := runVerifyCommandWithOutput(context.Background(), RepoRoot(), opts, &out, &errOut); code != 0 {
 			t.Fatalf("code=%d out=%s err=%s", code, &out, &errOut)
