@@ -195,10 +195,7 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 	}
 	check := upgradeCheck{current: current, candidate: candidate, runID: state.RunID}
 	for _, instance := range state.Instances {
-		if err := check.instance(instance); err != nil {
-			return nil, err
-		}
-		if err := check.committedGate(instance, state.CommittedGateCards); err != nil {
+		if err := check.instanceAndCommittedGate(instance, state.CommittedGateCards); err != nil {
 			return nil, err
 		}
 	}
@@ -233,6 +230,13 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 		}
 	}
 	return check.blockers, ctx.Err()
+}
+
+func (c *upgradeCheck) instanceAndCommittedGate(instance UpgradeInstance, cards []decisioncard.Card) error {
+	if err := c.instance(instance); err != nil {
+		return err
+	}
+	return c.committedGate(instance, cards)
 }
 
 func (c *upgradeCheck) committedGate(instance UpgradeInstance, cards []decisioncard.Card) error {

@@ -333,13 +333,9 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			return nil, err
 		}
 	}
-	if err == nil && card.Anchor.Kind() == decisioncard.AnchorKindStageGate && opts.CompletionReplay != nil {
-		response, replayed, replayErr := opts.CompletionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
-		if replayErr != nil {
-			return nil, decisionCardAPIError(cardID, replayErr)
-		}
-		if replayed {
-			return decisionCardMutationResponse(cardID, response, true)
+	if err == nil {
+		if result, complete, replayErr := replayCompletedDecisionCardMutation(ctx, opts, card, request, mutation); complete {
+			return result, replayErr
 		}
 	}
 	authority := opts.Authority
@@ -375,6 +371,21 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		return nil, decisionCardAPIError(cardID, err)
 	}
 	return decisionCardMutationResponse(cardID, response, replayed)
+}
+
+func replayCompletedDecisionCardMutation(ctx context.Context, opts DecisionCardHandlerOptions, card decisioncard.Card, request apiidempotency.Request, mutation runtimepipeline.DecisionCardMutation) (any, bool, error) {
+	if card.Anchor.Kind() != decisioncard.AnchorKindStageGate || opts.CompletionReplay == nil {
+		return nil, false, nil
+	}
+	response, replayed, err := opts.CompletionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
+	if err != nil {
+		return nil, true, decisionCardAPIError(request.ResourceID, err)
+	}
+	if !replayed {
+		return nil, false, nil
+	}
+	result, err := decisionCardMutationResponse(request.ResourceID, response, true)
+	return result, true, err
 }
 
 func pausedDecisionCardSourceError(ctx context.Context, opts DecisionCardHandlerOptions, card decisioncard.Card, err error) error {
