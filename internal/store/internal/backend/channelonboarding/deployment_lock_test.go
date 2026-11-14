@@ -23,6 +23,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/serveapp"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
@@ -72,6 +73,23 @@ type deploymentLockFixture struct {
 func newDeploymentLockFixture(t *testing.T) deploymentLockFixture {
 	t.Helper()
 	f := deploymentLockFixture{callbackLockFixture: newCallbackLockFixture(t, "postgres")}
+	work := worklifetime.NewProcess()
+	original, err := startupownership.CaptureMutationAuthority(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := work.BindOriginalProcess(original.ProcessAuthority().LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = worklifetime.WithProcess(f.ctx, work)
+	t.Cleanup(func() {
+		work.Retire()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := work.Join(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +185,7 @@ func newDeploymentLockFixture(t *testing.T) deploymentLockFixture {
 	return f
 }
 
-func (f deploymentLockFixture) pending(ctx context.Context, now time.Time) (domain.Operation, operatorchannel.Operation, error) {
+func (f deploymentLockFixture) pending(ctx context.Context, now time.Time, eventID int64) (domain.Operation, operatorchannel.Operation, error) {
 	var child operatorchannel.Operation
 	id := uuid.NewString()
 	op, err := f.deployment.ReserveChannelOnboarding(ctx, domain.StartRequest{DeploymentRegistration: true,
@@ -230,7 +248,7 @@ func (f deploymentLockFixture) pending(ctx context.Context, now time.Time) (doma
 			current, err := f.current.CurrentValueMatchesSeal(ctx, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 			return err == nil && current
 		}, func(providertriggers.InboundAdmissionPlan) (providertriggers.Delivery, error) {
-			body, err := json.Marshal(map[string]any{"update_id": 28731, "message": map[string]any{"message_id": 28731,
+			body, err := json.Marshal(map[string]any{"update_id": eventID, "message": map[string]any{"message_id": eventID,
 				"from": map[string]any{"id": 1001}, "chat": map[string]any{"id": 1001, "type": "private"}, "text": child.Challenge}})
 			if err != nil {
 				return providertriggers.Delivery{}, err
@@ -287,7 +305,7 @@ func proveDeploymentParentInterleavings(t *testing.T) {
 func proveDeploymentParentInterleaving(t *testing.T, mutation string) {
 	f := newDeploymentLockFixture(t)
 	now := time.Now().UTC()
-	op, child, err := f.pending(f.ctx, now)
+	op, child, err := f.pending(f.ctx, now, 28731)
 	if err != nil || child.State != operatorchannel.StateAwaitingConfirmation {
 		t.Fatal("genuine pending deployment identity", child.State, err)
 	}
@@ -384,7 +402,7 @@ func (f deploymentLockFixture) compete(ctx context.Context, mutation string, op 
 	if mutation != "logout_then_connect" {
 		return nil
 	}
-	next, nextChild, err := f.pending(ctx, now.Add(time.Second))
+	next, nextChild, err := f.pending(ctx, now.Add(time.Second), 28732)
 	if err != nil {
 		return err
 	}
