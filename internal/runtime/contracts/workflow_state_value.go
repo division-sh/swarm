@@ -74,6 +74,11 @@ func projectStateField(value yamlsource.Value, types TypeCatalogDocument) (Entit
 		if scalar.Tag == "!!str" && scalar.Style == 0 {
 			return stateTypeDeclaration(scalar.Value, types)
 		}
+		if scalar.Tag == "!!str" && scalar.Style&(yamlsource.SingleQuotedStyle|yamlsource.DoubleQuotedStyle) != 0 {
+			if _, err := stateTypeDeclaration(scalar.Value, types); err == nil {
+				return EntityFieldDecl{}, NewExpectedShapeDiagnostic("contract_loader.quoted_state_type", value.SemanticPath(), "remove the quotes", "", nil)
+			}
+		}
 		return stateLiteral(value)
 	default:
 		return EntityFieldDecl{}, fmt.Errorf("state field requires a type or a non-null literal; empty lists are not declarations (use [T])")
