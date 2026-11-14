@@ -1047,24 +1047,6 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 	}
-	existingQuery := `SELECT session_id::text FROM agent_sessions
-		WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3 AND agent_name_source=$4
-		AND agent_route_presence=$5 AND flow_scope_key=$6 AND flow_instance_id=$7 AND flow_instance=$8
-		AND status <> 'terminated'`
-	if sqlite {
-		existingQuery = `SELECT session_id FROM agent_sessions
-			WHERE run_id=? AND agent_id=? AND agent_name_owner=? AND agent_name_source=?
-			AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?
-			AND status <> 'terminated'`
-	}
-	var existingSessionID string
-	err = db.QueryRowContext(ctx, existingQuery, append([]any{runID}, identityArgs...)...).Scan(&existingSessionID)
-	if err == nil {
-		return existingSessionID
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("read operator replay delivery session: %v", err)
-	}
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -1348,7 +1330,11 @@ func TestOperatorEventReplayStoresIdempotencyBeforeDirectPublishFanoutError(t *t
 	ch := subscribeOperatorReplayAgent(t, bus, "agent-a")
 	defer runtimebustest.Unsubscribe(bus, "agent-a")
 	fillAgentChannel(t, ctx, pg, bus, "agent-a", cap(ch))
-	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
+	retained, err := pg.LoadOperatorAgent(ctx, operatorReplayAgentIdentity(t, "agent-a"))
+	if err != nil {
+		t.Fatalf("read filler delivery session: %v", err)
+	}
+	original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered, retained)
 	handler := eventReplayTestHandler(t, pg, bus)
 	body := eventReplayBody(original.EventID, nil, "idem-direct-fanout-failure")
 
@@ -1837,7 +1823,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 	})
 }
 
-func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
+func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status, retained ...operatorread.OperatorAgentDetail) operatorread.OperatorEventFull {
 	t.Helper()
 	ctx = originalAPIFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
@@ -1875,7 +1861,15 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
+			var sessionID string
+			if len(retained) == 0 {
+				sessionID = seedOperatorReplayDeliverySession(t, ctx, pg, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
+			} else {
+				if len(retained) != 1 || retained[0].Agent.Identity != route.AgentIdentity || retained[0].CurrentSessionRef == nil || retained[0].CurrentSessionRef.SessionID == "" {
+					t.Fatal("retained replay fixture requires its exact agent and current session")
+				}
+				sessionID = retained[0].CurrentSessionRef.SessionID
+			}
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}
