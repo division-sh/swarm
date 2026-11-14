@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
@@ -10,17 +11,67 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
+
+type competingForkContinueReader struct {
+	runlifecycle.LiveRunReader
+	runlifecycle.LandingRunReader
+	runcontrol.Store
+	runID   string
+	reads   int
+	outcome runcontrol.StoreTransition
+	err     error
+}
+
+func (r *competingForkContinueReader) LoadRunLiveScope(ctx context.Context, runID string) (runlifecycle.LiveRunScope, error) {
+	r.reads++
+	if r.reads == 2 {
+		r.outcome, r.err = r.Store.ContinueRunControlOutcome(ctx, runcontrol.TransitionRequest{
+			RunID: r.runID, Reason: "competing_fork_continue", ControlledBy: "test",
+		})
+	}
+	return r.LiveRunReader.LoadRunLiveScope(ctx, runID)
+}
 
 // Source artifact admission is private setup, not proof of public publication.
 // Publication, pause, fork and readback below use the assembled HTTP surface.
 func TestSelectedForkPendingInputBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, mode := range []string{"unchanged", "compatible", "incompatible", "missing_input", "ambiguous_artifact", "explicit_child", "ordinary_child", "ordinary_root", "reference", "pause_resume", "fork_wait_publication"} {
+		for _, mode := range []string{"unchanged", "compatible", "incompatible", "missing_input", "ambiguous_artifact", "explicit_child", "ordinary_child", "ordinary_root", "reference", "pause_resume", "fork_wait_publication", "competing_continue"} {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
+				var competitor *competingForkContinueReader
+				if mode == "competing_continue" {
+					previous := buildSelectedAPICapabilities
+					buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+						caps, err := previous(owner, req)
+						if err != nil {
+							return caps, err
+						}
+						executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor)
+						if !ok {
+							t.Fatal("selected fork executor is required")
+						}
+						control, ok := executor.LiveRuns.(runcontrol.Store)
+						if !ok {
+							t.Fatal("selected run-control owner is required")
+						}
+						landing, ok := executor.LiveRuns.(runlifecycle.LandingRunReader)
+						if !ok {
+							t.Fatal("selected landing-run reader is required")
+						}
+						competitor = &competingForkContinueReader{LiveRunReader: executor.LiveRuns, LandingRunReader: landing, Store: control}
+						executor.LiveRuns = competitor
+						caps.RunFork = executor
+						return caps, nil
+					}
+					t.Cleanup(func() { buildSelectedAPICapabilities = previous })
+				}
 				var selected *selectedStoreOwner
 				previous := projectRuntimePersistenceForServe
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
@@ -35,6 +86,9 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "input-seed",
 				})
+				if competitor != nil {
+					competitor.runID = seed.RunID
+				}
 				waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
@@ -158,6 +212,39 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", forkParams)
+				if competitor != nil {
+					if competitor.reads < 2 {
+						t.Fatalf("competing Continue did not reach the paused fork cut: reads=%d", competitor.reads)
+					}
+					if competitor.outcome.Acknowledged {
+						if response.Error == nil {
+							t.Fatal("fork materialized after competing Continue committed")
+						}
+						details, ok := response.Error.Data["details"].(map[string]any)
+						if !ok {
+							t.Fatalf("competing Continue lost its typed fork conflict: %+v", response.Error)
+						}
+						failure := decodeServedFailureEnvelope(t, details["failure"])
+						if failure.Class != failures.ClassLifecycleConflict || failure.Detail.Code != "run_fork_write_conflict" {
+							t.Fatalf("competing Continue failure = %+v, want clean fork conflict", failure)
+						}
+						var after int
+						var status string
+						if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&after); err != nil || after != before {
+							t.Fatalf("competing Continue minted a fork child: before=%d after=%d err=%v", before, after, err)
+						}
+						if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, seed.RunID).Scan(&status); err != nil || status != "live" {
+							t.Fatalf("committed Continue lost its original run: status=%s err=%v", status, err)
+						}
+						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
+						requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
+						requirePendingInputPublicStates(t, rt, seed.RunID, 2)
+						return
+					}
+					if competitor.err == nil {
+						t.Fatal("competing Continue neither committed nor refused")
+					}
+				}
 				if mode == "incompatible" || mode == "missing_input" {
 					if response.Error == nil {
 						t.Fatal("invalid selected input was accepted")
