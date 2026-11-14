@@ -19,12 +19,13 @@ type selectedStoreBootCheck = storeselected.BootCheckInput
 
 var selectedStoreTestDatabases sync.Map
 
-func openSelectedPostgresOwner(t testing.TB, dsn string, db *sql.DB, cfg *config.Config) *selectedStoreOwner {
+func openSelectedPostgresOwner(t testing.TB, dsn string, db *sql.DB, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) *selectedStoreOwner {
 	t.Helper()
 	owner, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{
 		Selection:      storebackend.Selection{Backend: storebackend.BackendPostgres},
 		PostgresDSN:    dsn,
 		SessionLockTTL: runtimeSessionLockTTL(cfg),
+		BootCheckInput: firstBootCheckInput(bootCheck),
 	})
 	if err != nil {
 		t.Fatalf("open PostgreSQL selected store: %v", err)
@@ -37,11 +38,12 @@ func openSelectedPostgresOwner(t testing.TB, dsn string, db *sql.DB, cfg *config
 	return owner
 }
 
-func openSelectedSQLiteOwner(t testing.TB, path string, cfg *config.Config) *selectedStoreOwner {
+func openSelectedSQLiteOwner(t testing.TB, path string, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) *selectedStoreOwner {
 	t.Helper()
 	owner, err := storeselected.OpenRuntime(context.Background(), storeselected.RuntimeRequest{
 		Selection:      storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: path},
 		SessionLockTTL: runtimeSessionLockTTL(cfg),
+		BootCheckInput: firstBootCheckInput(bootCheck),
 	})
 	if err != nil {
 		t.Fatalf("open SQLite selected store: %v", err)
@@ -49,6 +51,13 @@ func openSelectedSQLiteOwner(t testing.TB, path string, cfg *config.Config) *sel
 	db, _, _ := selectedRuntimeStoreForTest(t, projectServeRuntimePersistence(owner))
 	registerSelectedStoreTestDatabase(t, owner, db)
 	return owner
+}
+
+func firstBootCheckInput(input []*selectedStoreBootCheck) *selectedStoreBootCheck {
+	if len(input) == 0 {
+		return nil
+	}
+	return input[0]
 }
 
 func registerSelectedStoreTestDatabase(t testing.TB, owner *selectedStoreOwner, db *sql.DB) {

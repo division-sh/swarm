@@ -7094,7 +7094,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 	t.Cleanup(func() { _ = storetest.DatabaseForTest(runtimePG).Close() })
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...), nil
 	}
 	if workspaceFactory != nil {
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {

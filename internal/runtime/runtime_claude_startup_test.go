@@ -642,6 +642,86 @@ func TestValidateClaudeMCPToolsForManagedAgents_StartupPromptMatchesCanonicalNor
 	if !slices.Equal(exec.executed, []string{"health_check"}) {
 		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)
 	}
+	t.Run("checked_start_keeps_native_binding_and_callable_tail", func(t *testing.T) {
+		ctx := testAuthorActivityContext(t.Context())
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := sourceartifact.AdmitDirectory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := claudeStartupAgentSource()
+		bundle, _ := semanticview.Bundle(source)
+		bundle.SourceArtifact = artifact
+		credentialStore := testProviderCredentialStore(t, "CLAUDE_CODE_OAUTH_TOKEN", "checked-provider")
+		resolver := llm.NewProviderCredentialResolver(credentialStore)
+		profile, err := cfg.LLMBackendProfile()
+		if err != nil {
+			t.Fatal(err)
+		}
+		credential, err := resolver.Resolve(ctx, profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err := llm.ProviderContractForProfile(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates, err := managedProviderPreflightAgentConfigs(manager)
+		if err != nil || len(candidates) != 1 {
+			t.Fatalf("native candidate census: %v", err)
+		}
+		target := ManagedProviderCheckTarget{Actor: candidates[0].config, Plan: candidates[0].plan}
+		planned, err := llm.CompileManagedCapabilityAdmission(target.Actor, contract, exec.defs, startupProbeCapabilitySet([]string{"hidden_tool", "query_entities", "health_check"}, exec.caps))
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, err := providerStartupCheckKey(cfg, credential, artifact.BundleHash(), target, expectedText, planned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configHash, _ := providerCheckHash(cfg)
+		targetKey, _ := providerCheckHash(target)
+		group, _ := providerCheckHash([]string{profile.Provider, credential.Key, credential.Value})
+		response := &llm.Response{CLIInventory: llm.CLIInventoryValid, MCPServers: map[string]string{"runtime-tools": "connected"}}
+		for _, tool := range planned {
+			if !tool.Capability.Visible || !tool.Capability.Callable {
+				continue
+			}
+			for _, binding := range tool.Bindings {
+				if binding.Kind == managedcapabilities.BindingMCPProvider {
+					response.MCPVisibleTools = append(response.MCPVisibleTools, binding.ExactName)
+				}
+			}
+		}
+		raw, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := providerCheckTestInput{checks: &ManagedProviderBootChecks{
+			config: configHash, source: artifact.BundleHash(), starts: map[string]json.RawMessage{key: raw},
+			keys: map[string]llmselection.Profile{group: profile}, targets: map[string]struct{}{targetKey: {}},
+		}, credentials: resolver}
+		beforeStarts, beforeCalls := len(probe.calls), len(exec.executed)
+		if err := validateClaudeMCPToolsForManagedAgents(ctx, cfg, source, binding, probe, turns, exec, manager, input); err != nil {
+			t.Fatal(err)
+		}
+		if len(probe.calls) != beforeStarts || len(exec.executed) != beforeCalls+1 || exec.executed[beforeCalls] != "health_check" {
+			t.Fatal("checked start repeated provider work or bypassed the native callable proof")
+		}
+		if string(input.checks.starts[key]) != string(raw) || response.CapabilitySurface != nil {
+			t.Fatal("native consumption mutated raw check evidence or adopted it as authority")
+		}
+		delete(input.checks.starts, key)
+		if err := validateClaudeMCPToolsForManagedAgents(ctx, cfg, source, binding, probe, turns, exec, manager, input); err == nil || len(probe.calls) != beforeStarts || len(exec.executed) != beforeCalls+1 {
+			t.Fatalf("missing exact observation permitted a second start or callable dispatch: %v", err)
+		}
+	})
 }
 
 func TestValidateManagedProviderPreflightConsumesRunlessBlueprintBeforeLiveAdmission(t *testing.T) {
