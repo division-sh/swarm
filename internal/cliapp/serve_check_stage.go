@@ -162,7 +162,7 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	}
 	verifyDeploymentObservation(ctx, &out.Validation, "managed_provider_startup", "internal/runtime.ObserveManagedProviderBootChecks", "source:"+out.Validation.BootReport.SourceArtifactHash, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		var err error
-		out.ProviderChecks, err = runtime.ObserveManagedProviderBootChecks(ctx, in.Config.Config, out.Source, out.Options, targets, discovered, inspection, docker, intent.MCPListenAddr)
+		out.ProviderChecks, err = runtime.ObserveManagedProviderBootChecks(ctx, in.Config.Config, out.Source, out.Options, targets, discovered, inspection, docker, intent.MCPListenAddr, in.Options.TestLLMRuntime)
 		return err
 	})
 	out.Validation.BootReport.Sort()
