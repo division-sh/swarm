@@ -1529,7 +1529,11 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, story runtimeau
 	if err != nil {
 		return err
 	}
-	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, card.BundleHash)
+	resolveScope := runtimeauthoractivity.BundleScopeForSource
+	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate && (changeType == decisioncard.ChangeDecided || changeType == decisioncard.ChangeDeferred) {
+		resolveScope = runtimeauthoractivity.BundleScopeForTarget
+	}
+	scope, err := resolveScope(ctx, card.BundleHash)
 	if err != nil {
 		return fmt.Errorf("decision card change author activity scope: %w", err)
 	}
