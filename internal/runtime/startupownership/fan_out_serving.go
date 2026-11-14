@@ -31,7 +31,7 @@ type fanOutServingService struct {
 	intents      map[fanoutobligation.IntentKey]struct{}
 	claimEntered map[fanoutobligation.IntentKey]bool
 	opportunity  *fanOutOpportunity
-	scanRetry    *fanoutobligation.ReadRetry // accessed only by the selector loop
+	scanAfter    time.Time // accessed only by the selector loop
 }
 
 func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence worklifetime.Occurrence, workers *int, executor FanOutExecutor) (*FanOutServingRegistration, error) {
@@ -241,7 +241,7 @@ func (s *fanOutServingService) run(standing *worklifetime.Lease) {
 		case <-s.wake:
 		case <-ticker.C:
 		}
-		if s.scanRetry == nil || !time.Now().Before(s.scanRetry.NotBefore) {
+		if !time.Now().Before(s.scanAfter) {
 			s.refill()
 		}
 	}
@@ -338,12 +338,11 @@ func (s *fanOutServingService) refill() {
 		candidate, found, err := s.store.NextFanOutCandidate(s.ctx, grants, excluded)
 		s.reportTestScan(registrations, candidate, found, err)
 		if err != nil {
-			next := s.scanRetry.NextAttempt(time.Now())
-			s.scanRetry = &next
+			s.postponeFailedScan(time.Now())
 			reporter.executor.ReportFanOutServingError(s.ctx, err)
 			return
 		}
-		s.scanRetry = nil
+		s.scanAfter = time.Time{}
 		if !found {
 			return
 		}
@@ -414,4 +413,11 @@ func (s *fanOutServingService) refill() {
 			}
 		}()
 	}
+}
+
+// Admission discovery retains its existing one-second recovery bound; only an
+// admitted feed attempt owns exponential durable pacing. Coalesced wakes must
+// neither hammer a failed selector nor strand healthy work behind its backoff.
+func (s *fanOutServingService) postponeFailedScan(now time.Time) {
+	s.scanAfter = now.Add(fanOutRecoveryInterval)
 }

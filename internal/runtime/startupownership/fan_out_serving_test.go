@@ -459,6 +459,13 @@ func TestFanOutOpportunityEpisodesAreExactAndExcludeUnknownState(t *testing.T) {
 	b := a
 	b.GrantID = "grant-b"
 	now := time.Now()
+	for retry := 0; retry < 4; retry++ {
+		at := now.Add(time.Duration(retry) * time.Second)
+		s.postponeFailedScan(at)
+		if !s.scanAfter.Equal(at.Add(fanOutRecoveryInterval)) {
+			t.Fatal("discovery failure changed the existing recovery/opportunity bound")
+		}
+	}
 	if s.observeOpportunity(a, true, now) || s.observeOpportunity(a, true, now.Add(time.Second)) {
 		t.Fatal("incident emitted before exceeding the exact bound")
 	}
