@@ -14,7 +14,11 @@ import (
 
 // Identity checks use compiled read slots and existing sealed admissions only.
 // Pairing checkpoints, login and current native operation admission stay in boot.
-func inspectServeChannelIdentities(ctx context.Context, inventory channelonboarding.RetainedActivationInventory, plans []packs.SatisfactionPlan, store credentials.Store) ([]credentials.ValueEvidence, error) {
+func inspectServeChannelIdentities(ctx context.Context, inventory channelonboarding.RetainedActivationInventory, plans []packs.SatisfactionPlan, store credentials.Store, reads ...registration.HTTPExecutor) ([]credentials.ValueEvidence, error) {
+	executor := registration.HTTPExecutor{}
+	if len(reads) != 0 {
+		executor = reads[0]
+	}
 	var evidence []credentials.ValueEvidence
 	for _, operation := range inventory.Operations {
 		if !operation.DeploymentRegistration || operation.Provider != "telegram" || operation.LogoutCompleted || len(operation.CredentialAdmissions) == 0 {
@@ -60,7 +64,7 @@ func inspectServeChannelIdentities(ctx context.Context, inventory channelonboard
 		if err != nil {
 			return nil, err
 		}
-		output, err := (registration.HTTPExecutor{}).Read(ctx, read, input, values)
+		output, err := executor.Read(ctx, read, input, values)
 		if err != nil {
 			return nil, err
 		}

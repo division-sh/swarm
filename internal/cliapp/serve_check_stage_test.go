@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath string) (ServeCheckStageResult, error) {
@@ -39,6 +41,11 @@ func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configP
 		return ServeCheckStageResult{}, err
 	}
 	opts := DefaultServeOptions()
+	profile, err := cfg.Config.LLMBackendProfile()
+	if err != nil {
+		return ServeCheckStageResult{}, err
+	}
+	opts.TestLLMRuntime = serveCheckAnswerRuntime{profile: profile}
 	opts.SourceRoot, opts.ConfigPath = source, configPath
 	opts.APIListenAddr, opts.MCPListenAddr, err = cfg.ResolveServeListeners(opts, false, false)
 	if err != nil {
@@ -47,10 +54,24 @@ func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configP
 	return InspectServeCheckStage(ctx, ServeCheckStageRequest{Repo: repo, Paths: paths, Config: cfg, Options: opts, Selection: request.Selection, PackBases: bases})
 }
 
+type serveCheckAnswerRuntime struct {
+	llm.NoopRuntime
+	profile llmselection.Profile
+}
+
+func (r serveCheckAnswerRuntime) ProviderContract() llm.ProviderContract {
+	contract, _ := llm.ProviderContractForProfile(r.profile)
+	return contract
+}
+
+func (serveCheckAnswerRuntime) ObserveStartupAnswer(ctx context.Context, _ llmselection.Profile, _ llmselection.ResolvedModel) ([]byte, error) {
+	return []byte(`{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ready"}],"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ready"}}],"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}]}`), ctx.Err()
+}
+
 func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath, format string, out, diagnostic io.Writer) int {
 	t.Helper()
 	stage, err := serveChecksForTest(t, ctx, repo, source, configPath)
-	if err != nil {
+	if err != nil && stage.Bundle == nil {
 		t.Fatalf("check stage prerequisites: %v", err)
 	}
 	decision := stage.Decision()

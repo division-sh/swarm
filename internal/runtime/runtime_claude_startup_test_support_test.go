@@ -101,7 +101,7 @@ func (*startupEffectStore) SettleExternalAttempt(context.Context, runtimeeffects
 
 // This test-only adapter keeps the existing startup proof matrix focused on
 // behavior while routing every case through the canonical typed preflight.
-func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, binding toolgateway.Binding, probe llm.StartupVisibleToolSurfaceProber, turns llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
+func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, binding toolgateway.Binding, probe llm.StartupVisibleToolSurfaceProber, turns llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, checked ...providerCheckTestInput) error {
 	startupAuthorityID := uuid.NewString()
 	store := &startupEffectStore{}
 	profile, err := cfg.LLMBackendProfile()
@@ -112,7 +112,7 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 	if err != nil {
 		return err
 	}
-	_, err = ValidateManagedProviderPreflight(ctx, cfg, source, binding, runtimes, turns, tools, manager, ManagedProviderPreflightAuthority{
+	authority := ManagedProviderPreflightAuthority{
 		ExecutionKind:        managedcapabilities.ExecutionNormalAgent,
 		ExecutionAuthorityID: startupAuthorityID,
 		StartupOwnerID:       "startup-test-owner",
@@ -129,6 +129,16 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 				},
 			}, nil
 		},
-	})
+	}
+	if len(checked) != 0 {
+		_, err = validateManagedProviderPreflightWithChecks(ctx, cfg, source, binding, runtimes, turns, tools, manager, authority, checked[0].checks, checked[0].credentials)
+	} else {
+		_, err = ValidateManagedProviderPreflight(ctx, cfg, source, binding, runtimes, turns, tools, manager, authority)
+	}
 	return err
+}
+
+type providerCheckTestInput struct {
+	checks      *ManagedProviderBootChecks
+	credentials llm.ProviderCredentialResolver
 }

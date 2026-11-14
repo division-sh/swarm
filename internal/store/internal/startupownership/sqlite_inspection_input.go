@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 )
 
 // SQLiteInspectionInput is a non-authoritative observation. Only the existing
@@ -15,11 +14,7 @@ type SQLiteInspectionInput struct {
 }
 
 func CaptureSQLiteInspectionInput(ctx context.Context, path string) (*SQLiteInspectionInput, error) {
-	absent, err := ObserveSQLiteInspectionAbsence(ctx, path)
-	if err != nil {
-		return nil, err
-	}
-	path, err = filepath.Abs(filepath.Clean(path))
+	path, absent, err := inspectSQLiteCoordinate(ctx, path)
 	if err != nil {
 		return nil, err
 	}

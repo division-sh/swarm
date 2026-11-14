@@ -49,7 +49,7 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 					}
 					storetest.BootstrapPostgresRuntimeStore(t, pg)
 					db = storetest.DatabaseForTest(pg)
-					return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+					return openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...), nil
 				}
 				t.Cleanup(func() { buildStoresForServe = original })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
