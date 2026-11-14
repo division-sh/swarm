@@ -261,12 +261,17 @@ For serve-owned HTTPS instead, opt in through the deployment's `swarm.yaml`:
 serve:
   public_webhook:
     hostname: hooks.example.com # or an sslip.io-style name for your public IP
+    # port: 443
     # certificate_file: tls/fullchain.pem
     # private_key_file: tls/private-key.pem
     # email: ops@example.com
 ```
 
-This binds the dedicated webhook-only listener publicly on port 443. Supplied
+This binds the dedicated webhook-only HTTPS listener publicly on `port` (default
+443). An omitted port and explicit 443 keep the same advertised address, without
+`:443`; another port is included in that address. Every port uses HTTPS. Restart
+serve to change the port. Telegram accepts only 443, 80, 88 and 8443; other
+providers' requirements still apply. Supplied
 certificate and key paths may be anywhere the serving process can read. Relative
 paths resolve from the captured CLI invocation directory, not the configuration
 file, source directory or state directory; absolute paths and ordinary symlinks work.
@@ -278,7 +283,12 @@ With neither file configured, serve uses autocert with Let's Encrypt for exactly
 the configured name, accepting its terms; contact is omitted unless `email` is
 set. Its private cache is `public-webhook-certs/` inside the state directory.
 DNS must point to this deployment and TCP 443 must be publicly reachable, including
-the TLS-ALPN challenge. A cold start can fail its unchanged readiness window while
+the TLS-ALPN challenge. A different local port does not move that public challenge
+port: use a supplied certificate for direct operation there, or have the
+administrator pass public 443's TLS-ALPN traffic intact to this same serve. An
+ordinary TLS-terminating reverse proxy uses the existing proxy mode instead.
+Swarm does not configure forwarding or prove that external arrangement during
+configuration admission. A cold start can fail its unchanged readiness window while
 issuance is underway; restart once the certificate is cached. Library renewal work
 is not joined by same-process teardown; CLI process exit ends local work, but cannot
 recall a certificate request already sent. Each native-TLS readiness probe uses a

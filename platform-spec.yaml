@@ -12970,7 +12970,7 @@ tool_model:
       modes:
         managed_quick_tunnel: '`swarm serve --dev --expose`; requires parseable cloudflared semver >= 2021.7.0, a Swarm-owned empty temporary config, exact `/ready` and `/quicktunnel` endpoint admission, and one `*.trycloudflare.com` hostname'
         external_origin: '`swarm serve --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>` under either retained plain serve or development serve; it uses the invocation''s selected-store posture without changing its lifetime'
-        native_tls: 'Optional deployment configuration serve.public_webhook selects serve-owned HTTPS on public port 443 for one configured hostname; conflicts with --expose and --public-webhook-*; absence preserves existing modes.'
+        native_tls: 'Optional deployment configuration serve.public_webhook selects serve-owned HTTPS for one configured hostname; port is an optional integer from 1 to 65535, defaults to 443 only when omitted, and requires a restart to change. Every port uses HTTPS. Default and explicit 443 are omitted from the advertised origin; other ports are included. Conflicts with --expose and --public-webhook-*; absence preserves existing modes.'
       native_tls_certificates: >
         A complete supplied certificate_file/private_key_file pair is read once from operator-named paths,
         relative to the captured CLI invocation directory or absolute anywhere readable by serve, following ordinary
@@ -12978,6 +12978,12 @@ tool_model:
         supplied material never falls back to automatic issuance. Without the pair, unchanged autocert uses one
         hostname, its state-directory public-webhook-certs cache, Let's Encrypt defaults and accepted terms, with
         contact only when email is configured. No certificate upload to Telegram or self-signed generation is provided.
+        Automatic certificates still require public port 443 to reach this same manager's TLS-ALPN handler intact;
+        a different local port does not change that requirement. Ordinary TLS termination elsewhere is the existing
+        proxy mode, not challenge pass-through. No extra challenge socket or forwarding is provided.
+        Deployment admission refuses a selected Telegram webhook channel outside ports 443, 80, 88 and 8443.
+        Installed inventory, dormant unselected registrations and outbound-only bindings do not select a webhook.
+        No generic per-provider port table is introduced; other providers' acceptance remains provider-owned.
         Automatic issuance/renewal work is library-owned, not joined on same-process teardown; process exit ends local
         work but cannot recall an already-sent CA request. Cold issuance can exceed the unchanged startup window.
         Native TLS exposure proofs use a fresh verified TCP/TLS connection without pooled or resumed sessions on
