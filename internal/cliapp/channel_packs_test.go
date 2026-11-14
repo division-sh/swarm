@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -77,6 +79,40 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram.telegram_bot_token"]; got != "telegram_hitl_bot" {
 		t.Fatalf("credential mapping = %q", got)
 	}
+	t.Run("native_webhook_port_uses_exact_selection", func(t *testing.T) {
+		candidate := *base
+		candidate.Serve.PublicWebhook = &config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(9443)}
+		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{}); err != nil {
+			t.Fatalf("installed inventory alone selected Telegram: %v", err)
+		}
+		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{Bindings: loaded.Bindings}); err == nil {
+			t.Fatal("registered Telegram binding admitted an unsupported port")
+		}
+		binding := base.Channels.Bindings["hitl"]
+		binding.Register = ""
+		candidate.Channels.Bindings = map[string]config.ChannelBindingConfig{"hitl": binding}
+		outbound, err := load(t, &candidate, credentials)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{Bindings: outbound.Bindings}); err != nil {
+			t.Fatalf("outbound-only binding acquired a webhook prerequisite: %v", err)
+		}
+		candidate.Channels.HITL = &channelonboarding.AccountReference{Provider: "telegram", Account: "12345"}
+		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{}); err == nil {
+			t.Fatal("unheld configured Telegram account admitted an unsupported port")
+		}
+		for _, port := range []int{443, 80, 88, 8443} {
+			candidate.Serve.PublicWebhook.Port = &port
+			if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{Bindings: loaded.Bindings}); err != nil {
+				t.Fatalf("supported Telegram port %d refused: %v", port, err)
+			}
+		}
+		candidate.Serve.PublicWebhook = nil
+		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{Bindings: loaded.Bindings}); err != nil {
+			t.Fatalf("native setting changed proxy-mode admission: %v", err)
+		}
+	})
 	for _, plan := range loaded.Plans {
 		if subject, err := plan.CapabilitySubject(); err != nil || subject.ID != plan.ChannelIdentity().ID() {
 			t.Fatalf("standalone installed channel identity changed: %+v error=%v", subject, err)
@@ -108,6 +144,14 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 		}
 		if !captured.Channels.Plans[0].MatchesCapturedHolder(".") {
 			t.Fatal("captured channel lost its exact holding flow")
+		}
+		native := *base
+		native.Serve.PublicWebhook = &config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(9443)}
+		if err := ValidateServePublicWebhookPort(&native, ChannelPackLoad{Plans: []packs.SatisfactionPlan{captured.Channels.Plans[0]}}); err == nil {
+			t.Fatal("consumed Telegram webhook admitted an unsupported port")
+		}
+		if _, err := LoadBundlePackRuntime(t.Context(), RuntimeConfigLoadResult{Config: &native}, bundle, credentials, nil); err == nil {
+			t.Fatal("shared preboot bundle admission missed unsupported Telegram port")
 		}
 		for _, foreign := range []string{"", " .", "./", "child", "telegram-agent"} {
 			if captured.Channels.Plans[0].MatchesCapturedHolder(foreign) {

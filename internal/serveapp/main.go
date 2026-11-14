@@ -811,8 +811,15 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 2
 	}
 	if publicIngressMode == runtimepublicingress.ModeNativeTLS {
-		opts.PublicWebhookBaseURL = "https://" + strings.TrimSpace(cfg.Serve.PublicWebhook.Hostname)
-		opts.PublicWebhookListen = ":443"
+		if err := cliapp.ValidateServePublicWebhookPort(cfg, cliapp.ChannelPackLoad{}); err != nil {
+			presenter.fail(1, "serve_admission", err)
+			return 2
+		}
+		opts.PublicWebhookBaseURL, opts.PublicWebhookListen, err = runtimepublicingress.NativeTLSAddresses(cfg.Serve.PublicWebhook)
+		if err != nil {
+			presenter.fail(1, "serve_admission", err)
+			return 2
+		}
 	}
 	if publicIngressEnabled {
 		if err := runtimepublicingress.ValidateConfiguration(publicIngressMode, opts.PublicWebhookBaseURL, opts.PublicWebhookListen); err != nil {

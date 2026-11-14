@@ -17,12 +17,20 @@ type ServeConfig struct {
 
 type PublicWebhookConfig struct {
 	Hostname        string  `yaml:"hostname"`
+	Port            *int    `yaml:"port,omitempty"`
 	CertificateFile *string `yaml:"certificate_file,omitempty"`
 	PrivateKeyFile  *string `yaml:"private_key_file,omitempty"`
 	Email           string  `yaml:"email,omitempty"`
 }
 
 var webhookHostname = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$`)
+
+func (c *PublicWebhookConfig) PortNumber() int {
+	if c == nil || c.Port == nil {
+		return 443
+	}
+	return *c.Port
+}
 
 func (c *PublicWebhookConfig) Validate() error {
 	if c == nil {
@@ -31,6 +39,9 @@ func (c *PublicWebhookConfig) Validate() error {
 	host := strings.TrimSpace(c.Hostname)
 	if len(host) > 253 || net.ParseIP(host) != nil || !webhookHostname.MatchString(host) {
 		return fmt.Errorf("serve.public_webhook.hostname must be one DNS hostname without a scheme, port or path")
+	}
+	if port := c.PortNumber(); port < 1 || port > 65535 {
+		return fmt.Errorf("serve.public_webhook.port must be an integer from 1 to 65535")
 	}
 	if (c.CertificateFile == nil) != (c.PrivateKeyFile == nil) || c.CertificateFile != nil &&
 		(strings.TrimSpace(*c.CertificateFile) == "" || strings.TrimSpace(*c.PrivateKeyFile) == "") {
