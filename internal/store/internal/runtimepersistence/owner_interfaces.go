@@ -398,6 +398,7 @@ type pipelineOwnerMethods interface {
 	ReadWorkflowHandlerStageReceipts(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) ([]pipelineobligation.CommittedStageReceipt, error)
 	ReadWorkflowPublicationStages(ctx context.Context, eventID string, instance flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error)
 	ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []pipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]pipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
+	ReplayDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (json.RawMessage, bool, error)
 	RequireGateRouteAdmitted(ctx context.Context, runID string) error
 	ResolveDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationResolution, error)
 	RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error
