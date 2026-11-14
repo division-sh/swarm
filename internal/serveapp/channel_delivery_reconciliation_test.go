@@ -291,10 +291,11 @@ func testChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure(t *testin
 			go func() {
 				defer close(worker.done)
 				<-lease.Context().Done()
-				worker.err = lease.Done()
+				var result error
 				if independent {
-					worker.err = errors.Join(worker.err, failed)
+					result = failed
 				}
+				_ = worker.finishSend(ctx, lease, result)
 			}()
 			deadline, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 			defer stop()
