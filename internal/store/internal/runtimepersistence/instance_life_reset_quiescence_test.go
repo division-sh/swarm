@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
@@ -178,7 +179,16 @@ func holdInstanceResetTimer(t *testing.T, f receiverConfigActivationFixture, fir
 		if err != nil {
 			t.Fatal(err)
 		}
-		fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+		fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+		scope, scoped := authoractivity.ScopeFromContext(f.ctx)
+		if !present || !scoped || scope.BundleHash != fact.BundleHash() || scope.RuntimeInstanceID != mutation.ProcessAuthority().RuntimeInstanceID {
+			t.Fatal("timer fixture requires its exact native source/runtime scope")
+		}
+		catalog, err := f.store.(testAuthorActivityCatalogRegistrar).RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{{EventType: command.EventType, Disposition: authoractivity.StoryAuthored}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer catalog.Release()
 		publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{
 			RuntimeInstanceID: mutation.ProcessAuthority().RuntimeInstanceID, SourceArtifactFact: fact, ContractBundle: semanticview.Wrap(f.bundle),
 		})
