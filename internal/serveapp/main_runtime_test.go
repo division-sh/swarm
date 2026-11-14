@@ -4565,6 +4565,7 @@ func servedEventPublishProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig
 
 func startServedEventPublishFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
 	t.Helper()
+	opts = isolateDefaultServeProofDirectory(repoRootForTest(), opts)
 	serveCtx, cancelServe := context.WithCancel(context.Background())
 	var out lockedBuffer
 	done := make(chan int, 1)
