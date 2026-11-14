@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -269,6 +270,43 @@ func testChannelWorkerSubscriptionShutdown(t *testing.T) {
 				}
 			} else if !errors.Is(err, tc.want) {
 				t.Fatalf("subscription error=%v, want preserved %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestChannelWorkerExpiredDrainJoinsAcceptedSendAndPreservesFailure(t *testing.T) {
+	for _, independent := range []bool{false, true} {
+		t.Run(fmt.Sprint(independent), func(t *testing.T) {
+			process := worklifetime.NewProcess()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			worker := &serveChannelDeliveryWorker{owner: process, workCtx: ctx, cancel: cancel, done: make(chan struct{})}
+			lease, err := worker.beginSend(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed := errors.New("accepted channel acknowledgement failed")
+			go func() {
+				defer close(worker.done)
+				<-lease.Context().Done()
+				worker.err = lease.Done()
+				if independent {
+					worker.err = errors.Join(worker.err, failed)
+				}
+			}()
+			deadline, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			defer stop()
+			err = worker.Drain(deadline)
+			if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, failed) != independent || process.ActiveCount() != 0 {
+				t.Fatalf("expired drain lost join or failure: active=%d err=%v", process.ActiveCount(), err)
+			}
+			if next, err := worker.beginSend(ctx); next != nil || !errors.Is(err, context.Canceled) {
+				t.Fatalf("expired worker admitted another send: lease=%v err=%v", next, err)
+			}
+			process.Retire()
+			if err := process.Wait(context.Background()); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
