@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -51,7 +52,7 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					domain gateCompletionDomain
 					cardID string
 				}
-				upgrade := func() {
+				upgrade := func(wantHash, wantStatus string) {
 					t.Helper()
 					body = append(body, []byte("\n# immutable source changes; offered contract does not\n")...)
 					if err := os.WriteFile(schema, body, 0o600); err != nil {
@@ -83,17 +84,19 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					if rt.BundleHash == previous {
 						t.Fatal("restart did not admit the new source")
 					}
+					wantHash = cmp.Or(wantHash, rt.BundleHash)
 					var header struct {
 						Run struct {
 							BundleHash string `json:"bundle_hash"`
+							Status     string `json:"status"`
 						} `json:"run"`
 					}
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": f.base.RunID}, &header)
-					if header.Run.BundleHash != rt.BundleHash {
-						t.Fatal("retained run did not switch to current execution source")
+					if header.Run.BundleHash != wantHash || header.Run.Status != wantStatus {
+						t.Fatalf("restart run header=%+v want_hash=%s want_status=%s new_primary=%s", header.Run, wantHash, wantStatus, rt.BundleHash)
 					}
 				}
-				upgrade()
+				upgrade("", "running")
 				ctx := servedControlProofAuthorActivityContext(t, rt)
 				after, err := owner.GetDecisionCard(ctx, f.base.CardID)
 				if err != nil || !reflect.DeepEqual(before, after) {
@@ -200,7 +203,7 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					}
 				}
 				assertAttribution()
-				upgrade()
+				upgrade(answerSource, "completed")
 				answer()
 				assertAttribution()
 				var count int
