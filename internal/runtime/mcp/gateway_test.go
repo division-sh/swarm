@@ -875,6 +875,57 @@ func TestGatewayHandleMCP_ManagedClaudeCLIRejectsHostileCallsBeforeExecutor(t *t
 }
 
 func TestGatewayHandleMCP_ToolsListRejectsSameNameDefinitionIdentityDrift(t *testing.T) {
+	t.Run("startup_catalogue", func(t *testing.T) {
+		definition := llm.ToolDefinition{Name: "write_file", Schema: map[string]any{"type": "object"}}
+		planned := []managedcapabilities.PlannedTool{{Name: definition.Name, DefinitionHash: llm.ToolDefinitionIdentity(definition),
+			Capability: toolcapabilities.Capability{Name: definition.Name, Visible: true, Callable: true},
+			Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingMCPTool, ExactName: runtimeidentity.RuntimeToolsMCPPrefix + definition.Name, RequiredEvidenceKind: "mcp_listed"}},
+		}}
+		for _, delivered := range [][]llm.ToolDefinition{
+			nil,
+			{{Name: definition.Name, Description: "foreign definition", Schema: definition.Schema}},
+			{definition, definition},
+		} {
+			if _, err := NewStartupCatalogue(planned, delivered); err == nil {
+				t.Fatalf("invalid independent catalogue accepted: %+v", delivered)
+			}
+		}
+		catalogue, err := NewStartupCatalogue(planned, []llm.ToolDefinition{definition})
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(catalogue)
+		defer server.Close()
+		observation := catalogue.Observation(server.URL + "/mcp")
+		// The immutable response cannot be changed through the producer's maps.
+		definition.Schema.(map[string]any)["type"] = "string"
+		listed, err := observation.Probe(context.Background())
+		if err != nil || len(listed) != 1 || listed[0].Name != "write_file" || !bytes.Contains(listed[0].InputSchema, []byte(`"object"`)) {
+			t.Fatalf("independent catalogue observation: %+v %v", listed, err)
+		}
+		for _, path := range []string{"/mcp", "/tools/write_file"} {
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"write_file"}}`))
+			for name, value := range observation.Headers {
+				request.Header.Set(name, value)
+			}
+			recorder := httptest.NewRecorder()
+			catalogue.ServeHTTP(recorder, request)
+			if path == "/mcp" {
+				if response := mustRPCResponse(t, recorder); response.Error == nil {
+					t.Fatalf("observation executed tools/call: %+v", response)
+				}
+			} else if recorder.Code != http.StatusNotFound {
+				t.Fatalf("direct dispatch status=%d", recorder.Code)
+			}
+		}
+		request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"method":"tools/list"}`))
+		request.Header.Set("Authorization", observation.Headers["Authorization"])
+		recorder := httptest.NewRecorder()
+		catalogue.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("list without exact observation token accepted: %d", recorder.Code)
+		}
+	})
 	for _, changedDefinition := range []llm.ToolDefinition{
 		{Name: "write_file", Description: "changed description"},
 		{Name: "write_file", Schema: map[string]any{"type": "object", "required": []any{"path"}}},
