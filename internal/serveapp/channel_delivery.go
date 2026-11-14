@@ -213,12 +213,6 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 			return response, replayed, err
 		}
 	}
-	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate && d.completionReplay != nil {
-		response, replayed, err := d.completionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
-		if err != nil || replayed {
-			return response, replayed, err
-		}
-	}
 	if d.manager == nil {
 		return nil, false, fmt.Errorf("channel card runtime source is unavailable")
 	}
@@ -228,6 +222,12 @@ func (d *serveChannelDeliveryDispatcher) commitChannelCardMutation(ctx context.C
 	if card.Anchor.Kind() == decisioncard.AnchorKindStageGate {
 		var availability runbundle.Availability
 		use, lookup, availability, err = d.manager.AcquireRun(ctx, card.RunID)
+		if err == nil && lookup.AllowsCompletionReplay(ctx, card.RunID, availability) && d.completionReplay != nil {
+			response, replayed, replayErr := d.completionReplay.ReplayDecisionCardMutation(ctx, request, mutation)
+			if replayErr != nil || replayed {
+				return response, replayed, replayErr
+			}
+		}
 		if err == nil && !availability.Available() {
 			err = fmt.Errorf("channel card current run source is unavailable")
 		}

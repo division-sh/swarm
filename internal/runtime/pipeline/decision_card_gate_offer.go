@@ -56,11 +56,10 @@ func (p PreparedGateOffer) require(ctx context.Context, card decisioncard.Card, 
 		return err
 	}
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
-	root, supplied, err := correlation.RootAdmissionFromContext(ctx)
-	if err != nil {
+	if err := correlation.CheckRootAdmissionContext(ctx, p.root); err != nil {
 		return err
 	}
-	if !found || !supplied || p.root.Validate() != nil || root.Reference() != p.root || fact.BundleHash() != p.root.BundleHash || card.RunID != p.runID || card.CardID != p.cardID || instance.Life != p.life {
+	if !found || fact.BundleHash() != p.root.BundleHash || card.RunID != p.runID || card.CardID != p.cardID || instance.Life != p.life {
 		return fmt.Errorf("gate offer differs from the current source, card or instance life")
 	}
 	issued, err := decisioncard.IssuedGateOffer(card, activation)

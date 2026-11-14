@@ -25,8 +25,9 @@ func multiRuntimeContextMode(contexts *swruntime.RuntimeContextManager) bool {
 }
 
 type selectedRuntimeContext struct {
-	BundleContext *swruntime.BundleContext
-	Runtime       *swruntime.Runtime
+	BundleContext             *swruntime.BundleContext
+	Runtime                   *swruntime.Runtime
+	completionReplayAvailable bool
 }
 
 type runtimeUseCollectionKey struct{}
@@ -153,7 +154,7 @@ func runtimeBundleContextByRun(ctx context.Context, contexts *swruntime.RuntimeC
 	if !lookup.Loaded() {
 		details := bundleAvailabilityDetails(availability)
 		details["cause"] = runtimeContextLookupCause(lookup)
-		return ctx, selectedRuntimeContext{}, availability, NewApplicationError(BundleUnavailableCode, false, details)
+		return ctx, selectedRuntimeContext{completionReplayAvailable: lookup.AllowsCompletionReplay(ctx, strings.TrimSpace(runID), availability)}, availability, NewApplicationError(BundleUnavailableCode, false, details)
 	}
 	if err := registerRuntimeUse(ctx, use); err != nil {
 		return ctx, selectedRuntimeContext{}, availability, err

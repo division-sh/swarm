@@ -333,11 +333,6 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			return nil, err
 		}
 	}
-	if err == nil {
-		if result, complete, replayErr := replayCompletedDecisionCardMutation(ctx, opts, card, request, mutation); complete {
-			return result, replayErr
-		}
-	}
 	authority := opts.Authority
 	bundleSource := opts.SourceArtifact
 	if err == nil && runtimeContextManager(opts.RuntimeContexts) != nil {
@@ -348,6 +343,11 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 			ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, card.BundleHash, card.RunID)
 		}
 		if err != nil {
+			if selected.completionReplayAvailable {
+				if result, complete, replayErr := replayCompletedDecisionCardMutation(ctx, opts, card, request, mutation); complete {
+					return result, replayErr
+				}
+			}
 			return nil, pausedDecisionCardSourceError(ctx, opts, card, err)
 		}
 		if selected.Runtime == nil || selected.Runtime.Pipeline == nil || selected.Runtime.Bus == nil {
