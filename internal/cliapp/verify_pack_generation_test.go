@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -25,6 +29,76 @@ type verifyPackGenerationArtifactReader struct {
 	availability runbundle.Availability
 	record       sourceartifact.Persisted
 	rooted       sourceartifact.RootedSource
+}
+
+type verifyRetainedReportReader struct {
+	availabilities []runbundle.Availability
+	records        map[string]sourceartifact.Persisted
+	roots          map[string]sourceartifact.RootedSource
+	afterRead      func()
+	reads          int
+}
+
+func (r *verifyRetainedReportReader) ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error) {
+	return append([]runbundle.Availability(nil), r.availabilities...), nil
+}
+
+func (r *verifyRetainedReportReader) GetSourceArtifact(_ context.Context, hash string) (sourceartifact.Persisted, error) {
+	row, ok := r.records[hash]
+	if !ok {
+		return sourceartifact.Persisted{}, sourceartifact.ErrNotFound
+	}
+	return row, nil
+}
+
+func (r *verifyRetainedReportReader) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
+	r.reads++
+	if r.afterRead != nil {
+		r.afterRead()
+	}
+	for _, availability := range r.availabilities {
+		if availability.RunID != runID {
+			continue
+		}
+		row, err := r.GetSourceArtifact(ctx, availability.BundleHash)
+		if err != nil {
+			return sourceartifact.RootedSource{}, err
+		}
+		if err := row.Validate(); err != nil {
+			return sourceartifact.RootedSource{}, err
+		}
+		return r.roots[runID], r.roots[runID].Validate()
+	}
+	return sourceartifact.RootedSource{}, sourceartifact.ErrNotFound
+}
+
+func (r *verifyRetainedReportReader) add(t *testing.T, status string, rooted sourceartifact.RootedSource) string {
+	t.Helper()
+	if r.records == nil {
+		r.records = make(map[string]sourceartifact.Persisted)
+		r.roots = make(map[string]sourceartifact.RootedSource)
+	}
+	record, err := sourceartifact.PersistedFromArtifact(rooted.Artifact(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.NewString()
+	r.availabilities = append(r.availabilities, runbundle.Availability{
+		RunID: runID, Status: status, BundleHash: record.BundleHash, RootReference: rooted.Admission().Reference(),
+		RootAdmissionPresent: true, SourceArtifactPresent: true,
+	})
+	r.records[record.BundleHash], r.roots[runID] = record, rooted
+	return runID
+}
+
+type verifyCountedPackResolver struct {
+	packartifact.PlatformPackBaseResolver
+	calls int
+}
+
+func (r *verifyCountedPackResolver) CurrentPlatformPackBase() (*packartifact.PlatformPackInventory, error) {
+	r.calls++
+	return r.PlatformPackBaseResolver.CurrentPlatformPackBase()
 }
 
 func (r verifyPackGenerationArtifactReader) LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error) {
@@ -129,5 +203,133 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 	}
 	if _, err := verifyRetainedSourceLoader(root, nil); err == nil {
 		t.Fatal("missing generation fell back to embedded inventory")
+	}
+	retained := &verifyRetainedReportReader{}
+	retained.add(t, "paused", reader.rooted)
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	counted := &verifyCountedPackResolver{PlatformPackBaseResolver: bases}
+	var report runtime.WorkflowContractValidationResult
+	inspectVerifyRetainedSources(context.Background(), retained, RepoRoot(), "source:"+record.BundleHash, counted, &report)
+	if counted.calls == 0 || len(report.BootReport.Observations) != 2 || report.BootReport.Observations[1].Status != bootverify.AdmissionPassed {
+		t.Fatalf("retained report did not compile frozen source/configured generation: calls=%d report=%+v", counted.calls, report.BootReport)
+	}
+	verifyRetainedReportCells(t, bases)
+}
+
+func verifyRetainedReportCells(t *testing.T, bases packartifact.PlatformPackBaseResolver) {
+	t.Helper()
+	rooted := func(state, directory string) sourceartifact.RootedSource {
+		t.Helper()
+		artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"types.yaml":    []byte("Profile:\n  name: text\n"),
+			"state.yaml":    []byte(state),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source, path := sourceartifactfixture.Rooted(t, directory, artifact)
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+		return source
+	}
+	valid := rooted("x: text\n", "kept")
+	invalid := rooted("x: \"text\"\n", "quoted")
+	invalidRecord := rooted("x: 'Profile'\n", "record")
+	otherRoot, _ := sourceartifactfixture.Rooted(t, "other", valid.Artifact())
+	for _, name := range []string{"mixed_active", "same_source_runs", "different_roots", "missing_source", "corrupt_source", "crossed_root", "cancel_before", "cancel_after", "missing_generation"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reader := &verifyRetainedReportReader{}
+			want := map[string]bootverify.AdmissionObservationStatus{}
+			resolver := bases
+			switch name {
+			case "mixed_active":
+				want[reader.add(t, "running", invalid)] = bootverify.AdmissionFailed
+				want[reader.add(t, "paused", invalidRecord)] = bootverify.AdmissionFailed
+				want[reader.add(t, "live", valid)] = bootverify.AdmissionPassed
+			case "same_source_runs":
+				want[reader.add(t, "running", valid)] = bootverify.AdmissionPassed
+				want[reader.add(t, "paused", valid)] = bootverify.AdmissionPassed
+			case "different_roots":
+				first := reader.add(t, "running", valid)
+				second := reader.add(t, "paused", otherRoot)
+				reader.roots[first], reader.roots[second] = otherRoot, valid
+				want[first], want[second] = bootverify.AdmissionNotRun, bootverify.AdmissionNotRun
+			case "cancel_before":
+				reader.add(t, "paused", valid)
+				cancel()
+			default:
+				id := reader.add(t, "paused", valid)
+				want[id] = bootverify.AdmissionNotRun
+				switch name {
+				case "missing_source":
+					delete(reader.records, valid.Admission().BundleHash())
+					want[reader.add(t, "running", invalidRecord)] = bootverify.AdmissionFailed
+				case "corrupt_source":
+					row := reader.records[valid.Admission().BundleHash()]
+					row.SourceBlob = []byte("corrupt retained source")
+					reader.records[row.BundleHash] = row
+					want[reader.add(t, "running", invalidRecord)] = bootverify.AdmissionFailed
+				case "crossed_root":
+					reader.roots[id] = invalid
+					want[reader.add(t, "running", invalidRecord)] = bootverify.AdmissionFailed
+				case "cancel_after":
+					want[reader.add(t, "live", valid)] = bootverify.AdmissionNotRun
+					reader.afterRead = cancel
+				case "missing_generation":
+					resolver = nil
+				}
+			}
+			var report runtime.WorkflowContractValidationResult
+			report.BootReport.Purpose = bootverify.ExecutionValidation
+			inspectVerifyRetainedSources(ctx, reader, RepoRoot(), "source:candidate", resolver, &report)
+			if len(report.BootReport.Observations) != len(want)+1 {
+				t.Fatalf("report lost population after refusal: %+v", report.BootReport)
+			}
+			for _, observation := range report.BootReport.Observations[1:] {
+				var id string
+				for runID := range want {
+					if strings.HasPrefix(observation.Subject, "run:"+runID+"/source:") {
+						id = runID
+						break
+					}
+				}
+				if id == "" || observation.Status != want[id] {
+					t.Fatalf("wrong per-run result: %+v wanted=%+v", observation, want)
+				}
+				delete(want, id)
+				if observation.NotRunCause != nil {
+					t.Fatal("unchecked retained source acquired absent-store authority")
+				}
+				if observation.Status == bootverify.AdmissionNotRun && observation.FailureClass != failures.ClassDependencyUnavailable {
+					t.Fatalf("unchecked source was nonblocking: %+v", observation)
+				}
+				if observation.Status == bootverify.AdmissionFailed && (!strings.Contains(observation.Reason, "remove the quotes") || !strings.Contains(observation.Reason, "state.yaml")) {
+					t.Fatalf("compiler refusal lost original location/teaching: %+v", observation)
+				}
+			}
+			decision := report.BootReport.AdmissionDecision(bootverify.AdmissionFindingPolicy{})
+			if name != "same_source_runs" && (decision.Complete || decision.FailureClass == "") {
+				t.Fatalf("incomplete/refused retained population passed: %+v", decision)
+			}
+			if strings.HasPrefix(name, "cancel_") && !decision.Interrupted {
+				t.Fatalf("cancellation disappeared: %+v", report.BootReport)
+			}
+			if name == "same_source_runs" && (!decision.Complete || reader.reads != 2) {
+				t.Fatalf("equal source suppressed a run check: decision=%+v reads=%d", decision, reader.reads)
+			}
+			if name == "missing_generation" && (reader.reads != 0 || !strings.Contains(report.BootReport.Observations[1].Reason, "generation is required")) {
+				t.Fatalf("missing frozen generation reached source/compiler: %+v", report.BootReport)
+			}
+			if name == "cancel_before" && (reader.reads != 0 || !errors.Is(ctx.Err(), context.Canceled)) {
+				t.Fatal("canceled report admitted retained reads")
+			}
+		})
 	}
 }
