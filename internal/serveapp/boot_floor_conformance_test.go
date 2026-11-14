@@ -67,9 +67,6 @@ func TestBootFloorStructuralReadersDoNotClaimNativeWorkspaceReadiness(t *testing
 		for _, asJSON := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/json=%t", command, asJSON), func(t *testing.T) {
 				args := []string{command, sourceRoot, "--config", configPath}
-				if command == "verify" {
-					args = append(args, "--portable")
-				}
 				if asJSON {
 					args = append(args, "--json")
 				}
@@ -174,9 +171,6 @@ func TestBootFloorExplicitHostRefusalIsLiveAdmissionNotStructuralValidity(t *tes
 		t.Run(command, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			args := []string{command, sourceRoot, "--config", configPath}
-			if command == "verify" {
-				args = append(args, "--portable")
-			}
 			if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, Run); code != 0 {
 				t.Fatalf("structural read confused deployment readiness with validity: code=%d stderr=%s", code, stderr.String())
 			}

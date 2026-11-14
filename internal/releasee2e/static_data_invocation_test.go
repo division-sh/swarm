@@ -158,7 +158,7 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 						t.Logf("invocation shutdown=%s process wall=%s user=%s system=%s", time.Since(stopStarted), time.Since(serveStarted), process.cmd.ProcessState.UserTime(), process.cmd.ProcessState.SystemTime())
 						return observed
 					}
-					args := []string{"verify", "--config", config, "--portable", "--json"}
+					args := []string{"verify", "--config", config, "--json"}
 					if cell.operand != "" {
 						args = append(args, cell.operand)
 					}

@@ -101,12 +101,8 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 			configPath := filepath.Join(t.TempDir(), "runtime.yaml")
 			writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, configText))
 			for _, mode := range []string{"json", "text", "quiet"} {
-				args := []string{"verify", root, "--config", configPath}
-				if mode != "text" {
-					args = append(args, "--"+mode)
-				}
 				var out, diagnostic bytes.Buffer
-				code := executeRootCommand(ctx, root, args, &out, &diagnostic)
+				code := renderServeChecksForTest(t, ctx, root, root, configPath, mode, &out, &diagnostic)
 				if code != cliExitConflict {
 					t.Fatalf("%s did not preserve occupied-coordinate exit: %d stdout=%s stderr=%s", mode, code, &out, &diagnostic)
 				}
@@ -131,7 +127,7 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				}
 			}
 			var out, diagnostic bytes.Buffer
-			if code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--portable", "--json"}, &out, &diagnostic); code != 0 {
+			if code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic); code != 0 {
 				t.Fatalf("portable validation observed deployment possession: %d %s %s", code, &out, &diagnostic)
 			}
 			var portable verifyCommandResult
@@ -159,13 +155,9 @@ func TestVerifyPossessionPublicFormatsAndPortableBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, mode := range []string{"json", "text", "quiet"} {
-				args := []string{"verify", root, "--config", configPath}
-				if mode != "text" {
-					args = append(args, "--"+mode)
-				}
 				out.Reset()
 				diagnostic.Reset()
-				if code := executeRootCommand(ctx, root, args, &out, &diagnostic); code != 0 {
+				if code := renderServeChecksForTest(t, ctx, root, root, configPath, mode, &out, &diagnostic); code != 0 {
 					t.Fatalf("%s free-store admission failed: %d %s %s", mode, code, &out, &diagnostic)
 				}
 				if mode != "json" {

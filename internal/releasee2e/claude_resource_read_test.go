@@ -61,7 +61,7 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 			if store.passwordEnv != "" {
 				env = append(env, goldenPostgresPass+"="+store.passwordEnv)
 			}
-			for _, args := range [][]string{{"verify", contracts, "--config", configPath, "--portable"}, {"secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin", "--config", configPath}} {
+			for _, args := range [][]string{{"verify", contracts, "--config", configPath}, {"secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin", "--config", configPath}} {
 				result := runReleaseCommand(t, goldenStartupTimeout, root, env, releaseE2EOAuthToken+"\n", binary, args...)
 				if result.err != nil {
 					t.Fatalf("public prerequisite %v: %v\n%s", args, result.err, result.output)

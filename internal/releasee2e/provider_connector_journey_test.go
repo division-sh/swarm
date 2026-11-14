@@ -86,7 +86,7 @@ func TestEmbeddedConnectorPublicJourneysBothStores(t *testing.T) {
 					t.Fatalf("public connection did not establish %s: %#v %v", key, status, err)
 				}
 			}
-			verify := command("", "verify", source, "--portable", "--json")
+			verify := command("", "verify", source, "--json")
 			assertFullLifecycleVerifySuccess(t, releaseCommandResult{output: verify})
 			publicListen := fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t))
 			publicTarget, err := url.Parse("http://" + publicListen)
