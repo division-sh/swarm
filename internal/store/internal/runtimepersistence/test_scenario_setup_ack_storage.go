@@ -2,14 +2,12 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
-type ScenarioSetupAckStorage struct {
-	Runs, Entities, SetupMutations, Completions int
-	Response                                    json.RawMessage
-}
+type ScenarioSetupAckStorage = pipelinepersistence.ScenarioSetupAckStorage
 
 func ReadScenarioSetupAckStorageForTest(ctx context.Context, selected any, runID, entityID string) (ScenarioSetupAckStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
@@ -20,22 +18,12 @@ func ReadScenarioSetupAckStorageForTest(ctx context.Context, selected any, runID
 			return ScenarioSetupAckStorage{}, err
 		}
 	}
-	var out ScenarioSetupAckStorage
-	var response string
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT
-			(SELECT COUNT(*) FROM runs WHERE CAST(run_id AS TEXT)=$1),
-			(SELECT COUNT(*) FROM entity_state WHERE CAST(run_id AS TEXT)=$1 AND CAST(entity_id AS TEXT)=$2),
-			(SELECT COUNT(*) FROM entity_mutations WHERE CAST(run_id AS TEXT)=$1 AND CAST(entity_id AS TEXT)=$2 AND writer_id='test.setup_entities'),
-			(SELECT COUNT(*) FROM api_idempotency WHERE resource_id=$1)`, runID, entityID).
-			Scan(&out.Runs, &out.Entities, &out.SetupMutations, &out.Completions); err != nil {
-			return err
-		}
-		return tx.QueryRowContext(ctx, `SELECT response FROM api_idempotency WHERE resource_id=$1`, runID).Scan(&response)
-	})
-	if err != nil {
-		return ScenarioSetupAckStorage{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadScenarioSetupAckStorageForTest(ctx, runID, entityID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadScenarioSetupAckStorageForTest(ctx, runID, entityID)
+	default:
+		return ScenarioSetupAckStorage{}, fmt.Errorf("scenario setup acknowledgment requires the original selected owner")
 	}
-	out.Response = append(json.RawMessage(nil), response...)
-	return out, nil
 }
