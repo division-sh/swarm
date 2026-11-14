@@ -27,6 +27,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/devscratch"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
 type ServeCheckStageRequest struct {
@@ -47,6 +49,7 @@ type ServeCheckStageResult struct {
 	Validation     runtime.WorkflowContractValidationResult
 	ProviderChecks *runtime.ManagedProviderBootChecks
 	channelChecks  []credentials.ValueEvidence
+	storeInput     *storeselected.BootCheckInput
 	Options        runtime.WorkflowContractValidationOptions
 }
 
@@ -113,10 +116,15 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	inspectVerifyListeners(ctx, in.Repo, in.Config, &out.Validation, intent)
 	inspectVerifyWorkspaceDependencies(ctx, in.Config, backend, workspaceOK, &out.Validation)
 	inspectVerifyPublicIngress(ctx, in.Config, &out.Validation, "source:"+out.Validation.BootReport.SourceArtifactHash, intent)
-	retained := inspectVerifySelectedStore(ctx, in.Repo, in.Paths, in.Config,
-		cliSwarmDirOptions{SwarmDir: in.Options.SwarmDir, SwarmDirFlagSet: in.Options.SwarmDirSet},
-		out.Source, out.Options, in.PackBases, inspection, workspaceOK, &out.Validation,
-		serveStoreInspection{selection: in.Selection, dryRun: in.Options.DryRun})
+	var retained *verifyRetainedAdmissionInventory
+	if in.Options.Dev && !in.Options.LocalRun {
+		inspectServeScratch(ctx, in, &out.Validation)
+	} else {
+		retained = inspectVerifySelectedStore(ctx, in.Repo, in.Paths, in.Config,
+			cliSwarmDirOptions{SwarmDir: in.Options.SwarmDir, SwarmDirFlagSet: in.Options.SwarmDirSet},
+			out.Source, out.Options, in.PackBases, inspection, workspaceOK, &out.Validation,
+			serveStoreInspection{selection: in.Selection, dryRun: in.Options.DryRun, input: &out.storeInput})
+	}
 	if retErr != nil || !serveProviderPrerequisitesReady(out.Validation.BootReport, in.Options.DryRun) {
 		out.Validation.BootReport.Sort()
 		return out, retErr
@@ -168,6 +176,33 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	out.Validation.BootReport.Sort()
 	return out, ctx.Err()
 }
+
+func inspectServeScratch(ctx context.Context, in ServeCheckStageRequest, result *runtime.WorkflowContractValidationResult) {
+	subject := "store:" + in.Selection.SQLitePath
+	verifyDeploymentObservation(ctx, result, "dev_scratch_predecessor", "internal/store/devscratch.InspectPredecessor", subject, failures.ClassLifecycleConflict, func(context.Context) error {
+		coordinate, err := devscratch.Resolve(in.Paths.SourceRoot)
+		if err != nil {
+			return err
+		}
+		if in.Selection.Backend != storebackend.BackendSQLite || in.Selection.SQLitePathSource != storebackend.SourceProjectScratch || in.Selection.SQLitePath != coordinate.DatabasePath {
+			return fmt.Errorf("dev scratch selection disagrees with its canonical project owner")
+		}
+		return devscratch.InspectPredecessor(coordinate)
+	})
+	checks := append(bootverify.SelectedStoreAbsentAdmissionChecks(), bootverify.SelectedStoreAdmissionCheck{ID: "selected_store_access", Owner: bootverify.SelectedStoreAccessOwner})
+	for _, check := range checks {
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: check.ID, Owner: check.Owner, Subject: subject, Class: bootverify.AdmissionDeploymentObservation,
+			Status: bootverify.AdmissionNotApplicable, Reason: "the dev epoch replaces predecessor contents; they are not retained obligations of the next boot",
+		})
+	}
+	result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+		ID: "dev_scratch_preparation", Owner: "internal/store/devscratch.EpochAuthority.PrepareFreshStore", Subject: subject,
+		Reason: "boot must acquire the existing native epoch exclusion, revalidate predecessor artifacts and prepare a fresh store; checks never acquire or reset it",
+	})
+}
+
+func (r ServeCheckStageResult) BootStoreInput() *storeselected.BootCheckInput { return r.storeInput }
 
 func (r ServeCheckStageResult) Revalidate(ctx context.Context, in ServeCheckStageRequest) error {
 	if err := ctx.Err(); err != nil {

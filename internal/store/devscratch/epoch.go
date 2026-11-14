@@ -333,6 +333,29 @@ func predecessorPaths(databasePath string) []string {
 	return paths
 }
 
+// InspectPredecessor checks the disposable epoch's physical inputs without
+// acquiring an epoch, reading its application rows or removing anything.
+func InspectPredecessor(coordinate Coordinate) error {
+	canonical, err := Resolve(coordinate.ProjectRoot)
+	if err != nil {
+		return err
+	}
+	if coordinate != canonical {
+		return errors.New("dev scratch coordinate does not match its canonical project owner")
+	}
+	for _, path := range []string{filepath.Join(canonical.ProjectRoot, ".swarm"), filepath.Dir(canonical.DatabasePath)} {
+		if _, err := inspectCanonicalDirectory(path, "dev scratch directory"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	for _, path := range predecessorPaths(canonical.DatabasePath) {
+		if err := validatePredecessorArtifact(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validatePredecessorArtifact(path string) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {

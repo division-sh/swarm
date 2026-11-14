@@ -41,6 +41,7 @@ func verifyAbsentSQLiteStoreCause(err error) *bootverify.AdmissionNotRunCause {
 type serveStoreInspection struct {
 	selection storebackend.Selection
 	dryRun    bool
+	input     **storeselected.BootCheckInput
 }
 
 func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult, serve ...serveStoreInspection) *verifyRetainedAdmissionInventory {
@@ -74,6 +75,12 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		bounded, cancel := context.WithTimeout(ctx, storeBudget)
 		defer cancel()
 		selected, err = storeselected.OpenAdmissionInspection(bounded, request)
+		if err != nil && len(serve) != 0 && serve[0].input != nil {
+			var absent *storeselected.AbsentSQLiteStore
+			if errors.As(err, &absent) {
+				*serve[0].input = absent.BootInput(schema)
+			}
+		}
 		if bounded.Err() != nil {
 			return bounded.Err()
 		}
@@ -117,6 +124,13 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	var retained *verifyRetainedAdmissionInventory
 	schemaOK := verifyDeploymentBoundedObservation(ctx, storeBudget, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		inspection, err := selected.Inspect(ctx, schemaRequest, func(snapshot *storeselected.AdmissionSnapshot) error {
+			if len(serve) != 0 && serve[0].input != nil {
+				input, err := snapshot.CaptureBootInput(ctx)
+				if err != nil {
+					return err
+				}
+				*serve[0].input = input
+			}
 			fresh, err := snapshot.RequiresSchemaPreparation()
 			if err != nil {
 				return err

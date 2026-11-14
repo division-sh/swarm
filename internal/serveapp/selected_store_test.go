@@ -15,6 +15,7 @@ import (
 )
 
 type selectedStoreOwner = storeselected.Owner
+type selectedStoreBootCheck = storeselected.BootCheckInput
 
 var selectedStoreTestDatabases sync.Map
 

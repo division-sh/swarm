@@ -425,7 +425,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	})
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
@@ -644,7 +644,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				var opened *store.PostgresStore
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 					var err error
 					opened, err = store.NewPostgresStore(dsn)
 					if err != nil {

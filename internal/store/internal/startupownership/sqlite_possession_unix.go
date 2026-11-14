@@ -51,11 +51,11 @@ func acquireSQLitePossession(selectedPath string, createDatabase bool) (sqlitePo
 	return sqlitePossessionForConstruction(context.Background(), selectedPath, createDatabase, false)
 }
 
-func waitSQLiteConstructionPossession(ctx context.Context, selectedPath string) (sqlitePossession, error) {
-	return sqlitePossessionForConstruction(ctx, selectedPath, true, true)
+func waitSQLiteConstructionPossession(ctx context.Context, selectedPath string, input ...*SQLiteInspectionInput) (sqlitePossession, error) {
+	return sqlitePossessionForConstruction(ctx, selectedPath, true, true, input...)
 }
 
-func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, createDatabase, wait bool) (sqlitePossession, error) {
+func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, createDatabase, wait bool, input ...*SQLiteInspectionInput) (sqlitePossession, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -74,6 +74,11 @@ func sqlitePossessionForConstruction(ctx context.Context, selectedPath string, c
 	coordinate, coordinateInfo, err := lockSQLitePossessionCoordinate(ctx, coordinatePath, true, wait)
 	if err != nil {
 		return nil, err
+	}
+	if len(input) != 0 && input[0] != nil {
+		if err := input[0].Revalidate(ctx, databasePath); err != nil {
+			return nil, errors.Join(err, releaseSQLitePossessionCoordinate(coordinate))
+		}
 	}
 	database, databaseInfo, err := openSQLiteDatabaseIdentity(databasePath, createDatabase)
 	if err != nil {
