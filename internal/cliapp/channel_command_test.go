@@ -284,7 +284,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			row["connection"] = map[string]any{"state": "error", "linked": true, "reason": "network unreachable", "cause": "cause unknown"}
 			return result
 		})
-		out, errOut, code := runOperatorChannelCLI(t, server, "channel", "list")
+		out, errOut, code := runOperatorChannelCLIWithBinding(t, server, channelfixture.For("whatsapp"), "", "channel", "list")
 		if code != 0 || calls != 1 || errOut != "" || !strings.Contains(out, "WhatsApp: error: cause unknown") || strings.Contains(out, "network unreachable") || strings.Contains(out, "reconnecting") {
 			t.Fatal("failure rendering lost cause or changed read behavior", code, calls, out, errOut)
 		}
