@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -60,6 +61,29 @@ func webhookCertificateFixture(t *testing.T, root, hostname string, expiry time.
 func TestNativeTLSSuppliedCertificateUsesOperatorPathsAndRestartOwned(t *testing.T) {
 	root := t.TempDir()
 	settings, _, _, _ := webhookCertificateFixture(t, root, "hooks.example.test", time.Now().Add(90*24*time.Hour))
+	for _, port := range []*int{nil, new(443), new(8443), new(80), new(88), new(65535), new(0), new(-1), new(65536)} {
+		cfg := *settings
+		cfg.Port = port
+		origin, listen, err := NativeTLSAddresses(&cfg)
+		if port != nil && (*port < 1 || *port > 65535) {
+			if err == nil || origin != "" || listen != "" {
+				t.Fatalf("invalid programmatic port admitted: origin=%q listen=%q err=%v", origin, listen, err)
+			}
+			continue
+		}
+		wantOrigin, wantListen := "https://hooks.example.test", ":443"
+		if port != nil && *port != 443 {
+			wantListen = fmt.Sprintf(":%d", *port)
+			wantOrigin += wantListen
+		}
+		if err != nil || origin != wantOrigin || listen != wantListen {
+			t.Fatalf("native projection=%q %q err=%v, want %q %q", origin, listen, err, wantOrigin, wantListen)
+		}
+		callback, err := CallbackURL(Generation{PublicOrigin: origin}, "support", "telegram", "generation")
+		if err != nil || callback != wantOrigin+"/webhooks/support/telegram?swarm_callback_generation=generation" {
+			t.Fatalf("callback lost the exact native origin: %q err=%v", callback, err)
+		}
+	}
 	first, err := NativeTLSConfig(settings, root, root)
 	if err != nil || first.GetCertificate != nil || len(first.Certificates) != 1 {
 		t.Fatalf("supplied TLS must load once without an issuer: config=%v error=%v", first, err)

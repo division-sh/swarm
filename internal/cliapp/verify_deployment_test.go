@@ -24,17 +24,24 @@ import (
 )
 
 func TestVerifyNativePublicIngressUsesAdmittedConfiguration(t *testing.T) {
-	for _, settings := range []*config.PublicWebhookConfig{nil, {Hostname: "hooks.example.test"}, {}} {
-		cfg := RuntimeConfigLoadResult{Config: &config.Config{Serve: config.ServeConfig{PublicWebhook: settings}}}
+	for _, row := range []struct {
+		settings *config.PublicWebhookConfig
+		status   bootverify.AdmissionObservationStatus
+	}{
+		{nil, bootverify.AdmissionNotApplicable},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test"}, bootverify.AdmissionPassed},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(8443)}, bootverify.AdmissionPassed},
+		{&config.PublicWebhookConfig{Hostname: "hooks.example.test", Port: new(0)}, bootverify.AdmissionFailed},
+		{&config.PublicWebhookConfig{}, bootverify.AdmissionFailed},
+	} {
+		cfg := RuntimeConfigLoadResult{Config: &config.Config{Serve: config.ServeConfig{PublicWebhook: row.settings}}}
 		var result runtime.WorkflowContractValidationResult
 		inspectVerifyPublicIngress(context.Background(), cfg, &result, "test")
 		if len(result.BootReport.Observations) != 1 {
 			t.Fatalf("public ingress admission was not observed: %#v", result.BootReport)
 		}
 		status := result.BootReport.Observations[0].Status
-		if settings == nil && status != bootverify.AdmissionNotApplicable ||
-			settings != nil && settings.Hostname != "" && status != bootverify.AdmissionPassed ||
-			settings != nil && settings.Hostname == "" && status != bootverify.AdmissionFailed {
+		if status != row.status {
 			t.Fatalf("wrong ingress observation: %s", status)
 		}
 	}
