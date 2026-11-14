@@ -45,6 +45,60 @@ func TestCLIStartupProbeJoinsStderrBeforeWait(t *testing.T) {
 			}
 		})
 	}
+	t.Run("raw_observation_failure_cuts", func(t *testing.T) {
+		readerErr := errors.New("startup reader failed")
+		waitErr := errors.New("startup process failed")
+		response := &Response{SessionID: "observed-session", Raw: []byte("raw startup evidence")}
+		for _, tc := range []struct {
+			name      string
+			result    cliStartupProbeResult
+			stderr    string
+			waitErr   error
+			cancelled bool
+			uncertain bool
+			class     runtimefailures.Class
+			code      string
+		}{
+			{name: "init", result: cliStartupProbeResult{found: true, resp: response}},
+			{name: "joined_init_cancellation", result: cliStartupProbeResult{found: true, resp: response}, waitErr: waitErr, cancelled: true},
+			{name: "reader_error", result: cliStartupProbeResult{err: readerErr}, waitErr: waitErr},
+			{name: "init_wait_failure", result: cliStartupProbeResult{found: true, resp: response}, waitErr: waitErr, uncertain: true, class: runtimefailures.ClassConnectorFailure, code: "claude_cli_startup_probe_failed"},
+			{name: "authentication", stderr: "OAuth token expired", uncertain: true, class: runtimefailures.ClassAuthenticationNeeded, code: "provider_unauthorized"},
+			{name: "wait_failure", waitErr: waitErr, uncertain: true, class: runtimefailures.ClassConnectorFailure, code: "claude_cli_startup_probe_failed"},
+			{name: "missing_init", uncertain: true, class: runtimefailures.ClassConnectorFailure, code: "claude_cli_startup_surface_missing"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if tc.cancelled {
+					cancel()
+				}
+				got := classifyCLIStartupObservation(ctx, tc.result, [][]byte{[]byte(tc.stderr)}, tc.waitErr, nil)
+				if got.outcomeUncertain != tc.uncertain {
+					t.Fatalf("uncertain=%t want %t: %v", got.outcomeUncertain, tc.uncertain, got.err)
+				}
+				if tc.result.err != nil {
+					if got.err != readerErr || got.response != nil {
+						t.Fatalf("reader error changed: %+v", got)
+					}
+					return
+				}
+				if tc.class == "" {
+					if got.err != nil || got.response != response {
+						t.Fatalf("startup evidence changed: %+v", got)
+					}
+					return
+				}
+				failure, ok := runtimefailures.As(got.err)
+				if !ok || failure.Failure.Class != tc.class || failure.Failure.Detail.Code != tc.code || got.response != nil {
+					t.Fatalf("failure cut changed: %+v", got)
+				}
+				if tc.waitErr != nil && !errors.Is(got.err, tc.waitErr) {
+					t.Fatalf("wait cause lost: %v", got.err)
+				}
+			})
+		}
+	})
 }
 
 func TestStartupProbeConsumesSessionContractWithoutExecutionFrame(t *testing.T) {
