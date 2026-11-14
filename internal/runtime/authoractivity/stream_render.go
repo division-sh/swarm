@@ -174,7 +174,7 @@ func diagnosticRoute(occurrence Occurrence) string {
 		return ""
 	}
 	if occurrence.RunID != "" {
-		return "swarm logs --run " + occurrence.RunID + " --level error"
+		return "swarm logs --run-id " + occurrence.RunID + " --level error"
 	}
 	return "swarm logs --level error"
 }

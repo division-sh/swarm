@@ -42,7 +42,7 @@ func TestHumanRendererBankedAuthorStoryGrammar(t *testing.T) {
 		"19:09:01  drafter → phrase.completed\n" +
 		"19:09:02  telegram-sender ✓ sent\n" +
 		"19:09:05  telegram-normalizer ✗ failed — internal error\n" +
-		"          └ swarm logs --run 99e0d8c2-4e75-4e55-a17c-2b887c2a6f31 --level error\n"
+		"          └ swarm logs --run-id 99e0d8c2-4e75-4e55-a17c-2b887c2a6f31 --level error\n"
 	if out.String() != want {
 		t.Fatalf("author story output:\n%s\nwant:\n%s", out.String(), want)
 	}
@@ -68,7 +68,7 @@ func TestHumanRendererCompressesContiguousFailuresAndFlushes(t *testing.T) {
 	}
 	text := string(rendered)
 	for _, want := range []string{
-		"19:09:05  telegram-normalizer ✗ failed — internal error\n          └ swarm logs --run 99e0d8c2-4e75-4e55-a17c-2b887c2a6f31 --level error\n",
+		"19:09:05  telegram-normalizer ✗ failed — internal error\n          └ swarm logs --run-id 99e0d8c2-4e75-4e55-a17c-2b887c2a6f31 --level error\n",
 		"19:09:06  telegram-normalizer ✗ failed — internal error (2nd time)\n",
 		"19:09:11  telegram-normalizer ✗ failed — internal error (×5 in 6s)\n",
 	} {
