@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -235,11 +236,11 @@ func CheckUpgrade(ctx context.Context, current, candidate semanticview.Source, s
 }
 
 func (c *upgradeCheck) committedGate(instance UpgradeInstance, cards []decisioncard.Card) error {
-	buckets, err := joinruntime.PersistedBuckets(instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, instance.StateBuckets)
 	if err != nil {
 		return err
 	}
-	activations, err := gateruntime.List(buckets)
+	activations, err := gateruntime.List(carrier.StateBuckets)
 	if err != nil {
 		return err
 	}

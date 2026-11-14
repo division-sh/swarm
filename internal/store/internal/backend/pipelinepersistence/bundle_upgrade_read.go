@@ -13,10 +13,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -76,11 +76,11 @@ func readBundleUpgradeStateTx(ctx context.Context, tx *sql.Tx, owner bundleUpgra
 			EntityID: instance.EntityID, FlowID: entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, instance.StorageRef),
 			Status: instance.Status, Stage: instance.CurrentState, Fields: instance.Fields, StateBuckets: instance.StateBuckets,
 		})
-		buckets, err := joinruntime.PersistedBuckets(instance.StateBuckets)
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, instance.StateBuckets)
 		if err != nil {
 			return runbundle.UpgradeState{}, err
 		}
-		activations, err := gateruntime.List(buckets)
+		activations, err := gateruntime.List(carrier.StateBuckets)
 		if err != nil {
 			return runbundle.UpgradeState{}, err
 		}
