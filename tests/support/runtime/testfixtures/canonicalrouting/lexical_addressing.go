@@ -44,9 +44,10 @@ connect:
 	if !crossAccount {
 		documents["schema.yaml"] = "inputs: [opened, root.audit]\nconnect:\n  - {event: opened, from: ., to: account, resolution: select-or-create}\n  - {event: root.audit, from: ., to: account, resolution: select}\n  - {event: root.audit, from: ., to: account/audit}\n"
 		documents["events.yaml"] = "opened:\n  account_id: text\n  ticket_id: text\nroot.audit:\n  account_id: text\n"
-		documents["account/schema.yaml"] = "instance: account_id\ninputs: [opened, root.audit]\nconnect:\n  - {event: opened, from: ., to: ticket, resolution: select-or-create}\n  - {event: ticket.done, from: ticket, to: audit}\n"
+		documents["account/schema.yaml"] = "instance: account_id\ninputs: [opened, root.audit]\noutputs: [ticket.opened]\nconnect:\n  - {event: ticket.opened, from: ., to: ticket, rename: opened, resolution: select-or-create}\n  - {event: ticket.done, from: ticket, to: audit}\n"
+		documents["account/events.yaml"] = "ticket.opened:\n  account_id: text\n  ticket_id: text\n"
 		documents["account/state.yaml"] = "account_id: text\n"
-		documents["account/nodes.yaml"] = "receiver:\n  root.audit: {}\n"
+		documents["account/nodes.yaml"] = "receiver:\n  opened:\n    emit: {event: ticket.opened, fields: {account_id: payload.account_id, ticket_id: payload.ticket_id}}\n  root.audit: {}\n"
 		documents["account/ticket/schema.yaml"] = "instance: ticket_id\ninputs: [opened]\noutputs: [ticket.done]\n"
 		documents["account/ticket/nodes.yaml"] = "reporter:\n  opened:\n    emit: {event: ticket.done}\n"
 	}
@@ -70,15 +71,7 @@ func CopyWrappedLexicalAddressing(t testing.TB, higherOwner bool) string {
 	root := t.TempDir()
 	copyTree(t, original, filepath.Join(root, "envelope"))
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	events, err := os.ReadFile(filepath.Join(original, "events.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeClosedVariantFile(t, root, "events.yaml", string(events))
-	schema := "inputs: [opened, root.audit, cross.requested]\nconnect:\n"
-	for _, event := range []string{"opened", "root.audit", "cross.requested"} {
-		schema += "  - {event: " + event + ", from: ., to: envelope}\n"
-	}
+	schema := "stages: []\n"
 	if higherOwner {
 		path := filepath.Join(root, "envelope", "schema.yaml")
 		raw, err := os.ReadFile(path)
@@ -86,7 +79,7 @@ func CopyWrappedLexicalAddressing(t testing.TB, higherOwner bool) string {
 			t.Fatalf("wrapped cross-account fixture lost its exact row: %v", err)
 		}
 		writeClosedVariantFile(t, root, "envelope/schema.yaml", strings.Replace(string(raw), crossAccountRow, "", 1))
-		schema += "  - {event: ticket.cross, from: envelope/account/ticket, to: envelope/account, resolution: select, key_from: payload.target_account_id}\n"
+		schema += "connect:\n  - {event: ticket.cross, from: envelope/account/ticket, to: envelope/account, resolution: select, key_from: payload.target_account_id}\n"
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
 	return root

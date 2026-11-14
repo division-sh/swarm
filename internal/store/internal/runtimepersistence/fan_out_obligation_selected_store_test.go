@@ -1412,7 +1412,7 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 					t.Fatal(err)
 				}
 				selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rooted.Admission().BundleHash()}
-				prepared, refusal := prepareSelectedStoreForkForTest(t, ctx, owner, source.runID, "", selection, rooted.Admission().BundleHash())
+				prepared, refusal := prepareSelectedStoreForkForTest(t, ctx, owner, source.runID, source.eventID, selection, rooted.Admission().BundleHash())
 				if refusal == nil {
 					request, err := prepared.MaterializationRequest()
 					if err != nil {

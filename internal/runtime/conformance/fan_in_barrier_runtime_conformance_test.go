@@ -52,6 +52,7 @@ type fanInBarrierConformanceStore interface {
 	runtimepipeline.WorkflowPersistenceOwner
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
 }
 
 type fanInBarrierRuntime struct {
@@ -201,7 +202,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Fatal("restart changed the retained barrier arm")
 			}
 			requireFanInBarrierReportTargets(t, ctx, backend, db, 2, parentTarget, conformanceNode(t, "portfolio", "portfolio-router").Key())
-			requireA2NestedPeriodReadback(t, ctx, backend, db, parentTarget, portfolio)
+			requireTypedFanInPeriodReadback(t, ctx, backend, parentTarget, portfolio, 2)
 			if portfolio.CurrentState != "complete" || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed barrier = state:%s activation:%#v", portfolio.CurrentState, activation)
 			}
@@ -209,15 +210,34 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			if err != nil || len(results) != 2 || results[0] != int64(11) || results[1] != int64(22) {
 				t.Fatalf("barrier results = %#v err=%v, want declared membership order [11 22]", results, err)
 			}
+			parentTest := t
 			t.Run("three_whole_members", func(t *testing.T) {
-				selected, selectedDB := tc.setup(t)
-				proveThreeWholeFanInMembers(t, selected, selectedDB)
+				if err := runtime.manager.Shutdown(); err != nil {
+					t.Fatal(err)
+				}
+				if err := runtime.schedules.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := runtime.grant.Retire(ctx); err != nil {
+					t.Fatal(err)
+				}
+				capability, err := agentfixture.ProcessCapability(parentTest, ctx, backend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := capability.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
+				proveThreeWholeFanInMembers(t, backend)
 			})
 		})
 	}
 }
 
-func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB) {
+func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceStore) {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
 	path := filepath.Join(root, "portfolio", "period", "nodes.yaml")
@@ -225,8 +245,31 @@ func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceSt
 	if err != nil || strings.Count(string(raw), "output: payload.revenue") != 1 {
 		t.Fatalf("whole-member fixture: %s %v", raw, err)
 	}
-	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "output: payload.revenue", "output: payload", 1)), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "output: payload.revenue", "output: payload.report", 1)), 0600); err != nil {
 		t.Fatal(err)
+	}
+	reportSchema := "  report:\n    operating_id: text\n    portfolio_id: text\n    period_id: text\n    revenue: integer\n"
+	for _, label := range []string{"events.yaml", "ingress/events.yaml", "operating/events.yaml", "portfolio/events.yaml"} {
+		path := filepath.Join(root, label)
+		raw, err := os.ReadFile(path)
+		needle := "  revenue: integer\n"
+		if err != nil || strings.Count(string(raw), needle) != 1 {
+			t.Fatalf("whole report catalog %s: %s %v", label, raw, err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), needle, needle+reportSchema, 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, label := range []string{"ingress/nodes.yaml", "operating/nodes.yaml", "portfolio/nodes.yaml"} {
+		path := filepath.Join(root, label)
+		raw, err := os.ReadFile(path)
+		needle := "        revenue: payload.revenue\n"
+		if err != nil || strings.Count(string(raw), needle) != 1 {
+			t.Fatalf("whole report projection %s: %s %v", label, raw, err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), needle, needle+"        report: payload.report\n", 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(canonicalrouting.RepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)))
 	if err != nil {
@@ -255,6 +298,7 @@ func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceSt
 	arrive := func(member string, revenue int) {
 		publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "ingress", "operating.report.requested", map[string]any{
 			"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": revenue,
+			"report": map[string]any{"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": revenue},
 		})
 	}
 	arrive("op-b", 22)
@@ -310,8 +354,66 @@ func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceSt
 	if err != nil || !reflect.DeepEqual(results, want) {
 		t.Fatalf("whole-member results: got=%#v want=%#v err=%v", results, want, err)
 	}
-	requireFanInBarrierReportTargets(t, ctx, backend, db, 4, routes[0].Target.Route(), conformanceNode(t, "portfolio", "portfolio-router").Key())
-	requireA2NestedPeriodReadback(t, ctx, backend, db, routes[0].Target.Route(), final, 4)
+	reports := typedFanInEvents(t, ctx, backend, "operating.reported")
+	if len(reports) != 4 {
+		t.Fatalf("fan-in report event count = %d, want %d", len(reports), 4)
+	}
+	sourceEntities := make(map[string]struct{}, len(reports))
+	for _, view := range reports {
+		snapshot, err := view.EventSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		from := snapshot.RoutingSource().Route().Normalized()
+		if from.FlowID != "operating" || from.FlowInstance == "" || from.EntityID == "" || from.EntityID == routes[0].Target.Route().EntityID {
+			t.Fatalf("fan-in report source lost exact distinct owner: %+v", from)
+		}
+		matched := false
+		for _, route := range view.Deliveries {
+			matched = matched || route.SubscriberID == conformanceNode(t, "portfolio", "portfolio-router").Key() && route.Target.Normalized() == routes[0].Target.Route().Normalized()
+		}
+		if !matched {
+			t.Fatalf("fan-in report lost exact selected target: %+v", view)
+		}
+		sourceEntities[from.EntityID] = struct{}{}
+	}
+	if len(sourceEntities) != 4 {
+		t.Fatalf("fan-in report source entities = %#v, want %d distinguishable child owners", sourceEntities, 4)
+	}
+	requireTypedFanInPeriodReadback(t, ctx, backend, routes[0].Target.Route(), final, 4)
+}
+
+func typedFanInEvents(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, name string) []operatorread.OperatorEventFull {
+	t.Helper()
+	page, err := backend.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runtimecorrelation.RunIDFromContext(ctx)}, Limit: 100, ExcludeRuntimeLogs: true})
+	if err != nil || page.NextCursor != "" {
+		t.Fatalf("whole fan-in event inventory: %+v %v", page, err)
+	}
+	var selected []operatorread.OperatorEventFull
+	for _, event := range page.Events {
+		if strings.HasSuffix(event.EventName, "/"+name) || event.EventName == name {
+			selected = append(selected, event)
+		}
+	}
+	return selected
+}
+
+func requireTypedFanInPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance, wantCount int) {
+	t.Helper()
+	arrivals := typedFanInEvents(t, ctx, backend, "period.reported")
+	if len(arrivals) != wantCount {
+		t.Fatalf("forwarded period arrivals: events=%+v want=%d", arrivals, wantCount)
+	}
+	want := (events.RouteIdentity{FlowID: "portfolio/period", FlowInstance: period.StorageRef, EntityID: period.EntityID}).Normalized()
+	for _, view := range arrivals {
+		event, err := view.EventSnapshot()
+		if err != nil || event.SourceRoute().Normalized() != parent.Normalized() || event.TargetRoute().Normalized() != want || len(view.Deliveries) != 1 || len(view.DeadLetters) != 0 {
+			t.Fatalf("nested parent-to-period readback: event=%#v view=%#v err=%v", event, view, err)
+		}
+		if delivery := view.Deliveries[0]; delivery.SubscriberID != conformanceNode(t, "portfolio/period", "portfolio-collector").Key() || delivery.Target.EntityID != period.EntityID || delivery.Target.FlowInstance != period.StorageRef || delivery.Target.FlowID != "portfolio/period" {
+			t.Fatalf("nested selected receiver drifted: %#v", delivery)
+		}
+	}
 }
 
 func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance, expectedArrivals ...int) {

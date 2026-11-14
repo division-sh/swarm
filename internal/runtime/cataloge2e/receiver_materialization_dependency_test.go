@@ -56,7 +56,7 @@ func proveHeldReceiverReadiness(t *testing.T, backend catalogRuntimeBackend) {
 				if strings.Count(s, old) != 1 {
 					t.Fatalf("held-readiness edge missing: %s", old)
 				}
-				s = strings.Replace(s, old, from+", to: consumer, resolution: "+mode+", key_from: payload.token}", 1)
+				s = strings.Replace(s, old, from+", to: consumer, resolution: "+mode+"}", 1)
 			}
 			return s
 		},
@@ -76,7 +76,7 @@ func proveHeldReceiverReadiness(t *testing.T, backend catalogRuntimeBackend) {
 	gate := &heldReceiverReadiness{entered: make(chan pipeline.DynamicFlowRuntimeActivationAttempt, 1), release: make(chan struct{})}
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(gate.release) }) })
-	h := newRuntimeHarnessWithPersistenceProjection(t, root, backend, true, nil, nil, nil, runlifecycle.LiveRunScope{}, func(deps *runtimepkg.RuntimeDeps) {
+	h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, nil, nil, runlifecycle.LiveRunScope{}, func(deps *runtimepkg.RuntimeDeps) {
 		gate.WorkflowPersistenceOwner = deps.EventStore.(pipeline.WorkflowPersistenceOwner)
 		deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(gate)
 	})

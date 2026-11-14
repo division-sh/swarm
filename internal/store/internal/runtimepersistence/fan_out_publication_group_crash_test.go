@@ -270,17 +270,21 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string, barrierVariant .
 				}
 				assertPublicationGroupCrashEffects(t, ctx, fixture, seeded.runID, ids, 3, 3, false)
 				if withBarrier {
-					advanceFanOutBarriersForTest(t, ctx, fixture.store.(storeTestDurableEventBusStore), seeded.runID, time.Now().UTC())
-					summary := fanoutbarrier.Summary{Total: 3, Succeeded: 3}
-					var status string
-					var raw []byte
-					if err := fixture.db.QueryRowContext(ctx, `SELECT status,summary FROM fan_out_obligation_barriers WHERE run_id=$1`, seeded.runID).Scan(&status, &raw); err != nil || status != string(fanoutbarrier.StatusClosedPending) {
-						t.Fatalf("recovered preclaim barrier status=%s err=%v", status, err)
-					}
-					var actual fanoutbarrier.Summary
-					if err := json.Unmarshal(raw, &actual); err != nil || actual != summary {
-						t.Fatalf("recovered preclaim outcomes=%+v want=%+v err=%v", actual, summary, err)
-					}
+					t.Run("settled_barrier", func(t *testing.T) {
+						observation := correlation.WithRunID(testAuthorActivityContextForBundle(seeded.bundleHash), seeded.runID)
+						observation = originalStoreFixtureContext(t, observation, fixture.store)
+						advanceFanOutBarriersForTest(t, observation, fixture.store.(storeTestDurableEventBusStore), seeded.runID, time.Now().UTC())
+						summary := fanoutbarrier.Summary{Total: 3, Succeeded: 3}
+						var status string
+						var raw []byte
+						if err := fixture.db.QueryRowContext(observation, `SELECT status,summary FROM fan_out_obligation_barriers WHERE run_id=$1`, seeded.runID).Scan(&status, &raw); err != nil || status != string(fanoutbarrier.StatusClosedPending) {
+							t.Fatalf("recovered preclaim barrier status=%s err=%v", status, err)
+						}
+						var actual fanoutbarrier.Summary
+						if err := json.Unmarshal(raw, &actual); err != nil || actual != summary {
+							t.Fatalf("recovered preclaim outcomes=%+v want=%+v err=%v", actual, summary, err)
+						}
+					})
 				}
 				t.Logf("real group SIGKILL at %s, exact selected-store takeover, exact ordinal-prefix effects and missing-suffix handler executions, final public recipient effects/receipts, startup candidate discovery; not deferred-agent B15 signal recovery", cut)
 			})

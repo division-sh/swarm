@@ -536,11 +536,16 @@ func assertSelectedDeploymentRows(t *testing.T, f *deploymentResourceFixture, se
 }
 
 func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows []byte, wantClosed int) {
-	assertSelectedDeploymentRowSet(t, f, server, runID, route, compiledVersion, [][]byte{rows}, wantClosed)
+	documentRows := bytes.Split(bytes.TrimSpace(rows), []byte("\n"))
+	assertSelectedDeploymentRowSet(t, f, server, runID, route, compiledVersion, documentRows, wantClosed, len(documentRows))
 }
 
-func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int) {
+func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int, expectedCommitted ...int) {
 	t.Helper()
+	wantCommitted := 1
+	if len(expectedCommitted) != 0 {
+		wantCommitted = expectedCommitted[0]
+	}
 	defer func() {
 		if t.Failed() {
 			logDeploymentResourceFailure(t, f.db, runID)
@@ -586,7 +591,7 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 			}
 		}
 	}
-	if events != len(rows) || delivered != len(rows) || committed != 1 || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
+	if events != len(rows) || delivered != len(rows) || committed != wantCommitted || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
 		t.Fatalf("%s selected route did not settle: events=%d delivered=%d committed=%d pipeline_receipts=%d stamped_handoffs=%d", route, events, delivered, committed, pipelineReceipts, stampedHandoffs)
 	}
 	var parentRunID sql.NullString
@@ -739,8 +744,10 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatalf("public result lost its exact typed point: %+v", result)
 					}
 					forkRows := [][]byte{changedRows}
+					wantCommitted := 1
 					if prefix {
 						forkRows = bytes.Split(bytes.TrimSpace(changedRows), []byte("\n"))
+						wantCommitted = len(forkRows)
 					}
 					if pointKind == runfork.RunForkPointEvent {
 						// The explicit event cut replays its recorded row once; the
@@ -748,7 +755,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						forkRows = append(forkRows, originalRows)
 					}
 					assertForkRows := func() {
-						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
+						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1, wantCommitted)
 						lifecycle, err := storetest.ReadRuntimeLogRunSnapshot(f.ctx, f.selected, result.ForkRunID)
 						instances, instanceErr := f.selected.ListWorkflowInstances(f.ctx, result.ForkRunID)
 						finals := 0
@@ -764,7 +771,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 							t.Fatalf("selected fixture did not retain live/final/settled facts: %+v instances=%+v errors=%v/%v", lifecycle, instances, err, instanceErr)
 						}
 					}
-					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
+					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1, wantCommitted)
 					if prefix {
 						reader := f.selected.(operatorread.FanOutReader)
 						intents, err := reader.ListFanOutIntents(f.ctx, fanoutobligation.ListQuery{RunID: result.ForkRunID})
