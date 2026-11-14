@@ -195,6 +195,7 @@ func assertClaudeHostRefusal(t *testing.T, output string) {
 
 type bootFloorNativeFallbackRuntime struct {
 	runtimellm.NoopRuntime
+	servedStartupAnswerObservation
 }
 
 func (bootFloorNativeFallbackRuntime) ProviderContract() runtimellm.ProviderContract {
