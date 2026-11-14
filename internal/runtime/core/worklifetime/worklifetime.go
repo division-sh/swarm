@@ -91,12 +91,12 @@ func CarryAcceptedLease(dst, admitted context.Context) context.Context {
 
 // BeginAcceptedRuntimeWork retains a registered turn, never admitting a fresh
 // replacement for a missing, foreign or settled original lease.
-func BeginAcceptedRuntimeWork(ctx context.Context, expected *RuntimeOccurrence) (*Lease, error) {
+func BeginAcceptedRuntimeWork(ctx context.Context, expected *RuntimeOccurrence) (*Lease, *RuntimeOccurrence, error) {
 	if ctx == nil {
-		return nil, ErrAdmissionFenced
+		return nil, nil, ErrAdmissionFenced
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	owner, _ := OccurrenceFromContext(ctx)
 	ancestor, _ := ctx.Value(acceptedLeaseContextKey{}).(*Lease)
@@ -112,7 +112,7 @@ func BeginAcceptedRuntimeWork(ctx context.Context, expected *RuntimeOccurrence) 
 		}
 	}
 	if runtime == nil || ancestor == nil || expected != nil && expected != runtime {
-		return nil, ErrAdmissionFenced
+		return nil, nil, ErrAdmissionFenced
 	}
 	ancestor.mu.Lock()
 	valid := !ancestor.settled && ancestor.transient && ancestor.ctx.Err() == nil
@@ -123,19 +123,16 @@ func BeginAcceptedRuntimeWork(ctx context.Context, expected *RuntimeOccurrence) 
 	}
 	ancestor.mu.Unlock()
 	if !valid {
-		return nil, ErrAdmissionFenced
+		return nil, nil, ErrAdmissionFenced
 	}
 	accepted := owner.(interface {
 		BeginAcceptedDescendant(context.Context) (*Lease, error)
 	})
 	lease, err := accepted.BeginAcceptedDescendant(ctx)
 	if err == nil && ctx.Err() != nil {
-		return nil, errors.Join(ctx.Err(), lease.Done())
+		return nil, nil, errors.Join(ctx.Err(), lease.Done())
 	}
-	if lease != nil {
-		lease.ctx = WithRuntimeOccurrence(lease.Context(), runtime)
-	}
-	return lease, err
+	return lease, runtime, err
 }
 
 func (g *gate) begin(parent context.Context) (*Lease, error) {
