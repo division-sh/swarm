@@ -70,10 +70,19 @@ func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*
 }
 
 func (o SelectedContractExecutionOwner) materializePrepared(ctx context.Context, p *PreparedSelectedFork) (runfork.RunForkMaterialization, bool, error) {
+	return o.materializePreparedWithSourceStatus(ctx, p, false)
+}
+
+func (o SelectedContractExecutionOwner) materializePreparedLive(ctx context.Context, p *PreparedSelectedFork) (runfork.RunForkMaterialization, bool, error) {
+	return o.materializePreparedWithSourceStatus(ctx, p, true)
+}
+
+func (o SelectedContractExecutionOwner) materializePreparedWithSourceStatus(ctx context.Context, p *PreparedSelectedFork, requirePaused bool) (runfork.RunForkMaterialization, bool, error) {
 	req, err := p.MaterializationRequest()
 	if err != nil {
 		return runfork.RunForkMaterialization{}, false, err
 	}
+	req.RequirePausedSource = requirePaused
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()

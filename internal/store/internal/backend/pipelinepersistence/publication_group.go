@@ -295,6 +295,7 @@ func (g *publicationGroup) ClaimBatch(ctx context.Context, requests []pipelineob
 }
 
 func (g *publicationGroup) claimMember(ctx context.Context, ordinal int, event events.Event) (pipelineobligation.Claim, error) {
+	ctx = pipelineobligation.WithPublicationRun(ctx, event.RunID())
 	var claim pipelineobligation.Claim
 	var state *pipelineClaimState
 	var err error

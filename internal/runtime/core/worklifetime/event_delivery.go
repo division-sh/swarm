@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 // Occurrence is deliberately closed to the fixed runtime-generation types in
@@ -81,6 +82,13 @@ const (
 func newEventDelivery(ctx context.Context, event events.Event, route events.DeliveryRoute, owner Occurrence, begin func(context.Context) (*Lease, error)) (*EventDelivery, error) {
 	if event.Type() == "" {
 		return nil, errors.New("local delivery event is required")
+	}
+	runID := event.RunID()
+	if runID == "" {
+		runID = route.Context.RunID
+	}
+	if runID != "" {
+		ctx = correlation.WithRunID(ctx, runID)
 	}
 	lease, err := begin(ctx)
 	if err != nil {

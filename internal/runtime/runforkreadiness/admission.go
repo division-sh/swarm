@@ -35,6 +35,7 @@ type MaterializeRequest struct {
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	OriginalRootAdmission   sourceartifact.RootAdmission      `json:"-"`
 	SourceRunID             string
+	RequirePausedSource     bool
 	At                      string
 	ContractSelection       runfork.RunForkContractSelection
 	SourceArtifactFact      correlation.SourceArtifactFact
