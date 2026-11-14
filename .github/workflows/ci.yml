@@ -871,6 +871,9 @@ jobs:
               while IFS= read -r container; do docker logs --timestamps --follow "$container"; done
           ' _ "$since" >test-results/evidence/postgres-service.log 2>&1 </dev/null &
           printf '%s\n' "$!" >"$RUNNER_TEMP/soak-postgres-log.pid"
+      - name: Allow port 443 for the sitting journey unit
+        if: matrix.unit == 'serveapp-standing'
+        run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443
       - name: Run exact planned proof unit
         shell: bash
         env:
