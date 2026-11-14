@@ -162,11 +162,7 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 		req.SourceArtifactFact.BundleHash() != "" && req.SourceArtifactFact.BundleHash() != bundleHash {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected rooted responsibility differs from requested content", runbundle.CodeBundleDataIntegrityError)
 	}
-	specPath, err := platform.MaterializePlatformSpecFile()
-	if err != nil {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: compile DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
-	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(strings.TrimSpace(l.RepoRoot), rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(strings.TrimSpace(l.RepoRoot), rooted, platform.PlatformSpecDisplayPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
