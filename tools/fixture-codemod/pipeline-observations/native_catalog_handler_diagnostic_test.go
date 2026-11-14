@@ -92,7 +92,7 @@ func TestNativeCatalogHandlerDiagnosticRetainsFailureAndDropsOnlyRawPresence(t *
 }
 
 func TestNativeCatalogHandlerDiagnosticOwnerRetainsExactPhysicalSelection(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "eventrecord", "causal_observation.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "eventpersistence", "test_event_record_observation_queries.go")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
