@@ -15,6 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -458,6 +459,12 @@ func executeIdempotentMailboxNoticeAcknowledgment(
 }
 
 func decisionCardAPIError(cardID string, err error) error {
+	if errors.Is(err, runtimepipeline.ErrGateOfferChanged) {
+		if !failures.OnlyBranches(err, func(branch error) bool { return branch == runtimepipeline.ErrGateOfferChanged }) {
+			return err
+		}
+		return NewApplicationError(BundleUnavailableCode, false, map[string]any{})
+	}
 	switch {
 	case errors.Is(err, mailbox.ErrNotNotice):
 		return NewInvalidParamsError(map[string]any{"field": "mailbox_id", "reason": err.Error(), "remediation": "use mailbox.decide for a decision card"})
