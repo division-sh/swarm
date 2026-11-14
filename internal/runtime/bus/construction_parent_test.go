@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -270,6 +272,153 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 	if _, _, _, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, leafPlan, map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"}); err == nil {
 		t.Fatal("sole existing receiver bypassed the missing ancestor edge")
 	}
+	proveLexicalAddressGeometries(t)
+}
+
+func lexicalAddressFixture(t *testing.T, crossAccount bool) string {
+	t.Helper()
+	root := t.TempDir()
+	documents := map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `inputs: [opened, root.audit]
+connect:
+  - {event: opened, from: ., to: account, resolution: select-or-create, key_from: payload.account_id}
+  - {event: root.audit, from: ., to: account, resolution: select, key_from: payload.account_id}
+  - {event: root.audit, from: ., to: account/audit}
+`,
+		"events.yaml":           "opened:\n  account_id: text\n  ticket_id: text\nroot.audit:\n  account_id: text\n",
+		"account/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"account/schema.yaml": `instance: account_id
+inputs: [opened, root.audit]
+connect:
+  - {event: opened, from: ., to: ticket, resolution: select-or-create, key_from: payload.ticket_id}
+  - {event: ticket.done, from: ticket, to: audit}
+`,
+		"account/state.yaml":           "account_id: text\n",
+		"account/nodes.yaml":           "receiver:\n  root.audit: {}\n",
+		"account/ticket/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"account/ticket/schema.yaml":   "instance: ticket_id\ninputs: [opened]\noutputs: [ticket.done]\n",
+		"account/ticket/state.yaml":    "ticket_id: text\n",
+		"account/ticket/events.yaml":   "ticket.done:\n",
+		"account/ticket/nodes.yaml":    "reporter:\n  opened:\n    emit: {event: ticket.done}\n",
+		"account/audit/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
+		"account/audit/schema.yaml":    "stages: []\ninputs: [ticket.done, root.audit]\n",
+		"account/audit/nodes.yaml":     "audit:\n  ticket.done: {}\n  root.audit: {}\n",
+	}
+	if crossAccount {
+		documents["schema.yaml"] += "  - {event: ticket.cross, from: account/ticket, to: account, resolution: select, key_from: payload.target_account_id}\n"
+		documents["account/schema.yaml"] = strings.Replace(documents["account/schema.yaml"], "inputs: [opened, root.audit]", "inputs: [opened, root.audit, ticket.cross]", 1)
+		documents["account/nodes.yaml"] += "  ticket.cross: {}\n"
+		documents["account/ticket/schema.yaml"] = strings.Replace(documents["account/ticket/schema.yaml"], "outputs: [ticket.done]", "outputs: [ticket.done, ticket.cross]", 1)
+		documents["account/ticket/events.yaml"] += "ticket.cross:\n  target_account_id: text\n"
+		documents["account/ticket/nodes.yaml"] += "cross-reporter:\n  opened:\n    emit: {event: ticket.cross, fields: {target_account_id: payload.account_id}}\n"
+	}
+	for label, body := range documents {
+		path := filepath.Join(root, label)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func proveLexicalAddressGeometries(t *testing.T) {
+	t.Helper()
+	root := lexicalAddressFixture(t, false)
+	source := loadConnectRoutePlanCanonicalSource(t, root)
+	graph := pinrouting.CompileConnectGraph(source)
+	if issues := graph.Issues(); len(issues) != 0 {
+		t.Fatal(issues)
+	}
+	rootInstance := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
+	index := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, rootInstance, "")}}
+	accounts, audits, tickets := map[string]flowidentity.Instance{}, map[string]flowidentity.Instance{}, map[string]flowidentity.Instance{}
+	for _, key := range []string{"7", "8"} {
+		account, err := flowidentity.KeyedChild(source, rootInstance, "account", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		audit, err := flowidentity.KeylessChild(source, account, "account/audit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ticket, err := flowidentity.KeyedChild(source, account, "account/ticket", "42")
+		if err != nil {
+			t.Fatal(err)
+		}
+		accounts[key], audits[key], tickets[key] = account, audit, ticket
+		index.observations = append(index.observations, constructionIndexObservation(t, source, busInternalTestRunID, account, key), constructionIndexObservation(t, source, busInternalTestRunID, audit, ""), constructionIndexObservation(t, source, busInternalTestRunID, ticket, "42"))
+	}
+	for _, test := range []struct {
+		name, event, receiver string
+		source, want          flowidentity.Instance
+		selectParent          bool
+	}{
+		{"C51_lexical_account", "ticket.done", "account/audit", tickets["7"], audits["7"], false},
+		{"C52_root_selected_account", "root.audit", "account/audit", rootInstance, audits["7"], true},
+		{"C53_explicit_other_account", "ticket.cross", "account", tickets["7"], accounts["8"], false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testSource, testGraph := source, graph
+			if test.name == "C53_explicit_other_account" {
+				testSource = loadConnectRoutePlanCanonicalSource(t, lexicalAddressFixture(t, true))
+				testGraph = pinrouting.CompileConnectGraph(testSource)
+				if issues := testGraph.Issues(); len(issues) != 0 {
+					t.Fatalf("frozen C53 root edge was not admitted: %+v", issues)
+				}
+			}
+			owner := connectInstanceSelector{source: testSource, index: index}
+			ctx := withConnectRoutePlanPreview(constructionIndexContext(t, testSource))
+			routing := eventtest.ConcreteTemplateRoutingSource(test.source.TemplateID, test.source.InstancePath, test.source.EntityID)
+			eventType := test.source.InstancePath + "/" + test.event
+			if test.source.TemplateID == "." {
+				routing = eventtest.RootRoutingSource(busInternalTestRunID)
+				eventType = test.event
+			}
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID(test.name), events.EventType(eventType), "test", "", []byte(`{"account_id":"7","target_account_id":"8"}`), 0, busInternalTestRunID, events.EventEnvelope{}, routing, time.Now().UTC())
+			values := map[string]string{"payload.account_id": "7", "payload.target_account_id": "8"}
+			var target pinrouting.ConnectRoutePlan
+			for _, plan := range testGraph.Plans() {
+				if plan.SourceEndpoint().Readback().LocalEvent != test.event {
+					continue
+				}
+				if test.selectParent && plan.ReceiverEndpoint().Readback().FlowID == "account" {
+					_, parent, _, err := owner.Materialize(ctx, event, plan, values)
+					if err != nil || parent.Identity() != accounts["7"] {
+						t.Fatalf("root ancestor selection: %+v %v", parent, err)
+					}
+					if err := selectConnectionConstruction(ctx, parent.Identity()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if plan.ReceiverEndpoint().Readback().FlowID == test.receiver {
+					target = plan
+				}
+			}
+			materialized, selected, _, err := owner.Materialize(ctx, event, target, values)
+			if err != nil || !materialized.Failure.Empty() || selected.Identity() != test.want {
+				t.Fatalf("exact edge selected another account: selected=%+v materialized=%+v want=%+v err=%v", selected, materialized, test.want, err)
+			}
+		})
+	}
+	t.Run("C08_missing_ancestor_key_teaching", func(t *testing.T) {
+		path := filepath.Join(root, "events.yaml")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "root.audit:\n  account_id: text\n", "root.audit:\n", 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		repo := canonicalrouting.RepoRoot(t)
+		_, err = contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
+		if err == nil || !strings.Contains(err.Error(), "account_id") || !strings.Contains(err.Error(), "schema.yaml") {
+			t.Fatalf("missing ancestor key lost located teaching: %v", err)
+		}
+	})
 }
 
 func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testing.T) {

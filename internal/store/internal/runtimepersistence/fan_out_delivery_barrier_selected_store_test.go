@@ -120,6 +120,59 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 			if projected := operatorread.ProjectRunOperationalStatus(report); report.TestQuiescence.FanOutBarriers != 1 || projected.State != "running" || len(projected.Attributions) != 0 {
 				t.Fatalf("pending barrier outcome was diagnosed as an agent stall: status=%+v work=%+v", projected, report.TestQuiescence)
 			}
+			t.Run("all_dead_lettered", func(t *testing.T) {
+				f := newFanOutConstructorFixture(t, backend)
+				owner, db, postgres := f.store.(selectedFanOutOwner), f.db, backend == "postgres"
+				selected := owner.(storeTestDurableEventBusStore)
+				fixture := seedFanOutOwnerFixtureWithArtifact(t, f.ctx, db, owner, postgres, 3, base, f.bundle.SourceArtifact)
+				ctx := correlation.WithRunID(f.ctx, fixture.runID)
+				handle := seedFanOutDeliveryBarrier(t, ctx, db, fixture, base)
+				var ids []string
+				var issued []events.Event
+				route := fanOutBarrierRoute("all-failed")
+				for ordinal := 0; ordinal < 3; ordinal++ {
+					event := fanOutBarrierChildEvent(t, fixture, ordinal, base.Add(time.Duration(ordinal+1)*time.Second))
+					if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
+						t.Fatal(err)
+					}
+					ids, issued = append(ids, event.ID()), append(issued, event)
+				}
+				seedFanOutBarrierOutcomes(t, ctx, db, fixture, ids, false, base.Add(5*time.Second))
+				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(6*time.Second))
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
+				for i, event := range issued {
+					settleFanOutBarrierRouteDeadLetter(t, ctx, selected, event, route)
+					if i != len(issued)-1 {
+						advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(7*time.Second))
+						assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
+					}
+				}
+				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(8*time.Second))
+				want := fanoutbarrier.Summary{Total: 3, DeadLettered: 3}
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
+				settled, err := owner.ReadFanOutSettlement(ctx, fixture.runID, base.Add(9*time.Second))
+				if err != nil || settled.Unsettled != 0 || settled.Owed != 0 || settled.Open != 0 || settled.Blocked != 0 {
+					t.Fatalf("all-dead-letter settlement: %+v %v", settled, err)
+				}
+				completionRoute, state := constructFanOutCompletionReceiver(t, ctx, f, "completion_one", base)
+				completionEvent := fanOutBarrierChildEvent(t, fixture, 100, base.Add(10*time.Second))
+				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, completionEvent, []events.DeliveryRoute{completionRoute}); err != nil {
+					t.Fatal(err)
+				}
+				claimed, err := claimDeliveryFixture(ctx, selected, completionEvent, completionRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				commitFanOutBarrierCompletionForTest(t, ctx, selected, runtimepipeline.WorkflowEngineMutationCommand{
+					State: state, FanOutBarrierCompletion: &fanoutbarrier.Completion{Handle: handle, Summary: want},
+					DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Millisecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection()},
+				})
+				assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusFired, &want, handle.TaskID())
+				summary, err := owner.FanOutRunSummary(ctx, fixture.runID, base.Add(11*time.Second))
+				if err != nil || summary.BarrierTerminal != 1 || summary.BarrierPending != 0 || summary.BlocksCompletion() {
+					t.Fatalf("all-dead-letter terminal barrier: %+v %v", summary, err)
+				}
+			})
 		})
 	}
 }

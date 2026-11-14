@@ -2,16 +2,162 @@ package cataloge2e
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
+
+type heldReceiverReadiness struct {
+	pipeline.WorkflowPersistenceOwner
+	entered chan pipeline.DynamicFlowRuntimeActivationAttempt
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *heldReceiverReadiness) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
+	if strings.HasPrefix(attempt.InstancePath(), "consumer/") && previous == pipeline.FlowAttachmentTimersArmed {
+		g.once.Do(func() { g.entered <- attempt })
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return pipeline.FlowAttachmentAdvanceResult{}, ctx.Err()
+		}
+	}
+	return g.WorkflowPersistenceOwner.AdvanceFlowAttachment(ctx, attempt, previous, at)
+}
+
+func proveHeldReceiverReadiness(t *testing.T, backend catalogRuntimeBackend) {
+	t.Helper()
+	root := canonicalrouting.CopyReceiverMaterializationWithAgent(t, "collector")
+	for label, edit := range map[string]func(string) string{
+		"consumer/schema.yaml": func(s string) string { return "instance: token\n" + s },
+		"consumer/state.yaml":  func(s string) string { return s + "\ntoken: text\n" },
+		"schema.yaml": func(s string) string {
+			for _, from := range []string{"work.ready, from: producer", "receiver.seeded, from: .", "receiver.closed, from: ."} {
+				old := from + ", to: consumer}"
+				mode := "select"
+				if strings.HasPrefix(from, "receiver.seeded") {
+					mode = "select-or-create"
+				}
+				if strings.Count(s, old) != 1 {
+					t.Fatalf("held-readiness edge missing: %s", old)
+				}
+				s = strings.Replace(s, old, from+", to: consumer, resolution: "+mode+", key_from: payload.token}", 1)
+			}
+			return s
+		},
+		"events.yaml": func(s string) string {
+			return strings.Replace(s, "receiver.closed:\n", "receiver.closed:\n  token: text\n", 1)
+		},
+	} {
+		path := filepath.Join(root, label)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(edit(string(body))), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gate := &heldReceiverReadiness{entered: make(chan pipeline.DynamicFlowRuntimeActivationAttempt, 1), release: make(chan struct{})}
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(gate.release) }) })
+	h := newRuntimeHarnessWithPersistenceProjection(t, root, backend, true, nil, nil, nil, runlifecycle.LiveRunScope{}, func(deps *runtimepkg.RuntimeDeps) {
+		gate.WorkflowPersistenceOwner = deps.EventStore.(pipeline.WorkflowPersistenceOwner)
+		deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(gate)
+	})
+	t.Cleanup(func() { release.Do(func() { close(gate.release) }) })
+	ctx := catalogRunContext(h, catalogRuntimeRunID)
+	done := make(chan error, 1)
+	go func() {
+		done <- h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "start.seeded", Payload: map[string]any{"token": "held"}}, catalogRuntimePublishTimeout, true)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		release.Do(func() { close(gate.release) })
+		select {
+		case <-done:
+		case <-time.After(catalogRuntimePublishTimeout):
+			t.Error("held publication did not join")
+		}
+	})
+	var attempt pipeline.DynamicFlowRuntimeActivationAttempt
+	select {
+	case attempt = <-gate.entered:
+	case err := <-done:
+		t.Fatalf("publication returned before receiver readiness cut: %v", err)
+	case <-time.After(catalogRuntimePublishTimeout):
+		t.Fatal("receiver did not reach native pre-ready cut")
+	}
+	readiness, found, err := gate.LoadDynamicFlowRuntimeReadiness(ctx, catalogRuntimeRunID, flowidentity.RouteForInstancePath(attempt.InstancePath()))
+	if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentTimersArmed || readiness.Plan.Identity.InstancePath != attempt.InstancePath() {
+		t.Fatalf("held exact readiness: %+v found=%t err=%v", readiness, found, err)
+	}
+	eventID, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "receiver.seeded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var store interface {
+		LoadPreparedPublishEvent(context.Context, string) (bus.PreparedPublishEvent, bool, error)
+		deliverylifecycle.Store
+	} = h.pg
+	if h.sqlite != nil {
+		store = h.sqlite
+	}
+	publication, found, err := store.LoadPreparedPublishEvent(ctx, eventID)
+	if err != nil || !found || len(publication.DeliveryRoutes) != 2 {
+		t.Fatalf("held durable receiver publication: %+v %t %v", publication, found, err)
+	}
+	for _, route := range publication.DeliveryRoutes {
+		id, err := deliverylifecycle.DeliveryID(eventID, route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending, err := store.Snapshot(ctx, id)
+		if err != nil || pending.Status != deliverylifecycle.StatusPending || pending.ClaimVersion != 0 || !pending.StartedAt.IsZero() {
+			t.Fatalf("receiver ran before readiness: %+v %v", pending, err)
+		}
+	}
+	h.llm.mu.Lock()
+	calls := len(h.llm.deliveryCalls)
+	h.llm.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("provider executed before readiness: %d", calls)
+	}
+	release.Do(func() { close(gate.release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(catalogRuntimePublishTimeout):
+		t.Fatal("released receiver publication did not finish")
+	}
+	for _, route := range publication.DeliveryRoutes {
+		id, err := deliverylifecycle.DeliveryID(eventID, route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settled, err := store.Snapshot(ctx, id)
+		if err != nil || settled.Status != deliverylifecycle.StatusDelivered || settled.ClaimVersion != 1 {
+			t.Fatalf("ready receiver did not settle exactly once: %+v %v", settled, err)
+		}
+	}
+}
 
 func TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
@@ -152,6 +298,9 @@ func TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores(t *testing.T)
 				reopenedContext := catalogRunContext(reopened, catalogRuntimeRunID)
 				if err := reopened.rt.Bus.PublishAndWait(reopenedContext, publication.Event.Event()); err != nil {
 					t.Fatalf("duplicate publication after restart: %v", err)
+				}
+				if agent == "collector" {
+					t.Run("held_receiver_readiness", func(t *testing.T) { proveHeldReceiverReadiness(t, backend) })
 				}
 				for _, before := range []deliverylifecycle.Snapshot{materializer, observer} {
 					after, err := recovered.Snapshot(reopenedContext, before.DeliveryID)

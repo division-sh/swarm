@@ -260,6 +260,10 @@ func newLiveForkCatalogHarness(t *testing.T, fixtureRoot string, backend catalog
 }
 
 func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), scope runlifecycle.LiveRunScope, additionalRunIDs ...string) *runtimeHarness {
+	return newRuntimeHarnessWithPersistenceProjection(t, fixtureRoot, backend, start, transcript, provider, chunkObserver, scope, nil, additionalRunIDs...)
+}
+
+func newRuntimeHarnessWithPersistenceProjection(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), scope runlifecycle.LiveRunScope, project func(*runtime.RuntimeDeps), additionalRunIDs ...string) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -350,6 +354,9 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	if provider != nil {
 		deps.Options.LLMRuntime = &terminalManagedProvider{scriptedLLMRuntime: llmRuntime, probe: provider,
 			controller: runtimeeffects.NewCompletionController(deps.EffectsStore, deps.CompletionStore, deps.CompletionHeartbeatStore, nil).WithExecutionPosture(deps.Options.ExecutionPosture)}
+	}
+	if project != nil {
+		project(&deps)
 	}
 	rt, err := runtime.NewRuntime(ctx, deps)
 	if err != nil {
