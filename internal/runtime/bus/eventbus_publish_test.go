@@ -1744,17 +1744,11 @@ func componentRecordedReplayForTest(t testing.TB, store *directRecipientTransact
 	store.settlements = map[string]events.RouteSettlement{original.ID(): settlement}
 	store.deliveries = map[string][]string{original.ID(): {route.Recipient.LocalID()}}
 	store.mu.Unlock()
-	replay, err := events.NewReplayEvent(events.ReplayEventInput{
-		Facts: events.EventFacts{ID: uuid.NewString(), Type: original.Type(),
-			Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
-			TaskID:   original.TaskID(), Payload: original.Payload(), ChainDepth: original.ChainDepth() + 1,
-			RoutingSource: original.RoutingSource(), Envelope: events.EnvelopeForTargetSet(original.Envelope(), []events.RouteIdentity{route.Target.Route()}),
-			CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode()},
-		Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	replay := eventtest.ReplayForProducerWithRoutingSource(
+		uuid.NewString(), original.Type(), original.Producer(), original.TaskID(), original.Payload(), original.ChainDepth()+1,
+		events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
+		events.EnvelopeForTargetSet(original.Envelope(), []events.RouteIdentity{route.Target.Route()}), original.RoutingSource(), time.Now().UTC(),
+	)
 	return replay, selection
 }
 
