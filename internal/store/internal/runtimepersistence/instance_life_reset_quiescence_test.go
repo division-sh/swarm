@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -195,7 +196,9 @@ func holdInstanceResetTimer(t *testing.T, f receiverConfigActivationFixture, fir
 		if err != nil {
 			t.Fatal(err)
 		}
-		scheduler, dispatcher := &selectedStoreLifecycleScheduler{}, &terminalScheduleDispatcherProbe{}
+		scheduler := &selectedStoreLifecycleScheduler{}
+		dispatch := publisher.EngineDispatcher()
+		dispatcher := &instanceClockReceiptDispatcher{PostCommitDispatcher: dispatch, handoff: dispatch.(engine.CommittedPublicationDispatcher)}
 		lifecycle, err := genericschedule.NewLifecycle(store, scheduler, publisher, dispatcher, forkCompletionScheduleLogger{t: t}, executionposture.Live)
 		if err != nil {
 			t.Fatal(err)
@@ -213,7 +216,6 @@ func holdInstanceResetTimer(t *testing.T, f receiverConfigActivationFixture, fir
 		if err != nil || !found || fired.Status != genericschedule.StatusFired || dispatcher.calls != 1 {
 			t.Fatalf("drain due timer by actual publication: %+v dispatch=%d err=%v", fired, dispatcher.calls, err)
 		}
-		settleInstanceResetEvent(t, f, fired.CurrentEventID)
 	}
 }
 

@@ -38,6 +38,11 @@ func (d *instanceClockReceiptDispatcher) DispatchCommittedPublication(ctx contex
 	return d.handoff.DispatchCommittedPublication(ctx, publication)
 }
 
+func (d *instanceClockReceiptDispatcher) DispatchPostCommit(ctx context.Context, intents []engine.EmitIntent) error {
+	d.calls++
+	return d.PostCommitDispatcher.DispatchPostCommit(ctx, intents)
+}
+
 func TestInstanceClockSchedulerConsumesCommittedReceiptBothStores(t *testing.T) {
 	for _, backend := range selectedScheduleStoreCases() {
 		for _, phase := range []string{"healthy", "preparation_postcommit_error", "settlement_postcommit_error", "cancel_after_commit"} {
