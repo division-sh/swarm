@@ -279,6 +279,49 @@ func TestManagerShutdownDuringResetJoinsResetTransition(t *testing.T) {
 }
 
 func ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	t.Run("accepted_wait_preserves_terminal_and_independent_failures", func(t *testing.T) {
+		native := newNativeDelivery(t)
+		eventBus := newLifecycleTransitionEventBus(t)
+		cached := errors.New("retained terminal diagnostic failure")
+		dependencies := &lifecycleTransitionTrackingBus{EventBus: eventBus, shutdownErr: errors.New("independent producer join failure")}
+		fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native, dependencies)
+		fixture.manager.lifecycle.recordLifecycleDiagnosticFailure(cached)
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		waitErr := fixture.manager.WaitForAcceptedWork(cancelled)
+		if !errors.Is(waitErr, context.Canceled) || errors.Is(waitErr, cached) {
+			t.Errorf("accepted-work wait mixed terminal evidence with its own cancellation: %v", waitErr)
+		}
+		fixture.unblock()
+		ctx, cancelJoin := context.WithTimeout(context.Background(), time.Second)
+		defer cancelJoin()
+		drainedErr := fixture.manager.WaitForAcceptedWork(ctx)
+		if drainedErr != nil {
+			t.Errorf("drained accepted work replayed terminal evidence: %v", drainedErr)
+		}
+		expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancelExpired()
+		expiredErr := fixture.manager.WaitForAcceptedWork(expired)
+		if expiredErr != nil {
+			t.Errorf("cache-only evidence fabricated an expired work wait: %v", expiredErr)
+		}
+		if err := fixture.manager.WaitForQuiescence(ctx); !errors.Is(err, cached) {
+			t.Errorf("diagnostic-bearing quiescence lost cached evidence: %v", err)
+		}
+		shutdownErr := fixture.manager.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
+		result := errors.Join(waitErr, drainedErr, expiredErr, shutdownErr)
+		for _, cause := range []error{context.Canceled, cached, dependencies.shutdownErr} {
+			if !errors.Is(result, cause) || strings.Count(result.Error(), cause.Error()) != 1 {
+				t.Errorf("independent cause not retained exactly once (%v): %v", cause, result)
+			}
+		}
+		if errors.Is(result, context.DeadlineExceeded) {
+			t.Errorf("cache-only evidence became a work-drain expiry: %v", result)
+		}
+		if got := dependencies.shutdownJoins.Load(); got != 1 {
+			t.Errorf("dependency joins = %d, want 1", got)
+		}
+	})
 	t.Run("caller_budget_does_not_expire_shared_work", func(t *testing.T) {
 		native := newNativeDelivery(t)
 		eventBus := newLifecycleTransitionEventBus(t)

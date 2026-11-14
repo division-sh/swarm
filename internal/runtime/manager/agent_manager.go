@@ -390,6 +390,11 @@ func (am *AgentManager) WaitForQuiescence(ctx context.Context) error {
 	return am.lifecycle.waitForWork(ctx)
 }
 
+// WaitForAcceptedWork leaves cached terminal evidence to the terminal transition.
+func (am *AgentManager) WaitForAcceptedWork(ctx context.Context) error {
+	return am.WaitForQuiescence(ctx)
+}
+
 func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) error {
 	if am == nil || am.bus == nil {
 		return errors.New("event bus is not configured")
