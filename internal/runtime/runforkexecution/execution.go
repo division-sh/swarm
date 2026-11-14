@@ -40,6 +40,7 @@ type SelectedContractExecutionRequest struct {
 	LiveContexts            *runtimepkg.RuntimeContextManager
 	LiveRuns                runlifecycle.LiveRunReader
 	liveSelectionHeld       bool
+	requirePausedSource     bool
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
@@ -147,7 +148,7 @@ func executePreparedSelectedContractRunFork(ctx context.Context, req SelectedCon
 		acknowledged = materializationDiagnostic == nil
 	} else {
 		if req.LiveRuntime != nil || req.AcquireLiveRuntime != nil {
-			materialization, acknowledged, materializationDiagnostic = req.Owner.materializePreparedLive(ctx, prepared)
+			materialization, acknowledged, materializationDiagnostic = req.Owner.materializePreparedWithSourceStatus(ctx, prepared, req.requirePausedSource)
 		} else {
 			materialization, acknowledged, materializationDiagnostic = req.Owner.materializePrepared(ctx, prepared)
 		}
