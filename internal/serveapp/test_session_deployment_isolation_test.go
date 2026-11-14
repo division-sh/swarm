@@ -73,7 +73,7 @@ func TestSwarmTestUsesCompleteDeploymentLLMConfig(t *testing.T) {
 			original := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = original })
 			acquired := false
-			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				acquired = true
 				if test.refusal != "" {
 					t.Fatal("invalid endpoint reached private resource acquisition")
@@ -154,7 +154,7 @@ serve:
 			original := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = original })
 			acquired := false
-			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			buildStoresForServe = func(ctx context.Context, selected storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 				acquired = true
 				if selected.Backend != storebackend.BackendSQLite || selected.SQLitePath == storePath ||
 					strings.HasPrefix(selected.SQLitePath, deployment+string(os.PathSeparator)) {

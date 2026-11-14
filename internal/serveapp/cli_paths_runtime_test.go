@@ -23,7 +23,7 @@ func TestRunServeRuntimeRejectsRetiredConfiguredContractPathBeforeBundleLoad(t *
 	originalBuildStores := buildStoresForServe
 	owner := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), &config.Config{})
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
-	buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config, ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		return owner, nil
 	}
 	t.Cleanup(func() {

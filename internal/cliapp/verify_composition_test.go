@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/devscratch"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -275,6 +276,28 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					after, err := owner.InspectSchema(ctx, complete)
 					if err != nil || !reflect.DeepEqual(before, after) {
 						t.Fatalf("stage changed native schema: %v", err)
+					}
+					if backend == "sqlite" && !prepared {
+						coordinate, err := devscratch.Resolve(root)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := os.MkdirAll(filepath.Dir(coordinate.DatabasePath), 0700); err != nil {
+							t.Fatal(err)
+						}
+						predecessor := []byte("disposable predecessor, not a retained SQLite source")
+						if err := os.WriteFile(coordinate.DatabasePath, predecessor, 0600); err != nil {
+							t.Fatal(err)
+						}
+						input.Options.Dev = true
+						input.Selection = backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: coordinate.DatabasePath, SQLitePathSource: backendselection.SourceProjectScratch}
+						scratch, err := InspectServeCheckStage(ctx, input)
+						if err != nil || scratch.Failure() != nil || scratch.BootStoreInput() != nil {
+							t.Fatalf("disposable predecessor became retained application state: %v %v", err, scratch.Failure())
+						}
+						if actual, err := os.ReadFile(coordinate.DatabasePath); err != nil || string(actual) != string(predecessor) {
+							t.Fatalf("dry run replaced the predecessor: %v", err)
+						}
 					}
 				})
 				var out, diagnostic bytes.Buffer

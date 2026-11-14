@@ -40,7 +40,7 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 				dsn, _, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
-				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 					pg, err := store.NewPostgresStore(dsn)
 					if err != nil {
 						return nil, err

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -128,15 +127,6 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 	finding.FailureClass = observation.FailureClass
 	result.BootReport.Add(finding)
 	return false
-}
-
-func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
-	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
-	inspectVerifyListeners(ctx, repo, cfg, result)
-	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)
-	inspectVerifyPublicIngress(ctx, cfg, result, "source:"+result.BootReport.SourceArtifactHash)
-	inspectVerifySelectedStore(ctx, repo, paths, cfg, swarmDir, source, opts, packBases, workspaces, workspaceOK, result)
-	result.BootReport.Sort()
 }
 
 func inspectVerifySourceAdmission(ctx context.Context, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, result *runtime.WorkflowContractValidationResult, preference ...WorkspaceBackendSelection) (WorkspaceBackendSelection, workspace.Resolver, bool) {

@@ -167,7 +167,7 @@ func newServedBoundaryFixtureLifetime(t *testing.T, backend, sourceRoot string) 
 	}
 	var selected *selectedStoreOwner
 	previous := buildStoresForServe
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 		var err error
 		if backend == "postgres" {
 			selected, err = storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{

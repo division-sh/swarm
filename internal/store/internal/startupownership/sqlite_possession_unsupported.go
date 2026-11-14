@@ -38,7 +38,7 @@ func waitSQLiteFilePossession(context.Context, string) (sqlitePossession, error)
 	return nil, err
 }
 
-func waitSQLiteConstructionPossession(context.Context, string) (sqlitePossession, error) {
+func waitSQLiteConstructionPossession(context.Context, string, ...*SQLiteInspectionInput) (sqlitePossession, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return nil, err
 }

@@ -255,6 +255,9 @@ func TestDevScratchEpochReplacementIsAllOrFailClosed(t *testing.T) {
 	if err := os.Symlink(filepath.Base(coordinate.DatabasePath), coordinate.DatabasePath+"-wal"); err != nil {
 		t.Fatal(err)
 	}
+	if err := devscratch.InspectPredecessor(coordinate); err == nil || !strings.Contains(err.Error(), "not one unaliased regular file") {
+		t.Fatalf("read-only predecessor check lost the replacement refusal: %v", err)
+	}
 	authority, err := devscratch.Acquire(coordinate)
 	if err != nil {
 		t.Fatal(err)

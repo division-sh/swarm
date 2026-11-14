@@ -64,13 +64,15 @@ type admissionInspectionPort interface {
 // Its reads are scoped to one consistent callback; momentary possession is a
 // separate, joined observation outside that MVCC snapshot.
 type AdmissionInspection struct {
-	store admissionInspectionPort
+	store  admissionInspectionPort
+	sqlite *storeconstruction.SQLiteInspectionInput
 }
 
 // AbsentSQLiteStore is a non-creating observation, not an empty database or
 // permission to skip the independent construction checks at serve time.
 type AbsentSQLiteStore struct {
-	Path string
+	Path  string
+	input *storeconstruction.SQLiteInspectionInput
 }
 
 func (e *AbsentSQLiteStore) Error() string {
@@ -78,20 +80,27 @@ func (e *AbsentSQLiteStore) Error() string {
 }
 
 func OpenAdmissionInspection(ctx context.Context, req AuthorityRequest) (*AdmissionInspection, error) {
+	var input *storeconstruction.SQLiteInspectionInput
 	if req.Selection.Backend == storebackend.BackendSQLite {
-		absent, err := storeconstruction.ObserveSQLiteInspectionAbsence(ctx, req.Selection.SQLitePath)
+		var err error
+		input, err = storeconstruction.CaptureSQLiteInspectionInput(ctx, req.Selection.SQLitePath)
 		if err != nil {
 			return nil, err
 		}
-		if absent {
-			return nil, &AbsentSQLiteStore{Path: req.Selection.SQLitePath}
+		if input.Absent() {
+			return nil, &AbsentSQLiteStore{Path: req.Selection.SQLitePath, input: input}
 		}
 	}
 	selected, err := openInspectionStore(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return &AdmissionInspection{store: selected}, nil
+	if input != nil {
+		if err := input.Revalidate(ctx, req.Selection.SQLitePath); err != nil {
+			return nil, errors.Join(err, selected.Close())
+		}
+	}
+	return &AdmissionInspection{store: selected, sqlite: input}, nil
 }
 
 func openInspectionStore(ctx context.Context, req AuthorityRequest) (admissionInspectionPort, error) {
@@ -127,7 +136,7 @@ func (s *AdmissionInspection) Inspect(ctx context.Context, request store.SchemaB
 		}
 		scoped, cancel := context.WithCancel(ctx)
 		defer cancel()
-		return observe(&AdmissionSnapshot{ctx: scoped, store: s.store, fresh: schema.Fresh})
+		return observe(&AdmissionSnapshot{ctx: scoped, store: s.store, fresh: schema.Fresh, schema: schema, request: request, sqlite: s.sqlite})
 	})
 	return schema, err
 }
@@ -152,9 +161,12 @@ func (s *AdmissionInspection) ProbePossession(ctx context.Context) (startupowner
 // AdmissionSnapshot cannot expose writes, raw SQL, process possession or a
 // runtime projection. Passing another context cannot escape its read snapshot.
 type AdmissionSnapshot struct {
-	ctx   context.Context
-	store admissionInspectionPort
-	fresh bool
+	ctx     context.Context
+	store   admissionInspectionPort
+	fresh   bool
+	schema  store.SchemaInspection
+	request store.SchemaBootstrapRequest
+	sqlite  *storeconstruction.SQLiteInspectionInput
 }
 
 func (s *AdmissionSnapshot) ReadBundleUpgradeState(ctx context.Context, runID string, source semanticview.Source) (runbundle.UpgradeState, error) {
