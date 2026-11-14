@@ -11,19 +11,20 @@ func replyContextProjectionSpec() projectionSpec {
 		COALESCE(CAST(r.accepted_reply_event_id AS TEXT), ''),
 		r.created_at, r.updated_at, r.terminal_at,
 		COALESCE(CAST(r.source_run_id AS TEXT), ''), CAST(r.source_request_event_id AS TEXT),
-		COALESCE(r.enclosing_reply_context_id, '')
+		COALESCE(r.enclosing_reply_context_id, ''), r.await_binding
 		FROM reply_contexts r WHERE r.run_id = $1`
 	return projectionSpec{
 		query: query, source: "reply_contexts r", runAlias: "r",
 		columns: typedColumns(map[string]valueKind{
-			"origin_route": valueJSON,
-			"created_at":   valueTime, "updated_at": valueTime, "terminal_at": valueTime,
+			"origin_route":  valueJSON,
+			"await_binding": valueJSON,
+			"created_at":    valueTime, "updated_at": valueTime, "terminal_at": valueTime,
 		}, "reply_context_id", "run_id", "request_event_id", "requester_flow_id",
 			"request_output_pin", "reply_input_pin", "provider_flow_id",
 			"provider_input_pin", "provider_output_pin", "origin_route",
 			"request_correlation_id", "correlation_key", "state",
 			"accepted_reply_event_id", "created_at", "updated_at", "terminal_at",
-			"source_run_id", "source_request_event_id", "enclosing_reply_context_id"),
+			"source_run_id", "source_request_event_id", "enclosing_reply_context_id", "await_binding"),
 		parts: []projectionPart{{query: query, alias: "r"}},
 	}
 }

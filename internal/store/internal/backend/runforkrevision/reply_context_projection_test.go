@@ -24,6 +24,7 @@ func TestReplyContextProjectionCoversCanonicalRecord(t *testing.T) {
 		"Origin": "origin_route", "OriginLife": "origin_route", "ReturnJoins": "origin_route", "RequestCorrelationID": "request_correlation_id",
 		"CorrelationKey": "correlation_key", "State": "state", "AcceptedReplyEventID": "accepted_reply_event_id",
 		"CreatedAt": "created_at", "UpdatedAt": "updated_at", "TerminalAt": "terminal_at",
+		"Await": "await_binding",
 	}
 	recordType := reflect.TypeOf(replycontext.Record{})
 	if recordType.NumField() != len(fields) {
@@ -36,8 +37,8 @@ func TestReplyContextProjectionCoversCanonicalRecord(t *testing.T) {
 		}
 		kinds[column.name] = column.kind
 	}
-	if len(kinds) != 20 || spec.build != nil {
-		t.Fatalf("projection should retain exactly the 20 native columns: %#v", spec)
+	if len(kinds) != 21 || spec.build != nil {
+		t.Fatalf("projection should retain exactly the 21 native columns: %#v", spec)
 	}
 	for i := 0; i < recordType.NumField(); i++ {
 		field := recordType.Field(i).Name
@@ -51,7 +52,7 @@ func TestReplyContextProjectionCoversCanonicalRecord(t *testing.T) {
 		}
 		want := valueRaw
 		switch column {
-		case "origin_route":
+		case "origin_route", "await_binding":
 			want = valueJSON
 		case "created_at", "updated_at", "terminal_at":
 			want = valueTime
