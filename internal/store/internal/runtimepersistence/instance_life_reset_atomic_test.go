@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -772,6 +773,22 @@ func proveInstanceResetFieldAndChildHistory(t *testing.T, backend string) {
 	if err != nil || parentBefore.Fields["handled"] != true {
 		t.Fatalf("non-key field was not changed before reset: %+v err=%v", parentBefore, err)
 	}
+	childHistory := func() []any {
+		var cuts []any
+		for _, initial := range []bool{true, false} {
+			metadata, projection, found, err := runforkrevision.ReadEntityLife(f.ctx, f.db, first.Readiness.RunID, child.Identity.EntityID, 1, initial)
+			want := "done"
+			if initial {
+				want = "active"
+			}
+			if err != nil || !found || metadata.CurrentState != want || projection.Fields["handled"] != !initial {
+				t.Fatalf("finished child lost retained initial/final cut: initial=%t metadata=%+v fields=%+v err=%v", initial, metadata, projection.Fields, err)
+			}
+			cuts = append(cuts, metadata, projection)
+		}
+		return cuts
+	}
+	retainedChildHistory := childHistory()
 	reset := prepareNativeResetPlan(t, f, first)
 	committed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
 	if err != nil || !committed.StartedOver {
@@ -793,6 +810,9 @@ func proveInstanceResetFieldAndChildHistory(t *testing.T, backend string) {
 	observed, found, err := f.workflows.LoadConstructedFlowInstance(f.ctx, planOwner(child), identity.NormalizeEntityID(child.Identity.EntityID))
 	if err != nil || !found || observed.EntityID != child.Identity.EntityID || observed.StorageRef != child.Identity.InstancePath || observed.Life != 1 || observed.CurrentState != "done" {
 		t.Fatalf("parent reset reconstructed or changed current finished child: %+v found=%t err=%v", observed, found, err)
+	}
+	if !reflect.DeepEqual(retainedChildHistory, childHistory()) {
+		t.Fatal("parent reset rewrote its finished child's retained initial/final history")
 	}
 }
 
