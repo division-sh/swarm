@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
 
@@ -43,6 +47,60 @@ func TestVerifyNamesOnlyRootInterfaceHasNoHarnessClassification(t *testing.T) {
 			t.Fatalf("verify JSON retains %q: %s", retired, stdout.Bytes())
 		}
 	}
+	t.Run("captured_root_interface_is_frozen", func(t *testing.T) {
+		privateRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+		schemaFile := filepath.Join(privateRoot, "schema.yaml")
+		schema, err := os.ReadFile(schemaFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeDescribeTestFile(t, schemaFile, string(schema)+"\noutputs: [item.processed]\n")
+		_, original, err := NewSwarmWorkflowModule(RepoRoot(), privateRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rooted, err := original.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		interfaceOf := func(bundle *contracts.WorkflowContractBundle) [4]string {
+			t.Helper()
+			source := semanticview.Wrap(bundle)
+			inputs, outputs := source.FlowInputEventPins("."), source.FlowOutputEventPins(".")
+			if len(inputs) != 1 || len(outputs) != 1 {
+				t.Fatalf("captured root lost its exact pin set: inputs=%+v outputs=%+v", inputs, outputs)
+			}
+			input, publicInput := semanticview.SelectedRootInputPin(source, inputs[0].EventType())
+			output, publicOutput := semanticview.SelectedRootOutputPin(source, outputs[0].EventType())
+			receiver, hasInputSchema := input.ReceiverEventSchema()
+			producer, hasOutputSchema := output.EventSchema()
+			if !publicInput || !publicOutput || !hasInputSchema || !hasOutputSchema || len(semanticview.SelectedRootInputEndpoints(source)) != 1 {
+				t.Fatal("compiled public interface lost a declared endpoint or schema")
+			}
+			return [4]string{input.EventType(), output.EventType(), receiver.AcceptanceSchemaDigest(), producer.AcceptanceSchemaDigest()}
+		}
+		before := interfaceOf(original)
+		writeDescribeTestFile(t, schemaFile, "stages: []\ninputs: [renamed.received]\noutputs: [renamed.processed]\n")
+		writeDescribeTestFile(t, filepath.Join(privateRoot, "events.yaml"), "renamed.received:\n  item_id: integer\nrenamed.processed:\n  item_id: integer\n")
+		writeDescribeTestFile(t, filepath.Join(privateRoot, "nodes.yaml"), "updated:\n  renamed.received:\n    emit:\n      event: renamed.processed\n      fields: {item_id: payload.item_id}\n")
+		_, changed, err := NewSwarmWorkflowModule(RepoRoot(), privateRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		after := interfaceOf(changed)
+		for i := range before {
+			if before[i] == after[i] {
+				t.Fatalf("private mutation did not change pin/schema coordinate %d: before=%+v after=%+v", i, before, after)
+			}
+		}
+		retained, err := contracts.LoadWorkflowContractBundleFromRootedSource(RepoRoot(), rooted, contracts.DefaultPlatformSpecFile(RepoRoot()), contracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := interfaceOf(retained); got != before || retained.SourceArtifact.BundleHash() != original.SourceArtifact.BundleHash() {
+			t.Fatalf("retained public interface changed with the working tree: got=%+v want=%+v", got, before)
+		}
+	})
 }
 
 func TestVerifyRejectsRetiredHarnessMarkersAtSourceAdmission(t *testing.T) {
