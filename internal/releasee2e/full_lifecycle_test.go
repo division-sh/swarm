@@ -180,7 +180,7 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 	credentialFreeEnv := goldenProcessEnv(t, projectRoot, "", 0)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 	verify := runReleaseCommand(t, fullLifecycleStartupLimit, projectRoot, env, "", binary,
-		"verify", "contracts", "--config", "swarm.yaml", "--portable", "--json")
+		"verify", "contracts", "--config", "swarm.yaml", "--json")
 	assertFullLifecycleVerifySuccess(t, verify)
 	for key, value := range map[string]string{
 		"telegram.webhook_signing_secret": fullLifecycleSigningSecret,
@@ -240,7 +240,7 @@ func assertFullLifecycleSourceAdmission(t *testing.T, binary, root string) {
 			env := goldenProcessEnv(t, project, "", 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			result := runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
-				"verify", "contracts", "--config", "swarm.yaml", "--portable", "--json")
+				"verify", "contracts", "--config", "swarm.yaml", "--json")
 			assertFullLifecycleVerifySuccess(t, result)
 			if !test.mutate {
 				return

@@ -31,7 +31,7 @@ func TestDeclaredClockNestedBinaryDeliveryBothStores(t *testing.T) {
 			source := filepath.Join(root, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/support/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/nested"), source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
-			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--portable", "--json")
+			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", source, "--config", config, "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
 			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: root, Source: source,
 				ConfigPath: config, Store: backend, TokenFile: "api-token", Token: goldenAPIToken, Env: env})
@@ -100,7 +100,7 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(root, "payload.json"), "{}\n")
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-				"verify", source, "--config", config, "--portable", "--json")
+				"verify", source, "--config", config, "--json")
 			assertFullLifecycleVerifySuccess(t, verify)
 			describe := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 				"describe", source, "--config", config, "--json")

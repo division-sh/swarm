@@ -92,7 +92,7 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, command := range [][]string{
-		{"verify", "--portable"}, {"describe"}, {"describe", "--graph"}, {"describe", "routes"},
+		{"verify"}, {"describe"}, {"describe", "--graph"}, {"describe", "routes"},
 		{"packs", "list"}, {"packs", "show", "telegram"},
 	} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {

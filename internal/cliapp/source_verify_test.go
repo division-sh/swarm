@@ -53,7 +53,7 @@ func Test2376SourceInvocationParity(t *testing.T) {
 		{"bare", root, ""}, {"dot", root, "."}, {"relative", filepath.Dir(root), filepath.Base(root)}, {"absolute", t.TempDir(), root}, {"root_alias", filepath.Dir(alias), "alias"}, {"symlink_invocation", alias, "."},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			args := []string{"verify", "--portable"}
+			args := []string{"verify"}
 			if row.operand != "" {
 				args = append(args, row.operand)
 			}

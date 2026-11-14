@@ -57,7 +57,7 @@ func TestCatalogTypeNamespacePublicAdmissionBothStores(t *testing.T) {
 					for _, command := range []string{"verify", "serve"} {
 						args := []string{command, source, "--config", config}
 						if command == "verify" {
-							args = append(args, "--portable", "--json")
+							args = append(args, "--json")
 						}
 						refused := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
 						message := refused.output
@@ -103,7 +103,7 @@ func TestCatalogTypeNamespacePublicAdmissionBothStores(t *testing.T) {
 			} {
 				t.Run(override.name, func(t *testing.T) {
 					source := makeSource(t, override.root, override.child)
-					result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", "--portable", "--json", source, "--config", config)
+					result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", "--json", source, "--config", config)
 					if result.err != nil {
 						t.Fatalf("valid same-category override verify: %v\n%s", result.err, result.output)
 					}
