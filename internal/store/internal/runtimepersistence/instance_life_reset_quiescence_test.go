@@ -132,7 +132,10 @@ func holdInstanceResetWork(t *testing.T, f receiverConfigActivationFixture, firs
 	if group == "due_timers" || group == "future_timer_only" {
 		return holdInstanceResetTimer(t, f, first, actor, group == "future_timer_only")
 	}
-	source := eventtest.ConcreteTemplateRoutingSource("review", life.FlowInstance, first.Identity.EntityID)
+	source, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: "review", FlowInstance: life.FlowInstance, EntityID: first.Identity.EntityID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	event := eventtest.RuntimeControlWithRoutingSource(uuid.NewString(), "review/task.started", "fixture", "", []byte(`{}`), 0,
 		life.RunID, "", events.EventEnvelope{}, source, time.Now().UTC())
 	routes := []events.DeliveryRoute(nil)
