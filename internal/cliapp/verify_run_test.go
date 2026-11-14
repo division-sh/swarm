@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +34,9 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			ctx := context.Background()
 			root := issue2567VerifySource(t)
+			if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("verdict: 'original'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			config := filepath.Join(t.TempDir(), "swarm.yaml")
 			_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), root)
 			if err != nil {
@@ -69,7 +74,7 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 						WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
 						Mode:         bundle.RootSchema.EffectiveMode(),
 						CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
-						Fields: map[string]any{},
+						Fields: map[string]any{"verdict": "original"},
 					}, pipeline.WorkflowLifecycleMutationPlan{}, at)
 					if err != nil {
 						t.Fatal(err)
@@ -81,6 +86,7 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 					if history := storetest.ObserveEntityMutationHistory(t, constructionContext, selected, runID); len(history) == 0 {
 						t.Fatal("UUID fixture has no mutations")
 					}
+					ctx = constructionContext
 				}
 				for _, missing := range []bool{false, true} {
 					id := runID
@@ -133,6 +139,45 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 					if !observed {
 						t.Fatal("boot's snapshot omitted the existing active-run mutation check")
 					}
+				}
+			}
+			history := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID)
+			if err := storetest.CorruptRegistryVerdict(ctx, selected, runID, runID, "hostile-drift"); err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range []runlifecycle.State{runlifecycle.StateRunning, runlifecycle.StatePaused, runlifecycle.StateCancelled} {
+				if state != runlifecycle.StateRunning {
+					if state == runlifecycle.StatePaused {
+						if _, err := selected.TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: state}); err != nil {
+							t.Fatal(err)
+						}
+					} else if _, _, err := selected.MarkTerminalRun(ctx, runlifecycle.TerminalRequest{RunID: runID, State: state, EndedAt: time.Now().UTC()}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				stage, err := serveChecksForTest(t, ctx, root, root, config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observed := false
+				for _, observation := range stage.Validation.BootReport.Observations {
+					if observation.CheckID != "run_mutation_drift" {
+						continue
+					}
+					observed = true
+					if state == runlifecycle.StateCancelled {
+						if observation.Status != "passed" {
+							t.Fatalf("terminal history entered active boot checks: %+v", observation)
+						}
+					} else if observation.Status != "failed" || !strings.Contains(observation.Reason, runID) || !strings.Contains(observation.Reason, "verdict") || !strings.Contains(observation.Reason, "hostile-drift") || !strings.Contains(observation.Reason, "original") {
+						t.Fatalf("%s stage lost exact hostile drift refusal: %+v", state, observation)
+					}
+				}
+				if !observed {
+					t.Fatal("stage omitted active-run drift predicate")
+				}
+				if after := storetest.ObserveEntityMutationHistory(t, ctx, selected, runID); !reflect.DeepEqual(history, after) {
+					t.Fatal("read-only stage changed mutation history")
 				}
 			}
 		})

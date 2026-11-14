@@ -426,7 +426,6 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...), nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
@@ -650,7 +649,6 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					storetest.BootstrapPostgresRuntimeStore(t, opened)
 					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg, bootCheck...), nil
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
