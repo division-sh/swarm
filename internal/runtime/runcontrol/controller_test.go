@@ -2,6 +2,7 @@ package runcontrol
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"testing"
@@ -222,7 +223,43 @@ func TestControllerContinueRechecksHandlersWithoutReplayingLifecycle(t *testing.
 			}
 		})
 	}
+	proveNotPausedFailureDoesNotResume(t)
 	proveContinuedSelectedHandlerBoundary(t)
+}
+
+func proveNotPausedFailureDoesNotResume(t *testing.T) {
+	t.Helper()
+	cleanup := errors.New("independent native rollback failure")
+	for _, tc := range []struct {
+		name    string
+		failure error
+		benign  bool
+	}{
+		{"wrapped_live", fmt.Errorf("native outcome: %w", ErrNotPaused), true},
+		{"only_live_branches", errors.Join(ErrNotPaused, fmt.Errorf("native refusal: %w", ErrNotPaused)), true},
+		{"mixed_cleanup", errors.Join(ErrNotPaused, cleanup), false},
+		{"mixed_connection_disposal", errors.Join(ErrNotPaused, driver.ErrBadConn), false},
+		{"wrapped_mixed_cleanup", fmt.Errorf("native outcome: %w", errors.Join(ErrNotPaused, cleanup)), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsNotPausedOnly(tc.failure); got != tc.benign {
+				t.Fatalf("live-refusal evidence=%t want=%t", got, tc.benign)
+			}
+			calls := 0
+			store := &fakeRunControlStore{continueUnack: true, continueErr: tc.failure}
+			controller := NewController(store, nil, Options{ResumeFanOut: func(context.Context, string) (fanoutobligation.ResumeResult, error) {
+				calls++
+				return fanoutobligation.ResumeResult{Admitted: true}, nil
+			}})
+			_, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"})
+			if tc.benign && (err != nil || calls != 1) {
+				t.Fatalf("benign recheck err=%v calls=%d", err, calls)
+			}
+			if !tc.benign && (calls != 0 || !errors.Is(err, tc.failure) || !errors.Is(err, ErrNotPaused)) {
+				t.Fatalf("mixed native failure hidden by recovery: err=%v calls=%d", err, calls)
+			}
+		})
+	}
 }
 
 func proveContinuedSelectedHandlerBoundary(t *testing.T) {

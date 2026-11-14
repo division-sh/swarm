@@ -117,7 +117,7 @@ func (s *processLifecycleSupervisor) continueRunRuntime(ctx context.Context, req
 	}
 	result, err := current.RunControl.ContinueDeferred(ctx, req)
 	if err != nil {
-		if errors.Is(err, runcontrol.ErrNotPaused) {
+		if runcontrol.IsNotPausedOnly(err) {
 			return s.recheckPausedRunHandlersLocked(ctx, lease, req.RunID, availability.RootReference, currentSources.Revision)
 		}
 		return result, errors.Join(err, lease.Done())

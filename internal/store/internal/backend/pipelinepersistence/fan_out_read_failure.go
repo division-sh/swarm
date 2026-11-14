@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -51,6 +52,18 @@ func fanOutReadHasUncertainCause(err error) bool {
 }
 
 func fanOutInvalidRead(cause error) error { return &fanOutReadDefect{cause: cause} }
+
+func fanOutPinnedSourceError(err error) error {
+	// Only the pinned-data owner proves this immutable contradiction. A joined
+	// disposal or independent read failure is not covered by that statement.
+	if runtimefailures.OnlyBranches(err, func(cause error) bool {
+		failure, ok := cause.(*durabledata.DomainError)
+		return ok && failure != nil && failure.Code == durabledata.CodeIntegrity
+	}) {
+		return fanOutInvalidRead(err)
+	}
+	return err
+}
 
 func fanOutDecodedReadFailure(decoded bool, err error) error {
 	if decoded && err != nil {

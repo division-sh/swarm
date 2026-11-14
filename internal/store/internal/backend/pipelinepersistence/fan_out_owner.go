@@ -445,13 +445,14 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 		}
 		source, sourceErr := resourceData.LoadFeedSource(ctx, intent.Request.Key.RunID, bundleHash, intent.Request.Key.DeploymentFeedID, intent.Source.Declaration)
 		if sourceErr != nil {
-			return input, sourceErr
+			return input, fanOutPinnedSourceError(sourceErr)
 		}
 		if source.VersionID != intent.Source.VersionID || source.RowCount != intent.Request.Cardinality ||
 			(intent.Request.Deployment != nil && source.SchemaDigest != intent.Request.Deployment.SchemaDigest) {
 			return input, fanOutInvalidRead(fmt.Errorf("fan-out immutable resource source disagrees with committed intent"))
 		}
 		input.Items, err = resourceData.LoadPinnedRowsRange(ctx, intent.Request.Key.RunID, bundleHash, source, intent.Cursor, endOrdinal)
+		err = fanOutPinnedSourceError(err)
 	} else {
 		switch intent.Source.Kind {
 		case fanoutobligation.SourceEventPayloadField:

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -27,6 +28,12 @@ var (
 	ErrNotPaused       = errors.New("run not paused")
 	ErrDispatchBlocked = errors.New("run dispatch is blocked")
 )
+
+// IsNotPausedOnly permits a handler recheck only when no transaction or cleanup
+// failure accompanies the native live-run refusal.
+func IsNotPausedOnly(err error) bool {
+	return failures.OnlyBranches(err, func(cause error) bool { return cause == ErrNotPaused })
+}
 
 type StateError struct {
 	Err           error
@@ -259,7 +266,7 @@ func (c *Controller) continueRun(ctx context.Context, req TransitionRequest, def
 	}
 	committed, err := c.store.ContinueRunControlOutcome(ctx, req)
 	if !committed.Acknowledged {
-		if !deferRecovery && errors.Is(err, ErrNotPaused) && c.resumeFanOut != nil {
+		if !deferRecovery && IsNotPausedOnly(err) && c.resumeFanOut != nil {
 			return c.RecheckPausedFanOut(ctx, req.RunID)
 		}
 		if err == nil {
