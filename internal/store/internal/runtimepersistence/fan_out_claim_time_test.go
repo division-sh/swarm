@@ -24,7 +24,7 @@ func TestFanOutExpiredUnreclaimedClaimCannotReadOrCommitOnBothStores(t *testing.
 			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, time.Now().UTC())
 			turnTime := time.Now().UTC()
-			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "expired-unreclaimed", BundleHash: fixture.bundleHash, Now: turnTime, Lease: 100 * time.Millisecond,
 			})
 			if err != nil || !found {
@@ -55,6 +55,7 @@ func TestFanOutExpiredUnreclaimedClaimCannotReadOrCommitOnBothStores(t *testing.
 			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
+			waitFanOutReadPacingForTest(t, ctx, intent)
 			_, successor, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "successor", BundleHash: fixture.bundleHash, Now: time.Now().UTC(), Lease: time.Minute,
 			})
@@ -81,7 +82,7 @@ func TestFanOutClaimLeaseUsesAdmissionRatherThanCallerClockOnBothStores(t *testi
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, time.Now().UTC())
 			for _, offset := range []time.Duration{-time.Hour, time.Hour} {
 				before := time.Now().UTC()
-				_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
+				intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 					Owner: "clock-proof", BundleHash: fixture.bundleHash, Now: before.Add(offset), Lease: time.Minute,
 				})
 				after := time.Now().UTC()
@@ -94,6 +95,7 @@ func TestFanOutClaimLeaseUsesAdmissionRatherThanCallerClockOnBothStores(t *testi
 				if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 					t.Fatal(err)
 				}
+				waitFanOutReadPacingForTest(t, ctx, intent)
 			}
 		})
 	}

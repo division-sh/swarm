@@ -11,6 +11,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
+func waitFanOutReadPacingForTest(t *testing.T, ctx context.Context, intent fanoutobligation.Intent) {
+	t.Helper()
+	if intent.ReadRetry == nil {
+		t.Fatal("native claim did not retain its read admission floor")
+	}
+	timer := time.NewTimer(max(0, time.Until(intent.ReadRetry.NotBefore.Add(time.Millisecond))))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
 func TestFanOutReadPacingSurvivesClaimReleaseAndRestartBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
