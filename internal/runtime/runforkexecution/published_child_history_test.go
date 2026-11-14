@@ -92,6 +92,7 @@ func TestIssue642PublishedChildHistoricalClosureBothStores(t *testing.T) {
 				ctx := runForkTestContext(t)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				process, _ := worklifetime.ProcessFromContext(ctx)
+				ctx = runForkOriginalContextForTest(t, ctx, capability)
 				owner := construct()
 				if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
 					t.Fatal(err)

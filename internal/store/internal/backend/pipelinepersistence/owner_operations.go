@@ -1451,6 +1451,40 @@ func (s *PipelinePostgresOwner) ClaimPostgresPipelineEventForTest(ctx context.Co
 	return s.claimPostgresPipelineEvent(ctx, eventID, purpose)
 }
 
+func (s *postgresPipelineObligationStore) PublicationCommitted(claim runtimepipelineobligation.Claim) error {
+	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		return runtimepipelineobligation.ErrWrongClaim
+	}
+	registry := s.postgresPipelineClaims()
+	token, err := registry.issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if state := registry.claims[token]; state != nil && state.recoveryDone != nil {
+		state.recoveryDone()
+	}
+	return nil
+}
+
+func (s *sqlitePipelineObligationStore) PublicationCommitted(claim runtimepipelineobligation.Claim) error {
+	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+		return runtimepipelineobligation.ErrWrongClaim
+	}
+	s.pipelineClaimMu.Lock()
+	defer s.pipelineClaimMu.Unlock()
+	issuer, claims := s.pipelineClaimOwner()
+	token, err := issuer.Token(claim)
+	if err != nil {
+		return err
+	}
+	if state := claims[token]; state != nil && state.recoveryDone != nil {
+		state.recoveryDone()
+	}
+	return nil
+}
+
 func (r *postgresPipelineClaimRegistry) retirePostgresPipelineClaim(token string, state *pipelineClaimState) {
 	if r == nil || state == nil {
 		return

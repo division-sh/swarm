@@ -166,3 +166,17 @@ func (c *pipelinePublicationClaim) Claim() runtimepipelineobligation.Claim {
 	}
 	return c.claim
 }
+
+func (c *pipelinePublicationClaim) publicationCommitted() error {
+	if c == nil || c.bus == nil || c.bus.pipelineObligations == nil {
+		return nil
+	}
+	observer, ok := c.bus.pipelineObligations.(runtimepipelineobligation.PublicationCommitObserver)
+	if !ok {
+		if _, forkOwner := c.bus.pipelineObligations.(runtimepipelineobligation.ParentTransitionOwner); forkOwner {
+			return errors.New("source-fork transition owner requires publication commit observation")
+		}
+		return nil
+	}
+	return observer.PublicationCommitted(c.claim)
+}

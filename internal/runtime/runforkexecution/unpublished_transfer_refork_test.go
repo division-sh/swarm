@@ -64,7 +64,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 				t.Fatal(err)
 			}
 			ancestor := uuid.NewString()
-			cut, cause := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
+			cut, cause, _ := seedPublishedJoinSource(t, ctx, selected, owner, loaded, ancestor)
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
 			lifecycle := selected.(SelectedContractForkLifecycle)
 			parentRequest := SelectedContractExecutionRequest{SourceRunID: ancestor, At: cut,
