@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
+	eventtypes "github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -216,7 +216,7 @@ func TestReceiverInitializationNestedGeometryBothStores(t *testing.T) {
 					t.Fatalf("absent ancestor manufactured receiver state: before=%+v after=%+v err=%v", before, after, err)
 				}
 				public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
-				if err != nil || public[id].EventID != id || public[id].NoDelivery == nil || public[id].NoDelivery.Reason != events.NoDeliveryResolutionBlocked.Code() || len(public[id].Deliveries) != 0 || len(public[id].DeadLetters) != 1 || public[id].DeadLetters[0].Failure.Class != failures.ClassTargetUnreachable {
+				if err != nil || public[id].EventID != id || public[id].NoDelivery == nil || public[id].NoDelivery.Reason != eventtypes.NoDeliveryResolutionBlocked.Code() || len(public[id].Deliveries) != 0 || len(public[id].DeadLetters) != 1 || public[id].DeadLetters[0].Failure.Class != failures.ClassTargetUnreachable {
 					t.Fatalf("absent-parent publication must be a counted no-route outcome: %+v err=%v", public[id], err)
 				}
 			})
