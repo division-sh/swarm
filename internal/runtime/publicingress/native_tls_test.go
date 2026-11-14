@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -16,7 +17,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -88,6 +91,35 @@ func TestNativeTLSSuppliedCertificateUsesOperatorPathsAndRestartOwned(t *testing
 	if err != nil || first.GetCertificate != nil || len(first.Certificates) != 1 {
 		t.Fatalf("supplied TLS must load once without an issuer: config=%v error=%v", first, err)
 	}
+	t.Run("occupied_native_port_preserves_bind_error", func(t *testing.T) {
+		occupied := reserveTestListener(t)
+		cfg := *settings
+		cfg.Port = new(occupied.Addr().(*net.TCPAddr).Port)
+		origin, listen, err := NativeTLSAddresses(&cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readiness := NewReadinessOwner(true)
+		controller, err := NewController(Options{Mode: ModeNativeTLS, PublicOrigin: origin, ListenAddress: listen,
+			TLSConfig: first, Readiness: readiness, Handler: http.NotFoundHandler(),
+			OnGeneration: func(context.Context, Generation) error { t.Error("failed bind reached registration"); return nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := controller.Stop(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+		err = controller.Start(t.Context())
+		var operation *net.OpError
+		if !errors.Is(err, syscall.EADDRINUSE) || !errors.As(err, &operation) ||
+			!strings.HasPrefix(err.Error(), "bind dedicated public webhook listener:") || readiness.Snapshot(time.Now()).Exposure != nil {
+			t.Fatalf("failed bind lost its native cause or published exposure: %v", err)
+		}
+	})
 	webhookCertificateFixture(t, root, settings.Hostname, time.Now().Add(90*24*time.Hour))
 	second, err := NativeTLSConfig(settings, root, root)
 	if err != nil || bytes.Equal(first.Certificates[0].Certificate[0], second.Certificates[0].Certificate[0]) {
