@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -288,11 +289,7 @@ func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, a
 		if rooted.Admission().Reference() != reference {
 			return nil, fmt.Errorf("bundle upgrade artifact disagrees with its admitted root")
 		}
-		spec, err := EmbeddedPlatformSpecPath()
-		if err != nil {
-			return nil, err
-		}
-		retained, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, spec, contracts.WorkflowContractLoadOptions{
+		retained, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{
 			PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 		})
 		return semanticview.Wrap(retained), err
