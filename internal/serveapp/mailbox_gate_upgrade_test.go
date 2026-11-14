@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -113,6 +114,7 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					calls, result, cause, domain, cardID := capture.calls, capture.result, capture.err, capture.domain, capture.cardID
 					capture.Unlock()
 					t.Logf("GATE_UPGRADE_ORIGINAL_RETURN calls=%d result=%#v error_type=%T error=%v domain=%+v card_id=%s", calls, result, cause, cause, domain, cardID)
+					logGateUpgradeCauseTree(t, cause)
 					gateCompletionRead(t, rt, "original_error_sequential_readback", before.RunID, cardID, domain)
 				}
 				answer := func() {
@@ -211,6 +213,43 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				}
 				rt.joinAndAssertExit()
 			})
+		}
+	}
+}
+
+func logGateUpgradeCauseTree(t *testing.T, cause error) {
+	t.Helper()
+	type branch struct {
+		err  error
+		path string
+	}
+	pending := []branch{{cause, "root"}}
+	for visited := 0; len(pending) > 0 && visited < 16; visited++ {
+		node := pending[0]
+		pending = pending[1:]
+		if node.err == nil {
+			continue
+		}
+		line := fmt.Sprintf("branch=%s type=%T cause=%v", node.path, node.err, node.err)
+		truncated := len(line) > 1024
+		if truncated {
+			line = line[:1024]
+		}
+		t.Logf("GATE_UPGRADE_CAUSE %s text_truncated=%t", line, truncated)
+		var children []error
+		switch wrapped := node.err.(type) {
+		case interface{ Unwrap() []error }:
+			children = wrapped.Unwrap()
+		case interface{ Unwrap() error }:
+			children = []error{wrapped.Unwrap()}
+		}
+		available := 15 - visited - len(pending)
+		if len(children) > available {
+			t.Logf("GATE_UPGRADE_CAUSE tree_truncated=true branch=%s omitted_children=%d", node.path, len(children)-available)
+			children = children[:available]
+		}
+		for index, child := range children {
+			pending = append(pending, branch{child, fmt.Sprintf("%s/%d", node.path, index)})
 		}
 	}
 }
