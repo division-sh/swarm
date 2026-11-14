@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -179,6 +180,10 @@ func startReleaseServeEndpoint(t *testing.T, binary string, backend servedparity
 		t.Fatalf("public verify failed: %v\n%s", err, output)
 	}
 	args := []string{"serve", root, "--config", config, "--workspace-backend", "host", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0", "--self-check", "--verbose"}
+	opts := isolateDefaultServeProofDirectory(repoRootForTest(), cliapp.ServeOptions{ConfigPath: config})
+	if opts.SwarmDirSet {
+		args = append(args, "--swarm-dir", opts.SwarmDir)
+	}
 	if backend == servedparity.BackendExplicitPostgres {
 		args = append(args, "--store", "postgres")
 	}
