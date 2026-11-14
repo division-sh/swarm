@@ -92,11 +92,22 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	if err != nil {
 		return out, err
 	}
-	if found {
-		return out, fmt.Errorf("live fork flow selected run %s after source %s paused", live.RunID, current.plan.SourceRunID)
+	if found && paused.predecessor == nil && !req.liveSelectionHeld {
+		releaseSelection := req.LiveContexts.BeginLiveRunSelection()
+		defer releaseSelection()
+		req.liveSelectionHeld = true
+		live, found, err = req.LiveRuns.LoadLiveRun(ctx, scope)
+		if err != nil {
+			return out, err
+		}
 	}
 	if paused.predecessor != nil {
+		if found {
+			return out, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
+		}
 		live, found = *paused.predecessor, true
+	} else if found && live.RunID == current.plan.SourceRunID {
+		return out, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
 	}
 	if found {
 		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
@@ -233,6 +244,17 @@ func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContract
 	})
 	if err != nil {
 		return sourcePause{}, err
+	}
+	parked, err = control.RunDispatchParked(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, fmt.Errorf("read paused fork source control: %w", err)
+	}
+	availability, err = req.Owner.ports.fork.LoadRunBundleAvailability(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, fmt.Errorf("read paused fork source availability: %w", err)
+	}
+	if !parked || availability.Status != "paused" || availability.BundleHash != source.BundleHash() {
+		return sourcePause{}, fmt.Errorf("live fork source changed during pause readback: %s", availability.DetailString())
 	}
 	result := sourcePause{}
 	if found && live.RunID == sourceID {

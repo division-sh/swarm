@@ -577,7 +577,7 @@ func (s *postgresPipelineObligationStore) ClaimEvent(ctx context.Context, eventI
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
-	runID, err := pipelineClaimEventRun(ctx, s.backend, eventID, true)
+	runID, err := pipelineClaimEventRun(ctx, s.backend, eventID, purpose, true)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
@@ -608,7 +608,7 @@ func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID 
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
-	runID, err := pipelineClaimEventRun(ctx, s.backend, eventID, false)
+	runID, err := pipelineClaimEventRun(ctx, s.backend, eventID, purpose, false)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
@@ -635,7 +635,7 @@ func (s *sqlitePipelineObligationStore) ClaimEvent(ctx context.Context, eventID 
 	return work, nil
 }
 
-func pipelineClaimEventRun(ctx context.Context, q pipelineQueryer, eventID string, postgres bool) (string, error) {
+func pipelineClaimEventRun(ctx context.Context, q pipelineQueryer, eventID string, purpose runtimepipelineobligation.Purpose, postgres bool) (string, error) {
 	eventID = strings.TrimSpace(eventID)
 	if _, err := uuid.Parse(eventID); err != nil {
 		return "", fmt.Errorf("claim pipeline event: %w", err)
@@ -643,6 +643,12 @@ func pipelineClaimEventRun(ctx context.Context, q pipelineQueryer, eventID strin
 	query := `SELECT COALESCE(run_id, '') FROM events WHERE event_id = ?`
 	if postgres {
 		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
+	}
+	if purpose == runtimepipelineobligation.PurposeDecisionRoute {
+		query = `SELECT run_id FROM decision_card_route_obligations WHERE event_id = ? AND status = 'pending'`
+		if postgres {
+			query = `SELECT run_id::text FROM decision_card_route_obligations WHERE event_id = $1::uuid AND status = 'pending'`
+		}
 	}
 	var runID string
 	if err := q.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
@@ -2071,7 +2077,7 @@ func (s *PipelinePostgresOwner) postgresPipelineCandidatePage(
 				     , route.next_attempt_at
 				     , route.created_at
 				     , e.execution_mode
-				     , COALESCE(e.run_id::text, '')
+				     , route.run_id::text
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
 				JOIN events e ON e.event_id = route.event_id
@@ -2200,7 +2206,7 @@ func (s *PipelineSQLiteOwner) sqlitePipelineCandidatePage(
 				     , route.next_attempt_at
 				     , route.created_at
 				     , e.execution_mode
-				     , COALESCE(e.run_id, '')
+				     , route.run_id
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
 				JOIN events e ON e.event_id = route.event_id
