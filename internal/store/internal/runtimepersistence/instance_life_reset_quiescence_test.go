@@ -37,7 +37,7 @@ func proveInstanceResetQuiescence(t *testing.T, backend string) {
 			if group == "fanout" {
 				extra = map[string]string{
 					"review/events.yaml": "review.created:\n  account_id: text\nfinish.requested:\n  items: [text]\nitem.completed:\n  item: text\ntask.started:\ntimer.elapsed:\n",
-					"review/nodes.yaml":  "progress:\n  finish.requested:\n    advances_to: done\n    fan_out:\n      items_from: payload.items\n      as: item\n      emit:\n        event: item.completed\n        fields: {item: item}\n",
+					"review/nodes.yaml":  "progress:\n  finish.requested:\n    advances_to: done\n    fan_out:\n      items_from: payload.items\n      as: member\n      emit:\n        event: item.completed\n        fields: {item: member}\n",
 				}
 			}
 			f, first := newWorkflowTargetConstructionFixtureDocuments(t, backend, true, extra)
