@@ -80,13 +80,14 @@ type runCommandOptions struct {
 }
 
 type runStartResult struct {
-	PublicationID      string                  `json:"publication_id,omitempty"`
-	RunID              string                  `json:"run_id"`
-	EventID            string                  `json:"event_id,omitempty"`
-	DeploymentFeedIDs  []string                `json:"deployment_feed_ids,omitempty"`
-	Status             string                  `json:"status"`
-	DataBinding        durabledata.DataBinding `json:"data_binding"`
-	selectedBundleHash string
+	PublicationID       string                  `json:"publication_id,omitempty"`
+	RunID               string                  `json:"run_id"`
+	EventID             string                  `json:"event_id,omitempty"`
+	DeploymentFeedIDs   []string                `json:"deployment_feed_ids,omitempty"`
+	Status              string                  `json:"status"`
+	DataBinding         durabledata.DataBinding `json:"data_binding"`
+	selectedBundleHash  string
+	selectedSourceLabel string
 }
 
 type runCommandOKResult struct {
@@ -585,6 +586,9 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	}
 	if strings.TrimSpace(opts.connectURL) != "" {
 		result.selectedBundleHash = bundleHash
+		if bundleHash == strings.TrimSpace(health.Bundle.BundleHash) {
+			result.selectedSourceLabel = health.Bundle.SourceLabel
+		}
 	}
 	return result, nil
 }
@@ -1235,7 +1239,11 @@ func writeRunCommandStarted(out io.Writer, result runStartResult) {
 	}
 	fmt.Fprintf(out, "run started: run_id=%s status=%s\n", result.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, result.Status))
 	if result.selectedBundleHash != "" {
-		fmt.Fprintf(out, "bundle_hash=%s\n", result.selectedBundleHash)
+		fmt.Fprintf(out, "bundle_hash=%s", result.selectedBundleHash)
+		if result.selectedSourceLabel != "" {
+			fmt.Fprintf(out, " source=%s", cliSanitizeOneLineValue(result.selectedSourceLabel))
+		}
+		fmt.Fprintln(out)
 	}
 	if result.PublicationID != "" {
 		fmt.Fprintf(out, "rows published: publication_id=%s\n", result.PublicationID)

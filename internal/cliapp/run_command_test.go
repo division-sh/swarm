@@ -116,7 +116,7 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 				if req.Method == "health.check" {
 					health := runCommandHealthResult()
 					health["bundle"].(map[string]any)["bundle_hash"] = servedHash
-					health["bundle"].(map[string]any)["source_label"] = "not-a-selected-name"
+					health["bundle"].(map[string]any)["source_label"] = "serve-selected-name"
 					writeJSONRPCResult(t, w, req.ID, health)
 					return
 				}
@@ -171,10 +171,10 @@ func TestRunCommandPositionalSourceUsesCanonicalBundleIdentity(t *testing.T) {
 			if code != wantCode || starts.Load() != wantStarts {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 			}
-			if selection.connected && !mismatch && !strings.Contains(stdout.String(), "bundle_hash="+directoryHash+"\n") {
+			if selection.connected && !mismatch && !strings.Contains(stdout.String(), "bundle_hash="+directoryHash+" source=serve-selected-name\n") {
 				t.Fatalf("successful connected start omitted its selected identity: %s", &stdout)
 			}
-			if (!selection.connected || mismatch) && strings.Contains(stdout.String(), "bundle_hash=") || strings.Contains(stdout.String(), "not-a-selected-name") {
+			if (!selection.connected || mismatch) && (strings.Contains(stdout.String(), "bundle_hash=") || strings.Contains(stdout.String(), "serve-selected-name")) {
 				t.Fatalf("borrowed a name or changed local/refused output: %s", &stdout)
 			}
 		})
@@ -391,7 +391,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 					switch req.Method {
 					case "health.check":
 						health := runCommandHealthResult()
-						health["bundle"].(map[string]any)["source_label"] = "not-a-selected-name"
+						health["bundle"].(map[string]any)["source_label"] = "serve-selected-name"
 						return health
 					case "data.show":
 						if req.Params["detail"] == "request_binding" {
@@ -501,7 +501,11 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 				}
 			}
 			assertRunCommandMethods(t, calls, want)
-			if !strings.Contains(stdout.String(), "bundle_hash="+selectedHash+"\n") || strings.Contains(stdout.String(), "not-a-selected-name") {
+			wantIdentity := "bundle_hash=" + selectedHash
+			if !tc.retained {
+				wantIdentity += " source=serve-selected-name"
+			}
+			if !strings.Contains(stdout.String(), wantIdentity+"\n") || tc.retained && strings.Contains(stdout.String(), "serve-selected-name") {
 				t.Fatalf("publication receipt omitted or borrowed selected hash: %s", &stdout)
 			}
 			if tc.rows && (!strings.Contains(stdout.String(), "row 0 ACCEPTED") || !strings.Contains(stdout.String(), "feed published: deployment_feed_id="+feedID)) {
