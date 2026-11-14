@@ -450,11 +450,11 @@ func issue3011RegisterForSend(t *testing.T, opts cliapp.ServeOptions, peer *serv
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	var out, errOut bytes.Buffer
-	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"}, &out, &errOut, nil, nil, factory); code != 0 {
+	if code := cliapp.Execute(ctx, channelFixtureArguments(opts.ConfigPath, "channel", "connect", "whatsapp", "--yes"), &out, &errOut, nil, nil, factory); code != 0 {
 		t.Fatalf("registration failed: %d %s", code, errOut.String())
 	}
 	var outList, errList bytes.Buffer
-	if code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "list", "--json"}, &outList, &errList, nil, nil, factory); code != 0 {
+	if code := cliapp.Execute(ctx, channelFixtureArguments(opts.ConfigPath, "channel", "list", "--json"), &outList, &errList, nil, nil, factory); code != 0 {
 		t.Fatal("registration list failed", code)
 	}
 	var listed struct {
