@@ -42,14 +42,6 @@ type SourceFanOutIntentDiagnosticRow struct {
 	LeaseExpiry                     any
 }
 
-func CountFanOutIntentsForRun(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
 func FixturePipelineReceiptOutcomeTx(ctx context.Context, tx *sql.Tx, eventID string) (string, *runtimefailures.Envelope, error) {
 	if tx == nil {
 		return "", nil, fmt.Errorf("pipeline receipt evidence requires a selected read transaction")

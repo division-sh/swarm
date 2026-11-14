@@ -31,14 +31,6 @@ type WorkflowControlProjectionStorage struct {
 	Fields                      json.RawMessage
 }
 
-func CountWorkflowFieldRowsForRun(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
 func CountWorkflowHeadersCreatedSince(ctx context.Context, tx *sql.Tx, since time.Time) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE created_at >= $1`, since).Scan(&count)
