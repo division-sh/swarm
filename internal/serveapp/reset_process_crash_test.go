@@ -222,6 +222,7 @@ func TestResetCrashServeProcessHelper(t *testing.T) {
 	})
 	opts := cliapp.DefaultServeOptions()
 	opts.ConfigPath = os.Getenv("SWARM_TEST_RESET_CONFIG")
+	opts = isolateDefaultServeProofDirectory(repoRootForTest(), opts)
 	opts.SourceRoot = os.Getenv("SWARM_TEST_RESET_SOURCE")
 	opts.StoreMode = os.Getenv("SWARM_TEST_RESET_STORE")
 	opts.StoreModeSet = opts.StoreMode != ""

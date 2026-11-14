@@ -8077,6 +8077,7 @@ func startOwnedLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opt
 
 func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.ServeOptions, run func(context.Context, string, cliapp.ServeOptions) int) *serveRuntimeTestProcess {
 	t.Helper()
+	opts = isolateDefaultServeProofDirectory(repo, opts)
 	if opts.TestLifecycleProbe == nil {
 		if observer, ok := ownedMockLifecycleProbes.Load(t); ok {
 			opts.TestLifecycleProbe = observer.(lifecycleprobe.Observer)
@@ -8116,6 +8117,19 @@ func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.Se
 		done <- run(ctx, repo, opts)
 	}()
 	return process
+}
+
+func isolateDefaultServeProofDirectory(repo string, opts cliapp.ServeOptions) cliapp.ServeOptions {
+	if opts.SwarmDirSet || strings.TrimSpace(opts.ConfigPath) == "" {
+		return opts
+	}
+	directory, err := cliapp.ResolveServeContextRegistrationSwarmDir(invocationRootForTest(repo), opts)
+	if err == nil && directory.Source == "default ~/.swarm" {
+		// One owned config identifies the deployment across restart and reset.
+		opts.SwarmDir = cliapp.ResolvePath(repo, opts.ConfigPath) + ".proof-state"
+		opts.SwarmDirSet = true
+	}
+	return opts
 }
 
 func (p *serveRuntimeTestProcess) waitForReadyLine() {
