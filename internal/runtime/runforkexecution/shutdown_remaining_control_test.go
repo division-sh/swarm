@@ -114,7 +114,7 @@ func TestSelectedGracefulDrainRetainsNativePublicationHandoffBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newActivityForkFixture(t, backend)
-			ctx, request, _ := q1GateComponentSource(t, fixture.owner, true, false, true)
+			ctx, request, _ := q1GateComponentSource(t, fixture.owner, false, true, true)
 			attachment := q1StageBranchPointComponent(t, ctx, request)
 			p, container := attachment.prepared, attachment.container
 			if err := p.retainedRuntime.startExecution(container.attachment.ctx, container.attachment.pipeline, container.diagnostics, false); err != nil {
