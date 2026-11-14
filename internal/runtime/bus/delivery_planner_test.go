@@ -112,7 +112,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan,
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := plan.ValidatePersistentDeliveries(); err != nil {
+	if err := plan.requireAdmittedNodeIntents(); err != nil {
 		return RoutePlan{}, err
 	}
 	return plan, nil
