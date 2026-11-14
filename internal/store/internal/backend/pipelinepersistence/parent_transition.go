@@ -10,8 +10,9 @@ import (
 )
 
 // Run-scoped admission lives beside the existing selected-store claim registry.
-// Membership retires with each claim; no transaction or registry mutex is held
-// while draining.
+// Recovery membership retires with its claim; publication membership retires
+// on commit acknowledgment or an abandoned claim. No transaction or registry
+// mutex is held while draining.
 type pipelineRecoveryTransitions struct {
 	mu   sync.Mutex
 	runs map[string]*pipelineRecoveryRun

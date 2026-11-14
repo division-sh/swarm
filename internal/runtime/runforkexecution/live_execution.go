@@ -21,6 +21,7 @@ import (
 
 type sourcePause struct {
 	predecessor *runlifecycle.LiveRun
+	paused      bool
 }
 
 // Preparation must refuse before predecessor retirement. Once execution starts,
@@ -48,6 +49,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 		if err != nil {
 			return out, err
 		}
+		req.requirePausedSource = paused.paused
 		transitionOwner, ok := req.Owner.ports.pipelineObligations.(pipelineobligation.ParentTransitionOwner)
 		if !ok {
 			return out, errors.New("live fork requires selected-store run transition admission")
@@ -226,6 +228,23 @@ func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContract
 	if !availability.Available() || availability.RunID != sourceID || availability.BundleHash != source.BundleHash() {
 		return sourcePause{}, fmt.Errorf("live fork source differs from its exact admitted bundle: %s", availability.DetailString())
 	}
+	selectedSource := found && live.RunID == sourceID
+	pausedLanding := false
+	if availability.Status == "paused" {
+		landingReader, ok := req.LiveRuns.(runlifecycle.LandingRunReader)
+		if !ok {
+			return sourcePause{}, errors.New("paused fork source requires its landing-run reader")
+		}
+		landing, selected, err := landingReader.LoadLandingRun(ctx, scope)
+		if err != nil {
+			return sourcePause{}, err
+		}
+		pausedLanding = selected && landing.RunID == sourceID && landing.State == runlifecycle.StatePaused
+	}
+	if !selectedSource && !pausedLanding {
+		// A retained historical source is not the flow's live run to pause.
+		return sourcePause{}, nil
+	}
 	ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, source), sourceID)
 	if scope, present := authoractivity.ScopeFromContext(ctx); present && scope.Kind == authoractivity.ScopeBundle {
 		ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(scope.RuntimeInstanceID, source.BundleHash()))
@@ -238,7 +257,14 @@ func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContract
 		if availability.Status != "paused" {
 			return sourcePause{}, fmt.Errorf("live fork source changed during paused readback: run=%s status=%s", sourceID, availability.Status)
 		}
-		return sourcePause{}, nil
+		result := sourcePause{paused: true}
+		if selectedSource {
+			result.predecessor = &live
+		}
+		return result, nil
+	}
+	if !selectedSource {
+		return sourcePause{}, fmt.Errorf("retained paused fork source %s lacks its admitted paused control", sourceID)
 	}
 	if availability.Status != "running" && availability.Status != "live" {
 		return sourcePause{}, fmt.Errorf("live fork source is not pausable: run=%s status=%s", sourceID, availability.Status)
@@ -260,10 +286,7 @@ func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContract
 	if !parked || availability.Status != "paused" || availability.BundleHash != source.BundleHash() {
 		return sourcePause{}, fmt.Errorf("live fork source changed during pause readback: %s", availability.DetailString())
 	}
-	result := sourcePause{}
-	if found && live.RunID == sourceID {
-		result.predecessor = &live
-	}
+	result := sourcePause{predecessor: &live, paused: true}
 	return result, nil
 }
 

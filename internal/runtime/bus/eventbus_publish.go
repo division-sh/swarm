@@ -1111,6 +1111,9 @@ func (p PreparedPublish) WithCommitOutcome(outcome EventAppendOutcome) (Prepared
 	if err := validateEventAppendOutcome(outcome); err != nil {
 		return PreparedPublish{}, err
 	}
+	if err := p.publicationClaim.publicationCommitted(); err != nil {
+		return PreparedPublish{}, err
+	}
 	p.exactDuplicate = outcome == EventAppendExactDuplicate
 	return p, nil
 }

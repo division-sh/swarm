@@ -647,6 +647,12 @@ type Store interface {
 	SummarizeRun(context.Context, string) (RunSummary, error)
 }
 
+// PublicationCommitObserver ends a publication's source-fork wait after its
+// durable commit is acknowledged. The claim remains owned until settlement.
+type PublicationCommitObserver interface {
+	PublicationCommitted(Claim) error
+}
+
 // ResumeAdmissionPreflighter inspects every pending selected-store obligation
 // without applying claim eligibility or mutating queue state.
 type ResumeAdmissionPreflighter interface {
