@@ -521,7 +521,7 @@ func (s *DeliverySQLiteOwner) ProviderOriginRecoveryAbandonedTx(ctx context.Cont
 	return sqliteDeliveryAdapter.providerOriginRecoveryAbandoned(ctx, tx, claim)
 }
 
-func (a *Adapter) providerOriginRecoveryAbandoned(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
+func (a *Adapter) providerOriginRecoveryAbandoned(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
 	disposition, err := a.readProviderOriginRecoveryDisposition(ctx, tx, claim, false)
 	return disposition == providerOriginRecoveryExpiredExact || disposition == providerOriginRecoveryAlreadyTerminal, err
 }
