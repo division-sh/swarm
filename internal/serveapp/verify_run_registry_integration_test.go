@@ -202,8 +202,18 @@ func registryProofVerify(t *testing.T, options cliapp.ServeOptions, runID, phase
 	for _, observation := range stage.Validation.BootReport.Observations {
 		if observation.CheckID == "run_mutation_drift" {
 			observed = true
-			if (observation.Status == "passed") != (phase == "clean") {
+			if phase == "clean" && observation.Status != "passed" {
 				t.Fatalf("shared stage drift decision: phase=%s observation=%+v", phase, observation)
+			}
+			if phase == "drift" {
+				if observation.Status != "failed" {
+					t.Fatalf("shared stage did not refuse drift: %+v", observation)
+				}
+				for _, evidence := range []string{runID, entityID, "verdict", "watchlist", "injected-drift"} {
+					if !strings.Contains(observation.Reason, evidence) {
+						t.Fatalf("shared stage drift refusal lost %q: %+v", evidence, observation)
+					}
+				}
 			}
 		}
 	}
