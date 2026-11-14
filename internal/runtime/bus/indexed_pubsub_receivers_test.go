@@ -191,8 +191,10 @@ func TestIndexedPubsubRootUsesGenerationCoordinate(t *testing.T) {
 	for _, path := range []string{eventtest.UUID("other-root-run"), "private-child"} {
 		foreign := subscribers[0]
 		foreign.Path = path
-		if intents := (ordinaryPublicationSource{}).nodeIntents(source, event, event, []Subscriber{foreign}); len(intents) != 0 {
-			t.Fatalf("foreign root coordinate obtained delivery authority: %+v", intents)
+		candidate := newRoutePlan(event)
+		candidate.AddDeliveryIntents((ordinaryPublicationSource{}).nodeIntents(source, event, event, []Subscriber{foreign})...)
+		if len(candidate.DeliveryRoutes()) != 0 || candidate.ValidatePersistentDeliveries() == nil {
+			t.Fatalf("foreign root coordinate obtained delivery authority: %+v", candidate)
 		}
 	}
 }

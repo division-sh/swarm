@@ -112,7 +112,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan,
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
+	if err := plan.ValidatePersistentDeliveries(); err != nil {
 		return RoutePlan{}, err
 	}
 	return plan, nil
@@ -1589,7 +1589,23 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 	intent := plan.DeliveryIntents[0]
 	subscriber := Subscriber{Recipient: intent.Recipient, Path: want.FlowID, handlerNode: intent.Handler.Node(), targetHandler: intent.Handler}
 	root := rootExecutionCoordinate(planner.recipientPolicy.semanticSource, plan.Event.RunID())
-	if !resolvedSelectedRunRootIntentMatchesSubscriber(intent, subscriber, root, want) {
+	admit := func(result RoutePlanDeliveryIntent, candidate Subscriber, coordinate semanticview.RootExecutionCoordinate) bool {
+		projection := publicationTargetOwnerEvidence{source: planner.recipientPolicy.semanticSource}
+		if !coordinate.Valid() {
+			projection.source = nil
+		}
+		proposed := newRoutePlan(plan.Event)
+		proposed.DeliveryIntents = []RoutePlanDeliveryIntent{result, {
+			Recipient: candidate.Recipient, Handler: routedSubscriberTargetHandler(candidate, plan.Event.Type()),
+			nodeSubscribers: []Subscriber{candidate}, Producer: routeIntentProducerOrdinary, Persist: true,
+		}}
+		if err := projection.resolveNodeTargetOwners(&proposed, nil); err != nil {
+			return false
+		}
+		projection.bindNodeCandidates(&proposed)
+		return proposed.ValidatePersistentDeliveries() == nil
+	}
+	if !admit(intent, subscriber, root) {
 		t.Fatal("exact selected-root receipt refused its admitted node and handler")
 	}
 	otherNode := testRootNode(t, "other-node")
@@ -1629,22 +1645,56 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 		t.Run(test.name, func(t *testing.T) {
 			changed, changedSubscriber, changedRoot := intent, subscriber, root
 			test.change(&changed, &changedSubscriber, &changedRoot)
-			if resolvedSelectedRunRootIntentMatchesSubscriber(changed, changedSubscriber, changedRoot, changed.TargetBlueprint) {
+			if admit(changed, changedSubscriber, changedRoot) {
 				t.Fatal("selected-root exception accepted mismatched authority")
 			}
 		})
 	}
 	changed := intent
 	changed.Recipient = events.MustNodeDeliveryRecipient(otherNode)
-	handler := routedSubscriberTargetHandler(subscriber, plan.Event.Type())
-	if routePlanIntentAuthorizesRoutedSubscriber(changed, subscriber, root, handler) {
+	if admit(changed, subscriber, root) {
 		t.Fatal("outer node-recipient fence was bypassed")
 	}
 	changed = intent
 	changed.Handler = changed.Handler.ForEvent("foreign.event")
-	if routePlanIntentAuthorizesRoutedSubscriber(changed, subscriber, root, handler) {
+	if admit(changed, subscriber, root) {
 		t.Fatal("outer localized-handler fence was bypassed")
 	}
+	t.Run("each unresolved candidate needs its own admitted result", func(t *testing.T) {
+		foreign := subscriber
+		foreign.Path = "foreign"
+		proposed := newRoutePlan(plan.Event)
+		proposed.AddDeliveryIntents(intent)
+		for _, candidate := range []Subscriber{subscriber, foreign} {
+			proposed.AddDeliveryIntents(RoutePlanDeliveryIntent{
+				Recipient: candidate.Recipient, Handler: routedSubscriberTargetHandler(candidate, plan.Event.Type()),
+				nodeSubscribers: []Subscriber{candidate}, Producer: routeIntentProducerOrdinary, Persist: true,
+			})
+		}
+		projection := publicationTargetOwnerEvidence{source: planner.recipientPolicy.semanticSource}
+		if err := projection.resolveNodeTargetOwners(&proposed, nil); err != nil {
+			t.Fatal(err)
+		}
+		projection.bindNodeCandidates(&proposed)
+		if err := proposed.ValidatePersistentDeliveries(); err == nil {
+			t.Fatal("one lawful candidate hid a different unbound instance")
+		}
+		if len(proposed.DeliveryRoutes()) != 1 {
+			t.Fatalf("unresolved candidate became executable: %+v", proposed.DeliveryRoutes())
+		}
+	})
+	t.Run("node descriptions are owned projections", func(t *testing.T) {
+		description := plan.routedRecipients()
+		if len(description) != 1 {
+			t.Fatalf("admitted node readback = %+v", description)
+		}
+		description[0].Path = "foreign"
+		copy := plan.Normalized()
+		copy.DeliveryIntents[0].nodeSubscribers[0].Path = "another"
+		if got := plan.routedRecipients(); len(got) != 1 || got[0].Path == "foreign" || got[0].Path == "another" {
+			t.Fatalf("readback or normalized copy mutated admitted result: %+v", got)
+		}
+	})
 }
 
 func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *testing.T) {

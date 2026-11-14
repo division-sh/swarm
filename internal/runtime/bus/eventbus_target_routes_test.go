@@ -578,12 +578,71 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	eb.deliveryPlanner.routeResolver.resolveRoutedSubscribers = func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+		return []Subscriber{{
+			Recipient: wantBlueprint.Recipient, Path: wantBlueprint.Target.FlowInstance,
+			routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "task.started",
+			handlerNode: wantBlueprint.Handler.Node(), targetHandler: wantBlueprint.Handler,
+		}}, nil
+	}
 	if err := eb.Publish(context.Background(), eventtest.RuntimeControl(eventID,
 		events.EventType("review/inst-1/task.started"), "", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if !guardSawMaterializedRoute {
 		t.Fatal("recipient plan guard did not see materialized route")
+	}
+	for _, kind := range []string{"node", "agent"} {
+		t.Run("late private "+kind, func(t *testing.T) {
+			const eventType = "task.started"
+			source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+				"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":          "stages: []\ninputs: [task.started]\n",
+				"events.yaml":          "task.started:\n",
+				"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"review/schema.yaml":   "stages: []\ninputs: [task.started]\n",
+				"review/events.yaml":   "task.started:\n",
+				"review/nodes.yaml":    "target-node:\n  task.started: {}\n",
+				"review/agents.yaml":   "observer:\n  intent: {inline: 'Observe work.'}\n  subscriptions: [task.started]\n",
+			}))
+			store := newTargetRouteMemoryStore()
+			root := events.RouteIdentity{FlowID: ".", FlowInstance: busInternalTestRunID, EntityID: runtimeflowidentity.EntityID(busInternalTestRunID)}
+			private := events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: runtimeflowidentity.EntityID("review")}
+			store.setTargetOwnerRoutes(root, private)
+			blueprint := DeliveryRouteBlueprint{
+				Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")), Target: private,
+				Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent(eventType),
+			}
+			if kind == "agent" {
+				blueprint = DeliveryRouteBlueprint{
+					Recipient:     events.MustAgentDeliveryRecipient("observer"),
+					AgentIdentity: agentidentitytest.DeclaredForRun(t, busInternalTestRunID, "observer", "review", "review", "review", "review"),
+					Target:        events.RouteIdentity{FlowID: "review", FlowInstance: "review"},
+				}
+			}
+			calls := 0
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source,
+				Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+					calls++
+					return []DeliveryRouteBlueprint{blueprint}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			installConnectionSourceConstructionForRun(t, eb, source, "review", busInternalTestRunID)
+			event := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), eventType, "operator", "", []byte("{}"), 0,
+				busInternalTestRunID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(busInternalTestRunID), time.Now().UTC())
+			store.requireConstructionUnchanged(t)
+			if err := eb.Publish(context.Background(), event); err == nil || !strings.Contains(err.Error(), "cannot authorize private delivery") {
+				t.Fatalf("late private %s result = %v, want ingress authority refusal", kind, err)
+			}
+			if calls != 1 || len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 {
+				t.Fatalf("late private route escaped admission: calls=%d events=%+v routes=%+v settlements=%+v scopes=%+v receipts=%+v", calls, store.events, store.routes, store.settlements, store.scopes, store.receipts)
+			}
+		})
 	}
 }
 
