@@ -3,11 +3,58 @@ package operatorchannel
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
 )
 
 type CallbackRollbackEvidence struct {
 	Actions, Acknowledgments int
+}
+
+type CallbackRollbackFixtureFault struct {
+	owner *SQLiteOwner
+	event string
+	ctx   context.Context
+}
+
+func OpenCallbackRollbackFaultForTest(ctx context.Context, owner *SQLiteOwner, event string) (*CallbackRollbackFixtureFault, error) {
+	decoded, err := hex.DecodeString(event)
+	if owner == nil || owner.backend == nil || !owner.backend.Valid() || err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != event {
+		return nil, fmt.Errorf("callback rollback fault requires its original SQLite owner and exact provider event")
+	}
+	fault := &CallbackRollbackFixtureFault{owner: owner, event: event, ctx: ctx}
+	if err := fault.set(true); err != nil {
+		return nil, err
+	}
+	return fault, nil
+}
+
+func (f *CallbackRollbackFixtureFault) set(enabled bool) error {
+	return f.owner.SetCallbackRollbackFixtureFault(f.ctx, f.event, enabled)
+}
+
+func (f *CallbackRollbackFixtureFault) ReadEvidence(ctx context.Context) (CallbackRollbackEvidence, error) {
+	if f.owner == nil {
+		return CallbackRollbackEvidence{}, errors.New("callback rollback fault is closed")
+	}
+	return f.owner.ReadCallbackRollbackFixtureEvidence(ctx, f.event)
+}
+
+func (f *CallbackRollbackFixtureFault) CardState(ctx context.Context, token string) (string, error) {
+	if f.owner == nil {
+		return "", errors.New("callback rollback fault is closed")
+	}
+	return f.owner.ReadCallbackRollbackFixtureCardState(ctx, token)
+}
+
+func (f *CallbackRollbackFixtureFault) Close() error {
+	if f.owner == nil {
+		return errors.New("callback rollback fault is closed")
+	}
+	err := f.set(false)
+	f.owner = nil
+	return err
 }
 
 func (s *SQLiteOwner) SetCallbackRollbackFixtureFault(ctx context.Context, event string, enabled bool) error {
