@@ -186,7 +186,7 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 		return runtimeinbound.CommitResult{}, err
 	}
 	request := command.Request.Normalized()
-	outcome := runPostgresEventMutationResult(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
+	outcome := runPostgresEventMutationResult(ctx, s, inboundNeedsCandidateHandoff(command.Publications), func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
 		txctx, release := command.WithNativeLifetime(txctx)
 		defer release()
 		var result runtimeinbound.CommitResult

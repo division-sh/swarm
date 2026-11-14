@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 )
@@ -18,7 +19,7 @@ import (
 // Publication, pause, fork and readback below use the assembled HTTP surface.
 func TestSelectedForkPendingInputBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, mode := range []string{"unchanged", "compatible", "incompatible", "missing_input", "ambiguous_artifact", "explicit_child", "ordinary_child", "ordinary_root", "reference", "pause_resume"} {
+		for _, mode := range []string{"unchanged", "compatible", "incompatible", "missing_input", "ambiguous_artifact", "explicit_child", "ordinary_child", "ordinary_root", "reference", "pause_resume", "fork_wait_publication"} {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				var selected *selectedStoreOwner
 				previous := projectRuntimePersistenceForServe
@@ -38,6 +39,24 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-pause"})
+				var releaseFork func()
+				if mode == "fork_wait_publication" {
+					owner, ok := selected.RuntimeDeps().PipelineObligations.(pipelineobligation.ParentTransitionOwner)
+					if !ok {
+						t.Fatal("selected store has no native source fork transition")
+					}
+					transition, err := owner.BeginSourceForkTransition(t.Context(), seed.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(transition.Done)
+					workDone, err := rt.Runtime.WorkOccurrence().BeginRunTransition(t.Context(), seed.RunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(workDone)
+					releaseFork = func() { workDone(); transition.Done() }
+				}
 				params := map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "input-pending"}
 				wantDone := 2
 				if mode == "reference" {
@@ -97,6 +116,18 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					return
 				}
 				if mode == "pause_resume" {
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-resume"})
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
+					requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
+					requirePendingInputPublicStates(t, rt, seed.RunID, 2)
+					return
+				}
+				if mode == "fork_wait_publication" {
+					replayed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+					if point.RunID != seed.RunID || point.NewRunCreated || replayed.EventID != point.EventID || replayed.RunID != point.RunID {
+						t.Fatalf("fenced publication lost exact queued identity: first=%+v replay=%+v", point, replayed)
+					}
+					releaseFork()
 					requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-resume"})
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)

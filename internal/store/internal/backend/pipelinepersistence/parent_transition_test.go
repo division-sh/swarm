@@ -94,11 +94,15 @@ func TestPipelineParentTransitionOwnsExactRecoveryAcquisition(t *testing.T) {
 	}
 }
 
-func TestPipelineForkTransitionJoinsPublicationWithoutChangingStopOrOtherRun(t *testing.T) {
+func TestPipelineForkTransitionJoinsStartedWorkButNotPublicationPreparation(t *testing.T) {
 	var registry pipelineRecoveryTransitions
-	finishPublication, admitted := registry.reservePublication("source", false)
+	finishPublication, admitted := registry.reservePublication("source")
 	if !admitted {
 		t.Fatal("source publication refused before fork")
+	}
+	finishStarted, admitted := registry.reserve("source")
+	if !admitted {
+		t.Fatal("started source work refused before fork")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -124,46 +128,54 @@ func TestPipelineForkTransitionJoinsPublicationWithoutChangingStopOrOtherRun(t *
 		select {
 		case <-ticker.C:
 		case <-deadline:
-			t.Fatal("fork transition did not fence publication admission")
+			t.Fatal("fork transition did not fence started-work admission")
 		}
 	}
-	if done, ok := registry.reservePublication("source", false); ok {
-		done()
-		t.Fatal("fresh publication crossed source fork fence")
-	}
-	accepted, ok := registry.reservePublication("source", true)
+	fresh, ok := registry.reservePublication("source")
 	if !ok {
-		t.Fatal("accepted source publication could not finish after fork fence")
+		t.Fatal("fresh source publication could not commit while fork joined started work")
 	}
 	if done, ok := registry.reserve("source"); ok {
 		done()
 		t.Fatal("fresh recovery crossed source fork fence")
 	}
-	other, ok := registry.reservePublication("other", false)
+	other, ok := registry.reservePublication("other")
 	if !ok {
 		t.Fatal("unrelated publication was fenced")
 	}
 	other()
-	stop, err := registry.begin(ctx, "source")
+	var stopRegistry pipelineRecoveryTransitions
+	stopPublication, ok := stopRegistry.reservePublication("source")
+	if !ok {
+		t.Fatal("source publication refused before stop")
+	}
+	stop, err := stopRegistry.begin(ctx, "source")
 	if err != nil {
 		t.Fatalf("stop waited for foreground publication: %v", err)
 	}
 	stop.Done()
+	stopPublication()
 	select {
 	case err := <-finished:
-		t.Fatalf("fork did not join held publication: %v", err)
+		t.Fatalf("fork did not join started source work: %v", err)
 	default:
 	}
 	finishPublication()
-	accepted()
+	select {
+	case err := <-finished:
+		t.Fatalf("fork waited for publication after its started work remained: %v", err)
+	default:
+	}
+	finishStarted()
 	select {
 	case err := <-finished:
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-ctx.Done():
-		t.Fatal("fork did not join settled publication")
+		t.Fatal("fork did not join settled started work")
 	}
+	fresh()
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	if len(registry.runs) != 0 {
