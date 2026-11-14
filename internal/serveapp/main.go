@@ -1367,7 +1367,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 			return 1
 		}
 	}
-	if len(bundlePackLoads) > 0 && req.Purpose == executionposture.Live {
+	if len(bundlePackLoads) > 0 && req.Purpose == executionposture.Live && req.BootChecks == nil {
 		primaryPackLoad := bundlePackLoads[0]
 		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels, loadedBundle.source, apiListener)
 		if preflight.HasBlockers() {

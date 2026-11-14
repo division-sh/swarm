@@ -190,7 +190,7 @@ func TestVerifyEarlyRefusalPreservesIncompleteLedgerOnPublicOutputs(t *testing.T
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 					t.Fatal(err)
 				}
-				if result.OK || result.AdmissionComplete || result.ValidationScope != "deployment" || result.LiveReadiness != "not_evaluated" || result.Observations == nil || result.ExecutionObligations == nil || result.Members == nil {
+				if result.OK || result.AdmissionComplete || result.ValidationScope != "structural" || result.LiveReadiness != "not_evaluated" || result.Observations == nil || result.ExecutionObligations == nil || result.Members == nil {
 					t.Fatalf("early refusal fabricated readiness or omitted evidence: %#v", result)
 				}
 				failed, blocked := false, false

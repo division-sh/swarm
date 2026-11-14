@@ -36,9 +36,6 @@ func TestCatalogTypeDetachmentPublicRestartBothStores(t *testing.T) {
 			var description string
 			for _, command := range []string{"verify", "describe"} {
 				args := []string{command, "--json", source, "--config", config}
-				if command == "verify" {
-					args = append(args, "--portable")
-				}
 				result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
 				if result.err != nil {
 					t.Fatalf("public %s: %v\n%s", command, result.err, result.output)

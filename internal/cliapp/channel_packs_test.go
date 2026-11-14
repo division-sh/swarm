@@ -3,16 +3,20 @@ package cliapp
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil/packfixture"
 )
@@ -77,6 +81,49 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram.telegram_bot_token"]; got != "telegram_hitl_bot" {
 		t.Fatalf("credential mapping = %q", got)
 	}
+	t.Run("prelogin_identity_is_only_the_compiled_read", func(t *testing.T) {
+		store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Set(t.Context(), "telegram_hitl_bot", "read-only-test-token"); err != nil {
+			t.Fatal(err)
+		}
+		seal, err := runtimecredentials.SealCurrentValue(t.Context(), store, "telegram_hitl_bot")
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity, err := loaded.Plans[0].InterfaceIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		op := channelonboarding.Operation{DeploymentRegistration: true, Provider: "telegram", Interface: identity, AccountReference: "42",
+			CredentialAdmissions: []channelonboarding.CredentialAdmission{{Role: "telegram.telegram_bot_token", StoreKey: seal.Key, ValueSeal: seal.Seal}},
+		}
+		inventory := channelonboarding.RetainedActivationInventory{Operations: []channelonboarding.Operation{op}}
+		calls := 0
+		read := registration.HTTPExecutor{Client: &http.Client{Transport: channelIdentityReadTransport(func(request *http.Request) (*http.Response, error) {
+			calls++
+			if request.Method != http.MethodGet || request.URL.Host != "api.telegram.org" || !strings.HasSuffix(request.URL.Path, "/getMe") {
+				t.Fatal("identity check attempted a non-identify provider operation")
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"id":42,"is_bot":true,"first_name":"Check","username":"check_bot"}}`)), Header: http.Header{}}, nil
+		})}}
+		admitted, err := inspectServeChannelIdentities(t.Context(), inventory, loaded.Plans, store, read)
+		if err != nil || calls != 1 || len(admitted) != 1 || admitted[0] != seal || !reflect.DeepEqual(inventory.Operations[0], op) {
+			t.Fatalf("identity observation changed ownership or failed its compiled read: calls=%d err=%v", calls, err)
+		}
+		inventory.Operations[0].AccountReference = "43"
+		if _, err := inspectServeChannelIdentities(t.Context(), inventory, loaded.Plans, store, read); err == nil || calls != 2 {
+			t.Fatalf("foreign account was accepted: calls=%d err=%v", calls, err)
+		}
+		if err := store.Set(t.Context(), seal.Key, "changed-token"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := inspectServeChannelIdentities(t.Context(), inventory, loaded.Plans, store, read); err == nil || calls != 2 {
+			t.Fatalf("stale seal reached the provider: calls=%d err=%v", calls, err)
+		}
+	})
 	for _, plan := range loaded.Plans {
 		if subject, err := plan.CapabilitySubject(); err != nil || subject.ID != plan.ChannelIdentity().ID() {
 			t.Fatalf("standalone installed channel identity changed: %+v error=%v", subject, err)
@@ -214,6 +261,12 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 			}
 		})
 	}
+}
+
+type channelIdentityReadTransport func(*http.Request) (*http.Response, error)
+
+func (f channelIdentityReadTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 type channelTestCredentialStore map[string]string

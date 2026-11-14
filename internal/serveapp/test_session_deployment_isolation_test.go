@@ -84,7 +84,7 @@ func TestSwarmTestUsesCompleteDeploymentLLMConfig(t *testing.T) {
 				if selected.Backend != storebackend.BackendSQLite || strings.HasPrefix(selected.SQLitePath, source+string(os.PathSeparator)) {
 					t.Fatalf("test did not keep its private store: %#v", selected)
 				}
-				return original(ctx, selected, cfg)
+				return original(ctx, selected, cfg, bootCheck...)
 			}
 			var out, errOut bytes.Buffer
 			code := executeCLIFrom(t.Context(), source, args, &out, &errOut, nil)
@@ -163,7 +163,7 @@ serve:
 				if cfg.Database.PasswordFile != "" || cfg.Workspace.HostRoot == filepath.Join(deployment, "must-not-create") {
 					t.Fatal("deployment resource configuration crossed private construction boundary")
 				}
-				return original(ctx, selected, cfg)
+				return original(ctx, selected, cfg, bootCheck...)
 			}
 			var out, errOut bytes.Buffer
 			code := executeCLIFrom(context.Background(), source,

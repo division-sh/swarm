@@ -158,7 +158,7 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	oldBuild := buildStoresForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
+		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck)})
 	}
 	t.Cleanup(func() { buildStoresForServe = oldBuild })
 	root := writeServedEventPublishFollowUpFixture(t)
