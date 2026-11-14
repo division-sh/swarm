@@ -2049,6 +2049,7 @@ func buildRuntimeHost(ctx context.Context, req runtimeCompositionRequest, reconc
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
 		selectedDecisions: channelSelectedDecisions,
+		completionReplay:  storeDeps.WorkflowPersistence,
 		sessions:          sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
 		refreshSessions: func(refreshCtx context.Context) error {
 			if err := channelActivationRefresher.RefreshChannelActivations(refreshCtx); err != nil {

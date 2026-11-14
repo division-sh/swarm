@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
@@ -94,6 +95,12 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": f.base.RunID}, &header)
 					if header.Run.BundleHash != wantHash || header.Run.Status != wantStatus {
 						t.Fatalf("restart run header=%+v want_hash=%s want_status=%s new_primary=%s", header.Run, wantHash, wantStatus, rt.BundleHash)
+					}
+					if wantStatus == "completed" {
+						lookup, availability, err := supervisor.runtimeContexts.LookupRunStatus(t.Context(), f.base.RunID)
+						if err != nil || lookup.Loaded() || availability.Status != "completed" || availability.BundleHash != wantHash {
+							t.Fatalf("completed replay fixture is not exact/unloaded: lookup=%+v availability=%+v error=%v", lookup, availability, err)
+						}
 					}
 				}
 				upgrade("", "running")
@@ -205,6 +212,38 @@ func TestMailboxUnchangedGateUpgradeAnswerBothStores(t *testing.T) {
 				assertAttribution()
 				upgrade(answerSource, "completed")
 				answer()
+				capture.Lock()
+				calls, reply := capture.calls, capture.result
+				capture.Unlock()
+				wantCalls := 1
+				if transport == "api" {
+					wantCalls = 2
+				}
+				if calls != wantCalls {
+					t.Fatalf("transport mutation calls=%d want=%d", calls, wantCalls)
+				}
+				if transport == "api" {
+					raw, err := canonicaljson.Bytes(reply)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var replay, original map[string]any
+					if err := json.Unmarshal(raw, &replay); err != nil || replay["idempotency_replayed"] != true {
+						t.Fatalf("API did not replay retained completion: %s error=%v", raw, err)
+					}
+					delete(replay, "idempotency_replayed")
+					snapshot := gateCompletionRead(t, rt, "exact_replay_response", before.RunID, before.CardID, domain)
+					for _, row := range snapshot.API {
+						if row.Method == domain.Method && row.Actor == domain.Actor && row.Key == domain.Key && row.Hash == domain.Hash && row.ResourceID == before.CardID {
+							if err := json.Unmarshal([]byte(row.Response), &original); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					if original == nil || !reflect.DeepEqual(original, replay) {
+						t.Fatal("API replay response differs from retained domain response")
+					}
+				}
 				assertAttribution()
 				var count int
 				if err := rt.DB.QueryRow(`SELECT count(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, before.RunID).Scan(&count); err != nil || count != 1 {

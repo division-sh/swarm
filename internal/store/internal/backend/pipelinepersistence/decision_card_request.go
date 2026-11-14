@@ -3,8 +3,10 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
@@ -13,6 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -35,6 +39,96 @@ type decisionCardRequestLease struct {
 type decisionCardRequestSource interface {
 	GetDecisionCard(context.Context, string) (decisioncard.Card, error)
 	RequirePresentRunSource(context.Context, string) (correlation.SourceArtifactFact, error)
+}
+
+type decisionCardReplayOwner interface {
+	decisionCardRequestSource
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	pipeline.DecisionCardMutationOwner
+}
+
+type decisionCardReplaySource struct {
+	runID, issuedHash, contentHash, schemaHash string
+	root                                       sourceartifact.RootAdmissionReference
+}
+
+func decisionCardReplayContext(ctx context.Context, owner decisionCardReplayOwner, req apiidempotency.Request) (context.Context, decisionCardReplaySource, error) {
+	card, err := owner.GetDecisionCard(ctx, req.ResourceID)
+	if err != nil {
+		return nil, decisionCardReplaySource{}, err
+	}
+	if card.Anchor.Kind() != decisioncard.AnchorKindStageGate {
+		return nil, decisionCardReplaySource{}, fmt.Errorf("unloaded replay requires a stage-gate card")
+	}
+	rooted, err := owner.LoadRunRootedSource(ctx, card.RunID)
+	if err != nil {
+		return nil, decisionCardReplaySource{}, err
+	}
+	if err := rooted.Validate(); err != nil {
+		return nil, decisionCardReplaySource{}, err
+	}
+	fact, err := correlation.DecodeSourceArtifactFact(rooted.Admission().BundleHash())
+	if err != nil {
+		return nil, decisionCardReplaySource{}, err
+	}
+	if supplied, ok := correlation.SourceArtifactFactFromContext(ctx); ok && !supplied.Matches(fact) {
+		return nil, decisionCardReplaySource{}, fmt.Errorf("card source differs from admitted runtime source")
+	}
+	if err := correlation.CheckRootAdmissionContext(ctx, rooted.Admission().Reference()); err != nil {
+		return nil, decisionCardReplaySource{}, err
+	}
+	ctx = correlation.WithSourceArtifactFact(ctx, fact)
+	evidence := decisionCardReplaySource{card.RunID, card.BundleHash, card.CardContentHash, card.DecisionSchemaHash, rooted.Admission().Reference()}
+	return correlation.WithRootAdmission(ctx, rooted.Admission()), evidence, nil
+}
+
+func replayDecisionCardMutation(ctx context.Context, owner decisionCardReplayOwner, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (response json.RawMessage, replayed bool, err error) {
+	if err := mutation.ValidateRequest(req); err != nil {
+		return nil, false, err
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, false, nil
+	}
+	ctx, err = startupownership.FreezeMutationAuthority(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	ctx, expected, err := decisionCardReplayContext(ctx, owner, req)
+	if err != nil {
+		return nil, false, err
+	}
+	lease, err := owner.AcquireDecisionCardMutation(ctx, req, mutation)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() {
+		if releaseErr := lease.Release(context.WithoutCancel(ctx)); releaseErr != nil {
+			response, replayed = nil, false
+			err = errors.Join(err, releaseErr)
+		}
+	}()
+	_, actual, err := decisionCardReplayContext(ctx, owner, req)
+	if err != nil {
+		return nil, false, err
+	}
+	if actual != expected {
+		return nil, false, fmt.Errorf("card replay source evidence changed during acquisition")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if completion, found := lease.Replay(); found {
+		return append(json.RawMessage(nil), completion.Response...), true, nil
+	}
+	return nil, false, nil
+}
+
+func (s *PipelinePostgresOwner) ReplayDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (json.RawMessage, bool, error) {
+	return replayDecisionCardMutation(ctx, s, req, mutation)
+}
+
+func (s *PipelineSQLiteOwner) ReplayDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (json.RawMessage, bool, error) {
+	return replayDecisionCardMutation(ctx, s, req, mutation)
 }
 
 func admitDecisionCardRequest(ctx context.Context, owner decisionCardRequestSource, req apiidempotency.Request) (string, correlation.SourceArtifactFact, error) {
