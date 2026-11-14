@@ -287,7 +287,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 				t.Fatalf("registered subject acquired account-derived evidence: actual=%#v declared=%#v", effective, declared)
 			}
 			var out, errOut bytes.Buffer
-			code := cliapp.Execute(ctx, []string{"--config", opts.ConfigPath, "channel", "status", "telegram", "420079", "--json", "--api-server", endpoint},
+			code := cliapp.Execute(ctx, channelFixtureArguments(opts.ConfigPath, "channel", "status", "telegram", "420079", "--json", "--api-server", endpoint),
 				&out, &errOut, nil, nil, OpenChannelRegistration)
 			var status channelonboarding.AccountStatus
 			if code != 0 || json.Unmarshal(out.Bytes(), &status) != nil || status.Provider != "telegram" || status.Account != "420079" || !status.Linked || len(status.Holders) != 1 {
