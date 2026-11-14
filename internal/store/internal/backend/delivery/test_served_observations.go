@@ -38,7 +38,7 @@ func (s *DeliveryPostgresOwner) ReadNodeDeliveryTargetEncodingForTest(ctx contex
 	var out string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadNodeDeliveryTargetEncodingTx(ctx, tx, true, eventID, nodeID)
+		out, err = readNodeDeliveryTargetEncodingTx(ctx, tx, true, eventID, nodeID)
 		return err
 	})
 	if err != nil {
@@ -51,13 +51,25 @@ func (s *DeliverySQLiteOwner) ReadNodeDeliveryTargetEncodingForTest(ctx context.
 	var out string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadNodeDeliveryTargetEncodingTx(ctx, tx, false, eventID, nodeID)
+		out, err = readNodeDeliveryTargetEncodingTx(ctx, tx, false, eventID, nodeID)
 		return err
 	})
 	if err != nil {
 		return "", err
 	}
 	return out, nil
+}
+
+func readNodeDeliveryTargetEncodingTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (string, error) {
+	query := `SELECT delivery_target_route FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT delivery_target_route::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&raw); err != nil {
+		return "", err
+	}
+	return raw, nil
 }
 
 func (s *DeliveryPostgresOwner) ReadCausalDeliveryFrontierForTest(ctx context.Context, runID, eventID string) (CausalDeliveryFrontier, error) {

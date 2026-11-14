@@ -23,7 +23,7 @@ func TestNativeBusNodeTargetPreservesExactStorageDecodeAndAllFiveConsumers(t *te
 		if before != row.After || selectedCausalObservationBody(t, row.File, row.Function) != row.After {
 			t.Fatal("target read changed identity, decode, target kind or exact equality")
 		}
-		owner := selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/read_projections.go", "ReadNodeDeliveryTargetEncodingTx")
+		owner := selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/test_served_observations.go", "readNodeDeliveryTargetEncodingTx")
 		queries := eventDeliveryDiagnosticSQL(t, owner)
 		if len(queries) != 2 || !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, row.Before), queries[1:]) ||
 			!strings.Contains(owner, "eventID, nodeID).Scan(&raw)") {
