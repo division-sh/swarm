@@ -32,6 +32,7 @@ func SelectedStoreDependentAdmissionChecks() []SelectedStoreAdmissionCheck {
 		{"pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations"},
 		{"retained_route_admission", "internal/runtime/manager.InspectSelectedContractRouteRecoveries"},
 		{"retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations"},
+		{"run_mutation_drift", "internal/store/selected.AdmissionSnapshot.InspectRunMutationDrift"},
 		{"selected_fork_recovery_admission", "internal/runtime/runforkexecution"},
 		{"retained_actor_admission", "internal/runtime/manager"},
 		{"selected_fork_source_dependencies", "internal/runtime.ValidateWorkflowContractSurface"},
