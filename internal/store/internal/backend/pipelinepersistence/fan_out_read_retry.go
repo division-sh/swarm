@@ -1,6 +1,7 @@
 package pipelinepersistence
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
@@ -9,6 +10,30 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
+
+func fanOutReadWaitAge(ctx context.Context, db pipelineQueryer, postgres bool, rawSince any, now time.Time) (*int64, error) {
+	since, known, err := sqliteTimeValue(rawSince)
+	if err != nil {
+		return nil, errors.New("fan-out read wait summary has invalid observed failure time")
+	}
+	if !known {
+		return nil, nil
+	}
+	// A retry may commit between the caller's timestamp and this snapshot.
+	// Observe after the row read rather than inventing a zero/negative age.
+	observed, err := fanOutAdmissionTime(ctx, db, postgres, time.Now)
+	if err != nil {
+		return nil, err
+	}
+	if observed.Before(now) {
+		observed = now
+	}
+	if since.After(observed) {
+		return nil, errors.New("fan-out read failure is later than its native observation")
+	}
+	age := observed.Sub(since).Milliseconds()
+	return &age, nil
+}
 
 func decodeFanOutReadRetry(rawAt any, delay sql.NullInt64, rawSince any, rawFailure []byte) (*fanoutobligation.ReadRetry, error) {
 	if rawAt == nil && !delay.Valid && rawSince == nil && rawFailure == nil {
