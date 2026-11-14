@@ -22,12 +22,24 @@ func parseDeliveryObservationControl(t *testing.T, path, source string) *ast.Fil
 
 func TestReviewedDeliveryObservationHostilesStayUnowned(t *testing.T) {
 	root := eventBoundaryRepositoryRoot(t)
-	ownerPath := "internal/store/internal/runtimepersistence/test_selected_storage_observation.go"
-	ownerBytes, err := os.ReadFile(filepath.Join(root, ownerPath))
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, site := range reviewedDeliveryObservations {
+		ownerPath := site.path
+		ownerBytes, err := os.ReadFile(filepath.Join(root, ownerPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner := parseDeliveryObservationControl(t, ownerPath, string(ownerBytes))
+		approvedSource := parseDeliveryObservationControl(t, site.path, string(ownerBytes))
+		approved := reviewedDeliveryObservationLiterals(site.path, approvedSource, owner)
+		literals := deliveryObservationLiterals(deliveryObservationDeclaration(approvedSource, site.declaration))
+		if len(literals) != len(site.literals) {
+			t.Fatalf("reviewed %s has %d delivery SQL literals, want %d", site.declaration, len(literals), len(site.literals))
+		}
+		for _, literal := range literals {
+			if approved[literal.Pos()] != site.path+"/"+site.declaration {
+				t.Fatalf("reviewed %s lost exact source authority", site.declaration)
+			}
+		}
 		data, err := os.ReadFile(filepath.Join(root, site.path))
 		if err != nil {
 			t.Fatal(err)
@@ -69,9 +81,12 @@ func TestReviewedDeliveryObservationHostilesStayUnowned(t *testing.T) {
 					case "imports":
 						file.Imports[0].Name = ast.NewIdent("foreign")
 					case "delegation", "owner-delegation":
-						target, name := ast.Node(fn), "readServedDeliveryObservation"
+						target, name := ast.Node(fn), "QueryRowContext"
+						if site.declaration == "readSelectedDeploymentForkDiagnosticsTx" {
+							name = "QueryContext"
+						}
 						if attack == "owner-delegation" {
-							target, name = deliveryObservationDeclaration(owner, "readServedDeliveryObservation"), "RunReadTransaction"
+							target, name = deliveryObservationMethod(owner, site.ownerName, "RunForkPostgresOwner"), "RunReadTransaction"
 						}
 						changed := false
 						ast.Inspect(target, func(node ast.Node) bool {
