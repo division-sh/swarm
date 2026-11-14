@@ -132,8 +132,41 @@ func startupAnswerRequest(ctx context.Context, cfg *config.Config, profile llmse
 	if err != nil {
 		return nil, nil, err
 	}
+	decodeBody := decode
+	decode = func(raw []byte) (Response, error) {
+		if err := requireStartupAnswerCompletion(profile.ID, raw); err != nil {
+			return Response{}, err
+		}
+		return decodeBody(raw)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	return request, decode, err
+}
+
+func requireStartupAnswerCompletion(backend string, raw []byte) error {
+	var terminal struct {
+		Status     string `json:"status"`
+		StopReason string `json:"stop_reason"`
+		Choices    []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &terminal); err != nil {
+		return err
+	}
+	complete := false
+	switch backend {
+	case llmselection.BackendAnthropic:
+		complete = terminal.StopReason == "end_turn" || terminal.StopReason == "stop_sequence"
+	case llmselection.BackendOpenAICompatible:
+		complete = len(terminal.Choices) != 0 && terminal.Choices[0].FinishReason == "stop"
+	case llmselection.BackendOpenAIResponses:
+		complete = terminal.Status == "completed"
+	}
+	if !complete {
+		return fmt.Errorf("provider startup response did not complete successfully")
+	}
+	return nil
 }
 
 func observeClaudeStartupAnswer(ctx context.Context, cfg *config.Config, model llmselection.ResolvedModel, credentials ProviderCredentialResolver, target *workspace.Target) error {
