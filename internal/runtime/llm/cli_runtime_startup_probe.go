@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -80,32 +81,7 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	}
 	surface, _ = managedcapabilities.FromContext(ctx)
 
-	buildArgs := func(includeSystemPrompt bool) ([]string, string, error) {
-		args := []string{
-			"-p",
-			"--session-id", childSessionID,
-			"--output-format", "stream-json",
-		}
-		args = appendClaudePrintModeArgs(args, r.cfg)
-		args = append(args, permissionModeArgs()...)
-		if includeSystemPrompt {
-			if strings.TrimSpace(s.SystemPrompt) != "" {
-				args = append(args, "--system-prompt", s.SystemPrompt)
-			}
-		}
-		args = append(args, "--tools", toolProjection.builtinSelectionArg())
-		args = append(args, "--allowedTools", toolProjection.permissionAdmissionArg())
-		mcpConfig, contextToken, enabled, err := r.buildMCPConfigArg(ctx, s)
-		if err != nil {
-			return nil, "", err
-		}
-		if enabled {
-			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-		}
-		return args, contextToken, nil
-	}
-
-	args, contextToken, err := buildArgs(true)
+	mcpConfig, contextToken, enabled, err := r.buildMCPConfigArg(ctx, s)
 	if contextToken != "" {
 		defer r.mcpTurns.UnregisterTurnContext(contextToken)
 	}
@@ -113,6 +89,10 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassSchemaInvalid, "startup_probe_prelaunch_rejected", "claude-cli-adapter", "startup_probe", nil, err)
 		return nil, err
 	}
+	if !enabled {
+		mcpConfig = ""
+	}
+	args := claudeStartupProbeArgs(r.cfg, childSessionID, s.SystemPrompt, toolProjection, mcpConfig)
 
 	resp, err := r.runUntilCLIStartupInit(ctx, args, target, cliStartupProbePrompt, handle)
 	if err != nil {
@@ -138,6 +118,20 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 		return nil, err
 	}
 	return resp, nil
+}
+
+func claudeStartupProbeArgs(cfg *config.Config, sessionID, prompt string, projection claudeInvocationToolProjection, mcpConfig string) []string {
+	args := []string{"-p", "--session-id", sessionID, "--output-format", "stream-json"}
+	args = appendClaudePrintModeArgs(args, cfg)
+	args = append(args, permissionModeArgs()...)
+	if strings.TrimSpace(prompt) != "" {
+		args = append(args, "--system-prompt", prompt)
+	}
+	args = append(args, "--tools", projection.builtinSelectionArg(), "--allowedTools", projection.permissionAdmissionArg())
+	if mcpConfig != "" {
+		args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
+	}
+	return args
 }
 
 func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []string, target *workspace.Target, input string, handle *runtimeeffects.Handle) (*Response, error) {
