@@ -207,12 +207,12 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 					}
 				case "cancel_load":
 					var load *pipeline.FanOutEvaluationLoadError
-					if group != nil || !errors.As(err, &load) || load.Stage != "" || !errors.Is(load.Cause, context.Canceled) {
+					if group != nil || !errors.As(err, &load) || load.Stage != "admit_read" || load.Disposition != pipeline.FanOutReadYield || !errors.Is(load.Cause, context.Canceled) {
 						t.Fatalf("canceled native load lost its typed cause: group=%v err=%T %v", group, err, err)
 					}
 				case "validation_error":
 					var load *pipeline.FanOutEvaluationLoadError
-					if group != nil || !errors.Is(err, independent) || !errors.As(err, &load) || load.Stage != "validate_evaluation" {
+					if group != nil || !errors.Is(err, independent) || !errors.As(err, &load) || load.Stage != "validate_evaluation" || load.Disposition != pipeline.FanOutReadYield {
 						t.Fatalf("cancellation hid independent validation: %v %v", group, err)
 					}
 				default:
