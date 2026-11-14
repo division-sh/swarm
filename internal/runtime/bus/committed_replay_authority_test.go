@@ -41,16 +41,12 @@ func recordedReplaySelectionForTest(t testing.TB, original events.Event, routes 
 	for _, route := range routes {
 		targets = append(targets, route.Target.Route())
 	}
-	replay, err := events.NewReplayEvent(events.ReplayEventInput{
-		Facts: events.EventFacts{ID: eventtest.UUID(fmt.Sprintf("replay-%s", original.ID())), Type: original.Type(),
-			Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
-			TaskID:   original.TaskID(), Payload: original.Payload(), ChainDepth: original.ChainDepth() + 1,
-			RoutingSource: original.RoutingSource(), Envelope: events.EnvelopeForTargetSet(original.Envelope(), targets), CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode()},
-		Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	replay := eventtest.ReplayForProducerWithRoutingSource(
+		eventtest.UUID(fmt.Sprintf("replay-%s", original.ID())), original.Type(), original.Producer(),
+		original.TaskID(), original.Payload(), original.ChainDepth()+1,
+		events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
+		events.EnvelopeForTargetSet(original.Envelope(), targets), original.RoutingSource(), time.Now().UTC(),
+	)
 	return replay, selection
 }
 
