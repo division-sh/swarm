@@ -599,6 +599,7 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 				"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 				"schema.yaml":          "stages: []\ninputs: [task.started]\n",
 				"events.yaml":          "task.started:\n",
+				"nodes.yaml":           "root-observer:\n  task.started: {}\n",
 				"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 				"review/schema.yaml":   "stages: []\ninputs: [task.started]\n",
 				"review/events.yaml":   "task.started:\n",
@@ -631,6 +632,9 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if kind == "agent" {
+				eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: blueprint.AgentIdentity})
 			}
 			installConnectionSourceConstructionForRun(t, eb, source, "review", busInternalTestRunID)
 			event := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), eventType, "operator", "", []byte("{}"), 0,
