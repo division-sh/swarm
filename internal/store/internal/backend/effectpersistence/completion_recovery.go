@@ -105,7 +105,7 @@ type completionRecoveryAuthorityEvidence struct {
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
-	attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, selectedExecutionID, nil)
+	attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, delivery, now, selectedExecutionID, nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -113,7 +113,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now)
 }
 
-func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, true)
 	if err != nil {
 		return nil, err
@@ -138,11 +138,11 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now
 	if err != nil {
 		return nil, err
 	}
-	return selectAbandonedCompletionAttempts(ctx, tx, attempts, now, false)
+	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, false)
 }
 
 func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
-	attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, now, selectedExecutionID, nil)
+	attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, delivery, now, selectedExecutionID, nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -150,7 +150,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now)
 }
 
-func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, false)
 	if err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now t
 	if err != nil {
 		return nil, err
 	}
-	return selectAbandonedCompletionAttempts(ctx, tx, attempts, now, true)
+	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, true)
 }
 
 func startupCompletionRecoveryFilter(identity *agentidentity.Identity, postgres bool) (string, []any, error) {
@@ -200,7 +200,7 @@ func (s *EffectPostgresOwner) RecoverStartupProviderAttemptsPostgresTx(ctx conte
 		if err := validateStartupProviderRecovery(ctx, tx, request, result, false); err != nil {
 			return err
 		}
-		attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, request.Now, "", &request.Identity)
+		attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, s.delivery, request.Now, "", &request.Identity)
 		if err != nil {
 			return err
 		}
@@ -219,7 +219,7 @@ func (s *EffectSQLiteOwner) RecoverStartupProviderAttemptsSQLiteTx(ctx context.C
 		if err := validateStartupProviderRecovery(ctx, tx, request, result, true); err != nil {
 			return err
 		}
-		attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, request.Now, "", &request.Identity)
+		attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, s.delivery, request.Now, "", &request.Identity)
 		if err != nil {
 			return err
 		}

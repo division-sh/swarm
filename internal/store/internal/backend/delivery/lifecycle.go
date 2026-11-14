@@ -513,6 +513,19 @@ func (s *DeliverySQLiteOwner) InspectProviderOriginRecoveryTx(ctx context.Contex
 	return sqliteDeliveryAdapter.inspectProviderOriginRecovery(ctx, tx, claim, disposition, ordinarySettlement)
 }
 
+func (s *DeliveryPostgresOwner) ProviderOriginRecoveryAbandonedTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	return postgresDeliveryAdapter.providerOriginRecoveryAbandoned(ctx, tx, claim)
+}
+
+func (s *DeliverySQLiteOwner) ProviderOriginRecoveryAbandonedTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	return sqliteDeliveryAdapter.providerOriginRecoveryAbandoned(ctx, tx, claim)
+}
+
+func (a *Adapter) providerOriginRecoveryAbandoned(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
+	disposition, err := a.readProviderOriginRecoveryDisposition(ctx, tx, claim, false)
+	return disposition == providerOriginRecoveryExpiredExact || disposition == providerOriginRecoveryAlreadyTerminal, err
+}
+
 func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, claim runtimedelivery.Claim, lease time.Duration) error {
 	_, err := s.renewClaimTx(ctx, attempt, claim, lease)
 	return err

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/google/uuid"
 )
@@ -165,6 +166,11 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 			now := time.Now().UTC().Add(time.Minute)
 
 			mock := beginProviderRecoveryPostureMatrix(t, fixture, executionmode.Mock, now)
+			acquireCtx := runtimeeffects.WithDifferentOwner(fixture.original, runtimeeffects.OwnerBuildTestInfrastructure)
+			replacement, err := fixture.store.(sessions.Registry).Acquire(acquireCtx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+			if err != nil || replacement == nil || replacement.GrantID == fixture.grantID {
+				t.Fatalf("replace provider posture grant: lease=%+v err=%v", replacement, err)
+			}
 			summary, err := fixture.store.ReconcileExternalEffectAttempts(
 				fixture.original,
 				runtimeeffects.NewRecoveryRequest(now, executionposture.MockOnly),
@@ -178,6 +184,7 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 			assertRecoveredPostureMatrix(t, fixture.db, fixture.sqlite, mock)
 			assertProviderRecoveryCompletionRows(t, fixture.db, fixture.sqlite, mock)
 
+			fixture = backend.open(t)
 			live := beginProviderRecoveryPostureMatrix(t, fixture, executionmode.Live, now.Add(time.Minute))
 			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)
 			_, err = fixture.store.ReconcileExternalEffectAttempts(
