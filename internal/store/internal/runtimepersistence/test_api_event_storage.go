@@ -24,16 +24,14 @@ func ReadDecisionRouteStatusStorageForTest(ctx context.Context, selected any, ev
 	if err != nil || id == uuid.Nil || id.String() != eventID {
 		return "", fmt.Errorf("decision route evidence requires an exact canonical event")
 	}
-	var status string
-	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		status, err = pipelinepersistence.FixtureDecisionRouteStatusTx(ctx, tx, eventID)
-		return err
-	})
-	if err != nil {
-		return "", err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadDecisionRouteStatusForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadDecisionRouteStatusForTest(ctx, eventID)
+	default:
+		return "", fmt.Errorf("decision route evidence requires the original native owner")
 	}
-	return status, nil
 }
 
 func ReadLatestNamedEventIdentityStorageForTest(ctx context.Context, selected any, eventName, excludedEventID string) (string, error) {
