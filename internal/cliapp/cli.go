@@ -113,7 +113,7 @@ The typical path: check your setup with 'swarm doctor', validate authored source
 with 'swarm verify', run 'swarm serve', then
 start work with 'swarm run start' or 'swarm event publish' and watch it
 with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.
-Use default 'swarm verify' to observe admission for an explicitly configured deployment.`,
+Use 'swarm serve --dry-run' for deployment checks; 'swarm verify' never opens a store.`,
 		Example: `  swarm doctor                                      # check local prerequisites
   swarm verify ./contracts                           # validate source only, not deployment readiness
   swarm serve                                      # start the deployment runtime

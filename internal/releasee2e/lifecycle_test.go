@@ -61,7 +61,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	env := releaseProcessEnv(fakeBin, fakeRoot, home)
 	contracts := filepath.Join(releaseRoot, "contracts")
 	// Source preflight precedes credentials, store creation and the managed CLI test transport.
-	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts, "--portable")
+	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify", contracts)
 	if verify.err != nil {
 		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
 	}

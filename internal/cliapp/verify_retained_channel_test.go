@@ -119,11 +119,7 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 	})
 	for _, mode := range []string{"json", "quiet", "text"} {
 		var out, diagnostic bytes.Buffer
-		args := []string{"verify", root, "--config", configPath}
-		if mode != "text" {
-			args = append(args, "--"+mode)
-		}
-		if code := executeRootCommand(ctx, root, args, &out, &diagnostic); code != 0 {
+		if code := renderServeChecksForTest(t, ctx, root, root, configPath, mode, &out, &diagnostic); code != 0 {
 			t.Fatalf("%s retained channel inspection: %d %s %s", mode, code, &out, &diagnostic)
 		}
 		if mode == "json" {
@@ -171,7 +167,7 @@ func assertVerifyRetainedChannelPublicAdmission(t *testing.T, ctx context.Contex
 		t.Fatalf("boot's canonical durable ownership check missed crossed persisted evidence: %v", err)
 	}
 	var out, diagnostic bytes.Buffer
-	if code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic); code != cliExitConflict || !strings.Contains(out.String(), "exact owning onboarding operation") {
+	if code := renderServeChecksForTest(t, ctx, root, root, configPath, "json", &out, &diagnostic); code != cliExitConflict || !strings.Contains(out.String(), "exact owning onboarding operation") {
 		t.Fatalf("public verify hid boot's crossed evidence refusal: %d %s %s", code, &out, &diagnostic)
 	}
 	withOriginal(func(ctx context.Context) {

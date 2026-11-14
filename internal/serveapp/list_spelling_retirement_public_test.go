@@ -30,7 +30,7 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
 			}
 			for _, args := range [][]string{
-				{"verify", ".", "--portable", "--json", "--config", opts.ConfigPath},
+				{"verify", ".", "--json", "--config", opts.ConfigPath},
 				{"describe", ".", "--json"},
 			} {
 				var out, errOut bytes.Buffer
@@ -121,9 +121,6 @@ func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 				}
 				for _, command := range []string{"verify", "describe"} {
 					args := []string{command, ".", "--json"}
-					if command == "verify" {
-						args = append(args, "--portable")
-					}
 					var out, errOut bytes.Buffer
 					code := executeCLIFrom(context.Background(), root, args, &out, &errOut, nil)
 					diagnostic := out.String() + errOut.String()

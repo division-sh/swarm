@@ -18,7 +18,7 @@ func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
 	if imported.err != nil {
 		t.Fatalf("public pack import: %v\n%s", imported.err, imported.output)
 	}
-	for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe", "--json"}} {
+	for _, args := range [][]string{{"verify", "--json"}, {"describe", "--json"}} {
 		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 		if result.err != nil || !strings.Contains(result.output, `"live_readiness":"not_evaluated"`) {
 			t.Fatalf("compiled structural reader: %v\n%s", result.err, result.output)
@@ -37,7 +37,7 @@ func TestSchemaRelationFactoringCompiledReaders(t *testing.T) {
 		t.Fatal("channel fixture no longer carries the bounded result id")
 	}
 	writeReleaseFile(t, path, strings.Replace(string(body), needle, "id: {type: integer, minimum: 2, maximum: 2147483647}", 1))
-	for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe", "--json"}} {
+	for _, args := range [][]string{{"verify", "--json"}, {"describe", "--json"}} {
 		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 		if result.err == nil || !strings.Contains(result.output, "source minimum is broader than target minimum 2") {
 			t.Fatalf("compiled directional refusal: %v\n%s", result.err, result.output)
