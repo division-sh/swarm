@@ -51,6 +51,9 @@ func TestCLIImageAdmissionProbeRestrictionsAndCleanup(t *testing.T) {
 						}
 						return "", nil
 					case "exec":
+						if !strings.Contains(strings.Join(createArgs, " "), "--cap-drop ALL --cap-add CHOWN") {
+							return "", errors.New("private workdir ownership preparation lacks CHOWN capability")
+						}
 						return "", nil
 					case "container":
 						if failure == "cleanup" {
