@@ -102,9 +102,7 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 		return out, err
 	}
 	out.Validation, retErr = verifyBundleResultWithOptions(ctx, out.Source, out.Options)
-	verifyDeploymentObservation(ctx, &out.Validation, "generated_boundary_environment", "internal/cliapp.ValidateGeneratedBoundaryEnv", "source:"+out.Validation.BootReport.SourceArtifactHash, failures.ClassSchemaInvalid, func(context.Context) error {
-		return ValidateGeneratedBoundaryEnv()
-	})
+	inspectServeGeneratedBoundary(ctx, in.Options, &out.Validation, &out.Options)
 	preference, err := ResolveWorkspaceBackend(in.Options.WorkspaceBackend, in.Options.WorkspaceBackendSet, in.Config.Config)
 	if err != nil {
 		return out, errors.Join(retErr, err)
@@ -308,6 +306,26 @@ func serveCheckHostInputs(in ServeCheckStageRequest) (apiv1.AuthTokenResolution,
 		certificates = append(certificates, certificate.Certificate)
 	}
 	return auth, certificates, nil
+}
+
+func inspectServeGeneratedBoundary(ctx context.Context, mode ServeOptions, result *runtime.WorkflowContractValidationResult, options *runtime.WorkflowContractValidationOptions) {
+	const id = "generated_boundary_environment"
+	subject := "source:" + result.BootReport.SourceArtifactHash
+	if err := ValidateGeneratedBoundaryEnv(); err != nil && (mode.Dev || mode.LocalRun) {
+		// Local modes have always warned about generated endpoint overrides.
+		// This is not evidence that the configured endpoint was validated.
+		result.BootReport.Add(bootverify.Finding{CheckID: id, Location: subject, Severity: bootverify.SeveritySemanticDriftWarn, Message: err.Error(), Remediation: "Remove generated gateway endpoint overrides."})
+		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: id, Owner: "internal/cliapp.ValidateGeneratedBoundaryEnv", Subject: subject,
+			Class: bootverify.AdmissionDeploymentObservation, Status: bootverify.AdmissionNotApplicable,
+			Reason: "local-mode endpoint override is a warning, not an admitted generated endpoint",
+		})
+		options.ExcludedFatalBootWarningChecks = append(options.ExcludedFatalBootWarningChecks, id)
+		return
+	}
+	verifyDeploymentObservation(ctx, result, id, "internal/cliapp.ValidateGeneratedBoundaryEnv", subject, failures.ClassSchemaInvalid, func(context.Context) error {
+		return ValidateGeneratedBoundaryEnv()
+	})
 }
 
 func (r ServeCheckStageResult) Decision() bootverify.AdmissionDecision {

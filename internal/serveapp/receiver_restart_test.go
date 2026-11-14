@@ -45,7 +45,6 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					storetest.BootstrapPostgresRuntimeStore(t, pg)
 					db = storetest.DatabaseForTest(pg)
 					return openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...), nil
 				}

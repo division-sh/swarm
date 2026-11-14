@@ -423,7 +423,6 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		openStore()
 		oldBuildStores := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...), nil
 		}
 		t.Cleanup(func() {

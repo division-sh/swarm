@@ -843,12 +843,18 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 	}
 	t.Run("one_answer_per_credential_and_stale_inputs", func(t *testing.T) {
 		var calls atomic.Int32
+		var refused atomic.Bool
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls.Add(1)
 			if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer check-credential" {
 				t.Errorf("wrong provider request identity: path=%s", r.URL.Path)
 			}
 			w.Header().Set("Content-Type", "application/json")
+			if refused.Load() {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"rejected check-credential"}}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
 		}))
 		defer server.Close()
@@ -938,6 +944,15 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 		}
 		if err := checks.ValidateConfiguration(context.Background(), cfg, resolver); err == nil || calls.Load() != 1 {
 			t.Fatalf("changed credential did not refuse without a hidden second call: calls=%d err=%v", calls.Load(), err)
+		}
+		if err := credentials.Set(t.Context(), credentialKey, "check-credential"); err != nil {
+			t.Fatal(err)
+		}
+		refused.Store(true)
+		_, err = ObserveManagedProviderBootChecks(t.Context(), cfg, source, options, targets, nil, nil, nil, "")
+		failure, ok := runtimefailures.As(err)
+		if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || strings.Contains(err.Error(), "check-credential") || calls.Load() != 2 {
+			t.Fatalf("startup provider refusal lost its class, leaked its credential or repeated: calls=%d", calls.Load())
 		}
 	})
 
