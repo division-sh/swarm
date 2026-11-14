@@ -715,6 +715,22 @@ func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
 	if len(candidates) != wantCandidateCount {
 		t.Fatalf("preflight candidates = %#v, want one per live run", candidates)
 	}
+	checks, err := CompileManagedProviderCheckTargets(manager.ListAgentConfigs(), nil)
+	if err != nil || len(checks) != len(candidates) {
+		t.Fatalf("read-only target census = %+v, %v", checks, err)
+	}
+	for i, check := range checks {
+		if check.Actor.Identity != candidates[i].config.Identity || check.Plan != candidates[i].plan {
+			t.Fatalf("check/runtime owner census differs at %d", i)
+		}
+	}
+	conflicting := append([]runtimeactors.AgentConfig(nil), manager.ListAgentConfigs()...)
+	other := conflicting[0]
+	other.Config = json.RawMessage(`{"different":true}`)
+	conflicting = append(conflicting, other)
+	if _, err := CompileManagedProviderCheckTargets(conflicting, nil); err == nil {
+		t.Fatal("read-only target census accepted conflicting revisions for the same owner")
+	}
 	for _, candidate := range candidates {
 		identity, identityErr := candidate.config.ConcreteIdentity()
 		if identityErr != nil {
