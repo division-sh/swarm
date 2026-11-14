@@ -185,14 +185,13 @@ func (g *Gateway) AcquireAcceptedRuntimeRequest(r *http.Request, expected *workl
 	}
 	ctx, cancel := context.WithCancel(turn.original)
 	stop := context.AfterFunc(r.Context(), cancel)
-	lease, err := worklifetime.BeginAcceptedRuntimeWork(ctx, expected)
+	lease, owner, err := worklifetime.BeginAcceptedRuntimeWork(ctx, expected)
 	if err != nil {
 		stop()
 		cancel()
 		return nil, nil, err
 	}
 	release := func() { stop(); cancel(); _ = lease.Done() }
-	owner, _ := worklifetime.RuntimeOccurrenceFromContext(lease.Context())
 	if owner.Identity().BundleHash != turn.ExecutionAdmission.BundleHash {
 		release()
 		return nil, nil, worklifetime.ErrAdmissionFenced
