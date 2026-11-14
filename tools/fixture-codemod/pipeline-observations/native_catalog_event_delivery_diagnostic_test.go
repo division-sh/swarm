@@ -76,7 +76,7 @@ func eventDeliveryDiagnosticSQL(t *testing.T, source string) []string {
 
 func TestNativeCatalogEventDeliveryDiagnosticKeepsBothOriginalPhysicalQueries(t *testing.T) {
 	row := nativeMissingHeaderRecipe(t, "native-catalog-event-delivery-diagnostic")
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "read_projections.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "test_selected_read_projections_queries.go")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestNativeCatalogEventDeliveryDiagnosticKeepsBothOriginalPhysicalQueries(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn, err := uniqueFunction(file, "ReadEventDeliveryDiagnosticRows")
+	fn, err := uniqueFunction(file, "readEventDeliveryDiagnosticRows")
 	if err != nil {
 		t.Fatal(err)
 	}

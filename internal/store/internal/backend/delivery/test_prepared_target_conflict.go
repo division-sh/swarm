@@ -35,7 +35,7 @@ func (s *DeliveryPostgresOwner) ReadPreparedTargetConflictForTest(ctx context.Co
 	var out PreparedTargetConflictStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadPreparedTargetConflictTx(ctx, tx, true, eventID, routeIdentity)
+		out, err = readPreparedTargetConflictTx(ctx, tx, true, eventID, routeIdentity)
 		return err
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *DeliverySQLiteOwner) ReadPreparedTargetConflictForTest(ctx context.Cont
 	var out PreparedTargetConflictStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadPreparedTargetConflictTx(ctx, tx, false, eventID, routeIdentity)
+		out, err = readPreparedTargetConflictTx(ctx, tx, false, eventID, routeIdentity)
 		return err
 	})
 	if err != nil {

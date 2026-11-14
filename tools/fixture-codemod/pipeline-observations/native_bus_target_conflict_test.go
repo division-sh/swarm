@@ -12,7 +12,7 @@ func TestNativeBusTargetConflictKeepsEveryPhysicalDialectStatement(t *testing.T)
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	owners := map[string][2]string{"corruptPreparedDeliveryRow": {"lifecycle.go", "SetPreparedTargetConflictTx"}, "loadPreparedDeliveryCorruption": {"read_projections.go", "ReadPreparedTargetConflictTx"}}
+	owners := map[string][2]string{"corruptPreparedDeliveryRow": {"lifecycle.go", "SetPreparedTargetConflictTx"}, "loadPreparedDeliveryCorruption": {"test_selected_read_projections_queries.go", "readPreparedTargetConflictTx"}}
 	matched := 0
 	for _, row := range rows {
 		if row.Family != "native-bus-target-conflict" || owners[row.Function][0] == "" {

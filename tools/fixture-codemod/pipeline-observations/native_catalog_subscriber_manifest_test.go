@@ -75,7 +75,7 @@ func TestNativeCatalogSubscriberManifestOwnerKeepsPhysicalPredicateAndNoLocalSQL
 			original = causalDeliveryQueryLiteral(t, row.Before)
 		}
 	}
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "read_projections.go")
+	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", "delivery", "test_selected_read_projections_queries.go")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestNativeCatalogSubscriberManifestOwnerKeepsPhysicalPredicateAndNoLocalSQL
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn, err := uniqueFunction(file, "ReadSubscriberEventNamesCreatedSince")
+	fn, err := uniqueFunction(file, "readSubscriberEventNamesCreatedSince")
 	if err != nil {
 		t.Fatal(err)
 	}
