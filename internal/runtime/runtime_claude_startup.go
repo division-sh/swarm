@@ -464,7 +464,7 @@ func ValidatePreparedSelectedForkProviderPreflight(ctx context.Context, cfg *con
 		}
 	}
 	sort.Slice(configs, func(i, j int) bool { return runtimeagentidentity.LessPlan(configs[i].plan, configs[j].plan) })
-	ids, err := validateManagedProviderPreflightConfigs(ctx, cfg, gatewayBinding, nil, turnStore, nil, configs, authority)
+	ids, err := validateManagedProviderPreflightConfigs(ctx, cfg, gatewayBinding, nil, turnStore, nil, configs, authority, nil, llm.ProviderCredentialResolver{})
 	if err != nil {
 		return nil, err
 	}
@@ -525,6 +525,19 @@ func (a ManagedProviderPreflightAuthority) saveSurface(ctx context.Context, auth
 }
 
 func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, authority ManagedProviderPreflightAuthority) ([]string, error) {
+	return validateManagedProviderPreflightWithChecks(ctx, cfg, source, gatewayBinding, runtimes, turnStore, tools, manager, authority, nil, llm.ProviderCredentialResolver{})
+}
+
+func validateManagedProviderPreflightWithChecks(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, authority ManagedProviderPreflightAuthority, checks *ManagedProviderBootChecks, credentials llm.ProviderCredentialResolver) ([]string, error) {
+	if checks != nil {
+		if err := checks.ValidateConfiguration(ctx, cfg, credentials); err != nil {
+			return nil, err
+		}
+		bundle, ok := semanticview.Bundle(source)
+		if !ok || bundle == nil || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != checks.source {
+			return nil, fmt.Errorf("managed provider startup inputs changed")
+		}
+	}
 	if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
 		return nil, fmt.Errorf("selected-fork startup requires non-executable preparation")
 	}
@@ -542,10 +555,10 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 	if err != nil {
 		return nil, err
 	}
-	return validateManagedProviderPreflightConfigs(ctx, cfg, gatewayBinding, runtimes, turnStore, tools, preflightConfigs, authority)
+	return validateManagedProviderPreflightConfigs(ctx, cfg, gatewayBinding, runtimes, turnStore, tools, preflightConfigs, authority, checks, credentials)
 }
 
-func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Config, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, preflightConfigs []managedProviderPreflightAgent, authority ManagedProviderPreflightAuthority) ([]string, error) {
+func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Config, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, preflightConfigs []managedProviderPreflightAgent, authority ManagedProviderPreflightAuthority, checks *ManagedProviderBootChecks, credentials llm.ProviderCredentialResolver) ([]string, error) {
 	if len(preflightConfigs) == 0 {
 		return nil, nil
 	}
@@ -641,6 +654,21 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			agentCtx := runtimeactors.WithActor(ctx, agentCfg)
 			sessionTools, capabilities := target.catalog.tools, target.catalog.capabilities
 			probeID := uuid.NewString()
+			var checkedResponse *llm.Response
+			if checks != nil && agentCfg.ExecutionMode == runtimeeffects.ExecutionModeLive {
+				contract, ok := llm.ProviderContractForRuntime(modelRuntime)
+				if !ok {
+					return fmt.Errorf("managed capability surface requires provider contract")
+				}
+				planned, err := llm.CompileManagedCapabilityAdmission(agentCfg, contract, sessionTools, capabilities)
+				if err != nil {
+					return err
+				}
+				checkedResponse, err = checks.startupResponse(ctx, cfg, credentials, ManagedProviderCheckTarget{Actor: agentCfg, Plan: target.plan}, target.prompt, planned)
+				if err != nil {
+					return err
+				}
+			}
 			capabilityAuthority, effectAuthority, err := authority.probeAuthority(agentCtx, probeID, managedProviderPreflightAgent{config: agentCfg, plan: target.plan})
 			if err != nil {
 				return fmt.Errorf("build startup authority for agent %s: %w", agentID, err)
@@ -655,7 +683,18 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			agentCtx = managedcapabilities.WithContext(agentCtx, surface)
 			agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
 			agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
-			probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, target.prompt, sessionTools)
+			var probeResp *llm.Response
+			if checkedResponse != nil {
+				observed, observeErr := llm.ObserveCLIResponseCapabilitySurface(surface, checkedResponse)
+				err = observeErr
+				if err == nil {
+					err = llm.ValidateCLIProviderCapabilitySurface(observed, checkedResponse)
+				}
+				probeResp = checkedResponse
+				probeResp.CapabilitySurface = &observed
+			} else {
+				probeResp, err = startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, target.prompt, sessionTools)
+			}
 			if err != nil {
 				return fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
 			}
