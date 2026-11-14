@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
@@ -128,6 +129,15 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 		if err := admitSelectedForkSource(sourceRunID, sourceSnapshot); err != nil {
 			return err
+		}
+		if req.RequirePausedSource {
+			parked, err := runstate.DispatchParked(txctx, tx, port.postgres, sourceRunID)
+			if err != nil {
+				return fmt.Errorf("read live fork source pause at materialization: %w", err)
+			}
+			if !parked {
+				return fmt.Errorf("live fork source %s is not paused at materialization", sourceRunID)
+			}
 		}
 		point := req.Preparation.ForkPoint
 		forkOperation, err := bindResolvedForkOperation(req.ForkOperation, point)
