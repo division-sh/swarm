@@ -128,7 +128,7 @@ Go: go1.26.8 linux/amd64
 ```bash
 swarm new zero-agent-automation
 cd zero-agent-automation
-swarm verify --portable
+swarm verify
 swarm test . tests/smoke.yaml
 ```
 
@@ -140,7 +140,7 @@ Created zero-agent-automation in zero-agent-automation
 
 Next:
   cd zero-agent-automation
-  swarm verify --portable
+  swarm verify
   swarm test . tests/smoke.yaml
   swarm secrets set -- 'telegram.telegram_bot_token'
   swarm serve --dev
