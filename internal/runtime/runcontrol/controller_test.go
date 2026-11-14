@@ -3,11 +3,13 @@ package runcontrol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
 
@@ -219,6 +221,57 @@ func TestControllerContinueRechecksHandlersWithoutReplayingLifecycle(t *testing.
 				t.Fatal("deferred continue bypassed target runtime acquisition")
 			}
 		})
+	}
+	proveContinuedSelectedHandlerBoundary(t)
+}
+
+func proveContinuedSelectedHandlerBoundary(t *testing.T) {
+	t.Helper()
+	refusal := &runfork.SelectedForkControlUnsupported{RunID: "run-1", BindingID: "binding-1", Operation: runfork.ControlRunContinue}
+	cleanup := errors.New("independent native cleanup failure")
+	for _, tc := range []struct {
+		name    string
+		failure error
+		resumed fanoutobligation.ResumeResult
+		outside bool
+	}{
+		{"selected", refusal, fanoutobligation.ResumeResult{}, true},
+		{"wrapped_selected", errors.Join(fmt.Errorf("native owner: %w", refusal)), fanoutobligation.ResumeResult{}, true},
+		{"independent_cleanup", errors.Join(refusal, cleanup), fanoutobligation.ResumeResult{}, false},
+		{"different_run", &runfork.SelectedForkControlUnsupported{RunID: "run-2", BindingID: "binding-1", Operation: runfork.ControlRunContinue}, fanoutobligation.ResumeResult{}, false},
+		{"different_operation", &runfork.SelectedForkControlUnsupported{RunID: "run-1", BindingID: "binding-1", Operation: runfork.ControlAgentRestart}, fanoutobligation.ResumeResult{}, false},
+		{"missing_binding", &runfork.SelectedForkControlUnsupported{RunID: "run-1", Operation: runfork.ControlRunContinue}, fanoutobligation.ResumeResult{}, false},
+		{"observed_handlers", refusal, fanoutobligation.ResumeResult{Observed: 1, Unresolved: 1}, false},
+		{"admitted_handlers", refusal, fanoutobligation.ResumeResult{Admitted: true}, false},
+	} {
+		t.Run("lifecycle_"+tc.name, func(t *testing.T) {
+			store, queue := &fakeRunControlStore{}, &fakeRunControlQueue{}
+			controller := NewController(store, queue, Options{ResumeFanOut: func(context.Context, string) (fanoutobligation.ResumeResult, error) { return tc.resumed, tc.failure }})
+			result, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"})
+			if err != nil || !store.continued || queue.calls != 1 {
+				t.Fatalf("lost acknowledged lifecycle recovery: result=%+v err=%v queue=%d", result, err, queue.calls)
+			}
+			checkContinuedSelectedRecovery(t, result.Recovery, tc.outside, tc.failure)
+			checkContinuedSelectedRecovery(t, controller.RecoverContinuedRun(context.Background(), "run-1"), tc.outside, tc.failure)
+			if !tc.resumed.Admitted {
+				if result, err := controller.RecheckPausedFanOut(context.Background(), "run-1"); !errors.Is(err, tc.failure) || result.RunID != "" {
+					t.Fatalf("explicit handler resume bypassed refusal: %+v %v", result, err)
+				}
+			}
+		})
+	}
+}
+
+func checkContinuedSelectedRecovery(t *testing.T, recovery PostCommitRecovery, outside bool, cause error) {
+	t.Helper()
+	if outside {
+		if recovery.Disposition != RecoveryExhausted || recovery.Sweep.Settled != 1 || recovery.FanOut != nil || recovery.Err != nil {
+			t.Fatalf("unsupported ordinary-handler phase changed selected lifecycle recovery: %+v", recovery)
+		}
+		return
+	}
+	if recovery.Disposition != RecoveryFailed || recovery.FanOut == nil || !errors.Is(recovery.Err, cause) {
+		t.Fatalf("independent failure or handler evidence was suppressed: %+v", recovery)
 	}
 }
 

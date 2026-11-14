@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
 
@@ -280,7 +281,7 @@ func (c *Controller) continueRun(ctx context.Context, req TransitionRequest, def
 		result.Recovery = c.releaseQueuedAfterContinue(ctx, state.RunID, true)
 	}
 	if !deferRecovery {
-		result.Recovery = c.resumeContinuedFanOut(context.WithoutCancel(ctx), state.RunID, result.Recovery)
+		result.Recovery = c.resumeContinuedFanOut(context.WithoutCancel(ctx), state.RunID, result.Recovery, true)
 	}
 	if err != nil {
 		result.Recovery.Err = errors.Join(err, result.Recovery.Err)
@@ -307,7 +308,7 @@ func (c *Controller) RecoverContinuedRun(ctx context.Context, runID string) Post
 		}
 		recovery = c.releaseQueuedAfterContinue(ctx, runID, false)
 	}
-	return c.resumeContinuedFanOut(ctx, runID, recovery)
+	return c.resumeContinuedFanOut(ctx, runID, recovery, true)
 }
 
 // RecheckPausedFanOut performs no lifecycle transition. Even an empty result
@@ -317,18 +318,23 @@ func (c *Controller) RecheckPausedFanOut(ctx context.Context, runID string) (Tra
 		return TransitionResult{}, errors.New("paused handler recheck requires its live runtime owner")
 	}
 	result := TransitionResult{RunID: runID, Status: StatusRunning}
-	result.Recovery = c.resumeContinuedFanOut(ctx, runID, PostCommitRecovery{Disposition: RecoveryComplete})
+	result.Recovery = c.resumeContinuedFanOut(ctx, runID, PostCommitRecovery{Disposition: RecoveryComplete}, false)
 	if result.Recovery.FanOut == nil || !result.Recovery.FanOut.Admitted {
 		return TransitionResult{}, result.Recovery.Err
 	}
 	return result, nil
 }
 
-func (c *Controller) resumeContinuedFanOut(ctx context.Context, runID string, recovery PostCommitRecovery) PostCommitRecovery {
+func (c *Controller) resumeContinuedFanOut(ctx context.Context, runID string, recovery PostCommitRecovery, lifecycleCommitted bool) PostCommitRecovery {
 	if c.resumeFanOut == nil || recovery.Err != nil {
 		return recovery
 	}
 	resumed, err := c.resumeFanOut(ctx, runID)
+	// Ordinary handler resume must not alter an already acknowledged selected
+	// run's lifecycle recovery. No handler admission or completion is claimed.
+	if lifecycleCommitted && resumed == (fanoutobligation.ResumeResult{}) && onlySelectedHandlerResumeRefusal(err, runID) {
+		return recovery
+	}
 	if !resumed.Admitted && err == nil {
 		err = errors.New("fan-out handler recheck did not acknowledge native admission")
 	}
@@ -343,6 +349,28 @@ func (c *Controller) resumeContinuedFanOut(ctx context.Context, runID string, re
 		recovery.Disposition = RecoveryComplete
 	}
 	return recovery
+}
+
+func onlySelectedHandlerResumeRefusal(err error, runID string) bool {
+	switch cause := err.(type) {
+	case *runfork.SelectedForkControlUnsupported:
+		return cause != nil && cause.RunID == runID && cause.BindingID != "" && cause.Operation == runfork.ControlRunContinue
+	case interface{ Unwrap() []error }:
+		children := cause.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlySelectedHandlerResumeRefusal(child, runID) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return onlySelectedHandlerResumeRefusal(cause.Unwrap(), runID)
+	default:
+		return false
+	}
 }
 
 func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string, detachFirst bool) PostCommitRecovery {
