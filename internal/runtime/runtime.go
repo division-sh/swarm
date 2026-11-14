@@ -87,6 +87,7 @@ type RuntimeOptions struct {
 	PublicIngressAbsent              bool
 	EnableDeclaredClockBinding       bool
 	SelfCheck                        bool
+	ProviderBootChecks               *ManagedProviderBootChecks
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
 	ToolGatewayBinding               toolgateway.Binding
@@ -1944,7 +1945,12 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 			return nil, err
 		}
 	}
-	surfaceIDs, err := ValidateManagedProviderPreflight(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLMRuntimes, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority)
+	if checks := rt.Options.ProviderBootChecks; checks != nil {
+		if err := checks.validateWorkspace(ctx, rt.Options.WorkspaceLifecycle); err != nil {
+			return nil, err
+		}
+	}
+	surfaceIDs, err := validateManagedProviderPreflightWithChecks(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLMRuntimes, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority, rt.Options.ProviderBootChecks, providerCredentialResolverForRuntimeOptions(rt.Options))
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return nil, fmt.Errorf("claude runtime mcp validation failed: %w", err)
