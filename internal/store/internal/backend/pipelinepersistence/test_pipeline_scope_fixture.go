@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -30,13 +31,13 @@ func (s *PipelineSQLiteOwner) ReadExactFanOutBarrierForTest(ctx context.Context,
 
 func (s *PipelinePostgresOwner) DeleteCommittedReplayScopeForTest(ctx context.Context, eventID string) error {
 	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return DeleteCommittedReplayScopeFixtureTx(ctx, tx, true, eventID)
+		return deleteCommittedReplayScopeFixtureTx(ctx, tx, true, eventID)
 	})
 }
 
 func (s *PipelineSQLiteOwner) DeleteCommittedReplayScopeForTest(ctx context.Context, eventID string) error {
 	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
-		return DeleteCommittedReplayScopeFixtureTx(ctx, tx, false, eventID)
+		return deleteCommittedReplayScopeFixtureTx(ctx, tx, false, eventID)
 	})
 }
 
@@ -44,7 +45,7 @@ func (s *PipelinePostgresOwner) ReadExactPipelineReceiptOutcomeReasonForTest(ctx
 	var out ExactPipelineReceiptOutcomeReason
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadExactPipelineReceiptOutcomeReasonTx(ctx, tx, true, eventID)
+		out, err = readExactPipelineReceiptOutcomeReasonTx(ctx, tx, true, eventID)
 		return err
 	})
 	if err != nil {
@@ -57,11 +58,42 @@ func (s *PipelineSQLiteOwner) ReadExactPipelineReceiptOutcomeReasonForTest(ctx c
 	var out ExactPipelineReceiptOutcomeReason
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadExactPipelineReceiptOutcomeReasonTx(ctx, tx, false, eventID)
+		out, err = readExactPipelineReceiptOutcomeReasonTx(ctx, tx, false, eventID)
 		return err
 	})
 	if err != nil {
 		return ExactPipelineReceiptOutcomeReason{}, err
 	}
 	return out, err
+}
+
+func readExactPipelineReceiptOutcomeReasonTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (ExactPipelineReceiptOutcomeReason, error) {
+	query := `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
+	if postgres {
+		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
+	}
+	var out ExactPipelineReceiptOutcomeReason
+	if err := tx.QueryRowContext(ctx, query, eventID).Scan(&out.Outcome, &out.Reason); err != nil {
+		return ExactPipelineReceiptOutcomeReason{}, err
+	}
+	return out, nil
+}
+
+func deleteCommittedReplayScopeFixtureTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) error {
+	query := `DELETE FROM committed_replay_scopes WHERE event_id = ?`
+	if postgres {
+		query = `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`
+	}
+	result, err := tx.ExecContext(ctx, query, eventID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("committed replay scope fault removed %d rows, want one exact event", changed)
+	}
+	return nil
 }

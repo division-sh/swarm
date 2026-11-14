@@ -169,37 +169,6 @@ type ExactPipelineReceiptOutcomeReason struct {
 	Outcome, Reason string
 }
 
-func ReadExactPipelineReceiptOutcomeReasonTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (ExactPipelineReceiptOutcomeReason, error) {
-	query := `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	if postgres {
-		query = `SELECT outcome, COALESCE(reason_code, '') FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	}
-	var out ExactPipelineReceiptOutcomeReason
-	if err := tx.QueryRowContext(ctx, query, eventID).Scan(&out.Outcome, &out.Reason); err != nil {
-		return ExactPipelineReceiptOutcomeReason{}, err
-	}
-	return out, nil
-}
-
-func DeleteCommittedReplayScopeFixtureTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) error {
-	query := `DELETE FROM committed_replay_scopes WHERE event_id = ?`
-	if postgres {
-		query = `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`
-	}
-	result, err := tx.ExecContext(ctx, query, eventID)
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if changed != 1 {
-		return fmt.Errorf("committed replay scope fault removed %d rows, want one exact event", changed)
-	}
-	return nil
-}
-
 type LatestPipelineReceiptStorage struct {
 	Found                              bool
 	SubscriberID, Outcome, SideEffects string

@@ -21,7 +21,7 @@ func TestNativeBusCorruptScopePreservesExactFaultReceiptAndAllConsumers(t *testi
 		var owner string
 		switch row.Function {
 		case "deleteCommittedReplayScope":
-			owner = selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/owner_operations.go", "DeleteCommittedReplayScopeFixtureTx")
+			owner = selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/test_pipeline_scope_fixture.go", "deleteCommittedReplayScopeFixtureTx")
 			before := strings.ReplaceAll(row.Before, "DELETE FROM", "SELECT * FROM")
 			after := strings.ReplaceAll(owner, "DELETE FROM", "SELECT * FROM")
 			if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, before), eventDeliveryDiagnosticSQL(t, after)) ||
@@ -31,7 +31,7 @@ func TestNativeBusCorruptScopePreservesExactFaultReceiptAndAllConsumers(t *testi
 				t.Fatal("scope fault lost exact event/original writer/cardinality")
 			}
 		case "pipelineReceiptOutcome":
-			owner = selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/owner_operations.go", "ReadExactPipelineReceiptOutcomeReasonTx")
+			owner = selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/test_pipeline_scope_fixture.go", "readExactPipelineReceiptOutcomeReasonTx")
 			if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, row.Before), eventDeliveryDiagnosticSQL(t, owner)) ||
 				!strings.Contains(row.After, "ReadExactPipelineReceiptOutcomeReason(context.Background(), fixture.store, eventID)") ||
 				!strings.Contains(row.After, "return out.Outcome, out.Reason") {
