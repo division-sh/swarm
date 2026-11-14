@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -111,11 +112,13 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	}
 	if paused.predecessor != nil {
 		if found {
-			return out, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
+			return out, failures.Wrap(failures.ClassLifecycleConflict, "run_fork_write_conflict", "run-fork", "write", nil,
+				fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID))
 		}
 		live, found = *paused.predecessor, true
 	} else if req.Recovery == nil && found && live.RunID == current.plan.SourceRunID {
-		return out, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
+		return out, failures.Wrap(failures.ClassLifecycleConflict, "run_fork_write_conflict", "run-fork", "write", nil,
+			fmt.Errorf("paused fork source %s became live before materialization", live.RunID))
 	}
 	if found {
 		use, err := acquireLivePredecessor(ctx, req.LiveContexts, live)
