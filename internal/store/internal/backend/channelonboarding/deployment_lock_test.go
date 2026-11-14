@@ -294,6 +294,46 @@ func deploymentFixtureParent(op domain.Operation, child operatorchannel.Operatio
 		BindingOperationID: child.OperationID, BindingOperationRevision: child.Revision}
 }
 
+func deploymentParentLockOrder(queries []string) error {
+	// This process-only admission prefix is defined by generationauthority's
+	// mutation_admission.go:46-60, fence.go:139-156,210 and process_generation.go:70-87.
+	prefix := []string{
+		"SELECT pg_advisory_xact_lock_shared(1398231629, 1)",
+		"SELECT generation, CAST(lease_id AS TEXT), owner_id, CAST(boot_id AS TEXT), CAST(runtime_instance_id AS TEXT), backend FROM runtime_process_generation WHERE singleton_id = 1 FOR SHARE",
+		"SELECT operation_id::text FROM deployment_channel_operations WHERE operation_id=$1::uuid AND operation_revision=$2 FOR UPDATE",
+	}
+	if len(queries) < len(prefix) {
+		return fmt.Errorf("native admission and exact deployment parent were not reached")
+	}
+	for position, expected := range prefix {
+		if strings.Join(strings.Fields(queries[position]), " ") != expected {
+			return fmt.Errorf("native admission/deployment parent statement %d changed", position)
+		}
+	}
+	principal, currentKey, currentBinding := false, false, false
+	for _, raw := range queries[len(prefix):] {
+		query := strings.Join(strings.Fields(raw), " ")
+		if !principal {
+			switch query {
+			case "SELECT CAST(principal_id AS TEXT) FROM deployment_channel_operations WHERE operation_id=$1":
+				continue // The parent's nonlocking discovery read takes no other lock.
+			case "SELECT pg_advisory_xact_lock(hashtext('operator_principal_singleton'))",
+				"SELECT principal_id FROM operator_principals WHERE singleton_id = 1 FOR UPDATE":
+				principal = true
+				continue
+			default:
+				return fmt.Errorf("another statement precedes the first principal lock: %s", query)
+			}
+		}
+		currentKey = currentKey || query == "SELECT interface_key FROM deployment_channel_operations WHERE operation_id=$1"
+		currentBinding = currentBinding || strings.Contains(query, "FROM deployment_channel_operations o JOIN operator_channel_operations child ON child.operation_id=o.identity_operation_id JOIN operator_channel_bindings b")
+	}
+	if !principal || !currentKey || !currentBinding {
+		return fmt.Errorf("principal lock and subsequent exact currentness reads were not all reached")
+	}
+	return nil
+}
+
 func proveDeploymentParentInterleavings(t *testing.T) {
 	for _, mutation := range []string{"confirmation", "logout", "logout_then_connect"} {
 		t.Run(mutation, func(t *testing.T) {
@@ -365,9 +405,19 @@ func proveDeploymentParentInterleaving(t *testing.T, mutation string) {
 		t.Fatal("contending lifecycle owner did not finish", err)
 	}
 	workers.Wait()
-	if len(cut.queries) < 3 || !strings.Contains(cut.queries[0], "FROM deployment_channel_operations") ||
-		!strings.Contains(cut.queries[0], "FOR UPDATE") || !principalFenceQuery(cut.queries[2]) {
-		t.Fatal("deployment parent/principal lock prefix changed", cut.queries)
+	if err := deploymentParentLockOrder(cut.queries); err != nil {
+		t.Fatal("deployment parent/principal lock order changed", err, cut.queries)
+	}
+	if mutation == "confirmation" {
+		for _, hostile := range []string{"SELECT principal_id FROM operator_principals WHERE singleton_id = 1 FOR UPDATE",
+			"SELECT operation_id FROM operator_channel_operations FOR UPDATE"} {
+			queries := append([]string{}, cut.queries[:2]...)
+			queries = append(queries, hostile)
+			queries = append(queries, cut.queries[2:]...)
+			if deploymentParentLockOrder(queries) == nil {
+				t.Fatal("lock-order oracle accepted a lock before the deployment parent", hostile)
+			}
+		}
 	}
 	children, err := f.selected.ListOperatorChannelOperations(f.ctx, f.principal)
 	if err != nil {
