@@ -21,6 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -786,41 +790,44 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, completionBudget, len(replayed))
 	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
-	assertGoldenRunHasNoDrift(t, binaryPath, projectRoot, contractsOperand, configOperand, env, runID)
+	assertGoldenRunHasNoDrift(t, projectRoot, contractsOperand, store, runID)
 	if options.publicBoundaryProof {
 		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
 	}
 }
 
-func assertGoldenRunHasNoDrift(t *testing.T, binaryPath, projectRoot, contracts, configPath string, env []string, runID string) {
+func assertGoldenRunHasNoDrift(t *testing.T, projectRoot, contracts string, selected goldenStoreSelection, runID string) {
 	t.Helper()
-	for _, jsonOutput := range []bool{false, true} {
-		args := []string{"verify", contracts, "--config", configPath, "--run", runID}
-		if jsonOutput {
-			args = append(args, "--json")
-		}
-		result := runReleaseCommand(t, goldenStartupTimeout, projectRoot, env, "", binaryPath, args...)
-		if result.err != nil {
-			t.Fatalf("compiled verify --run failed (json=%t): %v\n%s", jsonOutput, result.err, result.output)
-		}
-		if !jsonOutput {
-			if !strings.Contains(result.output, "entities checked, no drift") {
-				t.Fatalf("compiled text verify did not prove no drift: %s", result.output)
-			}
-			continue
-		}
-		var report struct {
-			OK              bool              `json:"ok"`
-			Status          string            `json:"status"`
-			RunID           string            `json:"run_id"`
-			EntitiesChecked int               `json:"entities_checked"`
-			Rows            []json.RawMessage `json:"rows"`
-			Errors          []json.RawMessage `json:"errors"`
-		}
-		if err := json.Unmarshal([]byte(strings.TrimSpace(result.output)), &report); err != nil || !report.OK ||
-			report.Status != "passed" || report.RunID != runID || report.EntitiesChecked == 0 || len(report.Rows) != 0 || len(report.Errors) != 0 {
-			t.Fatalf("compiled JSON verify did not prove exact-run no drift: err=%v output=%s", err, result.output)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+	defer cancel()
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(releaseE2ERepoRoot(t), filepath.Join(projectRoot, contracts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := cliapp.StateStoreSchemaPlans(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: selected.inspectionSQLitePath}
+	if selected.name == "postgres" {
+		selection.Backend = storebackend.BackendPostgres
+	}
+	inspection, err := storeselected.OpenAdmissionInspection(ctx, storeselected.AuthorityRequest{Selection: selection, PostgresDSN: selected.inspectionPostgresDSN})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report mutationlog.DriftReport
+	_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
+		var err error
+		report, err = snapshot.InspectRunMutationDrift(ctx, runID)
+		return err
+	})
+	if err = errors.Join(err, inspection.Close()); err != nil || report.RunID != runID || report.EntitiesChecked == 0 || len(report.Rows) != 0 {
+		t.Fatalf("terminal mock native exact-run drift proof: report=%+v err=%v", report, err)
 	}
 }
 

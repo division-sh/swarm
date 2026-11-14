@@ -67,7 +67,6 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 			if err != nil {
 				return nil, err
 			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg, bootCheck...), nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
