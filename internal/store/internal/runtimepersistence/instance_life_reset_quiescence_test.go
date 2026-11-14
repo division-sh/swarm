@@ -42,7 +42,11 @@ func proveInstanceResetQuiescence(t *testing.T, backend string) {
 			}
 			f, first := newWorkflowTargetConstructionFixtureDocuments(t, backend, true, extra)
 			committer := agentFixtureFlowActivationCommitter{store: f.store}
-			if _, err := committer.CommitFlowInstanceActivation(f.ctx, first); err != nil {
+			committed, err := committer.CommitFlowInstanceActivation(f.ctx, first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, committed); err != nil {
 				t.Fatal(err)
 			}
 			agents, err := f.store.LoadAgents(f.ctx)
@@ -78,7 +82,7 @@ func proveInstanceResetQuiescence(t *testing.T, backend string) {
 				}
 				drain()
 			}
-			committed, err := committer.CommitFlowInstanceActivation(f.ctx, reset)
+			committed, err = committer.CommitFlowInstanceActivation(f.ctx, reset)
 			if err != nil || !committed.Acknowledged || !committed.StartedOver || committed.Plan.Instance.Life != 2 {
 				t.Fatalf("drained/future-only reset: %+v err=%v", committed, err)
 			}
