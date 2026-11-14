@@ -2,10 +2,9 @@ package main
 
 import (
 	"encoding/json"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -57,62 +56,60 @@ func TestNativeCatalogScatterConservationKeepsAllFourKeysScopeAndRefusal(t *test
 }
 
 func TestNativeCatalogScatterConservationOwnersRetainOriginalPhysicalQueries(t *testing.T) {
-	for _, owner := range []struct{ path, function, query string }{
-		{"pipelinepersistence/workflow_projection_observation.go", "CountWorkflowFieldRowsForRun", `SELECT COUNT(*) FROM entity_state WHERE run_id=$1`},
-		{"genericschedule/test_workflow_scheduler_observation.go", "CountTimerRowsForRun", `SELECT COUNT(*) FROM timers WHERE run_id=$1`},
-		{"pipelinepersistence/owner_operations.go", "CountFanOutIntentsForRun", `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`},
-		{"eventrecord/causal_observation.go", "CountScatterGatherDomainEvents", `SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','batch.opened') OR event_name LIKE 'workers/%/item.reported')`},
+	path := "internal/store/internal/backend/pipelinepersistence/test_scatter_gather_physical_counts.go"
+	source := selectedCausalObservationBody(t, path, "readScatterGatherPhysicalCountsTx")
+	want := []string{
+		`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`,
+		`SELECT COUNT(*) FROM timers WHERE run_id=$1`,
+		`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`,
+		`SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','batch.opened') OR event_name LIKE 'workers/%/item.reported')`,
+	}
+	for i := range want {
+		want[i] = strings.Join(strings.Fields(want[i]), "")
+	}
+	if got := eventDeliveryDiagnosticSQL(t, source); !reflect.DeepEqual(got, want) {
+		t.Fatalf("scatter/gather changed physical scope, retained history or domain-event predicate: %q", got)
+	}
+	previous := -1
+	for _, field := range []string{"Entities", "Timers", "FanOutIntents", "DomainEvents"} {
+		at := strings.Index(source, ".Scan(&out."+field+")")
+		if at <= previous {
+			t.Fatalf("scatter/gather count order or field %s changed", field)
+		}
+		previous = at
+	}
+	if strings.Count(source, "return ScatterGatherPhysicalCounts{}, err") != 4 {
+		t.Fatal("scatter/gather lost zero-on-error after a physical read")
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"func (s *PipelinePostgresOwner) ReadScatterGatherPhysicalCountsForTest", "func (s *PipelineSQLiteOwner) ReadScatterGatherPhysicalCountsForTest"} {
+		if !strings.Contains(string(data), fragment) {
+			t.Fatalf("scatter/gather lost original selected owner %s", fragment)
+		}
+	}
+	for fragment, wantCount := range map[string]int{
+		"s.backend.RunReadTransaction(ctx":                  2,
+		"readScatterGatherPhysicalCountsTx(ctx, tx, runID)": 2,
+		"return ScatterGatherPhysicalCounts{}, err":         6,
 	} {
-		path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.path)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		set := token.NewFileSet()
-		file, err := parser.ParseFile(set, path, data, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fn, err := uniqueFunction(file, owner.function)
-		if err != nil {
-			t.Fatal(err)
-		}
-		source := string(data[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
-		if causalDeliveryQueryLiteral(t, source) != strings.Join(strings.Fields(owner.query), "") {
-			t.Fatalf("%s changed physical scope, retained history or domain-event predicate", owner.function)
+		if got := strings.Count(string(data), fragment); got != wantCount {
+			t.Fatalf("scatter/gather lost one snapshot or zero-on-error per owner: %s count=%d", fragment, got)
 		}
 	}
 }
 
 func TestNativeCatalogScatterConservationSnapshotUsesAllCanonicalOwners(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "store", "internal", "runtimepersistence", "test_event_support.go")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, path, data, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fn, err := uniqueFunction(file, "ReadScatterGatherPhysicalCountsForTest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(data[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
+	source := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_event_support.go", "ReadScatterGatherPhysicalCountsForTest")
 	const shape = `func ReadScatterGatherPhysicalCountsForTest(ctx context.Context,selected any,runID string) (ScatterGatherPhysicalCounts,error) {
 if err := validateChannelObservationOwner(selected); err != nil { return ScatterGatherPhysicalCounts{},err }
-var out ScatterGatherPhysicalCounts
-err := readServedDeliveryObservation(ctx,selected,func(ctx context.Context,tx *sql.Tx) error {
-var err error
-if out.Entities,err = pipelinepersistence.CountWorkflowFieldRowsForRun(ctx,tx,runID); err != nil { return err }
-if out.Timers,err = genericschedule.CountTimerRowsForRun(ctx,tx,runID); err != nil { return err }
-if out.FanOutIntents,err = pipelinepersistence.CountFanOutIntentsForRun(ctx,tx,runID); err != nil { return err }
-out.DomainEvents,err = eventrecord.CountScatterGatherDomainEvents(ctx,tx,runID)
-return err
-})
-if err != nil { return ScatterGatherPhysicalCounts{},err }
-return out,nil
+switch store := selected.(type) {
+case *PostgresStore: return store.pipelinePostgresOwner.ReadScatterGatherPhysicalCountsForTest(ctx,runID)
+case *SQLiteRuntimeStore: return store.pipelineSQLiteOwner.ReadScatterGatherPhysicalCountsForTest(ctx,runID)
+default: return ScatterGatherPhysicalCounts{},fmt.Errorf("scatter/gather counts require the original native owner")
+}
 }`
 	want, err := canonicalFunction(shape)
 	got, parseErr := canonicalFunction(source)

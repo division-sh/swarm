@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
@@ -315,33 +314,20 @@ func ReadGlobalEventChronologyForTest(ctx context.Context, selected any) ([]Glob
 	}
 }
 
-type ScatterGatherPhysicalCounts struct {
-	Entities, Timers, FanOutIntents, DomainEvents int
-}
+type ScatterGatherPhysicalCounts = pipelinepersistence.ScatterGatherPhysicalCounts
 
 func ReadScatterGatherPhysicalCountsForTest(ctx context.Context, selected any, runID string) (ScatterGatherPhysicalCounts, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return ScatterGatherPhysicalCounts{}, err
 	}
-	var out ScatterGatherPhysicalCounts
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		if out.Entities, err = pipelinepersistence.CountWorkflowFieldRowsForRun(ctx, tx, runID); err != nil {
-			return err
-		}
-		if out.Timers, err = genericschedule.CountTimerRowsForRun(ctx, tx, runID); err != nil {
-			return err
-		}
-		if out.FanOutIntents, err = pipelinepersistence.CountFanOutIntentsForRun(ctx, tx, runID); err != nil {
-			return err
-		}
-		out.DomainEvents, err = eventrecord.CountScatterGatherDomainEvents(ctx, tx, runID)
-		return err
-	})
-	if err != nil {
-		return ScatterGatherPhysicalCounts{}, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.pipelinePostgresOwner.ReadScatterGatherPhysicalCountsForTest(ctx, runID)
+	case *SQLiteRuntimeStore:
+		return store.pipelineSQLiteOwner.ReadScatterGatherPhysicalCountsForTest(ctx, runID)
+	default:
+		return ScatterGatherPhysicalCounts{}, fmt.Errorf("scatter/gather counts require the original native owner")
 	}
-	return out, nil
 }
 
 func CountRunEventNameStorageForTest(ctx context.Context, selected any, run, name string) (int, error) {
