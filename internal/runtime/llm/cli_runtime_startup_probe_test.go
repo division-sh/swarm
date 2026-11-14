@@ -277,10 +277,14 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 			if strings.Contains(string(body), `"tools":[{`) || !strings.Contains(string(body), "selected-model") || !strings.Contains(string(body), cliStartupProbePrompt) {
 				t.Fatalf("answer request has tools or lost selected model/prompt: %s", body)
 			}
-			response := `{"content":[{"type":"text","text":"ok"}],"choices":[{"message":{"content":"ok"}}],"output":[{"type":"message","content":[{"text":"ok"}]}]}`
+			response := `{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"output":[{"type":"message","content":[{"text":"ok"}]}]}`
 			answer, err := decode([]byte(response))
 			if err != nil || validateStartupAnswer(answer) != nil {
 				t.Fatalf("%s completed answer: %+v %v", backend, answer, err)
+			}
+			partial := strings.NewReplacer(`"completed"`, `"incomplete"`, `"end_turn"`, `"max_tokens"`, `"finish_reason":"stop"`, `"finish_reason":"length"`).Replace(response)
+			if _, err := decode([]byte(partial)); err == nil {
+				t.Fatalf("%s accepted partial text as a completed answer", backend)
 			}
 		}
 		if validateStartupAnswer(Response{Message: Message{Content: "ready"}}) != nil {
