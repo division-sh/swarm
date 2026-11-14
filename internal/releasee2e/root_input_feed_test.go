@@ -46,6 +46,15 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 					t.Fatalf("input-only feed serve: %v\n%s", err, process.output.String())
 				}
 				servedHash := goldenServedBundleHash(t, process.rpc, "live")
+				var health struct {
+					Bundle struct {
+						BundleHash  string `json:"bundle_hash"`
+						SourceLabel string `json:"source_label"`
+					} `json:"bundle"`
+				}
+				if err := process.rpc.call(ctx, "health.check", map[string]any{}, &health); err != nil || health.Bundle.BundleHash != servedHash || health.Bundle.SourceLabel == "" {
+					t.Fatalf("connected source identity: %+v error=%v", health, err)
+				}
 				id := waitForFullLifecycleStandingRun(t, process.rpc, servedHash, "").RunID
 				if selector == "--pin" {
 					rows, err := os.ReadFile(filepath.Join(root, "rows.jsonl"))
@@ -94,7 +103,7 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 				if connected.err != nil {
 					t.Fatalf("connected input-only feed %s: %v\n%s", selector, connected.err, connected.output)
 				}
-				if !strings.Contains(connected.output, "bundle_hash="+servedHash+"\n") {
+				if !strings.Contains(connected.output, "bundle_hash="+servedHash+" source="+health.Bundle.SourceLabel+"\n") {
 					t.Fatalf("connected receipt omitted the selected bundle: %s", connected.output)
 				}
 				waitForGoldenTerminalRun(t, process, goldenStoreSelection{name: backend}, id, goldenStartupTimeout)
