@@ -50,7 +50,6 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			if err != nil {
 				return nil, err
 			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			db = storetest.DatabaseForTest(pg)
 			return openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...), nil
 		}
