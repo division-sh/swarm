@@ -221,7 +221,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			db = storetest.DatabaseForTest(pg)
 			selectedPG = pg
-			return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+			return openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...), nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeServeRuntimeTestConfig(t)

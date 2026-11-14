@@ -29698,6 +29698,17 @@ cli_specification:
         Starts current runtime and implemented API/MCP HTTP listeners for process probes, /v1/rpc, /v1/ws,
         MCP, and tool surfaces. Final CLI v2.1 topology is the separate API/MCP listener contract below;
         enable-disable controls and env/config listener precedence remain pending follow-up children.
+      check_stage:
+        flag: --dry-run
+        rule: >
+          Boot and dry run share the same mutation-free check stage. Observations cover the exact
+          configuration, source, pack generation, selected-store input and credentials. Disposable
+          resources are joined and released. A dry run acquires no process possession and resets no
+          dev scratch epoch. A live serve's occupied ports are explicitly not checked in dry run.
+          Real boot acquires existing native construction exclusion, revalidates the inspected store
+          absence/identity/schema/generation before bootstrap, then takes its own process authority.
+          Dev scratch validates predecessor artifacts without reading discarded application rows;
+          epoch exclusion and complete replacement remain boot actions after checks.
       runtime_config_backend_selection:
         config_flag: --config <path>
         backend_flag: --backend <anthropic|claude_cli|openai_compatible|openai_responses>

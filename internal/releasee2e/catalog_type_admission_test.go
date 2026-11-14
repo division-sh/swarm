@@ -78,9 +78,6 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 			var description string
 			for _, command := range []string{"verify", "describe"} {
 				args := []string{command, "--json", source, "--config", config}
-				if command == "verify" {
-					args = append(args, "--portable")
-				}
 				result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
 				if result.err != nil {
 					t.Fatalf("public %s: %v\n%s", command, result.err, result.output)
@@ -189,9 +186,6 @@ func TestCatalogTypeAdmissionPublicRestartBothStores(t *testing.T) {
 					args := []string{command, bad, "--config", config}
 					if command != "serve" {
 						args = append(args, "--json")
-						if command == "verify" {
-							args = append(args, "--portable")
-						}
 					}
 					refused := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
 					located := strings.Contains(refused.output, "unused/types.yaml") && strings.Contains(refused.output, invalid.reason)
@@ -243,9 +237,6 @@ func TestCatalogTypeAdmissionTemplateRoutingBothStores(t *testing.T) {
 			env := goldenProcessEnv(t, base, store.passwordEnv, 0)
 			for _, command := range []string{"verify", "describe"} {
 				args := []string{command, "--json", source, "--config", config}
-				if command == "verify" {
-					args = append(args, "--portable")
-				}
 				result := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, args...)
 				if result.err != nil {
 					t.Fatalf("public template %s: %v\n%s", command, result.err, result.output)

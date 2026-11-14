@@ -57,9 +57,12 @@ type ServeCheckStageResult struct {
 // a runtime or retaining any native role beyond its inspection callback.
 func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out ServeCheckStageResult, retErr error) {
 	defer func() {
-		if retErr != nil && out.Validation.BootReport.SourceArtifactHash == "" {
-			out.Validation = runtime.BlockedWorkflowContractAdmission(bootverify.ExecutionValidation, in.Paths.SourceRoot, "deployment_configuration", "prerequisite refused the selected source or configuration before validation")
-			verifyDeploymentObservation(ctx, &out.Validation, "deployment_configuration", "internal/cliapp.InspectServeCheckStage", in.Paths.SourceRoot, failures.ClassSchemaInvalid, func(context.Context) error { return retErr })
+		if retErr != nil {
+			if out.Validation.BootReport.SourceArtifactHash == "" {
+				out.Validation = runtime.BlockedWorkflowContractAdmission(bootverify.ExecutionValidation, in.Paths.SourceRoot, "deployment_configuration", "prerequisite refused the selected source or configuration before validation")
+			}
+			verifyDeploymentObservation(ctx, &out.Validation, "check_stage_completion", "internal/cliapp.InspectServeCheckStage", in.Paths.SourceRoot, failures.ClassSchemaInvalid, func(context.Context) error { return retErr })
+			out.Validation.BootReport.Sort()
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -99,6 +102,9 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 		return out, err
 	}
 	out.Validation, retErr = verifyBundleResultWithOptions(ctx, out.Source, out.Options)
+	verifyDeploymentObservation(ctx, &out.Validation, "generated_boundary_environment", "internal/cliapp.ValidateGeneratedBoundaryEnv", "source:"+out.Validation.BootReport.SourceArtifactHash, failures.ClassSchemaInvalid, func(context.Context) error {
+		return ValidateGeneratedBoundaryEnv()
+	})
 	preference, err := ResolveWorkspaceBackend(in.Options.WorkspaceBackend, in.Options.WorkspaceBackendSet, in.Config.Config)
 	if err != nil {
 		return out, errors.Join(retErr, err)
