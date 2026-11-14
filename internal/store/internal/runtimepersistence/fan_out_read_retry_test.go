@@ -73,6 +73,25 @@ func TestFanOutReadPacingSurvivesClaimReleaseAndRestartBothStores(t *testing.T) 
 				t.Fatalf("confirmed progress retained read episode: %+v err=%v", committed, err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
+			// A confirmed read failure waits from its native observation, not
+			// from the earlier claim admission which reserved the crash floor.
+			_, claim, found, err = owner.ClaimFanOutIntent(ctx, request)
+			if err != nil || !found {
+				t.Fatalf("fresh first-read attempt: found=%v err=%v", found, err)
+			}
+			time.Sleep(100 * time.Millisecond)
+			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest(), ReadEvaluation: true}); err != nil {
+				t.Fatal(err)
+			}
+			page, err = reader.ListFanOutIntents(ctx, fanoutobligation.ListQuery{RunID: fixture.runID})
+			if err != nil || len(page.Intents) != 1 || page.Intents[0].ReadWait == nil || page.Intents[0].ReadWait.Since == nil {
+				t.Fatalf("first read failure evidence=%+v err=%v", page, err)
+			}
+			wait := page.Intents[0].ReadWait
+			if wait.NotBefore.Sub(*wait.Since) < fanoutobligation.InitialReadRetryDelay {
+				t.Fatalf("first read retry waits %s from its observed failure, want at least %s", wait.NotBefore.Sub(*wait.Since), fanoutobligation.InitialReadRetryDelay)
+			}
+			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 1, 1)
 		})
 	}
 }
