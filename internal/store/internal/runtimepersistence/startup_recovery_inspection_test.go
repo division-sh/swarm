@@ -24,6 +24,7 @@ import (
 
 type startupRecoveryInspector interface {
 	InspectStartupRecovery(context.Context, time.Time, bool) (effects.StartupRecoveryCounts, error)
+	ForecastStartupRecovery(context.Context, time.Time) (effects.StartupRecoveryCounts, error)
 	InspectSnapshot(context.Context, func(context.Context) error) error
 }
 
@@ -76,6 +77,11 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 		want := effects.StartupRecoveryCounts{HTTPToolCallsUnknown: 1}
 		before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
 		requireStartupRecoveryCLI(t, fixture, binary)
+		forecast, err := reader.ForecastStartupRecovery(context.Background(), now)
+		wantForecast := effects.StartupRecoveryCounts{ProviderTurnsToResume: 1, ProviderTurnsToDeadLetter: 2, HTTPToolCallsUnknown: 1}
+		if err != nil || forecast != wantForecast {
+			t.Fatalf("conditional takeover forecast: %+v %v, want %+v", forecast, err, wantForecast)
+		}
 		// A native recovery row lock must not block an observational read.
 		if !fixture.sqlite {
 			locked, err := fixture.db.BeginTx(context.Background(), nil)
@@ -93,6 +99,12 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 			if err != nil || got != want {
 				t.Fatalf("inspection waited for recovery row lock: %+v %v", got, err)
 			}
+			bounded, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+			forecast, err := reader.ForecastStartupRecovery(bounded, now)
+			cancel()
+			if err != nil || forecast != wantForecast {
+				t.Fatalf("forecast waited for recovery row lock: %+v %v", forecast, err)
+			}
 			if err := locked.Rollback(); err != nil {
 				t.Fatal(err)
 			}
@@ -109,12 +121,18 @@ func TestStartupRecoveryInspectionMatchesSettlementBothStores(t *testing.T) {
 			if _, err := reader.InspectStartupRecovery(canceled, now, true); !errors.Is(err, context.Canceled) {
 				t.Fatalf("inspection lost cancellation: %v", err)
 			}
+			if _, err := reader.ForecastStartupRecovery(canceled, now); !errors.Is(err, context.Canceled) {
+				t.Fatalf("forecast lost cancellation: %v", err)
+			}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := reader.InspectStartupRecovery(expired, now, true); err == nil {
 			t.Fatal("inspection retained an expired snapshot")
+		}
+		if _, err := reader.ForecastStartupRecovery(expired, now); err == nil {
+			t.Fatal("forecast retained an expired snapshot")
 		}
 		historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
 		for _, owned := range []struct {

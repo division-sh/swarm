@@ -31,23 +31,14 @@ func (s *EffectSQLiteOwner) InspectStartupRecovery(ctx context.Context, now time
 }
 
 func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, now time.Time, available bool) (effects.StartupRecoveryCounts, error) {
-	var result effects.StartupRecoveryCounts
 	if now.IsZero() || delivery == nil {
-		return result, fmt.Errorf("startup recovery inspection requires its time and delivery reader")
+		return effects.StartupRecoveryCounts{}, fmt.Errorf("startup recovery inspection requires its time and delivery reader")
 	}
-	mode := recoveryReadMode{inspection: true, available: available}
-	candidates, err := loadExternalEffectRecoveryCandidates(ctx, tx, postgres, "", mode)
+	result, candidates, err := readStartupRecoveryReportBase(ctx, tx, postgres, available)
 	if err != nil {
 		return result, err
 	}
-	for _, row := range candidates {
-		if _, err := row.recoveryMode(); err != nil {
-			return effects.StartupRecoveryCounts{}, err
-		}
-		if row.EffectKind == string(effects.KindHTTPToolTarget) && recoveryPostlaunch(row.State) {
-			result.HTTPToolCallsUnknown++
-		}
-	}
+	mode := recoveryReadMode{inspection: true, available: available}
 	var attempts []completionRecoveryAttempt
 	if postgres {
 		attempts, err = loadCompletionRecoveryAttemptsPostgres(ctx, tx, delivery, now, "", nil, mode)
@@ -70,6 +61,23 @@ func inspectStartupRecovery(ctx context.Context, tx *sql.Tx, postgres bool, deli
 		}
 	}
 	return result, nil
+}
+
+func readStartupRecoveryReportBase(ctx context.Context, tx *sql.Tx, postgres, available bool) (effects.StartupRecoveryCounts, []externalEffectRecoveryCandidate, error) {
+	var result effects.StartupRecoveryCounts
+	candidates, err := loadExternalEffectRecoveryCandidates(ctx, tx, postgres, "", recoveryReadMode{inspection: true, available: available})
+	if err != nil {
+		return result, nil, err
+	}
+	for _, row := range candidates {
+		if _, err := row.recoveryMode(); err != nil {
+			return effects.StartupRecoveryCounts{}, nil, err
+		}
+		if row.EffectKind == string(effects.KindHTTPToolTarget) && recoveryPostlaunch(row.State) {
+			result.HTTPToolCallsUnknown++
+		}
+	}
+	return result, candidates, nil
 }
 
 func inspectProviderRecoveryOutcome(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, row completionRecoveryAttempt, now time.Time) (deliverylifecycle.Status, error) {

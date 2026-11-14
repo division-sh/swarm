@@ -114,6 +114,14 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 }
 
 func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+	attempts, err := readCompletionRecoveryAttemptsPostgres(ctx, tx, selectedExecutionID, identity, mode...)
+	if err != nil {
+		return nil, err
+	}
+	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, false)
+}
+
+func readCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, true)
 	if err != nil {
 		return nil, err
@@ -134,11 +142,7 @@ func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, del
 	if err != nil {
 		return nil, fmt.Errorf("list completion attempts for recovery: %w", err)
 	}
-	attempts, err := scanCompletionRecoveryAttempts(rows)
-	if err != nil {
-		return nil, err
-	}
-	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, false)
+	return scanCompletionRecoveryAttempts(rows)
 }
 
 func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
@@ -151,6 +155,14 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 }
 
 func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, now time.Time, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
+	attempts, err := readCompletionRecoveryAttemptsSQLite(ctx, tx, selectedExecutionID, identity, mode...)
+	if err != nil {
+		return nil, err
+	}
+	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, true)
+}
+
+func readCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, selectedExecutionID string, identity *agentidentity.Identity, mode ...recoveryReadMode) ([]completionRecoveryAttempt, error) {
 	predicate, args, err := startupCompletionRecoveryFilter(identity, false)
 	if err != nil {
 		return nil, err
@@ -166,11 +178,7 @@ func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, deliv
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite completion attempts for recovery: %w", err)
 	}
-	attempts, err := scanCompletionRecoveryAttempts(rows)
-	if err != nil {
-		return nil, err
-	}
-	return selectAbandonedCompletionAttempts(ctx, tx, delivery, attempts, now, true)
+	return scanCompletionRecoveryAttempts(rows)
 }
 
 func startupCompletionRecoveryFilter(identity *agentidentity.Identity, postgres bool) (string, []any, error) {
@@ -606,7 +614,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim conflicts for attempt %s", recovered.AttemptID)
 		}
 		attempt.Origin = origin
-	} else if strings.TrimSpace(recovered.AgentRunID) != "" {
+	} else if authority.Kind != runtimeeffects.AuthorityNormalAgent && strings.TrimSpace(recovered.AgentRunID) != "" {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery non-agent authority carries agent run identity for attempt %s", recovered.AttemptID)
 	}
 	agentID := strings.TrimSpace(target.AgentID)

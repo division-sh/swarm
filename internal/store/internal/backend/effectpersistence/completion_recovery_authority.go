@@ -18,22 +18,15 @@ import (
 // Recovery observes revocation, not the attempt's renewable wall-clock lease.
 // Its caller owns the read snapshot or the complete native mutation prefix.
 func selectAbandonedCompletionAttempts(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, attempts []completionRecoveryAttempt, now time.Time, sqlite bool) ([]completionRecoveryAttempt, error) {
-	observations := completionRecoveryObservations{
-		actors: make(map[agentidentity.Identity]agentpersistence.AgentExecutionObservation),
-		runs:   make(map[string]bool),
-	}
+	observations := newCompletionRecoveryObservations()
 	selected := make([]completionRecoveryAttempt, 0, len(attempts))
 	for _, row := range attempts {
-		var abandoned bool
-		var err error
-		switch row.AuthorityKind {
-		case string(effects.AuthoritySelectedContractFork):
-			abandoned = true
-		case string(effects.AuthorityConversationForkChat):
-			abandoned, err = completionForkChatParentAbandoned(ctx, tx, row, now, sqlite)
-		default:
-			abandoned, err = observations.ordinaryAbandoned(ctx, tx, delivery, row, now, sqlite)
+		observation, err := observations.readAuthority(ctx, tx, row, now, sqlite)
+		if err != nil {
+			return nil, err
 		}
+		// Only native state from this transaction enters actual selection.
+		abandoned, err := observations.recoveryDecision(ctx, tx, delivery, observation, observation.actor.State.Generation, now, sqlite)
 		if err != nil {
 			return nil, err
 		}
@@ -50,15 +43,56 @@ type completionRecoveryObservations struct {
 	process *processbinding.LeaseStamp
 }
 
-func (o *completionRecoveryObservations) ordinaryAbandoned(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, row completionRecoveryAttempt, now time.Time, sqlite bool) (bool, error) {
+func newCompletionRecoveryObservations() completionRecoveryObservations {
+	return completionRecoveryObservations{
+		actors: make(map[agentidentity.Identity]agentpersistence.AgentExecutionObservation),
+		runs:   make(map[string]bool),
+	}
+}
+
+type completionRecoveryAuthorityObservation struct {
+	row     completionRecoveryAttempt
+	attempt effects.Attempt
+	actor   agentpersistence.AgentExecutionObservation
+}
+
+func (o *completionRecoveryObservations) readAuthority(ctx context.Context, tx *sql.Tx, row completionRecoveryAttempt, now time.Time, sqlite bool) (completionRecoveryAuthorityObservation, error) {
+	result := completionRecoveryAuthorityObservation{row: row}
+	if row.AuthorityKind == string(effects.AuthoritySelectedContractFork) || row.AuthorityKind == string(effects.AuthorityConversationForkChat) {
+		return result, nil
+	}
 	attempt, _, err := completionRecoverySettlement(row, effects.StateTerminalFailure, nil, now)
 	if err != nil {
-		return false, err
+		return result, err
 	}
 	if attempt.Authority.Kind != effects.AuthorityNormalAgent || !attempt.Authority.Valid() {
-		return false, fmt.Errorf("completion recovery has invalid ordinary authority for %s", row.AttemptID)
+		return result, fmt.Errorf("completion recovery has invalid ordinary authority for %s", row.AttemptID)
 	}
-	abandoned, err := o.actorAbandoned(ctx, tx, attempt.Authority.Normal, sqlite)
+	result.attempt = attempt
+	token := attempt.Authority.Normal
+	actor, found := o.actors[token.Identity]
+	if !found {
+		actor, err = agentpersistence.ReadAgentExecution(ctx, tx, token, sqlite)
+		if err != nil {
+			return result, err
+		}
+		o.actors[token.Identity] = actor
+	}
+	result.actor = actor
+	return result, nil
+}
+
+// This is the one decision for actual recovery and a conditional report. The
+// caller supplies native generation, or a local forecast that never escapes.
+func (o *completionRecoveryObservations) recoveryDecision(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, observation completionRecoveryAuthorityObservation, takeoverGeneration uint64, now time.Time, sqlite bool) (bool, error) {
+	switch observation.row.AuthorityKind {
+	case string(effects.AuthoritySelectedContractFork):
+		return true, nil
+	case string(effects.AuthorityConversationForkChat):
+		return completionForkChatParentAbandoned(ctx, tx, observation.row, now, sqlite)
+	}
+	attempt := observation.attempt
+	abandoned, err := o.actorAbandoned(ctx, tx, attempt.Authority.Normal, observation.actor, takeoverGeneration, sqlite)
 	if err != nil || abandoned {
 		return abandoned, err
 	}
@@ -66,12 +100,14 @@ func (o *completionRecoveryObservations) ordinaryAbandoned(ctx context.Context, 
 	if err != nil || abandoned {
 		return abandoned, err
 	}
-	cancellation, err := readProviderOriginCancellation(ctx, tx, !sqlite, attempt, true, recoveryInspection)
-	if err != nil {
-		return false, err
-	}
-	if cancellation.disposition != providerOriginNotCanceled {
-		return true, nil
+	if attempt.Authority.HasBusinessTurnOrigin() {
+		cancellation, err := readProviderOriginCancellation(ctx, tx, !sqlite, attempt, true, recoveryInspection)
+		if err != nil {
+			return false, err
+		}
+		if cancellation.disposition != providerOriginNotCanceled {
+			return true, nil
+		}
 	}
 	if attempt.Origin.Kind == effects.CompletionOriginDelivery {
 		abandoned, err = delivery.ProviderOriginRecoveryAbandonedTx(ctx, tx, attempt.Origin.Delivery)
@@ -82,17 +118,8 @@ func (o *completionRecoveryObservations) ordinaryAbandoned(ctx context.Context, 
 	return o.runAbandoned(ctx, tx, attempt.Authority.Normal.Identity.RunID, sqlite)
 }
 
-func (o *completionRecoveryObservations) actorAbandoned(ctx context.Context, tx *sql.Tx, token effects.LifecycleToken, sqlite bool) (bool, error) {
-	actor, found := o.actors[token.Identity]
-	if !found {
-		var err error
-		actor, err = agentpersistence.ReadAgentExecution(ctx, tx, token, sqlite)
-		if err != nil {
-			return false, err
-		}
-		o.actors[token.Identity] = actor
-	}
-	if !actor.Found || actor.State.RuntimeEpoch != token.RuntimeEpoch || actor.State.Generation != token.Generation || actor.State.Phase != manager.AgentLifecycleRunning {
+func (o *completionRecoveryObservations) actorAbandoned(ctx context.Context, tx *sql.Tx, token effects.LifecycleToken, actor agentpersistence.AgentExecutionObservation, takeoverGeneration uint64, sqlite bool) (bool, error) {
+	if !actor.Found || actor.State.RuntimeEpoch != token.RuntimeEpoch || takeoverGeneration != token.Generation || actor.State.Phase != manager.AgentLifecycleRunning {
 		return true, nil
 	}
 	if o.process == nil {
