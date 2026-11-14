@@ -656,16 +656,11 @@ contract_formats:
         Ordinary handlers are eligible in every non-final stage; independent
         loop/join/guard/gate/timer carrier restrictions remain in force.
       services: >
-        A flow without final stages is a valid service and never completes.
-        Finite run.start refuses a service in its canonical construction/routing
-        closure before creating a run, event, data, feed or receipt. Include the
-        selected root, eagerly constructed keyless descendants and reachable
-        instance-bearing receivers/templates with their constructor children.
-        Stateless does not imply an exempt container. Unknown or contradictory
-        catalog evidence fails closed. The diagnostic names the offending flow
-        and says: this flow never completes; use `serve`, or mark its end stages
-        `final`. Standing/schedule/serve owners and existing-run event.publish
-        are separate; idempotent committed receipt replay remains authoritative.
+        A flow without final stages keeps its instances alive until they are
+        explicitly ended. Serve owns the deployment's live flows; run.start
+        publishes events or rows into them, without a finite-start refusal for
+        a flow without final stages. Idempotent committed receipt replay remains
+        authoritative.
       stateless_form: >
         `stages: []` is the explicit stateless form for staged bundles.
       retired_legacy_authoring: >
@@ -3660,9 +3655,9 @@ state_machine_authority:
       outcomes advance, emit, or write data and whether it owns a deadline;
       stage-free fan-out delivery joins retain their separate semantics. Final entry alone
       cancels no accepted work, revokes no acknowledged writes, and creates no
-      resource-cleanup authority. No-final flows are valid services that never
-      complete; finite run.start rejects their selected constructor/route
-      closure before creation, including independently selected feed receivers.
+      resource-cleanup authority. A flow without final stages keeps its instances
+      alive until explicitly ended; run.start publishes into the served live flow
+      without a finite-start refusal for that flow or its selected receivers.
     not_field_presence_authority: |
       A lifecycle state name alone does not assign a field or synthesize
       its value. Definite-assignment analysis consumes the existing compiled
