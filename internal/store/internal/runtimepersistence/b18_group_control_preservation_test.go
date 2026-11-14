@@ -231,6 +231,7 @@ func TestB18CommittedGroupSurvivesEnumerationLeaseExpiryBothStores(t *testing.T)
 			if _, err := f.owner.ReleaseFanOutClaim(f.ctx, f.claim); err != nil {
 				t.Fatal(err)
 			}
+			waitFanOutReadPacingForTest(t, f.ctx, f.intent)
 			key := f.claim.Key
 			intent, claim, found, err := f.owner.ClaimFanOutIntent(f.ctx, pipeline.FanOutClaimRequest{
 				Owner: "b18-committed-expiry", BundleHash: f.seed.bundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: 2 * time.Second,
