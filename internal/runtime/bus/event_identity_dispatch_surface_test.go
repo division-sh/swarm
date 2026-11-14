@@ -104,15 +104,11 @@ func (f completeEventDispatchFixture) recordedReplay(t testing.TB, ctx context.C
 	for _, route := range selection.Routes() {
 		targets = append(targets, route.Target.Route())
 	}
-	event, err := events.NewReplayEvent(events.ReplayEventInput{
-		Facts: events.EventFacts{ID: uuid.NewString(), Type: snapshot.Type(), Producer: events.ProducerClaim{Type: snapshot.ProducerType(), ID: snapshot.SourceAgent()},
-			TaskID: snapshot.TaskID(), Payload: snapshot.Payload(), ChainDepth: snapshot.ChainDepth() + 1, RoutingSource: snapshot.RoutingSource(),
-			Envelope: events.EnvelopeForTargetSet(snapshot.Envelope(), targets), CreatedAt: time.Now().UTC(), ExecutionMode: snapshot.ExecutionMode()},
-		Lineage: events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := eventtest.ReplayForProducerWithRoutingSource(
+		uuid.NewString(), snapshot.Type(), snapshot.Producer(), snapshot.TaskID(), snapshot.Payload(), snapshot.ChainDepth()+1,
+		events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
+		events.EnvelopeForTargetSet(snapshot.Envelope(), targets), snapshot.RoutingSource(), time.Now().UTC(),
+	)
 	return event, selection
 }
 
