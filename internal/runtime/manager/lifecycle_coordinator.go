@@ -1341,6 +1341,19 @@ func (c *agentLifecycleCoordinator) waitForWork(ctx context.Context) error {
 	return errors.Join(err, c.terminalErr)
 }
 
+func (c *agentLifecycleCoordinator) waitForAcceptedWork(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.workMu.Lock()
+	owner := c.runOwner
+	c.workMu.Unlock()
+	if owner == nil {
+		return nil
+	}
+	return owner.WaitForQuiescence(ctx)
+}
+
 func (c *agentLifecycleCoordinator) retireWorkAdmission() bool {
 	return c.retireWorkAdmissionAs(false)
 }
