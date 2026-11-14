@@ -69,37 +69,6 @@ func FixturePipelineReceiptOutcomeTx(ctx context.Context, tx *sql.Tx, eventID st
 	return outcome, &failure, nil
 }
 
-func ReadNodeReceiptDiagnosticLinesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
-	query := `SELECT subscriber_type || '/' || subscriber_id,
-outcome || ' reason=' || COALESCE(reason_code, '') || ' failure=' || COALESCE(failure, '')
-FROM event_receipts WHERE event_id = ? ORDER BY subscriber_type, subscriber_id`
-	if postgres {
-		query = `SELECT subscriber_type || '/' || subscriber_id,
-outcome || ' reason=' || COALESCE(reason_code, '') || ' failure=' || COALESCE(failure::text, '')
-FROM event_receipts WHERE event_id = $1::uuid ORDER BY subscriber_type, subscriber_id`
-	}
-	rows, err := tx.QueryContext(ctx, query, eventID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var subscriber, outcome string
-		if err := rows.Scan(&subscriber, &outcome); err != nil {
-			return nil, err
-		}
-		out = append(out, subscriber+" outcome="+outcome)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func FixturePipelineReceiptCardinalityTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
 	if tx == nil {
 		return 0, fmt.Errorf("pipeline receipt evidence requires a selected read transaction")
