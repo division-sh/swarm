@@ -20,7 +20,7 @@ type DeliveryPublicationFixtureStore interface {
 
 // CommitNativeDeliveryPublication uses the original publication owner and exact
 // authority. Publication finishes before any claim or process-local dispatch.
-func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected DeliveryPublicationFixtureStore, admitted events.AdmittedEvent, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) {
+func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected DeliveryPublicationFixtureStore, admitted events.AdmittedEvent, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) runtimebus.CommittedPublication {
 	t.Helper()
 	event := admitted.Event()
 	// A real root publication owns run creation and its flow claim atomically.
@@ -69,4 +69,5 @@ func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected
 	if err != nil || !committed.Acknowledged {
 		t.Fatalf("native publication was not acknowledged: %+v,error=%v", committed, err)
 	}
+	return committed
 }

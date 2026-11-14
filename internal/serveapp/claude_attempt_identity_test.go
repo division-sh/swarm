@@ -42,7 +42,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -83,7 +82,7 @@ type claudeAttemptProofStore interface {
 	runtimebus.EventStore
 	runtimebus.CommitPublicationOwner
 	runtimereplycontext.Store
-	runtimerunlifecycle.OperationOwner
+	storetest.RunFixtureStore
 	runtimebus.ActiveAgentDescriptorLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
@@ -890,8 +889,34 @@ func publishClaudeAttemptProofEvent(t *testing.T, backend claudeAttemptProofBack
 	eventID := uuid.NewString()
 	evt := eventtest.ExistingRunRootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, claudeAttemptProofRuntimeID, events.EventEnvelope{}, time.Now().UTC())
 	cfg := claudeAttemptProofAgentConfig(surface)
-	storetest.CommitSemanticEventWithRoutes(t, backend.context(), backend.store, evt,
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}, runtimepipelineobligation.ScopeSubscribed)
+	authority, err := eventBus.DeliveryAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := storetest.CommitNativeDeliveryPublication(t, backend.context(), backend.fixture,
+		storetest.AdmitNativeDeliveryEvent(t, evt),
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}, authority, nil)
+	if err := eventBus.AcceptCommittedDeliveryHandoffs(committed.DeliveryHandoffs); err != nil {
+		t.Fatalf("transfer committed Claude proof input: %v", err)
+	}
+	owner := backend.fixture.PipelineObligations()
+	work, err := owner.ClaimEvent(backend.context(), eventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled := false
+	defer func() {
+		if !settled {
+			if err := owner.Release(context.WithoutCancel(backend.context()), work.Claim); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	outcome, err := owner.Settle(backend.context(), work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	settled = outcome.Committed()
+	if err != nil || !outcome.DeliveryHandoffCommitted() {
+		t.Fatalf("settle Claude proof input handoff: committed=%v error=%v", outcome.DeliveryHandoffCommitted(), err)
+	}
 	coordinator, ok := eventBus.DeliveryContinuationOwner().(interface{ Synchronize(context.Context) error })
 	if !ok {
 		t.Fatal("Claude proof requires its native delivery coordinator")
