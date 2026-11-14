@@ -109,6 +109,31 @@ func pipelineDeliveryNativeFixture(t *testing.T, backend string, source semantic
 	return pipelineDeliveryNativeFixtureFromSelected(t, source, base, selected, reopen, probe)
 }
 
+func pipelineDeliveryNativeUpgradeFixture(t *testing.T, backend string, source semanticview.Source) *pipeline.PipelineDeliveryNativeFixtureForTest {
+	t.Helper()
+	fixture := pipelineDeliveryNativeFixture(t, backend, source)
+	original, err := agentfixture.ProcessCapability(t, fixture.Context, fixture.Store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := correlation.RootAdmissionFromContext(fixture.Context)
+	if err != nil || !found {
+		t.Fatalf("original upgrade source root is unavailable: found=%t err=%v", found, err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := original.InstallCompleteSourceSet(fixture.Context, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
 func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview.Source, base pipeline.WorkflowHandlerNativeFixtureForTest, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, probe *storetest.TransactionCollector) *pipeline.PipelineDeliveryNativeFixtureForTest {
 	t.Helper()
 	original, err := agentfixture.ProcessCapability(t, base.Context, selected.(agentfixture.Store))

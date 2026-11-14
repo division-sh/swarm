@@ -123,6 +123,10 @@ func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineD
 				if err != nil || !found {
 					t.Fatalf("read committed native answer: %t %v", found, err)
 				}
+				discovered, err := fixture.Store.(runbundle.UpgradeReader).ReadBundleUpgradeState(ctx, card.RunID, semanticview.Wrap(bundle))
+				if err != nil || len(discovered.CommittedGateCards) != 1 || discovered.CommittedGateCards[0].CardID != card.CardID || discovered.CommittedGateCards[0].DecisionEventID != mutation.decide.DecisionEventID {
+					t.Fatalf("upgrade discovery lost the exact committed card: %+v err=%v", discovered.CommittedGateCards, err)
+				}
 				err = fixture.UpgradeSource(ctx, candidate)
 				if order == "answer_first_equal" {
 					if err != nil {
