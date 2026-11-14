@@ -9,7 +9,7 @@ func (s *DeliveryPostgresOwner) ReadExactAgentDeliveryStatusForTest(ctx context.
 	var status string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		status, err = ReadExactAgentDeliveryStatusTx(ctx, tx, true, eventID, agentID)
+		status, err = readExactAgentDeliveryStatusTx(ctx, tx, true, eventID, agentID)
 		return err
 	})
 	if err != nil {
@@ -22,7 +22,7 @@ func (s *DeliverySQLiteOwner) ReadExactAgentDeliveryStatusForTest(ctx context.Co
 	var status string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		status, err = ReadExactAgentDeliveryStatusTx(ctx, tx, false, eventID, agentID)
+		status, err = readExactAgentDeliveryStatusTx(ctx, tx, false, eventID, agentID)
 		return err
 	})
 	if err != nil {
@@ -35,7 +35,7 @@ func (s *DeliveryPostgresOwner) ReadStandaloneAgentDeliveryStorageForTest(ctx co
 	var out StandaloneAgentDeliveryStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadStandaloneAgentDeliveryStorageTx(ctx, tx, eventID, agentID)
+		out, err = readStandaloneAgentDeliveryStorageTx(ctx, tx, eventID, agentID)
 		return err
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *DeliverySQLiteOwner) ReadStandaloneAgentDeliveryStorageForTest(ctx cont
 	var out StandaloneAgentDeliveryStorage
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadStandaloneAgentDeliveryStorageTx(ctx, tx, eventID, agentID)
+		out, err = readStandaloneAgentDeliveryStorageTx(ctx, tx, eventID, agentID)
 		return err
 	})
 	if err != nil {

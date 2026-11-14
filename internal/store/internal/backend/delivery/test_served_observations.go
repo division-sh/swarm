@@ -64,7 +64,7 @@ func (s *DeliveryPostgresOwner) ReadCausalDeliveryFrontierForTest(ctx context.Co
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryFrontier(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryFrontier(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *DeliverySQLiteOwner) ReadCausalDeliveryFrontierForTest(ctx context.Cont
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryFrontier(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryFrontier(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -90,7 +90,7 @@ func (s *DeliveryPostgresOwner) ProbeCausalDeliveryFrontierForTest(ctx context.C
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ProbeCausalDeliveryFrontier(ctx, tx, probe)
+		out, err = probeCausalDeliveryFrontier(ctx, tx, probe)
 		return err
 	})
 	if err != nil {
@@ -103,7 +103,7 @@ func (s *DeliverySQLiteOwner) ProbeCausalDeliveryFrontierForTest(ctx context.Con
 	var out CausalDeliveryFrontier
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ProbeCausalDeliveryFrontier(ctx, tx, probe)
+		out, err = probeCausalDeliveryFrontier(ctx, tx, probe)
 		return err
 	})
 	if err != nil {
@@ -116,7 +116,7 @@ func (s *DeliveryPostgresOwner) ReadEventDeliveryDiagnosticRowsForTest(ctx conte
 	var out []EventDeliveryDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadEventDeliveryDiagnosticRows(ctx, tx, eventID, true)
+		out, err = readEventDeliveryDiagnosticRows(ctx, tx, eventID, true)
 		return err
 	})
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *DeliverySQLiteOwner) ReadEventDeliveryDiagnosticRowsForTest(ctx context
 	var out []EventDeliveryDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadEventDeliveryDiagnosticRows(ctx, tx, eventID, false)
+		out, err = readEventDeliveryDiagnosticRows(ctx, tx, eventID, false)
 		return err
 	})
 	if err != nil {
@@ -142,7 +142,7 @@ func (s *DeliveryPostgresOwner) ReadSubscriberEventNamesCreatedSinceForTest(ctx 
 	var out []string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
+		out, err = readSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
 		return err
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *DeliverySQLiteOwner) ReadSubscriberEventNamesCreatedSinceForTest(ctx co
 	var out []string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
+		out, err = readSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
 		return err
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *DeliveryPostgresOwner) ReadCausalDeliveryStatusCountsForTest(ctx contex
 	var out []CausalDeliveryStatusCount
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -181,7 +181,7 @@ func (s *DeliverySQLiteOwner) ReadCausalDeliveryStatusCountsForTest(ctx context.
 	var out []CausalDeliveryStatusCount
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
+		out, err = readCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
 		return err
 	})
 	if err != nil {
@@ -194,7 +194,7 @@ func (s *DeliveryPostgresOwner) ReadNonLogRunDeliveryClaimTotalsForTest(ctx cont
 	var deliveries, claims int64
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveries, claims, err = ReadNonLogRunDeliveryClaimTotals(ctx, tx, runID)
+		deliveries, claims, err = readNonLogRunDeliveryClaimTotals(ctx, tx, runID)
 		return err
 	})
 	if err != nil {
@@ -207,7 +207,7 @@ func (s *DeliverySQLiteOwner) ReadNonLogRunDeliveryClaimTotalsForTest(ctx contex
 	var deliveries, claims int64
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveries, claims, err = ReadNonLogRunDeliveryClaimTotals(ctx, tx, runID)
+		deliveries, claims, err = readNonLogRunDeliveryClaimTotals(ctx, tx, runID)
 		return err
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func (s *DeliveryPostgresOwner) ReadDeliveryAttemptDiagnosticRowsForTest(ctx con
 	var out []DeliveryAttemptDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
+		out, err = readDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
 		return err
 	})
 	if err != nil {
@@ -233,7 +233,7 @@ func (s *DeliverySQLiteOwner) ReadDeliveryAttemptDiagnosticRowsForTest(ctx conte
 	var out []DeliveryAttemptDiagnosticRow
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		out, err = ReadDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
+		out, err = readDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
 		return err
 	})
 	if err != nil {
