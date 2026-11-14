@@ -323,18 +323,6 @@ func ReadSemanticEventSettledAttemptCount(ctx context.Context, q queryer, eventI
 	return count, err
 }
 
-func ReadAgentSettledAttemptCountTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, agentID string) (int, error) {
-	query := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
-	if postgres {
-		query = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
-	}
-	var count int
-	if err := tx.QueryRowContext(ctx, query, eventID, agentID).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
 func ReadSemanticEventDeliveryStorage(ctx context.Context, q queryer, eventID string) (map[string][18]string, map[string]string, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT delivery_id, status, route_identity, subscriber_type, subscriber_id,

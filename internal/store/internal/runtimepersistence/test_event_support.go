@@ -231,17 +231,14 @@ func ReadAgentSettledAttemptCountForTest(ctx context.Context, selected any, even
 	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
 		return 0, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		count, err = deliveryadapter.ReadAgentSettledAttemptCountTx(ctx, tx, postgres, eventID, agentID)
-		return err
-	})
-	if err != nil {
-		return 0, err
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.deliveryPostgresOwner.ReadAgentSettledAttemptCountForTest(ctx, eventID, agentID)
+	case *SQLiteRuntimeStore:
+		return store.deliverySQLiteOwner.ReadAgentSettledAttemptCountForTest(ctx, eventID, agentID)
+	default:
+		return 0, fmt.Errorf("agent settled attempt count requires the original native owner")
 	}
-	return count, nil
 }
 
 func SetEventChainDepthForTest(ctx context.Context, selected any, eventID string, depth int) error {
