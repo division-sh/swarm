@@ -94,3 +94,32 @@ func CopyUnselectedHigherCompositionConnect(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "connect:\n  - {event: deploy.done, from: envelope/producer, to: envelope/consumer, rename: deploy.completed}\n")
 	return root
 }
+
+const lexicalAccountReturnRow = "  - {event: ticket.done, from: ticket, to: .}\n"
+
+func CopyLexicallyBoundAccountConnection(t testing.TB) string {
+	t.Helper()
+	root := CopyLexicalAddressing(t, false)
+	writeClosedVariantFile(t, root, "account/ticket/events.yaml", "ticket.done:\n  account_id: text\n  target_account_id: text\n")
+	writeClosedVariantFile(t, root, "account/ticket/nodes.yaml", "reporter:\n  opened:\n    emit: {event: ticket.done, fields: {account_id: payload.account_id, target_account_id: payload.account_id}}\n")
+	writeClosedVariantFile(t, root, "account/nodes.yaml", "receiver:\n  root.audit: {}\n  ticket.done: {}\n")
+	path := filepath.Join(root, "account", "schema.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Count(string(raw), "inputs: [opened, root.audit]") != 1 {
+		t.Fatalf("lexical account input declaration: %s %v", raw, err)
+	}
+	body := strings.Replace(string(raw), "inputs: [opened, root.audit]", "inputs: [opened, root.audit, ticket.done]", 1)
+	writeClosedVariantFile(t, root, "account/schema.yaml", body+lexicalAccountReturnRow)
+	return root
+}
+
+func SetLexicalAccountKeySource(t testing.TB, root, source string) {
+	t.Helper()
+	path := filepath.Join(root, "account", "schema.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Count(string(raw), lexicalAccountReturnRow) != 1 {
+		t.Fatalf("lexical account return row: %s %v", raw, err)
+	}
+	row := "  - {event: ticket.done, from: ticket, to: ., resolution: select, key_from: " + source + "}\n"
+	writeClosedVariantFile(t, root, "account/schema.yaml", strings.Replace(string(raw), lexicalAccountReturnRow, row, 1))
+}

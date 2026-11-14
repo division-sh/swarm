@@ -316,6 +316,11 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	}
 	errs = append(errs, validateClockScheduleTopology(bundle)...)
 	errs = append(errs, validateCompiledConnectEventSchemaOwnership(bundle)...)
+	for _, connect := range bundle.Semantics.CompositionConnects {
+		if err := lexicallyBoundConnectionKeyError(bundle, connect); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", connect.AuthoredLocation(), err))
+		}
+	}
 	errs = append(errs, validateScopedAgentIntentCoordinates(bundle)...)
 	errs = append(errs, validateAgentTurnTimeoutContracts(bundle)...)
 	errs = append(errs, validateWorkflowPolicyValidationContracts(bundle)...)
