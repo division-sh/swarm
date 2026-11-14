@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -134,11 +135,34 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			}
 			opts.SourceRoot = sourceB
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
+			captured := captureSelectedResetSupervisor(t)
 			second, rt := start()
+			supervisor := <-captured
+			supervisor.mu.Lock()
+			original := supervisor.execution["mailbox.decide"]
+			if original == nil {
+				supervisor.mu.Unlock()
+				t.Fatal("restarted supervisor has no mailbox.decide handler")
+			}
+			supervisor.execution["mailbox.decide"] = func(ctx context.Context, req apiv1.Request) (any, error) {
+				result, err := original(ctx, req)
+				text := fmt.Sprintf("%#v", result)
+				truncated := len(text) > 1024
+				if truncated {
+					text = text[:1024]
+				}
+				t.Logf("MISSING_PIN_ORIGINAL result_type=%T result=%s text_truncated=%t error_type=%T", result, text, truncated, err)
+				logGateUpgradeCauseTree(t, err)
+				return result, err
+			}
+			supervisor.mu.Unlock()
 			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
 				t.Fatal("restart mutated pending lifecycle")
 			}
 			missingPin := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params)
+			supervisor.mu.Lock()
+			supervisor.execution["mailbox.decide"] = original
+			supervisor.mu.Unlock()
 			if missingPin.Data["code"] != "BUNDLE_UNAVAILABLE" {
 				t.Fatalf("missing pin=%#v", missingPin)
 			}

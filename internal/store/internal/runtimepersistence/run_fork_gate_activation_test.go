@@ -251,15 +251,15 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
 
-			rootOutcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-				"approve": {
-					Verdict:    "approve",
-					AdvancesTo: "done",
-					Emit:       runtimecontracts.EmitSpec{Event: "run_fork.compiled_root_gate_approved"},
-					EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-				},
-			}
 			rootBundle := runForkRootGateBundleForTest(t)
+			rootPlan, found := rootBundle.WorkflowGateForStage(".", "awaiting_review")
+			if !found || rootPlan.Decision != "root_review" {
+				t.Fatal("root gate declaration has no exact admitted plan")
+			}
+			rootOutcomes, err := decisioncard.ResolveGateOutcomes(rootBundle, rootPlan)
+			if err != nil {
+				t.Fatal(err)
+			}
 			target, err := runtimecontracts.BootBundleIdentity(rootBundle)
 			if err != nil {
 				t.Fatal(err)
@@ -295,14 +295,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			}
 			sourceCard, err := decisioncard.New(decisioncard.Card{
 				CardID: sourceActivation.CardID, RunID: sourceRunID, ExecutionMode: "live", Anchor: sourceAnchor,
-				Snapshot: freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "root source"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-					"approve": {
-						Verdict:    "approve",
-						AdvancesTo: "done",
-						Emit:       runtimecontracts.EmitSpec{Event: "run_fork.compiled_root_gate_approved"},
-						EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
-					},
-				}),
+				Snapshot:   freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "root source"}, rootOutcomes),
 				BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1", CreatedAt: now,
 			})
 			if err != nil {
