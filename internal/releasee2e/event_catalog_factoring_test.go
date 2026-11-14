@@ -20,7 +20,7 @@ func TestEventCatalogFactoringCompiledReaders(t *testing.T) {
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/tier8-boot-verification/test-boot-success"), source)
 	path := filepath.Join(source, "events.yaml")
 	writeReleaseFile(t, path, "task.requested:\n")
-	for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe"}} {
+	for _, args := range [][]string{{"verify", "--json"}, {"describe"}} {
 		result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 		if result.err != nil || (args[0] == "describe" && !strings.Contains(result.output, "(no fields)")) {
 			t.Fatalf("compiled bare-event reader: %v\n%s", result.err, result.output)
@@ -31,7 +31,7 @@ func TestEventCatalogFactoringCompiledReaders(t *testing.T) {
 		{"task.requested:\n  required: [id]\n  id: uuid\n", `event task.requested.required: unknown catalog type "id"`},
 	} {
 		writeReleaseFile(t, path, refusal.body)
-		for _, args := range [][]string{{"verify", "--portable", "--json"}, {"describe", "--json"}} {
+		for _, args := range [][]string{{"verify", "--json"}, {"describe", "--json"}} {
 			result := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, append(args, source, "--config", config)...)
 			want := refusal.want
 			if args[0] == "verify" {

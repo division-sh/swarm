@@ -37,7 +37,7 @@ func TestVerifySeparatesStructuralValidityFromEffectReadiness(t *testing.T) {
 			sourceRoot := writeVerifyMockConnectorFixture(t, tc.includeLive, tc.includeActivity)
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-				"verify", sourceRoot, "--portable", "--config", configPath,
+				"verify", sourceRoot, "--config", configPath,
 			}, &stdout, &stderr, defaultRootCommandOptions())
 			combined := stdout.String() + stderr.String()
 			if len(tc.wantFailure) == 0 {

@@ -847,7 +847,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommand(context.Background(), "", []string{"verify", "--portable", "--config", configPath}, &stdout, &stderr)
+	code := executeRootCommand(context.Background(), "", []string{"verify", "--config", configPath}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("verify unexpectedly consumed contracts path from repo .env: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -857,7 +857,7 @@ func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--portable", "--config", configPath}, &stdout, &stderr)
+	code = executeRootCommand(context.Background(), "", []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}

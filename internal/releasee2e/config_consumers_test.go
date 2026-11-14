@@ -45,7 +45,7 @@ func TestSingleDeploymentConfigReleaseReadConsumers(t *testing.T) {
 				name string
 				args []string
 			}{
-				{"verify", []string{"verify", source, "--portable", "--json"}},
+				{"verify", []string{"verify", source, "--json"}},
 				{"describe", []string{"describe", source, "--json"}},
 				{"routes", []string{"describe", "routes", source, "--json"}},
 			}
@@ -105,7 +105,7 @@ func TestSingleDeploymentConfigReleaseReadConsumers(t *testing.T) {
 			}
 			writeReleaseFile(t, configPath, "paths:\n  tooling_lock_file: null\n")
 			for _, args := range [][]string{
-				{"verify", "missing-source", "--portable", "--json"},
+				{"verify", "missing-source", "--json"},
 				{"describe", "missing-source", "--json"},
 				{"describe", "routes", "missing-source", "--json"},
 				{"context", "list", "--json"},

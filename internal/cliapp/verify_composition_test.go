@@ -138,7 +138,7 @@ func TestVerifyPublicListenerSetMatchesBootAndReleasesBindings(t *testing.T) {
 			configPath := filepath.Join(t.TempDir(), "runtime.yaml")
 			writeRuntimeConfigText(t, configPath, configText+fmt.Sprintf("llm: {backend: anthropic}\nserve: {api_listen_addr: %q, mcp_listen_addr: %q, api_token_file: %q}\n", api, mcp, writeCLIAPITokenFile(t, "composition-token")))
 			var out, diagnostic bytes.Buffer
-			code := executeRootCommand(context.Background(), root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+			code := renderServeChecksForTest(t, context.Background(), root, root, configPath, "json", &out, &diagnostic)
 			var result verifyCommandResult
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 				t.Fatalf("public result: %v output=%s stderr=%s", err, &out, &diagnostic)
@@ -278,7 +278,7 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					}
 				})
 				var out, diagnostic bytes.Buffer
-				code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+				code := renderServeChecksForTest(t, ctx, root, root, configPath, "json", &out, &diagnostic)
 				var result verifyCommandResult
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil || code != 0 || !result.OK || !result.AdmissionComplete {
 					t.Fatalf("preparable state refused: code=%d result=%+v err=%v stderr=%s", code, result, err, &diagnostic)
@@ -333,7 +333,7 @@ func TestVerifyPublicExistingStoreReportsDeploymentPreparationBothStores(t *test
 					t.Fatal(err)
 				}
 				var out, diagnostic bytes.Buffer
-				code := executeRootCommand(ctx, root, []string{"verify", root, "--config", configPath, "--json"}, &out, &diagnostic)
+				code := renderServeChecksForTest(t, ctx, root, root, configPath, "json", &out, &diagnostic)
 				var result verifyCommandResult
 				if err := json.Unmarshal(out.Bytes(), &result); err != nil || code != 0 || !result.OK || !result.AdmissionComplete {
 					t.Fatalf("compatible retained run refused: code=%d result=%+v err=%v stderr=%s", code, result, err, &diagnostic)
