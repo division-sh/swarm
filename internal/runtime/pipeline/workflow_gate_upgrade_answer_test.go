@@ -30,8 +30,9 @@ func VerifyGateAnswerUpgradeOrdersBothStoresForTest(t *testing.T, open pipelineD
 				}
 				card := nativeGateCardForTest(t, fixture, ctx)
 				now := time.Now().UTC()
-				request := apiidempotency.Request{Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor("operator"), ResourceID: card.CardID, IdempotencyKey: uuid.NewString(), RequestHash: "sha256:" + strings.Repeat("b", 64), Now: now, TTL: time.Hour}
-				mutation := NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: uuid.NewString(), Now: now})
+				principal := uuid.NewString()
+				request := apiidempotency.Request{Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(principal), ResourceID: card.CardID, IdempotencyKey: uuid.NewString(), RequestHash: "sha256:" + strings.Repeat("b", 64), Now: now, TTL: time.Hour}
+				mutation := NewDecisionCardDecision(decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: principal, ObservedContentHash: card.CardContentHash, Fields: semanticvalue.EmptyObject(), DecisionEventID: uuid.NewString(), Now: now})
 				lease, err := pc.workflowStore.cardMutations.AcquireDecisionCardMutation(ctx, request, mutation)
 				if err != nil {
 					t.Fatal(err)
