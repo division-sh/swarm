@@ -2461,7 +2461,7 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 func (rt *Runtime) drainAndJoinDeliveryContinuations(ctx context.Context, grace time.Duration) (error, error) {
 	var result error
 	if rt.Manager != nil {
-		result = rt.Manager.WaitForQuiescence(ctx)
+		result = rt.Manager.WaitForAcceptedWork(ctx)
 	}
 	if result != nil && ctx.Err() != nil {
 		if !errors.Is(result, ctx.Err()) {

@@ -392,7 +392,10 @@ func (am *AgentManager) WaitForQuiescence(ctx context.Context) error {
 
 // WaitForAcceptedWork leaves cached terminal evidence to the terminal transition.
 func (am *AgentManager) WaitForAcceptedWork(ctx context.Context) error {
-	return am.WaitForQuiescence(ctx)
+	if am == nil || am.lifecycle == nil {
+		return nil
+	}
+	return am.lifecycle.waitForAcceptedWork(ctx)
 }
 
 func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) error {
