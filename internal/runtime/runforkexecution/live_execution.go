@@ -41,46 +41,50 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 	if req.LiveRuns == nil || req.LiveContexts == nil {
 		return out, errors.New("live fork requires its durable flow selector and runtime contexts")
 	}
-	paused, err := pauseSelectedSourceBeforeLiveFork(ctx, req, current)
-	if err != nil {
-		return out, err
+	var paused sourcePause
+	if req.Recovery == nil {
+		var err error
+		paused, err = pauseSelectedSourceBeforeLiveFork(ctx, req, current)
+		if err != nil {
+			return out, err
+		}
+		transitionOwner, ok := req.Owner.ports.pipelineObligations.(pipelineobligation.ParentTransitionOwner)
+		if !ok {
+			return out, errors.New("live fork requires selected-store run transition admission")
+		}
+		transition, err := transitionOwner.BeginSourceForkTransition(ctx, current.plan.SourceRunID)
+		if err != nil {
+			return out, err
+		}
+		defer transition.Done()
+		releaseSourceWork, err := joinSelectedSourceWork(ctx, req, current.plan.SourceRunID, paused.predecessor != nil)
+		if err != nil {
+			return out, err
+		}
+		defer func() { finalErr = errors.Join(finalErr, releaseSourceWork()) }()
+		// Already-admitted work may have published after the first claim drain.
+		// Once its occurrence has joined, this second readback closes that cut.
+		cutTransition, err := transitionOwner.BeginSourceForkTransition(ctx, current.plan.SourceRunID)
+		if err != nil {
+			return out, err
+		}
+		defer cutTransition.Done()
+		finishPreparation()
+		if err := req.Owner.completePreparation(current); err != nil {
+			return out, err
+		}
+		current = nil
+		current, finalErr = req.Owner.prepareWithOperation(ctx, req, nil)
+		if finalErr != nil {
+			return out, finalErr
+		}
+		*prepared = current
+		finishRefreshed, err := req.Owner.beginSelectedOrchestration(current)
+		if err != nil {
+			return out, err
+		}
+		defer finishRefreshed()
 	}
-	transitionOwner, ok := req.Owner.ports.pipelineObligations.(pipelineobligation.ParentTransitionOwner)
-	if !ok {
-		return out, errors.New("live fork requires selected-store run transition admission")
-	}
-	transition, err := transitionOwner.BeginSourceForkTransition(ctx, current.plan.SourceRunID)
-	if err != nil {
-		return out, err
-	}
-	defer transition.Done()
-	releaseSourceWork, err := joinSelectedSourceWork(ctx, req, current.plan.SourceRunID, paused.predecessor != nil)
-	if err != nil {
-		return out, err
-	}
-	defer func() { finalErr = errors.Join(finalErr, releaseSourceWork()) }()
-	// Already-admitted work may have published after the first claim drain.
-	// Once its occurrence has joined, this second readback closes that cut.
-	cutTransition, err := transitionOwner.BeginSourceForkTransition(ctx, current.plan.SourceRunID)
-	if err != nil {
-		return out, err
-	}
-	defer cutTransition.Done()
-	finishPreparation()
-	if err := req.Owner.completePreparation(current); err != nil {
-		return out, err
-	}
-	current = nil
-	current, finalErr = req.Owner.prepareWithOperation(ctx, req, nil)
-	if finalErr != nil {
-		return out, finalErr
-	}
-	*prepared = current
-	finishRefreshed, err := req.Owner.beginSelectedOrchestration(current)
-	if err != nil {
-		return out, err
-	}
-	defer finishRefreshed()
 	scope, err := req.LiveRuns.LoadRunLiveScope(ctx, current.plan.SourceRunID)
 	if err != nil {
 		return out, err
@@ -106,7 +110,7 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 			return out, fmt.Errorf("live fork source changed after pause: source=%s live=%s", paused.predecessor.RunID, live.RunID)
 		}
 		live, found = *paused.predecessor, true
-	} else if found && live.RunID == current.plan.SourceRunID {
+	} else if req.Recovery == nil && found && live.RunID == current.plan.SourceRunID {
 		return out, fmt.Errorf("paused fork source %s became live before materialization", live.RunID)
 	}
 	if found {
@@ -184,14 +188,14 @@ func joinSelectedSourceWork(ctx context.Context, req SelectedContractExecutionRe
 	if occurrence == nil {
 		return nil, errors.Join(errors.New("live fork source runtime has no work occurrence"), use.Done())
 	}
+	if err := use.Done(); err != nil {
+		return nil, err
+	}
 	done, err := occurrence.BeginRunTransition(ctx, runID)
 	if err != nil {
-		return nil, errors.Join(err, use.Done())
+		return nil, err
 	}
-	return func() error {
-		done()
-		return use.Done()
-	}, nil
+	return func() error { done(); return nil }, nil
 }
 
 func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (sourcePause, error) {

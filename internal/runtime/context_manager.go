@@ -1400,7 +1400,7 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 		return nil, worklifetime.ErrAdmissionFenced
 	}
 	ctx = worklifetime.WithOccurrence(ctx, owner)
-	lease, err := owner.Begin(ctx)
+	lease, err := owner.BeginStanding(ctx)
 	if err != nil {
 		releaseAdmission()
 		return nil, fmt.Errorf("admit runtime context use: %w", err)
