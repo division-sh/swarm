@@ -45,6 +45,15 @@ func configureNativeNoticeProvider(t *testing.T, configPath string) *atomic.Int3
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if len(request.Tools) == 0 {
+			// The boot check's no-tool answer is not either business turn.
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{"id": "boot-answer", "choices": []any{map[string]any{
+				"message": map[string]any{"role": "assistant", "content": "Ready."}, "finish_reason": "stop"}}}); err != nil {
+				t.Error(err)
+			}
+			return
+		}
 		found := false
 		for _, tool := range request.Tools {
 			found = found || tool.Function.Name == "notify_human"

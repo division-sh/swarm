@@ -119,54 +119,20 @@ func TestBootFloorExplicitHostRefusalIsLiveAdmissionNotStructuralValidity(t *tes
 		}
 		assertClaudeHostRefusal(t, out.String())
 	})
-	for _, mode := range []string{"text", "json", "quiet"} {
-		t.Run("verify_deployment/"+mode, func(t *testing.T) {
-			args := []string{"verify", sourceRoot, "--config", configPath}
-			if mode != "text" {
-				args = append(args, "--"+mode)
-			}
-			var stdout, stderr bytes.Buffer
-			if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, Run); code != cliapp.CLIExitValidation {
-				t.Fatalf("default verification missed boot's host refusal: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
-			}
-			if mode == "json" {
-				var output struct {
-					OK                bool   `json:"ok"`
-					AdmissionComplete bool   `json:"admission_complete"`
-					ValidationScope   string `json:"validation_scope"`
-					LiveReadiness     string `json:"live_readiness"`
-					Errors            []struct {
-						CheckID string `json:"check_id"`
-						Message string `json:"message"`
-					} `json:"errors"`
-				}
-				if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-					t.Fatal(err)
-				}
-				if output.OK || output.AdmissionComplete || output.ValidationScope != "deployment" || output.LiveReadiness != "not_evaluated" {
-					t.Fatalf("host refusal became readiness: %s", &stdout)
-				}
-				found := false
-				for _, finding := range output.Errors {
-					if finding.CheckID == "workspace_capability_admission" {
-						assertClaudeHostRefusal(t, finding.Message)
-						found = true
-					}
-				}
-				if !found {
-					t.Fatal("JSON omitted the shared host/backend refusal")
-				}
-			} else {
-				assertClaudeHostRefusal(t, stdout.String()+stderr.String())
-				if !strings.Contains(stdout.String(), "failed: workspace_capability_admission @") {
-					t.Fatalf("%s erased the default admission refusal: %s", mode, &stdout)
-				}
-			}
-			if _, err := os.Stat(filepath.Join(sourceRoot, ".swarm")); !os.IsNotExist(err) {
-				t.Fatalf("default verify created source runtime state: %v", err)
-			}
-		})
-	}
+	t.Run("serve_dry_run", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"serve", sourceRoot, "--config", configPath, "--dry-run"}
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, Run); code != cliapp.CLIExitValidation {
+			t.Fatalf("check stage missed boot's host refusal: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+		}
+		assertClaudeHostRefusal(t, stdout.String()+stderr.String())
+		if !strings.Contains(stdout.String(), "failed: workspace_capability_admission @") {
+			t.Fatalf("dry run erased the shared admission refusal: %s", &stdout)
+		}
+		if _, err := os.Stat(filepath.Join(sourceRoot, ".swarm")); !os.IsNotExist(err) {
+			t.Fatalf("check stage created source runtime state: %v", err)
+		}
+	})
 	for _, command := range []string{"verify", "describe"} {
 		t.Run(command, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
