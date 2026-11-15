@@ -63,33 +63,8 @@ func inspectServeCheckSource(ctx context.Context, in ServeCheckStageRequest, roo
 		if reader != nil {
 			defer func() { retErr = errors.Join(retErr, reader.Close()) }()
 			_, err = reader.Inspect(bounded, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
-				fresh, err := snapshot.RequiresSchemaPreparation()
-				if err != nil || fresh {
-					return err
-				}
-				pending, err := destructivereset.InspectPendingOperations(bounded, snapshot)
-				if err != nil || len(pending) == 0 {
-					return err
-				}
-				reset = &pending[0]
-				plan, err := reset.RecoverySourceSet()
-				if err != nil || len(plan.Sources) == 0 {
-					return err
-				}
-				if len(plan.Sources) != 1 {
-					return fmt.Errorf("reset recovery requires one captured loaded bundle")
-				}
-				reference := plan.Sources[0].RootReference()
-				rooted, err := snapshot.GetRootedSource(bounded, reference)
-				if err != nil {
-					return err
-				}
-				if rooted.Admission().Reference() != reference {
-					return errors.New("reset recovery artifact disagrees with admitted root")
-				}
-				bundle, err = contracts.LoadWorkflowContractBundleFromRootedSource(in.Repo, rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{
-					PlatformPackBases: in.PackBases, AdmitPackInventory: packadmission.AdmitInventory,
-				})
+				var err error
+				bundle, reset, err = inspectServeResetSource(bounded, in, snapshot)
 				return err
 			})
 			if err != nil || reset != nil {
@@ -103,6 +78,37 @@ func inspectServeCheckSource(ctx context.Context, in ServeCheckStageRequest, roo
 	}
 	_, bundle, err = NewSwarmWorkflowModuleWithPackBase(in.Repo, root, base)
 	return bundle, nil, err
+}
+
+func inspectServeResetSource(ctx context.Context, in ServeCheckStageRequest, snapshot *storeselected.AdmissionSnapshot) (*contracts.WorkflowContractBundle, *destructivereset.Operation, error) {
+	fresh, err := snapshot.RequiresSchemaPreparation()
+	if err != nil || fresh {
+		return nil, nil, err
+	}
+	pending, err := destructivereset.InspectPendingOperations(ctx, snapshot)
+	if err != nil || len(pending) == 0 {
+		return nil, nil, err
+	}
+	reset := &pending[0]
+	plan, err := reset.RecoverySourceSet()
+	if err != nil || len(plan.Sources) == 0 {
+		return nil, reset, err
+	}
+	if len(plan.Sources) != 1 {
+		return nil, reset, fmt.Errorf("reset recovery requires one captured loaded bundle")
+	}
+	reference := plan.Sources[0].RootReference()
+	rooted, err := snapshot.GetRootedSource(ctx, reference)
+	if err != nil {
+		return nil, reset, err
+	}
+	if rooted.Admission().Reference() != reference {
+		return nil, reset, errors.New("reset recovery artifact disagrees with admitted root")
+	}
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(in.Repo, rooted, platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{
+		PlatformPackBases: in.PackBases, AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	return bundle, reset, err
 }
 
 func matchServeCheckReset(ctx context.Context, reader destructivereset.PendingOperationReader, expected *destructivereset.Operation) error {
