@@ -305,12 +305,12 @@ func runReleaseCommand(t *testing.T, timeout time.Duration, dir string, env []st
 
 func assertReleaseDockerEvidence(t *testing.T, records []fakeDockerRecord) {
 	t.Helper()
-	if err := validateReleaseDockerEvidence(records); err != nil {
+	if err := validateReleaseDockerEvidence(records, true); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
+func validateReleaseDockerEvidence(records []fakeDockerRecord, observed ...bool) error {
 	required := map[string]int{
 		"docker_version":   0,
 		"network_list":     0,
@@ -330,7 +330,24 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	currentIDs := map[string]string{}
 	admissionContainers := map[string]bool{}
 	probedContainers := map[string]bool{}
+	disposable := map[string]string{}
+	removed := map[string]bool{}
+	answerIndex, removalIndex, answerCount, disposableStarts := -1, -1, 0, 0
 	for index, record := range records {
+		switch record.Class {
+		case "admission_create":
+			if record.ContainerID == "" || disposable[record.ContainerID] != "" {
+				return fmt.Errorf("duplicate or absent disposable identity")
+			}
+			disposable[record.ContainerID] = dockerOptionValue(record.Args, "--name")
+		case "admission_remove":
+			if disposable[record.ContainerID] == "" || removed[record.ContainerID] {
+				return fmt.Errorf("disposable cleanup has no exact unique creation")
+			}
+			removed[record.ContainerID], removalIndex = true, index
+		case "admission_answer":
+			answerIndex, answerCount = index, answerCount+1
+		}
 		if record.Class == "container_create" && record.ContainerID != "" {
 			containerNames[record.ContainerID] = dockerOptionValue(record.Args, "--name")
 			currentIDs[containerNames[record.ContainerID]] = record.ContainerID
@@ -372,6 +389,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		}
 		switch record.Class {
 		case "claude_startup":
+			if record.StartupObservation {
+				disposableStarts++
+			}
 			startupIndex, startupSession = index, record.SessionID
 			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
 				return fmt.Errorf("startup selected builtins = %q, want exact fixture builtin surface", selected)
@@ -421,6 +441,11 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if record.ToolStatus != "queued" || strings.TrimSpace(record.MailboxID) == "" {
 				return fmt.Errorf("MCP notice result = status %q mailbox_id %q, want exact queued result", record.ToolStatus, record.MailboxID)
 			}
+		}
+	}
+	if disposableStarts != 0 || len(observed) != 0 && observed[0] {
+		if answerCount != 1 || len(disposable) != disposableStarts+2 || len(removed) != len(disposable) || answerIndex <= startupIndex || removalIndex < answerIndex || removalIndex >= liveIndex {
+			return fmt.Errorf("disposable answer/cleanup evidence incomplete: starts=%d answers=%d created=%d removed=%d", disposableStarts, answerCount, len(disposable), len(removed))
 		}
 	}
 	var missing []string
