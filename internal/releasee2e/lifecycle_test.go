@@ -380,7 +380,12 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if allowed := splitAllowedTools(dockerOptionValue(record.Args, "--allowedTools")); !equalStrings(allowed, wantTools) {
 				return fmt.Errorf("startup accepted tools = %q, want exact fixture tool surface", allowed)
 			}
-			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
+			if record.StartupObservation {
+				translated, err := hostReachableMCPURL(record.RawMCPURL, true)
+				if err != nil || translated != record.MCPURL {
+					return fmt.Errorf("startup observation MCP endpoints disagree: %v", err)
+				}
+			} else if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
 				return fmt.Errorf("startup MCP endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
 		case "claude_live":
