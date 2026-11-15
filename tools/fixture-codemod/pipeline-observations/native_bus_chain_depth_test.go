@@ -22,12 +22,17 @@ func TestNativeBusChainDepthPreservesPhysicalConstraintAndExactEvent(t *testing.
 		if row.After != want || selectedCausalObservationBody(t, row.File, row.Function) != want {
 			t.Fatal("chain-depth fault changed exact selected owner, context or event")
 		}
-		owner := selectedCausalObservationBody(t, "internal/store/internal/backend/eventrecord/fixture_chain_depth.go", "SetFixtureEventChainDepthTx")
+		var owner string
+		for _, receiver := range []string{"EventSQLiteOwner", "EventPostgresOwner"} {
+			method := selectedCausalObservationBody(t, "internal/store/internal/backend/eventpersistence/test_semantic_event_fixture.go", "SetEventChainDepthForTest", receiver)
+			if !strings.Contains(method, "tx.ExecContext(txctx,") || !strings.Contains(method, "depth, eventID)") || strings.Contains(method, "depth <") {
+				t.Fatal("chain-depth fixture bypassed the physical constraint or changed its update")
+			}
+			owner += method + "\n"
+		}
 		before := strings.ReplaceAll(row.Before, "UPDATE events", "SELECT events")
 		after := strings.ReplaceAll(owner, "UPDATE events", "SELECT events")
-		if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, before), eventDeliveryDiagnosticSQL(t, after)) ||
-			!strings.Contains(owner, "tx.ExecContext(ctx, query, depth, eventID)") ||
-			strings.Contains(owner, "depth <") {
+		if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, before), eventDeliveryDiagnosticSQL(t, after)) {
 			t.Fatal("chain-depth fixture bypassed the physical constraint or changed its update")
 		}
 	}

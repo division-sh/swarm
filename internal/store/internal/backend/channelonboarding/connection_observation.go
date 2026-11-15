@@ -9,25 +9,47 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReadSessionConnectionForTest projects one retained coordinate from the same
-// operation decoder, under the original read-only inspection transaction.
-func ReadSessionConnectionForTest(ctx context.Context, tx *sql.Tx, postgres bool, operationID string) (string, error) {
-	if tx == nil || uuid.Validate(operationID) != nil {
+// ReadSessionConnectionForTest projects only the opaque retained coordinate.
+func (s *PostgresOwner) ReadSessionConnectionForTest(ctx context.Context, operationID string) (string, error) {
+	if uuid.Validate(operationID) != nil {
 		return "", fmt.Errorf("session connection observation requires its original transaction and exact operation")
 	}
-	d := dialectSQLite
-	if postgres {
-		d = dialectPostgres
+	var connection string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		op, found, err := loadOperation(ctx, tx, dialectPostgres, operationID, false)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return domain.ErrNotFound
+		}
+		if op.OperationID != operationID || op.Posture != domain.ActivationSessionConnection || uuid.Validate(op.SessionConnectionID) != nil {
+			return fmt.Errorf("session connection observation found contradictory retained identity")
+		}
+		connection = op.SessionConnectionID
+		return ctx.Err()
+	})
+	return connection, err
+}
+
+func (s *SQLiteOwner) ReadSessionConnectionForTest(ctx context.Context, operationID string) (string, error) {
+	if uuid.Validate(operationID) != nil {
+		return "", fmt.Errorf("session connection observation requires its original transaction and exact operation")
 	}
-	op, found, err := loadOperation(ctx, tx, d, operationID, false)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", domain.ErrNotFound
-	}
-	if op.OperationID != operationID || op.Posture != domain.ActivationSessionConnection || uuid.Validate(op.SessionConnectionID) != nil {
-		return "", fmt.Errorf("session connection observation found contradictory retained identity")
-	}
-	return op.SessionConnectionID, ctx.Err()
+	var connection string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		op, found, err := loadOperation(ctx, tx, dialectSQLite, operationID, false)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return domain.ErrNotFound
+		}
+		if op.OperationID != operationID || op.Posture != domain.ActivationSessionConnection || uuid.Validate(op.SessionConnectionID) != nil {
+			return fmt.Errorf("session connection observation found contradictory retained identity")
+		}
+		connection = op.SessionConnectionID
+		return ctx.Err()
+	})
+	return connection, err
 }

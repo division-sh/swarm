@@ -6,7 +6,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
@@ -14,17 +13,13 @@ func ObserveChannelAuthorActivityForTest(ctx context.Context, selected any, opts
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return authoractivity.ListResult{}, err
 	}
-	dialect := authoractivityadapter.DialectSQLite
-	if _, postgres := selected.(*PostgresStore); postgres {
-		dialect = authoractivityadapter.DialectPostgres
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.activityPostgresOwner.ObserveChannelAuthorActivityForTest(ctx, opts)
+	case *SQLiteRuntimeStore:
+		return owner.activitySQLiteOwner.ObserveChannelAuthorActivityForTest(ctx, opts)
 	}
-	var result authoractivity.ListResult
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, err = authoractivityadapter.List(ctx, tx, dialect, opts)
-		return err
-	})
-	return result, err
+	return authoractivity.ListResult{}, nil
 }
 
 func ObserveChannelIntentForTest(ctx context.Context, selected any, demand render.IntentObservationQuery) (render.IntentObservation, bool, error) {
