@@ -373,10 +373,10 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if err != nil || identity.Name != name || identity.Route != actorRoute || identity.RunID != run {
 		t.Fatalf("constructed roster differs from its exact declared name/route: %+v %v", identity, err)
 	}
-	if err := manager.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, flowidentity.RunScopedFlowInstance{RunID: run, Route: committed.Plan.Identity.Route()}); err != nil {
-		t.Fatalf("prepare exact committed agent roster without starting manager: %v", err)
-	}
 	admitReceiverConfigFixtureGrant(t, ctx, grant)
+	if err := manager.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+		t.Fatalf("materialize exact committed agent roster without starting manager: %v", err)
+	}
 	state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || state.ConfigRevision != committed.Plan.Readiness.Agents[0].ConfigRevision {
 		t.Fatalf("current actor lifecycle: %+v %t %v", state, found, err)
