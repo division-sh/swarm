@@ -373,7 +373,8 @@ func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceSt
 		}
 		matched := false
 		for _, route := range view.Deliveries {
-			matched = matched || route.SubscriberID == conformanceNode(t, "portfolio", "portfolio-router").Key() && route.Target.Normalized() == routes[0].Target.Route().Normalized()
+			target := events.RouteIdentity{FlowID: route.Target.FlowID, FlowInstance: route.Target.FlowInstance, EntityID: route.Target.EntityID}
+			matched = matched || route.SubscriberID == conformanceNode(t, "portfolio", "portfolio-router").Key() && target.Normalized() == routes[0].Target.Route().Normalized()
 		}
 		if !matched {
 			t.Fatalf("fan-in report lost exact selected target: %+v", view)
