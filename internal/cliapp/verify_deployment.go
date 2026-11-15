@@ -98,6 +98,7 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 		err = errors.Join(ctx.Err(), err)
 	}
 	observation.FinishedAt = time.Now().UTC()
+	observation.Cause = err
 	if err == nil {
 		observation.Status = bootverify.AdmissionPassed
 		result.BootReport.Observations = append(result.BootReport.Observations, observation)
@@ -329,6 +330,7 @@ func inspectVerifyPublicIngress(ctx context.Context, cfg RuntimeConfigLoadResult
 type verifyListenerBinding struct {
 	subject  string
 	listener net.Listener
+	borrowed bool
 }
 
 func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigLoadResult, result *runtime.WorkflowContractValidationResult, intents ...ServeOptions) {
@@ -337,6 +339,9 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), verifyCleanupDeadline)
 		defer cancel()
 		for _, binding := range held {
+			if binding.borrowed {
+				continue // Run retains its supplied handle across the check stage.
+			}
 			verifyDeploymentObservation(cleanup, result, "listener_cleanup", "net.Listener.Close", binding.subject, failures.ClassDependencyUnavailable, func(context.Context) error {
 				return binding.listener.Close()
 			})
@@ -370,8 +375,19 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 	if intent.PublicWebhookListen != "" {
 		bindings = append(bindings, struct{ name, addr string }{"public-webhook", intent.PublicWebhookListen})
 	}
+	if intent.PublicWebhookListener != nil {
+		held = append(held, verifyListenerBinding{subject: "public-webhook:" + intent.PublicWebhookListener.Addr().String(), listener: intent.PublicWebhookListener, borrowed: true})
+	}
 	for _, binding := range bindings {
-		if intent.DryRun {
+		if binding.name == "public-webhook" && intent.PublicWebhookListener != nil {
+			verifyDeploymentObservation(ctx, result, "listener_availability", "net.TCPListener.SyscallConn", binding.name+":"+intent.PublicWebhookListener.Addr().String(), failures.ClassDependencyUnavailable, func(context.Context) error {
+				connection, err := intent.PublicWebhookListener.SyscallConn()
+				if err != nil {
+					return err
+				}
+				return connection.Control(func(uintptr) {})
+			})
+		} else if intent.DryRun {
 			probeServeDryRunListener(ctx, binding.name, binding.addr, &held, result)
 		} else {
 			verifyDeploymentObservation(ctx, result, "listener_availability", "internal/cliapp.ListenServeHTTPListener", binding.name+":"+binding.addr, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
@@ -382,7 +398,7 @@ func inspectVerifyListeners(ctx context.Context, repo string, cfg RuntimeConfigL
 					return err
 				}
 				// Boot binds this set concurrently; isolated probes miss conflicts.
-				held = append(held, verifyListenerBinding{binding.name + ":" + binding.addr, listener})
+				held = append(held, verifyListenerBinding{subject: binding.name + ":" + binding.addr, listener: listener})
 				return local.Err()
 			})
 		}

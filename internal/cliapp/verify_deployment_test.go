@@ -559,4 +559,48 @@ func TestVerifyListenerDriverProvesOccupiedAndReleasedExactBindings(t *testing.T
 			t.Fatal("dry run excused its own API/MCP collision")
 		}
 	})
+	t.Run("supplied_public_listener_stays_owned_and_closed_refuses", func(t *testing.T) {
+		root := t.TempDir()
+		cfg, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		intent := ServeOptions{APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", PublicWebhookListen: listener.Addr().String(), PublicWebhookListener: listener}
+		for _, closed := range []bool{false, true} {
+			if closed {
+				if err := listener.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+			inspectVerifyListeners(context.Background(), root, cfg, &result, intent)
+			found := false
+			for _, observation := range result.BootReport.Observations {
+				if observation.Subject == "public-webhook:"+listener.Addr().String() && observation.CheckID == "listener_availability" {
+					found = true
+					want := bootverify.AdmissionPassed
+					if closed {
+						want = bootverify.AdmissionFailed
+					}
+					if observation.Status != want {
+						t.Fatalf("closed=%t supplied listener evidence=%+v", closed, observation)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("supplied listener was not observed")
+			}
+			if !closed {
+				connection, err := listener.SyscallConn()
+				if err != nil || connection.Control(func(uintptr) {}) != nil {
+					t.Fatalf("stage closed the runtime-owned listener: %v", err)
+				}
+			}
+		}
+	})
 }

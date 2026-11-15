@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -22,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/tests/support/testutil/flowactivationfixture"
@@ -240,6 +243,15 @@ func TestVerifyRunTypedFailuresRetainCoordinatesAndCancellation(t *testing.T) {
 				t.Fatal("coordinates lost")
 			}
 		})
+	}
+	cleanup := errors.New("independent check cleanup failure")
+	result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation}}
+	verifyDeploymentObservation(context.Background(), &result, "retained_source_integrity", "native source reader", "run:"+run, failures.ClassLifecycleConflict, func(context.Context) error {
+		return errors.Join(startuprecovery.DataIntegrityError{}, cleanup)
+	})
+	stage := ServeCheckStageResult{Validation: result}
+	if failure := stage.Failure(); !startuprecovery.IsDataIntegrityError(failure) || !errors.Is(failure, cleanup) {
+		t.Fatalf("check presentation erased native integrity or cleanup classification: %v", failure)
 	}
 }
 

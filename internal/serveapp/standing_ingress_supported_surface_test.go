@@ -426,7 +426,9 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...), nil
+		owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
+		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
+		return owner, nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
@@ -649,7 +651,9 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 					if err != nil {
 						return nil, err
 					}
-					return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg, bootCheck...), nil
+					owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(opened), cfg, bootCheck...)
+					storetest.BootstrapPostgresRuntimeStore(t, opened)
+					return owner, nil
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil

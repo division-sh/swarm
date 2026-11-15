@@ -78,7 +78,8 @@ func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, c
 	t.Helper()
 	stage, err := serveChecksForTest(t, ctx, repo, source, configPath, selectedOptions...)
 	if err != nil && stage.Bundle == nil {
-		t.Fatalf("check stage prerequisites: %v", err)
+		_, _ = io.WriteString(diagnostic, FormatCLIAPIError(err)+"\n")
+		return CLIExitValidation
 	}
 	decision := stage.Decision()
 	view := verifyCommandOutput(decision.FailureClass == "" && !decision.Interrupted, stage.SourceRoot, stage.Validation, packInventoryReadbackFromInventory(stage.Bundle.PackInventory), stage.Bundle.SourceArtifact)

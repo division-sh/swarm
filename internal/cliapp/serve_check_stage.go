@@ -336,7 +336,14 @@ func (r ServeCheckStageResult) Decision() bootverify.AdmissionDecision {
 
 func (r ServeCheckStageResult) ExitCode() int { return verifyAdmissionExitCode(r.Decision()) }
 
-func (r ServeCheckStageResult) Failure() error {
+func (r ServeCheckStageResult) Failure() (failure error) {
+	defer func() {
+		if failure != nil {
+			for _, observation := range r.Validation.BootReport.Observations {
+				failure = errors.Join(failure, observation.Cause)
+			}
+		}
+	}()
 	decision := r.Decision()
 	if decision.FailureClass == "" && !decision.Interrupted {
 		return nil
