@@ -57,6 +57,7 @@ type admissionInspectionPort interface {
 	PipelineObligations() pipelineobligation.Store
 	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
 	channelonboarding.RetainedActivationReader
+	ListDeploymentChannelOperations(context.Context) ([]channelonboarding.Operation, error)
 	channelonboarding.PendingTeardownReader
 }
 
@@ -237,6 +238,15 @@ func (s *AdmissionSnapshot) ListChannelOnboardingOperations(ctx context.Context)
 	}
 	defer done()
 	return s.store.ListChannelOnboardingOperations(ctx)
+}
+
+func (s *AdmissionSnapshot) ListDeploymentChannelOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return s.store.ListDeploymentChannelOperations(ctx)
 }
 
 func (s *AdmissionSnapshot) ListCurrentConnectedChannelActivations(ctx context.Context) ([]channelonboarding.ConnectedChannelActivation, error) {
