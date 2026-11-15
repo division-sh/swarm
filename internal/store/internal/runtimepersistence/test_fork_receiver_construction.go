@@ -2,10 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
 func RemoveForkReceiverFieldCompanionForTest(ctx context.Context, selected any, runID, entityID, instance string) error {
@@ -20,7 +17,12 @@ func RemoveForkReceiverFieldCompanionForTest(ctx context.Context, selected any, 
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return pipelinepersistence.RemoveForkReceiverFieldCompanionTxForTest(ctx, tx, runID, entityID, instance)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.RemoveForkReceiverFieldCompanionForTest(ctx, runID, entityID, instance)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.RemoveForkReceiverFieldCompanionForTest(ctx, runID, entityID, instance)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }

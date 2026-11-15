@@ -2,11 +2,9 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
 func InstallActiveForkReceiverHeaderDoneFaultForTest(ctx context.Context, selected any, runID, entityID string) error {
@@ -18,9 +16,14 @@ func InstallActiveForkReceiverHeaderDoneFaultForTest(ctx context.Context, select
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return pipelinepersistence.InstallActiveForkReceiverHeaderDoneFaultTx(ctx, tx, runID, entityID)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.InstallActiveForkReceiverHeaderDoneFaultForTest(ctx, runID, entityID)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.InstallActiveForkReceiverHeaderDoneFaultForTest(ctx, runID, entityID)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }
 
 func ExpireExactDeliveryClaimFaultForTest(ctx context.Context, selected any, claim deliverylifecycle.Claim) error {
@@ -30,17 +33,26 @@ func ExpireExactDeliveryClaimFaultForTest(ctx context.Context, selected any, cla
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return delivery.ExpireExactDeliveryClaimFaultTx(ctx, tx, claim)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.deliveryPostgresOwner.ExpireExactDeliveryClaimFaultForTest(ctx, claim)
+	case *SQLiteRuntimeStore:
+		return owner.deliverySQLiteOwner.ExpireExactDeliveryClaimFaultForTest(ctx, claim)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }
 
 func TieExactPendingPublicationCreatedAtFaultForTest(ctx context.Context, selected any, eventID, firstID, secondID string) error {
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return delivery.TieExactPendingPublicationCreatedAtFaultTx(ctx, tx, delivery.Dialect(dialect), eventID, firstID, secondID)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.deliveryPostgresOwner.TieExactPendingPublicationCreatedAtFaultForTest(ctx, eventID, firstID, secondID)
+	case *SQLiteRuntimeStore:
+		return owner.deliverySQLiteOwner.TieExactPendingPublicationCreatedAtFaultForTest(ctx, eventID, firstID, secondID)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }

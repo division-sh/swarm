@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 )
@@ -21,11 +22,18 @@ func ReplaceRetainedChannelRuntimeForTest(ctx context.Context, selected channelo
 	if err := validateSelectedForkStorageIdentity(activation); err != nil {
 		return err
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE connected_channel_activations SET runtime_instance_id=$1 WHERE activation_id=$2 AND runtime_instance_id=$3`, to, activation, from)
-		if err != nil {
-			return err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		if owner == nil || owner.backend == nil {
+			return fmt.Errorf("postgres event fixture store is required")
 		}
-		return requireMailboxFixtureRow(result)
-	})
+		return owner.channelOnboardingPostgresOwner.ReplaceRetainedChannelRuntimeForTest(ctx, activation, from, to)
+	case *SQLiteRuntimeStore:
+		if owner == nil || owner.backend == nil {
+			return fmt.Errorf("sqlite event fixture store is required")
+		}
+		return owner.channelOnboardingSQLiteOwner.ReplaceRetainedChannelRuntimeForTest(ctx, activation, from, to)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }
