@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -30,25 +31,43 @@ func TestPinnedAuthoredMutationStoragePreservesExactSourceAndPhysicalBytesBothSt
 				// those exact bytes, not reconstruct the inserted text.
 				wantStored = `{"a": [2], " a ": [1.0]}`
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				for _, row := range []struct {
-					id, run, entity, domain string
-					value                   any
-				}{
-					{source.MutationID, runID, source.EntityID, "authored_field", stored},
-					{otherMutation, otherRun, source.EntityID, "authored_field", `"foreign-run"`},
-					{nullMutation, runID, source.EntityID, "authored_field", nil},
-					{privateMutation, runID, source.EntityID, "bookkeeping", `"not-authored"`},
-				} {
-					if _, err := tx.ExecContext(ctx, `INSERT INTO entity_mutations
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					for _, row := range []struct {
+						id, run, entity, domain string
+						value                   any
+					}{
+						{source.MutationID, runID, source.EntityID, "authored_field", stored},
+						{otherMutation, otherRun, source.EntityID, "authored_field", `"foreign-run"`},
+						{nullMutation, runID, source.EntityID, "authored_field", nil},
+						{privateMutation, runID, source.EntityID, "bookkeeping", `"not-authored"`},
+					} {
+						if _, err := tx.ExecContext(ctx, `INSERT INTO entity_mutations
 						(mutation_id, run_id, entity_id, domain, path, new_value, writer_type, writer_id, created_at)
 						VALUES ($1, $2, $3, $4, 'items', $5, 'platform', 'pinned-source-storage-control', $6)`,
-						row.id, row.run, row.entity, row.domain, row.value, time.Now().UTC()); err != nil {
-						return err
+							row.id, row.run, row.entity, row.domain, row.value, time.Now().UTC()); err != nil {
+							return err
+						}
 					}
+					return nil
 				}
-				return nil
-			}); err != nil {
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
@@ -118,10 +137,28 @@ func TestPinnedAuthoredMutationStorageRejectsInvalidAuthorityAndUnavailableEvide
 			}
 			rename := func(from, to string) {
 				t.Helper()
-				if err := runUnrevisionedEventFixtureTransactionForTest(original, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, "ALTER TABLE "+from+" RENAME TO "+to)
-					return err
-				}); err != nil {
+				if err := func() error {
+					fixtureContext := original
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(ctx, "ALTER TABLE "+from+" RENAME TO "+to)
+						return err
+					}
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}(); err != nil {
 					t.Fatal(err)
 				}
 			}
