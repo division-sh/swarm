@@ -584,41 +584,56 @@ func (r CommitPublishRequest) ValidatePreparedEvent() error {
 }
 
 func (r CommitPublishRequest) validateCompletionAwait() error {
-	if r.CompletionAwait != nil {
-		if len(r.ReplyCreations) != 1 || len(r.ReplyClaims) != 0 || len(r.ReplyContinuations) != 0 || len(r.ReplyReturns) != 0 ||
-			r.ReplyCreations[0].Await != nil || r.ReplyCreations[0].RequestEventID != r.Event.ID() || r.ReplyCreations[0].RunID != r.Event.Event().RunID() {
-			return fmt.Errorf("completion await requires one exact fresh request obligation")
-		}
-		attempt, record := r.CompletionAwait.Attempt, r.ReplyCreations[0]
-		if r.Event.Event().ProducerType() != events.EventProducerAgent || r.Event.Event().SourceAgent() != attempt.Authority.Target.AgentID ||
-			r.Event.Event().SourceRoute() != record.Origin {
-			return fmt.Errorf("completion await publication differs from its concrete actor and source route")
-		}
+	if err := r.validateFreshCompletionAwait(); err != nil {
+		return err
 	}
 	for _, claim := range r.ReplyClaims {
 		if claim.Expected.Await == nil {
 			continue
 		}
-		pairedPlan := false
-		compiledDeliveries := make([]bool, len(r.DeliveryRoutes))
-		for _, plan := range r.ConnectPlans {
-			paired := runtimepinrouting.ReplyReturnContinuation{Record: claim.Expected, Plan: plan}
-			pairedPlan = pairedPlan || (plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse && plan.MatchesReplyRecord(claim.Expected))
-			for i, route := range r.DeliveryRoutes {
-				if paired.MatchesResponseRecipient(route) {
-					return fmt.Errorf("await reply records readiness without a paired requester delivery")
-				}
-				compiled, err := plan.ClaimForRetainedDelivery(route)
-				compiledDeliveries[i] = compiledDeliveries[i] || (err == nil && compiled.Equal(route.ConnectClaim))
-			}
+		if err := r.validateAwaitReplyDeliveries(claim.Expected); err != nil {
+			return err
 		}
-		if !pairedPlan && len(r.DeliveryRoutes) != 0 {
-			return fmt.Errorf("await reply cannot admit deliveries without its exact paired response plan")
-		}
-		for _, compiled := range compiledDeliveries {
-			if !compiled {
-				return fmt.Errorf("await reply delivery lacks its exact compiled connection membership")
+	}
+	return nil
+}
+
+func (r CommitPublishRequest) validateFreshCompletionAwait() error {
+	if r.CompletionAwait == nil {
+		return nil
+	}
+	if len(r.ReplyCreations) != 1 || len(r.ReplyClaims) != 0 || len(r.ReplyContinuations) != 0 || len(r.ReplyReturns) != 0 ||
+		r.ReplyCreations[0].Await != nil || r.ReplyCreations[0].RequestEventID != r.Event.ID() || r.ReplyCreations[0].RunID != r.Event.Event().RunID() {
+		return fmt.Errorf("completion await requires one exact fresh request obligation")
+	}
+	attempt, record := r.CompletionAwait.Attempt, r.ReplyCreations[0]
+	if r.Event.Event().ProducerType() != events.EventProducerAgent || r.Event.Event().SourceAgent() != attempt.Authority.Target.AgentID ||
+		r.Event.Event().SourceRoute() != record.Origin {
+		return fmt.Errorf("completion await publication differs from its concrete actor and source route")
+	}
+	return nil
+}
+
+func (r CommitPublishRequest) validateAwaitReplyDeliveries(record runtimereplycontext.Record) error {
+	pairedPlan := false
+	compiledDeliveries := make([]bool, len(r.DeliveryRoutes))
+	for _, plan := range r.ConnectPlans {
+		paired := runtimepinrouting.ReplyReturnContinuation{Record: record, Plan: plan}
+		pairedPlan = pairedPlan || (plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse && plan.MatchesReplyRecord(record))
+		for i, route := range r.DeliveryRoutes {
+			if paired.MatchesResponseRecipient(route) {
+				return fmt.Errorf("await reply records readiness without a paired requester delivery")
 			}
+			compiled, err := plan.ClaimForRetainedDelivery(route)
+			compiledDeliveries[i] = compiledDeliveries[i] || (err == nil && compiled.Equal(route.ConnectClaim))
+		}
+	}
+	if !pairedPlan && len(r.DeliveryRoutes) != 0 {
+		return fmt.Errorf("await reply cannot admit deliveries without its exact paired response plan")
+	}
+	for _, compiled := range compiledDeliveries {
+		if !compiled {
+			return fmt.Errorf("await reply delivery lacks its exact compiled connection membership")
 		}
 	}
 	return nil

@@ -84,13 +84,8 @@ func (r Record) Normalized() Record {
 
 func (r Record) Validate() error {
 	r = r.Normalized()
-	if r.Await != nil {
-		if err := r.Await.Validate(); err != nil {
-			return err
-		}
-		if r.Await.ReplyContextID != r.ID || r.Await.RequestEventID != r.RequestEventID || r.Await.RunID != r.RunID || r.Await.OriginLife != r.OriginLife {
-			return fmt.Errorf("reply await binding contradicts its obligation")
-		}
+	if err := r.validateAwaitBinding(); err != nil {
+		return err
 	}
 	if r.ID == "" || r.RequestEventID == "" || r.SourceRequestEventID == "" || r.RequesterFlowID == "" || r.RequestOutputPin == "" || r.ReplyInputPin == "" || r.ProviderFlowID == "" || r.ProviderInputPin == "" || r.ProviderOutputPin == "" || r.RequestCorrelationID == "" {
 		return fmt.Errorf("reply context requires stable id, request identity, paired topology, and correlation")
@@ -123,6 +118,18 @@ func (r Record) Validate() error {
 		}
 	default:
 		return fmt.Errorf("unsupported reply context state %q", r.State)
+	}
+	return nil
+}
+
+func (r Record) validateAwaitBinding() error {
+	if r.Await != nil {
+		if err := r.Await.Validate(); err != nil {
+			return err
+		}
+		if r.Await.ReplyContextID != r.ID || r.Await.RequestEventID != r.RequestEventID || r.Await.RunID != r.RunID || r.Await.OriginLife != r.OriginLife {
+			return fmt.Errorf("reply await binding contradicts its obligation")
+		}
 	}
 	return nil
 }

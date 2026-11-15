@@ -34,8 +34,15 @@ func CompletionAwaitCall(payload json.RawMessage, adapter string, index int, pre
 	if !callableEmit || output.EventID() != requestID {
 		return "", "", fmt.Errorf("await request is not this exact callable emit's output")
 	}
-	if _, err := canonicaljson.Decode(prefix); err != nil {
+	if err := validateCompletionAwaitPrefix(continuation.Response.ToolCalls, index, prefix); err != nil {
 		return "", "", err
+	}
+	return continuation.Projection.FrameID, continuation.Response.ToolCalls[index].ID, nil
+}
+
+func validateCompletionAwaitPrefix(calls []ToolCall, index int, prefix json.RawMessage) error {
+	if _, err := canonicaljson.Decode(prefix); err != nil {
+		return err
 	}
 	var entries []struct {
 		CallID  string          `json:"tool_call_id"`
@@ -45,19 +52,19 @@ func CompletionAwaitCall(payload json.RawMessage, adapter string, index int, pre
 		Failure json.RawMessage `json:"failure"`
 	}
 	if err := json.Unmarshal(prefix, &entries); err != nil || entries == nil || len(entries) != index {
-		return "", "", fmt.Errorf("await requires the complete ordered tool-result prefix")
+		return fmt.Errorf("await requires the complete ordered tool-result prefix")
 	}
 	seen := make(map[string]bool)
-	for i, call := range continuation.Response.ToolCalls {
+	for i, call := range calls {
 		if call.ID == "" || call.Name == "" || seen[call.ID] {
-			return "", "", fmt.Errorf("await response contains ambiguous tool calls")
+			return fmt.Errorf("await response contains ambiguous tool calls")
 		}
 		seen[call.ID] = true
 		if i < index && (entries[i].CallID != call.ID || entries[i].Name != call.Name || entries[i].OK == nil ||
 			(*entries[i].OK && (len(entries[i].Result) == 0 || len(entries[i].Failure) != 0)) ||
 			(!*entries[i].OK && (len(entries[i].Failure) == 0 || len(entries[i].Result) != 0))) {
-			return "", "", fmt.Errorf("await prefix differs from its assistant call or lacks its outcome")
+			return fmt.Errorf("await prefix differs from its assistant call or lacks its outcome")
 		}
 	}
-	return continuation.Projection.FrameID, continuation.Response.ToolCalls[index].ID, nil
+	return nil
 }

@@ -676,10 +676,8 @@ func commitValidatedPublicationSQL(
 		}
 	}
 	request := command.Commit
-	if request.CompletionAwait != nil {
-		if err := store.prepareCompletionAwaitTx(ctx, attempt, request.CompletionAwait.Attempt); err != nil {
-			return runtimebus.CommittedPublication{}, err
-		}
+	if err := preparePublicationCompletionAwait(ctx, attempt, store, request); err != nil {
+		return runtimebus.CommittedPublication{}, err
 	}
 	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	creationAlreadyCommitted := false
@@ -717,19 +715,7 @@ func commitValidatedPublicationSQL(
 		result.AcceptedStage = &receipt
 	}
 	if outcome == runtimebus.EventAppendExactDuplicate {
-		if request.CompletionAwait != nil {
-			if err := store.completionAwaitReplyTx(ctx, attempt, request.ReplyCreations[0], *request.CompletionAwait, true); err != nil {
-				return runtimebus.CommittedPublication{}, err
-			}
-		}
-		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
-			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
-		}
-		result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, attempt, command.Activations)
-		if err != nil {
-			return runtimebus.CommittedPublication{}, err
-		}
-		return result, nil
+		return commitExactDuplicatePublicationSQL(ctx, attempt, store, command, creationAlreadyCommitted, result)
 	}
 	if outcome != runtimebus.EventAppendInserted {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit returned invalid append outcome")
@@ -754,6 +740,31 @@ func commitValidatedPublicationSQL(
 		if err := store.MarkDynamicFlowCreationOccurrenceCommittedTx(ctx, tx, *command.DynamicFlowCreation); err != nil {
 			return runtimebus.CommittedPublication{}, err
 		}
+	}
+	return result, nil
+}
+
+func preparePublicationCompletionAwait(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, request runtimebus.CommitPublishRequest) error {
+	if request.CompletionAwait == nil {
+		return nil
+	}
+	return store.prepareCompletionAwaitTx(ctx, attempt, request.CompletionAwait.Attempt)
+}
+
+func commitExactDuplicatePublicationSQL(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand, creationAlreadyCommitted bool, result runtimebus.CommittedPublication) (runtimebus.CommittedPublication, error) {
+	request := command.Commit
+	if request.CompletionAwait != nil {
+		if err := store.completionAwaitReplyTx(ctx, attempt, request.ReplyCreations[0], *request.CompletionAwait, true); err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
+	if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
+	}
+	var err error
+	result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, attempt, command.Activations)
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
 	}
 	return result, nil
 }
