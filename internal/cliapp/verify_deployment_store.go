@@ -76,12 +76,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		bounded, cancel := context.WithTimeout(ctx, storeBudget)
 		defer cancel()
 		selected, err = storeselected.OpenAdmissionInspection(bounded, request)
-		if err != nil && len(serve) != 0 && serve[0].input != nil {
-			var absent *storeselected.AbsentSQLiteStore
-			if errors.As(err, &absent) {
-				*serve[0].input = absent.BootInput(schema)
-			}
-		}
+		captureServeAbsentInput(err, schema, serve)
 		if bounded.Err() != nil {
 			return bounded.Err()
 		}
@@ -144,6 +139,16 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
 	return retained
+}
+
+func captureServeAbsentInput(err error, schema store.SchemaBootstrapRequest, serve []serveStoreInspection) {
+	if err == nil || len(serve) == 0 || serve[0].input == nil {
+		return
+	}
+	var absent *storeselected.AbsentSQLiteStore
+	if errors.As(err, &absent) {
+		*serve[0].input = absent.BootInput(schema)
+	}
 }
 
 func inspectVerifyAdmissionSnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, subject, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult, serve []serveStoreInspection) (*verifyRetainedAdmissionInventory, bool, error) {

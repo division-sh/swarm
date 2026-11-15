@@ -84,12 +84,9 @@ func (m *DockerManager) PrepareClaudeStartupObservation(ctx context.Context, act
 		"--tmpfs", ClaudeStateDirectory + ":rw,mode=0700,uid=10001,gid=10001",
 		"--tmpfs", "/tmp:rw,mode=1777",
 		"--mount", "type=bind,source=" + projection.PrivateRoot() + ",destination=" + m.cfg.SourceMountPoint + ",readonly"}
-	if runtime.GOOS == "linux" {
-		artifact, err := currentWorkerArtifact()
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,source="+artifact.path+",destination="+WorkerContainerPath+",readonly")
+	args, err = startupObservationWorkerMount(args)
+	if err != nil {
+		return nil, err
 	}
 	if network != "" {
 		args = append(args, "--network", network)
@@ -111,6 +108,17 @@ func (m *DockerManager) PrepareClaudeStartupObservation(ctx context.Context, act
 	base.release = cleanup
 	handedOff = true
 	return base, nil
+}
+
+func startupObservationWorkerMount(args []string) ([]string, error) {
+	if runtime.GOOS != "linux" {
+		return args, nil
+	}
+	artifact, err := currentWorkerArtifact()
+	if err != nil {
+		return nil, err
+	}
+	return append(args, "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,source="+artifact.path+",destination="+WorkerContainerPath+",readonly"), nil
 }
 
 func (m *DockerManager) startupObservationImage(ctx context.Context) (string, error) {
