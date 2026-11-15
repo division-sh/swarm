@@ -40,6 +40,7 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
 				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {

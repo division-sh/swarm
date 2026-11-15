@@ -202,7 +202,7 @@ func TestChannelConnectWhatsAppRegistersAccountBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				config = append(config, []byte(fmt.Sprintf("\npaths:\n  swarm_dir: %q\n", opts.SwarmDir))...)
+				config = []byte(withServeFixtureStateDirectory(t, string(config), opts.SwarmDir))
 				writeStandingCandidateFile(t, opts.ConfigPath, string(config))
 				if serving {
 					process := startServeRuntimeTestProcess(t, opts)

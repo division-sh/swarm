@@ -52,6 +52,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			var postgresDSN string
 			if backend == "postgres" {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				postgresDSN = dsn
 				t.Cleanup(cleanup)
 				oldBuildStores := buildStoresForServe
@@ -182,6 +183,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		configPath = writeInboundAdmissionRuntimeConfig(t, backend, sqlitePath)
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		postgresDSN = dsn
 		t.Cleanup(cleanup)
 		postgresStore, err = store.NewPostgresStore(dsn)

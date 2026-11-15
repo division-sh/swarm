@@ -7117,8 +7117,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
 	}
 	t.Cleanup(cleanup)
-	installedServePostgresFixtures.Store(t.Name(), dsn)
-	t.Cleanup(func() { installedServePostgresFixtures.Delete(t.Name()) })
+	recordServePostgresFixture(t, dsn)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)

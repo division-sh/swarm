@@ -67,7 +67,7 @@ func issue3011SendSettlement(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeStandingCandidateFile(t, opts.ConfigPath, string(config)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\n", opts.SwarmDir))
+	writeStandingCandidateFile(t, opts.ConfigPath, withServeFixtureStateDirectory(t, string(config), opts.SwarmDir))
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
 	root := filepath.Join(cmp.Or(os.Getenv("TEST_ISSUE3011_OUT"), t.TempDir()), backend)
 	if err := os.MkdirAll(root, 0o700); err != nil {
