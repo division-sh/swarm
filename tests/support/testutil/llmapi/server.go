@@ -204,11 +204,13 @@ func encodeReply(protocol Protocol, reply Reply) map[string]any {
 	}
 	switch protocol {
 	case Anthropic:
+		response["stop_reason"] = "end_turn"
 		content := []any{}
 		if reply.Text != "" {
 			content = append(content, map[string]any{"type": "text", "text": reply.Text})
 		}
 		for _, tool := range reply.Tools {
+			response["stop_reason"] = "tool_use"
 			content = append(content, map[string]any{"type": "tool_use", "id": tool.ID, "name": tool.Name, "input": tool.Arguments})
 		}
 		response["content"] = content
@@ -232,6 +234,7 @@ func encodeReply(protocol Protocol, reply Reply) map[string]any {
 		response["choices"] = []any{map[string]any{"index": 0, "message": message, "finish_reason": reason}}
 		response["usage"] = map[string]int{"prompt_tokens": reply.InputTokens, "completion_tokens": reply.OutputTokens, "total_tokens": reply.TotalTokens}
 	case OpenAIResponses:
+		response["status"] = "completed"
 		output := []any{}
 		for _, tool := range reply.Tools {
 			output = append(output, map[string]any{"id": tool.OutputID, "type": "function_call", "call_id": tool.ID,
