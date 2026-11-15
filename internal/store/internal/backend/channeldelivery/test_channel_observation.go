@@ -5,9 +5,42 @@ import (
 	"database/sql"
 	"fmt"
 
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
+
+func ObserveChannelIntentForTest(ctx context.Context, backend any, demand render.IntentObservationQuery, postgres bool) (render.IntentObservation, bool, error) {
+	var out render.IntentObservation
+	var found bool
+	err := readChannelObservation(ctx, backend, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, found, err = ObserveIntent(ctx, tx, demand, postgres)
+		return err
+	})
+	return out, found, err
+}
+
+func ObserveChannelDeliveryPlansForTest(ctx context.Context, backend any, cursor string, limit int, postgres bool) ([]Plan, error) {
+	var out []Plan
+	err := readChannelObservation(ctx, backend, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = ListCurrentPlans(ctx, tx, cursor, limit, postgres)
+		return err
+	})
+	return out, err
+}
+
+func ObserveChannelSentReceiptForTest(ctx context.Context, backend any, deliveryID, operationID string, postgres bool) (render.SentReceipt, bool, error) {
+	var out render.SentReceipt
+	var found bool
+	err := readChannelObservation(ctx, backend, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, found, err = ReadCurrentSentReceiptTx(ctx, tx, deliveryID, operationID, postgres)
+		return err
+	})
+	return out, found, err
+}
 
 func readChannelObservation(ctx context.Context, backend any, read func(context.Context, *sql.Tx) error) error {
 	switch b := backend.(type) {

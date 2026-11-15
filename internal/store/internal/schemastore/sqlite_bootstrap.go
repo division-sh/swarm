@@ -27,6 +27,26 @@ func DeploymentChannelAccountIndexForTest(ctx context.Context, q schemaQueryer, 
 	return definition, err
 }
 
+func (s *Postgres) DeploymentChannelAccountIndexForTest(ctx context.Context) (string, error) {
+	var definition string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		definition, err = DeploymentChannelAccountIndexForTest(ctx, tx, SchemaDialectPostgres)
+		return err
+	})
+	return definition, err
+}
+
+func (s *SQLite) DeploymentChannelAccountIndexForTest(ctx context.Context) (string, error) {
+	var definition string
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		definition, err = DeploymentChannelAccountIndexForTest(ctx, tx, SchemaDialectSQLite)
+		return err
+	})
+	return definition, err
+}
+
 func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) (err error) {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite store is required for schema bootstrap")
