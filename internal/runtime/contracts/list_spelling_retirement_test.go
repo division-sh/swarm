@@ -162,12 +162,25 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				}
 				repo := repoRootForContractsTest(t)
 				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-				if form.reject {
+				quotedStateType := surface == "entities" && (form.name == "bare_quoted_bracket" || form.name == "bare_quoted_whitespace")
+				requireQuotedStateTypeRefusal := func(err error) {
+					t.Helper()
+					diagnostic, ok := AsLoaderDiagnostic(err)
+					if !ok || diagnostic.Code != "contract_loader.quoted_state_type" ||
+						diagnostic.Problem != "state.yaml: state.items: remove the quotes" ||
+						diagnostic.Location.File != "state.yaml" || diagnostic.Location.YAMLPath != `$["items"]` ||
+						diagnostic.Location.Line != 1 || diagnostic.Location.Column <= 0 {
+						t.Fatalf("quoted state type lost its located refusal: diagnostic=%#v error=%v", diagnostic, err)
+					}
+				}
+				if form.reject || quotedStateType {
 					file := surface + ".yaml"
 					if surface == "entities" {
 						file = "state.yaml"
 					}
-					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
+					if quotedStateType {
+						requireQuotedStateTypeRefusal(err)
+					} else if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
 						t.Fatalf("full bundle failed to teach the offending source: %v", err)
 					}
 					artifact, err := sourceartifact.AdmitDirectory(root)
@@ -187,7 +200,10 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, source := range []*sourceartifact.AdmittedSourceArtifact{artifact, catalog, retained} {
-						if _, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
+						_, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+						if quotedStateType {
+							requireQuotedStateTypeRefusal(err)
+						} else if err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), file) {
 							t.Fatalf("retained source bypassed shape/style admission: %v", err)
 						}
 					}
