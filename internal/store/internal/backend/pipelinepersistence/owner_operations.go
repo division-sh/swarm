@@ -576,7 +576,7 @@ func (s *postgresPipelineObligationStore) ClaimEvent(ctx context.Context, eventI
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
-	runID, err := pipelineClaimEventRun(ctx, s.backend, eventID, purpose, true)
+	runID, err := s.claimPostgresEventRun(ctx, eventID, purpose)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
@@ -655,6 +655,23 @@ func pipelineClaimEventRun(ctx context.Context, q pipelineQueryer, eventID strin
 			return "", nil
 		}
 		return "", fmt.Errorf("read exact event run for claim: %w", err)
+	}
+	return runID, nil
+}
+
+func (s *PipelinePostgresOwner) claimPostgresEventRun(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runID string, finalErr error) {
+	session, release, err := s.reservePostgresPipelineClaimConnection(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { finalErr = errors.Join(finalErr, release()) }()
+	finalErr = postgresbackend.RunAuthorityReadTransaction(ctx, session, func(readCtx context.Context, tx *sql.Tx) error {
+		var readErr error
+		runID, readErr = pipelineClaimEventRun(readCtx, tx, eventID, purpose, true)
+		return readErr
+	})
+	if finalErr != nil {
+		return "", finalErr
 	}
 	return runID, nil
 }
