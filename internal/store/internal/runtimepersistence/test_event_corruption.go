@@ -69,3 +69,29 @@ func InstallEventDeliveryFailureAfterFlowMaterializationForTest(ctx context.Cont
 	}
 	return nil, nil
 }
+
+func InstallReplayScopeFailureAfterDeliveryForTest(ctx context.Context, selected any, invariant, reason, flowTemplate string) (func(), error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.InstallReplayScopeFailureAfterDeliveryForTest(ctx, invariant, reason, flowTemplate)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.InstallReplayScopeFailureAfterDeliveryForTest(ctx, invariant, reason, flowTemplate)
+	}
+	return nil, nil
+}
+
+func InstallAPICompletionFailureAfterPublicationForTest(ctx context.Context, selected any, invariant, reason, flowTemplate string) (func(), error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.postgresOwner.InstallAPICompletionFailureAfterPublicationForTest(ctx, invariant, reason, flowTemplate)
+	case *SQLiteRuntimeStore:
+		return owner.sQLiteOwner.InstallAPICompletionFailureAfterPublicationForTest(ctx, invariant, reason, flowTemplate)
+	}
+	return nil, nil
+}
