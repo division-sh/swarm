@@ -43,6 +43,7 @@ type serveStoreInspection struct {
 	selection storebackend.Selection
 	dryRun    bool
 	input     **storeselected.BootCheckInput
+	reset     *destructivereset.Operation
 }
 
 func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult, serve ...serveStoreInspection) *verifyRetainedAdmissionInventory {
@@ -145,6 +146,11 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 				})
 				return nil
 			}
+			if len(serve) != 0 {
+				if err := matchServeCheckReset(ctx, snapshot, serve[0].reset); err != nil {
+					return err
+				}
+			}
 			retained = inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, packBases, result)
 			tailAccounted = true
 			return nil
@@ -210,15 +216,7 @@ func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, path
 	if err != nil {
 		return request, store.SchemaBootstrapRequest{}, err
 	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
-		return request, store.SchemaBootstrapRequest{}, fmt.Errorf("admitted selected source bundle is required")
-	}
-	plans, err := StateStoreSchemaPlans(bundle)
-	if err != nil {
-		return request, store.SchemaBootstrapRequest{}, err
-	}
-	schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform)
+	schema, err := serveCheckPlatformSchema()
 	return request, schema, err
 }
 
@@ -242,7 +240,11 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return startupownership.AdmitAuthorityInspection(inspection)
 	})
 	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
+		pending, err := destructivereset.InspectPendingOperations(ctx, snapshot)
+		if err != nil || len(pending) != 0 {
+			return err // Recovery chooses its own admitted sources, not a candidate upgrade.
+		}
+		_, err = PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
 		return err
 	})
 	verifyDeploymentObservation(ctx, result, "retained_source_integrity", "internal/runtime/startuprecovery.Inspect", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
@@ -250,6 +252,9 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return err
 	})
 	verifyDeploymentObservation(ctx, result, "startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		if source == nil {
+			return nil // The reset's explicit empty population has no source obligations.
+		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
 			return err
@@ -299,7 +304,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 				if err := writeVerifyRunResult(&rendered, verifyRunCommandResult{DriftReport: report, Status: "drift", Errors: []failures.Envelope{}}); err != nil {
 					return err
 				}
-				drift = append(drift, errors.New(rendered.String()))
+				drift = append(drift, verifyRunFailure(run.RunID, errors.New(rendered.String())))
 			}
 		}
 		return errors.Join(drift...)
@@ -324,6 +329,9 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	retained.actorsOK = verifyDeploymentObservation(ctx, result, "retained_actor_admission", "internal/runtime/manager.InspectRetainedActors", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
+		if source == nil {
+			return nil
+		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
 			return err

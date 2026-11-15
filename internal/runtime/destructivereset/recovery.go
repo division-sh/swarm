@@ -26,20 +26,29 @@ type PendingRecovery struct {
 // paths supplied by the restarting process. The returned plan is independent
 // of the immutable journal evidence owned by this continuation.
 func (r *PendingRecovery) SourceSet() (agenttopology.SourceSetPlan, error) {
-	if r == nil || r.operation.Request.IncludeSourceArtifacts || r.operation.SourceSet == nil {
+	if r == nil {
 		return agenttopology.NewSourceSetPlan(nil, nil)
 	}
-	plan, err := agenttopology.NewSourceSetPlan(r.operation.SourceSet.Sources, r.operation.SourceSet.Agents)
+	return r.operation.RecoverySourceSet()
+}
+
+// RecoverySourceSet selects the admitted reconstruction population without
+// advancing the reset. Inspection and recovery must choose the same sources.
+func (o Operation) RecoverySourceSet() (agenttopology.SourceSetPlan, error) {
+	if o.Request.IncludeSourceArtifacts || o.SourceSet == nil {
+		return agenttopology.NewSourceSetPlan(nil, nil)
+	}
+	plan, err := agenttopology.NewSourceSetPlan(o.SourceSet.Sources, o.SourceSet.Agents)
 	if err != nil {
 		return agenttopology.SourceSetPlan{}, err
 	}
-	if len(plan.Sources) == 0 || (len(plan.Sources) == 1 && len(r.operation.Request.SourceProjections) == 0) {
+	if len(plan.Sources) == 0 || (len(plan.Sources) == 1 && len(o.Request.SourceProjections) == 0) {
 		return plan, nil
 	}
-	if len(r.operation.Request.SourceProjections) != 1 {
+	if len(o.Request.SourceProjections) != 1 {
 		return agenttopology.SourceSetPlan{}, errors.New("reset recovery requires one captured loaded bundle")
 	}
-	loadedHash := r.operation.Request.SourceProjections[0].Cleanup.BundleHash
+	loadedHash := o.Request.SourceProjections[0].Cleanup.BundleHash
 	for _, source := range plan.Sources {
 		if source.BundleHash == loadedHash {
 			return agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{source}, plan.Agents)
