@@ -98,7 +98,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 				if !ok {
 					t.Fatal("source-lifecycle card lacks frozen control")
 				}
-				waitChannelDeliverySendsSettled(t, db, backend)
+				waitChannelDeliverySendsSettled(t, db, observation)
 				frozen := readChannelSourceHistory(t, observation, card)
 				var originalSource []byte
 				if err := db.QueryRow(`SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1`, hash).Scan(&originalSource); err != nil {
@@ -182,7 +182,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						},
 					})
 					waitChannelRejectedCallback(t, db, rejectedToken)
-					waitChannelDeliverySendsSettled(t, db, backend)
+					waitChannelDeliverySendsSettled(t, db, observation)
 					for _, table := range []string{"operator_channel_action_intents", "operator_channel_text_intents"} {
 						var count int
 						if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ` WHERE state='settled'`).Scan(&count); err != nil || count == 0 {
@@ -439,7 +439,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					postChannelSourceControl(t, callback, signing, ordinaryCard, ordinaryToken, ordinaryMessage)
 					waitMailboxCardDecision(t, h.rpcEndpoint(), ordinaryCard)
-					waitChannelDeliverySendsSettled(t, db, backend)
+					waitChannelDeliverySendsSettled(t, db, observation)
 					h.stop(t)
 					h.start(t)
 					callback, signing, _ = h.provider.Registration()
