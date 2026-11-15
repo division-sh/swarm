@@ -64,10 +64,10 @@ type liveAwaitProofFixture struct {
 
 // Real native publication transactions, synthetic provider evidence; no live provider or invocation-resume proof.
 func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
+	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []string{"exact", "prefix", "same_run_other_request", "wrong_call", "non_emit", "wrong_frame", "late_reply_conflict", "duplicate_without_progress", "cancelled", "root_exact"} {
-			t.Run(backend.name+"/"+mode, func(t *testing.T) {
-				selected := backend.open(t).store.(liveAwaitProofStore)
+			t.Run(backend+"/"+mode, func(t *testing.T) {
+				selected := selectedRootAdmissionStore(t, backend).(liveAwaitProofStore)
 				fixture := newLiveAwaitProofFixture(t, selected, mode == "root_exact")
 				mode = strings.TrimPrefix(mode, "root_")
 				ctx, handle, payload, messages, output := settledLiveAwaitProof(t, fixture, mode)
@@ -405,19 +405,24 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	}
 	token := effects.LifecycleToken{RuntimeEpoch: state.RuntimeEpoch, Identity: identity, AgentID: identity.AgentID(), Generation: state.Generation}
 	ctx = effects.WithLifecycleToken(ctx, token)
-	lease, err := selected.Acquire(ctx, identity, "await-worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		result, err := selected.ReleaseOutcome(context.WithoutCancel(ctx), lease)
-		if err != nil || !result.Acknowledged {
-			t.Errorf("release original session: %+v %v", result, err)
+	sessionID, lockOwner, expiresAt := uuid.NewString(), "await-worker", time.Now().UTC().Add(10*time.Minute)
+	if config.Memory.Enabled {
+		lease, err := selected.Acquire(ctx, identity, lockOwner)
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	authority := effects.NormalAgentAuthority(token, lease.LockOwner, lease.ExpiresAt)
+		t.Cleanup(func() {
+			result, err := selected.ReleaseOutcome(context.WithoutCancel(ctx), lease)
+			if err != nil || !result.Acknowledged {
+				t.Errorf("release original session: %+v %v", result, err)
+			}
+		})
+		sessionID, lockOwner, expiresAt = lease.SessionID, lease.LockOwner, lease.ExpiresAt
+		ctx = effects.WithSessionGrant(ctx, effects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
+	}
+	authority := effects.NormalAgentAuthority(token, lockOwner, expiresAt)
 	authority.ExecutionMode = config.ExecutionMode
-	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: identity.AgentID(), AgentIdentity: identity, RunID: run, SessionID: lease.SessionID, Memory: config.Memory, FlowInstance: identity.FlowInstance(), EntityID: committed.Plan.Identity.EntityID}
+	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: identity.AgentID(), AgentIdentity: identity, RunID: run, SessionID: sessionID, Memory: config.Memory, FlowInstance: identity.FlowInstance(), EntityID: committed.Plan.Identity.EntityID}
 	fixture := liveAwaitProofFixture{store: selected, authority: authority, config: config,
 		route: events.RouteIdentity{FlowID: committed.Plan.Identity.ScopeKey, FlowInstance: committed.Plan.Identity.InstancePath, EntityID: committed.Plan.Identity.EntityID},
 		life:  events.InstanceLife{RunID: run, FlowInstance: committed.Plan.Identity.InstancePath, Life: committed.Plan.Instance.Life}}
@@ -468,7 +473,6 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 		t.Fatalf("claimed original delivery differs from committed construction/actor: %+v %v", snapshot, err)
 	}
 	fixture.context = effects.WithController(effects.WithAuthority(ctx, fixture.authority), newCompletionControllerForTest(selected))
-	fixture.context = effects.WithSessionGrant(fixture.context, effects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
 	fixture.context = deliverylifecycle.WithClaim(fixture.context, fixture.origin)
 	fixture.context = effects.WithTurnInstanceSource(fixture.context, source)
 	fixture.context = correlation.WithInboundEvent(fixture.context, fixture.input)
