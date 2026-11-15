@@ -294,10 +294,6 @@ func proveSelectedResolutionMode(t *testing.T, backend, originalMode, selectedMo
 		"worker/state.yaml":    "item_id: text\n",
 		"worker/nodes.yaml":    "receiver:\n  item.created: {}\n  item.requested: {}\n",
 	}
-	if originalMode == "select" {
-		documents["schema.yaml"] = strings.Replace(documents["schema.yaml"], "  - {event: item.created, from: ., to: worker, resolution: select-or-create}\n", "", 1)
-		documents["schema.yaml"] += "  - {event: item.requested, from: ., to: worker, rename: item.created, resolution: select-or-create}\n"
-	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 	source := semanticview.Wrap(f.bundle)
 	runID := correlation.RunIDFromContext(f.ctx)
@@ -319,6 +315,7 @@ func proveSelectedResolutionMode(t *testing.T, backend, originalMode, selectedMo
 	construct.Instance, construct.ConstructorInput, construct.ResolvedKey = child, "item.created", "business-key"
 	construct.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "item.created", "fixture", "", []byte(`{"item_id":"business-key"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	if originalMode == "select" {
+		construct.ConstructorInput = "item.requested"
 		construct.TriggerEvent = eventtest.ExistingRunRootIngress(construct.TriggerEvent.ID(), "item.requested", "fixture", "", construct.TriggerEvent.Payload(), 0, runID, events.EventEnvelope{}, construct.TriggerEvent.CreatedAt())
 	}
 	fact, present := correlation.SourceArtifactFactFromContext(f.ctx)

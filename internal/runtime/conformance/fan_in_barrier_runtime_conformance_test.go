@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -207,8 +210,182 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			if err != nil || len(results) != 2 || results[0] != int64(11) || results[1] != int64(22) {
 				t.Fatalf("barrier results = %#v err=%v, want declared membership order [11 22]", results, err)
 			}
+			parentTest := t
+			t.Run("three_whole_members", func(t *testing.T) {
+				if err := runtime.manager.Shutdown(); err != nil {
+					t.Fatal(err)
+				}
+				if err := runtime.schedules.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := runtime.grant.Retire(ctx); err != nil {
+					t.Fatal(err)
+				}
+				capability, err := agentfixture.ProcessCapability(parentTest, ctx, backend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := capability.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
+				freshBackend, _ := tc.setup(t)
+				proveThreeWholeFanInMembers(t, freshBackend)
+			})
 		})
 	}
+}
+
+func proveThreeWholeFanInMembers(t *testing.T, backend fanInBarrierConformanceStore) {
+	t.Helper()
+	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
+	path := filepath.Join(root, "portfolio", "period", "nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.Count(string(raw), "output: payload.revenue") != 1 {
+		t.Fatalf("whole-member fixture: %s %v", raw, err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "output: payload.revenue", "output: payload.report", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "types.yaml"), []byte("OperatingReport:\n  operating_id: text\n  portfolio_id: text\n  period_id: text\n  revenue: integer\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reportSchema := "  report: OperatingReport\n"
+	for _, label := range []string{"events.yaml", "ingress/events.yaml", "operating/events.yaml", "portfolio/events.yaml"} {
+		path := filepath.Join(root, label)
+		raw, err := os.ReadFile(path)
+		needle := "  revenue: integer\n"
+		if err != nil || strings.Count(string(raw), needle) != 1 {
+			t.Fatalf("whole report catalog %s: %s %v", label, raw, err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), needle, needle+reportSchema, 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, label := range []string{"ingress/nodes.yaml", "operating/nodes.yaml", "portfolio/nodes.yaml"} {
+		path := filepath.Join(root, label)
+		raw, err := os.ReadFile(path)
+		needle := "        revenue: payload.revenue\n"
+		if err != nil || strings.Count(string(raw), needle) != 1 {
+			t.Fatalf("whole report projection %s: %s %v", label, raw, err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), needle, needle+"        report: payload.report\n", 1)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(canonicalrouting.RepoRoot(t), root, runtimecontracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
+	ctx = originalConformanceFixtureContext(t, ctx, backend)
+	seedFanInBarrierRun(t, ctx, backend, source, runID)
+	runtime := newFanInBarrierRuntime(t, backend, source)
+	const period, portfolio = "2026-Q4", "whole-portfolio"
+	members := []string{"op-a", "op-b", "op-c"}
+	setupID := uuid.NewString()
+	publishFanInBarrierEvent(t, ctx, runtime.bus, source, setupID, ".", "portfolio.setup", map[string]any{
+		"portfolio_id": portfolio, "period_id": period, "expected_operating_ids": members,
+	})
+	routes, err := backend.ListEventDeliveryRoutes(ctx, setupID)
+	if err != nil || len(routes) != 1 || routes[0].Target.Route().FlowID != "portfolio" {
+		t.Fatalf("whole-member parent route: %+v %v", routes, err)
+	}
+	initial := loadFanInBarrierActivation(t, ctx, loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period), period)
+	if initial.Status != joinruntime.StatusOpen || initial.Completed() != 0 || initial.Expected() != 3 {
+		t.Fatalf("whole-member initial arm: %+v", initial)
+	}
+	arrive := func(member string, revenue int) {
+		publishFanInBarrierEvent(t, ctx, runtime.bus, source, uuid.NewString(), "ingress", "operating.report.requested", map[string]any{
+			"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": revenue,
+			"report": map[string]any{"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": revenue},
+		})
+	}
+	arrive("op-b", 22)
+	before := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
+	partial := loadFanInBarrierActivation(t, ctx, before, period)
+	if partial.Status != joinruntime.StatusOpen || partial.Completed() != 1 || !partial.JoinRef().Equal(initial.JoinRef()) {
+		t.Fatalf("whole-member partial arm: %+v", partial)
+	}
+	// A fresh admitted publication carries the same business member; this is
+	// not publication-ID replay suppression.
+	arrive("op-b", 22)
+	after := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("same business member changed the retained join")
+	}
+	if err := runtime.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.schedules.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.grant.Retire(ctx); err != nil {
+		t.Fatal(err)
+	}
+	runtime = newFanInBarrierRuntime(t, backend, source, 2)
+	arrive("op-c", 33)
+	partial = loadFanInBarrierActivation(t, ctx, loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period), period)
+	if partial.Status != joinruntime.StatusOpen || partial.Completed() != 2 || !partial.JoinRef().Equal(initial.JoinRef()) {
+		t.Fatalf("restarted two-member arm: %+v", partial)
+	}
+	arrive("op-a", 11)
+	deadline := time.Now().Add(10 * time.Second)
+	var final runtimepipeline.WorkflowInstance
+	for {
+		final = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline, period)
+		if final.CurrentState == "complete" || !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	arm := loadFanInBarrierActivation(t, ctx, final, period)
+	if final.CurrentState != "complete" || arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || arm.Completed() != 3 || !arm.JoinRef().Equal(initial.JoinRef()) {
+		t.Fatalf("whole-member closure: instance=%+v arm=%+v", final, arm)
+	}
+	results, err := arm.Results()
+	want := make([]any, 0, 3)
+	for i, member := range members {
+		want = append(want, map[string]any{"operating_id": member, "portfolio_id": portfolio, "period_id": period, "revenue": int64(11 * (i + 1))})
+	}
+	if err != nil || !reflect.DeepEqual(results, want) {
+		t.Fatalf("whole-member results: got=%#v want=%#v err=%v", results, want, err)
+	}
+	reports := typedFanInEvents(t, ctx, backend, "operating.reported")
+	if len(reports) != 4 {
+		t.Fatalf("fan-in report event count = %d, want %d", len(reports), 4)
+	}
+	sourceEntities := make(map[string]struct{}, len(reports))
+	for _, view := range reports {
+		snapshot, err := view.EventSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		from := snapshot.RoutingSource().Route().Normalized()
+		if from.FlowID != "operating" || from.FlowInstance == "" || from.EntityID == "" || from.EntityID == routes[0].Target.Route().EntityID {
+			t.Fatalf("fan-in report source lost exact distinct owner: %+v", from)
+		}
+		matched := false
+		for _, route := range view.Deliveries {
+			target := events.RouteIdentity{FlowID: route.Target.FlowID, FlowInstance: route.Target.FlowInstance, EntityID: route.Target.EntityID}
+			matched = matched || route.SubscriberID == conformanceNode(t, "portfolio", "portfolio-router").Key() && target.Normalized() == routes[0].Target.Route().Normalized()
+		}
+		if !matched {
+			t.Fatalf("fan-in report lost exact selected target: %+v", view)
+		}
+		sourceEntities[from.EntityID] = struct{}{}
+	}
+	if len(sourceEntities) != 4 {
+		t.Fatalf("fan-in report source entities = %#v, want %d distinguishable child owners", sourceEntities, 4)
+	}
+	requireTypedFanInPeriodReadback(t, ctx, backend, routes[0].Target.Route(), final, 4)
 }
 
 func typedFanInEvents(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, name string) []operatorread.OperatorEventFull {
