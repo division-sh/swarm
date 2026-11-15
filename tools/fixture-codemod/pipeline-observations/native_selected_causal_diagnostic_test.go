@@ -79,7 +79,7 @@ func TestNativeSelectedCausalDiagnosticRootRetainsEveryLifecycleCut(t *testing.T
 	}
 }
 
-func selectedCausalObservationBody(t *testing.T, path, name string) string {
+func selectedCausalObservationBody(t *testing.T, path, name string, receiver ...string) string {
 	t.Helper()
 	path = filepath.Join("..", "..", "..", path)
 	body, err := os.ReadFile(path)
@@ -92,6 +92,11 @@ func selectedCausalObservationBody(t *testing.T, path, name string) string {
 		t.Fatal(err)
 	}
 	fn, err := uniqueFunction(file, name)
+	if len(receiver) == 1 {
+		fn, err = uniqueRecipeFunction(file, recipe{Function: name, After: "func (s *" + receiver[0] + ") " + name + "() {}"})
+	} else if len(receiver) != 0 {
+		t.Fatal("native observation requires at most one exact receiver")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

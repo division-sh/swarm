@@ -20,17 +20,13 @@ func ReadCommittedPipelineScopeForTest(ctx context.Context, selected any, eventI
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return "", err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var scope runtimepipelineobligation.CommittedScope
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		scope, err = pipelinepersistence.LoadCommittedScope(ctx, tx, eventID, postgres)
-		return err
-	})
-	if err != nil {
-		return "", err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.ReadCommittedPipelineScopeForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.ReadCommittedPipelineScopeForTest(ctx, eventID)
 	}
-	return scope, nil
+	return "", nil
 }
 
 // ReadSemanticEventFixtureEvidenceForTest keeps record, revision and delivery

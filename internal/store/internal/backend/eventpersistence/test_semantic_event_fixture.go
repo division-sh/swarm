@@ -39,15 +39,39 @@ func (s *EventSQLiteOwner) InsertCanonicalEventRecordForTest(ctx context.Context
 	return inserted, err
 }
 
+// Deliberately reach the physical CHECK; prevalidation would conceal whether
+// the selected schema actually rejects the hostile depth.
 func (s *EventPostgresOwner) SetEventChainDepthForTest(ctx context.Context, eventID string, depth int) error {
 	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return eventrecord.SetFixtureEventChainDepthTx(txctx, tx, true, eventID, depth)
+		result, err := tx.ExecContext(txctx, `UPDATE events SET chain_depth = $1 WHERE event_id = $2::uuid`, depth, eventID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("chain-depth fixture changed %d rows, want one exact event", changed)
+		}
+		return nil
 	})
 }
 
 func (s *EventSQLiteOwner) SetEventChainDepthForTest(ctx context.Context, eventID string, depth int) error {
 	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(txctx context.Context, tx *sql.Tx) error {
-		return eventrecord.SetFixtureEventChainDepthTx(txctx, tx, false, eventID, depth)
+		result, err := tx.ExecContext(txctx, `UPDATE events SET chain_depth = ? WHERE event_id = ?`, depth, eventID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 1 {
+			return fmt.Errorf("chain-depth fixture changed %d rows, want one exact event", changed)
+		}
+		return nil
 	})
 }
 
