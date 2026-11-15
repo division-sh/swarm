@@ -42,7 +42,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -823,17 +822,17 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
-	eventtestsql.CorruptEventStore(t, ctx, db, authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
+	storetest.CorruptInboundDuplicatePayload(t, ctx, pg, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
-	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb, payload_bytes = '{"corrupt":true}'::bytea WHERE event_id = $1::uuid`, eventID)
+	}, eventID)
 	duplicate := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, target, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram PostgreSQL duplicate")
-	eventtestsql.RequireEventRowCount(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, 1)
+	storetest.RequireEventRowCount(t, ctx, pg, eventID, 1)
 }
 
 func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -893,17 +892,17 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
-	eventtestsql.CorruptEventStore(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventtestsql.EventCorruptionClaim{
+	storetest.CorruptInboundDuplicatePayload(t, ctx, sqliteStore, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
-	}, `UPDATE events SET payload = '{"corrupt":true}', payload_bytes = CAST('{"corrupt":true}' AS BLOB) WHERE event_id = ?`, "", eventID)
+	}, eventID)
 	duplicate := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, target, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram SQLite duplicate")
-	eventtestsql.RequireEventRowCount(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventID, 1)
+	storetest.RequireEventRowCount(t, ctx, sqliteStore, eventID, 1)
 }
 
 func requireInboundTelegramPatternProjection(t testing.TB, record runtimeinbound.Record, reference, address string) {

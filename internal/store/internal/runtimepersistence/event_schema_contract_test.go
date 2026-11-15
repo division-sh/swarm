@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/google/uuid"
 )
@@ -301,76 +302,49 @@ func validUnsafeDeclaredSourceEventRow() unsafeEventRow {
 
 func insertUnsafeEventRow(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, row unsafeEventRow, reason string) {
 	t.Helper()
-	sqliteStatement, postgresStatement, args := unsafeEventInsert(row)
-	statement := sqliteStatement
-	if fixture.dialect == "postgres" {
-		statement = postgresStatement
-	}
-	if _, err := fixture.db.ExecContext(ctx, statement, args...); err != nil {
+	if err := InsertConstraintEventRowForTest(ctx, fixture.store, nativeConstraintEventRow(row)); err != nil {
 		t.Fatalf("insert valid event DDL control for %s: %v", reason, err)
 	}
 }
 
 func rejectUnsafeEventRow(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, row unsafeEventRow, reason, category string) {
 	t.Helper()
-	sqliteStatement, postgresStatement, args := unsafeEventInsert(row)
-	eventtestsql.RejectEventStoreCorruptionCategory(t, ctx, fixture.db, fixture.dialect, eventtestsql.EventCorruptionClaim{
+	claim := eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.exact_persistence",
 		Reason:    "prove fresh DDL rejects " + reason,
-	}, category, sqliteStatement, postgresStatement, args...)
+	}
+	eventtestsql.RequireEventCorruptionClaim(t, claim)
+	err := InsertConstraintEventRowForTest(ctx, fixture.store, nativeConstraintEventRow(row))
+	eventtestsql.RequireEventStoreCorruptionCategory(t, claim, category, err)
 }
 
-func unsafeEventInsert(row unsafeEventRow) (string, string, []any) {
-	payloadBytes := row.payload
-	if value, ok := row.payload.(string); ok {
-		payloadBytes = []byte(value)
+func nativeConstraintEventRow(row unsafeEventRow) eventpersistence.ConstraintEventRow {
+	return eventpersistence.ConstraintEventRow{
+		Class:                    row.class,
+		EventID:                  row.eventID,
+		RunID:                    row.runID,
+		EventName:                row.eventName,
+		TaskID:                   row.taskID,
+		EntityID:                 row.entityID,
+		FlowInstance:             row.flowInstance,
+		Scope:                    row.scope,
+		Payload:                  row.payload,
+		PayloadSchemaBundleHash:  row.payloadSchemaBundleHash,
+		PayloadSchemaFlowID:      row.payloadSchemaFlowID,
+		PayloadSchemaEventKey:    row.payloadSchemaEventKey,
+		PayloadSchemaDigest:      row.payloadSchemaDigest,
+		PayloadSchemaClass:       row.payloadSchemaClass,
+		ExecutionMode:            row.executionMode,
+		ChainDepth:               row.chainDepth,
+		ProducedBy:               row.producedBy,
+		ProducedByType:           row.producedByType,
+		SourceEventID:            row.sourceEventID,
+		CreatedAt:                row.createdAt,
+		RoutingSourceKind:        row.routingSourceKind,
+		RoutingSourceAuthority:   row.routingSourceAuthority,
+		SourceRoute:              row.sourceRoute,
+		TargetRoute:              row.targetRoute,
+		TargetSet:                row.targetSet,
+		OperatorReferenceEventID: row.operatorReferenceEventID,
 	}
-	args := []any{
-		row.class, row.eventID, row.runID, row.eventName, row.taskID, row.entityID, row.flowInstance, row.scope, row.payload, payloadBytes,
-		row.payloadSchemaBundleHash, row.payloadSchemaFlowID, row.payloadSchemaEventKey,
-		row.payloadSchemaDigest, row.payloadSchemaClass,
-		row.executionMode, row.chainDepth, row.producedBy, row.producedByType, row.sourceEventID, row.createdAt,
-		row.routingSourceKind, row.routingSourceAuthority, row.sourceRoute, row.targetRoute, row.targetSet, row.operatorReferenceEventID,
-		unsafeEventRouteSettlement(row),
-	}
-	return `
-		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
-			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
-			payload_schema_digest, payload_schema_class,
-			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
-			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-				operator_reference_event_id, route_settlement, run_owner_key
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE('run:' || CAST(?3 AS TEXT), ''))
-	`, `
-		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
-			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
-			payload_schema_digest, payload_schema_class,
-			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
-			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-				operator_reference_event_id, route_settlement, run_owner_key
-			) VALUES (
-				$1, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9::jsonb, $10::bytea,
-				$11, $12, $13, $14, $15, $16, $17, $18, $19,
-				$20::uuid, $21, $22, $23, $24::jsonb, $25::jsonb, $26::jsonb, $27::uuid, $28::jsonb,
-				COALESCE('run:' || CAST($3::uuid AS TEXT), '')
-			)
-		`, args
-}
-
-func unsafeEventRouteSettlement(row unsafeEventRow) string {
-	switch row.eventName {
-	case "platform.runtime_log":
-		return `{"write_class":"runtime_log_direct","arm":"no_delivery","reason":"no_subscriber_by_design"}`
-	case "platform.inbound_recorded":
-		return `{"write_class":"inbound_evidence_direct","arm":"no_delivery","reason":"no_subscriber_by_design"}`
-	case "platform.agent_directive":
-		return `{"write_class":"directive_direct","arm":"no_delivery","reason":"no_subscriber_by_design"}`
-	}
-	writeClass := "normal_publication"
-	if row.class == "selected_fork_replay" {
-		writeClass = "selected_fork_publication"
-	}
-	return `{"write_class":"` + writeClass + `","arm":"no_delivery","reason":"declared_consumer_no_plan","evaluation":{"plans":[]}}`
 }

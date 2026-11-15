@@ -598,10 +598,12 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			})
 
 			t.Run("corrupt_record", func(t *testing.T) {
-				eventtestsql.CorruptEventStore(t, ctx, fixture.db, fixture.dialect, eventtestsql.EventCorruptionClaim{
+				claim := eventtestsql.EventCorruptionClaim{
 					Invariant: "store.event_record.canonical_readback",
 					Reason:    "prove canonical batch hydration rejects a malformed durable envelope without a partial result",
-				}, `UPDATE events SET target_route = ? WHERE event_id = ?`, `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, ids[len(ids)-1])
+				}
+				eventtestsql.RequireEventCorruptionClaim(t, claim)
+				eventtestsql.RequireEventCorruptionResult(t, claim, CorruptTargetRouteScalarForTest(ctx, fixture.store, ids[len(ids)-1]))
 				queryer := &countedEventRecordQueryer{db: fixture.db}
 				records, err := load(ctx, queryer, []string{ids[0], ids[len(ids)-1]})
 				if !errors.Is(err, eventrecord.ErrCorrupt) || records != nil {
