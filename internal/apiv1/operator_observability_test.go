@@ -11,6 +11,10 @@ import (
 )
 
 func TestEventListOnlyOmitsRunForExplicitDeadLetters(t *testing.T) {
+	scopeCode, ok := testRegistry(t).ApplicationErrorCode(EventObservationRunScopeRequiredCode)
+	if !ok {
+		t.Fatal("registry is missing EVENT_OBSERVATION_RUN_SCOPE_REQUIRED")
+	}
 	for _, cell := range []struct {
 		name, params string
 		code         int
@@ -21,14 +25,14 @@ func TestEventListOnlyOmitsRunForExplicitDeadLetters(t *testing.T) {
 		{"missing_filter", `{}`, codeInvalidParams},
 		{"null_filter", `{"filter":null}`, codeInvalidParams},
 		{"blank_filter", `{"filter":" "}`, codeInvalidParams},
-		{"empty_filter", `{"filter":{}}`, -32000},
-		{"false", `{"filter":{"has_dead_letter":false}}`, -32000},
-		{"null_boolean", `{"filter":{"has_dead_letter":null}}`, -32000},
-		{"status_only", `{"filter":{"delivery_status":"dead_letter"}}`, -32000},
-		{"reason_only", `{"filter":{"reason_code":"retry_exhausted"}}`, -32000},
-		{"null_run", `{"filter":{"run_id":null,"has_dead_letter":true}}`, -32000},
-		{"empty_run", `{"filter":{"run_id":"","has_dead_letter":true}}`, -32000},
-		{"blank_run", `{"filter":{"run_id":"  ","has_dead_letter":true}}`, -32000},
+		{"empty_filter", `{"filter":{}}`, scopeCode},
+		{"false", `{"filter":{"has_dead_letter":false}}`, scopeCode},
+		{"null_boolean", `{"filter":{"has_dead_letter":null}}`, scopeCode},
+		{"status_only", `{"filter":{"delivery_status":"dead_letter"}}`, scopeCode},
+		{"reason_only", `{"filter":{"reason_code":"retry_exhausted"}}`, scopeCode},
+		{"null_run", `{"filter":{"run_id":null,"has_dead_letter":true}}`, scopeCode},
+		{"empty_run", `{"filter":{"run_id":"","has_dead_letter":true}}`, scopeCode},
+		{"blank_run", `{"filter":{"run_id":"  ","has_dead_letter":true}}`, scopeCode},
 		{"nonstring_run", `{"filter":{"run_id":3,"has_dead_letter":true}}`, codeInvalidParams},
 		{"malformed_run", `{"filter":{"run_id":"bad/run","has_dead_letter":true}}`, codeInvalidParams},
 		{"nonboolean", `{"filter":{"has_dead_letter":"true"}}`, codeInvalidParams},
@@ -48,7 +52,7 @@ func TestEventListOnlyOmitsRunForExplicitDeadLetters(t *testing.T) {
 			if response.Error == nil || response.Error.Code != cell.code || reads.lastEventList.Limit != -1 {
 				t.Fatalf("refusal changed or reached owner: %+v opts=%+v", response, reads.lastEventList)
 			}
-			if cell.code == -32000 && asMap(t, response.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
+			if cell.code == scopeCode && asMap(t, response.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
 				t.Fatalf("missing run lost its semantic refusal: %+v", response.Error)
 			}
 		})
