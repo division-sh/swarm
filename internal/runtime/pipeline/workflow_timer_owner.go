@@ -1082,7 +1082,7 @@ func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activati
 	return l.queueWakeupReconcile(ctx, activation.Ref)
 }
 
-func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (WorkflowTimerFireOutcome, bool, error) {
+func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) (outcome WorkflowTimerFireOutcome, recurrenceCommitted bool, finalErr error) {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer lifecycle store is unavailable")
@@ -1127,6 +1127,14 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireTerminal, false, nil
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, hint.RunID)
+	if owner, present := worklifetime.OccurrenceFromContext(ctx); present {
+		firing, err := owner.Begin(ctx)
+		if err != nil {
+			return WorkflowTimerFireRetry, false, err
+		}
+		defer func() { finalErr = errors.Join(finalErr, firing.Done()) }()
+		ctx = firing.Context()
+	}
 	firedAt := canonicalWorkflowTimerTime(time.Now())
 	if firedAt.Before(occurrence.DueAt) {
 		return WorkflowTimerFireRetry, false, fmt.Errorf(

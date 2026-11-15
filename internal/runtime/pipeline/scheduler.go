@@ -199,7 +199,7 @@ func (s *Scheduler) registerWorkflowTimerWakeup(ctx context.Context, wakeup Work
 	if err != nil {
 		return err
 	}
-	return s.registerProjection(ctx, projection, false)
+	return s.registerProjection(ctx, projection, true)
 }
 
 func (s *Scheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup, owner runtimegenericschedule.OwnerKind) error {
