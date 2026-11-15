@@ -231,7 +231,12 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				if err := capability.Release(ctx); err != nil {
 					t.Fatal(err)
 				}
-				freshBackend, _ := tc.setup(t)
+				var freshBackend fanInBarrierConformanceStore
+				if tc.name == "postgres" {
+					freshBackend = storetest.StartPostgresRuntimeStore(t)
+				} else {
+					freshBackend = storetest.StartSQLiteRuntimeStore(t)
+				}
 				proveThreeWholeFanInMembers(t, freshBackend)
 			})
 		})
