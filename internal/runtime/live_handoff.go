@@ -81,14 +81,19 @@ func (rt *Runtime) ReconcileContinuedRunWakeups(ctx context.Context, runID strin
 	if rt == nil {
 		return errors.New("continued run wakeups require their loaded runtime")
 	}
-	if rt.GenericSchedules == nil {
-		return nil
-	}
 	ctx, err := rt.runWakeupContext(ctx, runID)
 	if err != nil {
 		return err
 	}
-	return rt.GenericSchedules.ReconcileRunWakeups(ctx, runID)
+	if rt.GenericSchedules != nil {
+		if err := rt.GenericSchedules.ReconcileRunWakeups(ctx, runID); err != nil {
+			return err
+		}
+	}
+	if rt.Pipeline != nil {
+		return rt.Pipeline.RestoreWorkflowTimers(ctx)
+	}
+	return nil
 }
 
 func (rt *Runtime) runWakeupContext(ctx context.Context, runID string) (context.Context, error) {

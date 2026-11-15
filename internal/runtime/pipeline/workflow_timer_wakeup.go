@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
 type workflowTimerWakeupFamily uint8
@@ -89,6 +90,10 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 		l.logFailure(callbackCtx, "workflow_timer_fire_failed", wakeup.Occurrence().Activation, err)
 	}
 	if outcome == WorkflowTimerFireRetry {
+		if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			// Continue or the next serve reprojects the unchanged durable arm.
+			return
+		}
 		// Only an uncommitted occurrence retries via the active timer selector.
 		// A published occurrence remains reachable through its pipeline obligation.
 		l.startWakeupRecovery(callbackCtx, wakeup.Occurrence().Activation)

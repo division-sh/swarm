@@ -203,7 +203,7 @@ func joinSelectedSourceWork(ctx context.Context, req SelectedContractExecutionRe
 	return func() error { done(); return nil }, nil
 }
 
-func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (sourcePause, error) {
+func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContractExecutionRequest, prepared *PreparedSelectedFork) (result sourcePause, finalErr error) {
 	control, ok := req.LiveRuns.(runcontrol.Store)
 	if !ok {
 		return sourcePause{}, errors.New("live fork requires its selected run-control owner")
@@ -272,25 +272,34 @@ func pauseSelectedSourceBeforeLiveFork(ctx context.Context, req SelectedContract
 	if availability.Status != "running" && availability.Status != "live" {
 		return sourcePause{}, fmt.Errorf("live fork source is not pausable: run=%s status=%s", sourceID, availability.Status)
 	}
-	_, err = runcontrol.NewController(control, nil, runcontrol.Options{}).Pause(ctx, runcontrol.TransitionRequest{
+	use, lookup, admitted, err := req.LiveContexts.AcquireRun(ctx, sourceID)
+	if err != nil {
+		return sourcePause{}, errors.Join(err, use.Done())
+	}
+	if !lookup.Loaded() || !admitted.Available() || use == nil || use.Runtime() == nil ||
+		!use.Context.SourceArtifactFact.Matches(source) || admitted.RootReference != availability.RootReference {
+		return sourcePause{}, errors.Join(errors.New("live fork source requires its original admitted runtime"), use.Done())
+	}
+	defer func() { finalErr = errors.Join(finalErr, use.Done()) }()
+	pauseCtx := correlation.WithRunID(correlation.WithSourceArtifactFact(use.WorkContext(), source), sourceID)
+	_, err = runcontrol.NewController(control, nil, runcontrol.Options{}).Pause(pauseCtx, runcontrol.TransitionRequest{
 		RunID: sourceID, Reason: "fork_live_switch", ControlledBy: "run.fork",
 	})
 	if err != nil {
 		return sourcePause{}, err
 	}
-	parked, err = control.RunDispatchParked(ctx, sourceID)
+	parked, err = control.RunDispatchParked(pauseCtx, sourceID)
 	if err != nil {
 		return sourcePause{}, fmt.Errorf("read paused fork source control: %w", err)
 	}
-	availability, err = req.Owner.ports.fork.LoadRunBundleAvailability(ctx, sourceID)
+	availability, err = req.Owner.ports.fork.LoadRunBundleAvailability(pauseCtx, sourceID)
 	if err != nil {
 		return sourcePause{}, fmt.Errorf("read paused fork source availability: %w", err)
 	}
 	if !parked || availability.Status != "paused" || availability.BundleHash != source.BundleHash() {
 		return sourcePause{}, fmt.Errorf("live fork source changed during pause readback: %s", availability.DetailString())
 	}
-	result := sourcePause{predecessor: &live, paused: true}
-	return result, nil
+	return sourcePause{predecessor: &live, paused: true}, nil
 }
 
 func pauseLiveSourceAndAcquire(ctx, pauseCtx context.Context, parked *runtimepkg.Runtime, runID string, alreadyPaused bool, root sourceartifact.RootAdmissionReference, release func() error, acquire func(context.Context, sourceartifact.RootAdmissionReference) (*runtimepkg.RuntimeContextUse, error)) (*runtimepkg.RuntimeContextUse, bool, error) {
