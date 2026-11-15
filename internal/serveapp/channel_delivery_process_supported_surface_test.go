@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
