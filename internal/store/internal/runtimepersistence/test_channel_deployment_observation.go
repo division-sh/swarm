@@ -3,10 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
+	operatorchannelstore "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 )
 
 type ChannelControlCounts struct{ Total, Nonmutating, OriginalRefused int }
@@ -245,14 +248,33 @@ func CountUnsettledChannelAfterResetForTest(ctx context.Context, selected any, o
 }
 
 func ReadChannelPreservedHistoryForTest(ctx context.Context, selected any, successors []string) (string, error) {
-	if err := validateChannelObservationOwner(selected); err != nil {
-		return "", err
+	var snapshots [][][]any
+	for index := 0; index < 15; index++ {
+		if err := validateChannelObservationOwner(selected); err != nil {
+			return "", err
+		}
+		var backend any
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			backend = owner.backend
+		case *SQLiteRuntimeStore:
+			backend = owner.backend
+		}
+		var snapshot [][]any
+		var err error
+		switch index {
+		case 0, 1, 2, 10:
+			snapshot, err = operatorchannelstore.ReadPreservedOperatorChannelHistoryForTest(ctx, backend, index)
+		case 13, 14:
+			snapshot, err = effectpersistence.ReadPreservedChannelEffectHistoryForTest(ctx, backend, index, successors)
+		default:
+			snapshot, err = channeldelivery.ReadPreservedChannelDeliveryHistoryForTest(ctx, backend, index, successors)
+		}
+		if err != nil {
+			return "", err
+		}
+		snapshots = append(snapshots, snapshot)
 	}
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		return channeldelivery.ReadChannelPreservedHistoryForTest(ctx, owner.backend, successors)
-	case *SQLiteRuntimeStore:
-		return channeldelivery.ReadChannelPreservedHistoryForTest(ctx, owner.backend, successors)
-	}
-	return "", nil
+	body, err := json.Marshal(snapshots)
+	return string(body), err
 }
