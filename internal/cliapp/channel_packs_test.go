@@ -85,8 +85,8 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{}); err != nil {
 			t.Fatalf("installed inventory alone selected Telegram: %v", err)
 		}
-		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{Bindings: loaded.Bindings}); err == nil {
-			t.Fatal("registered Telegram binding admitted an unsupported port")
+		if err := ValidateServePublicWebhookPort(&candidate, ChannelPackLoad{Bindings: loaded.Bindings}); err == nil || err.Error() != "Telegram webhooks cannot use port 9443. Set serve.public_webhook.port to 443, 80, 88 or 8443. Every port uses HTTPS." {
+			t.Fatalf("registered Telegram binding did not return the approved refusal: %v", err)
 		}
 		binding := base.Channels.Bindings["hitl"]
 		binding.Register = ""

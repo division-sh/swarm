@@ -182,6 +182,10 @@ func (c *Controller) Start(ctx context.Context) error {
 		listener, err = net.Listen("tcp", listenAddress)
 		if err != nil {
 			cancel()
+			if c.opts.Mode == ModeNativeTLS {
+				_, port, _ := net.SplitHostPort(listenAddress)
+				return fmt.Errorf("Cannot listen for public webhooks on port %s: %w. Choose another port accepted by your webhook provider in serve.public_webhook.port, or ask your administrator to make this port available.", port, err)
+			}
 			return fmt.Errorf("bind dedicated public webhook listener: %w", err)
 		}
 	}
