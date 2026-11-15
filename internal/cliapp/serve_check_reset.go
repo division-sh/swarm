@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -10,13 +11,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
-func inspectServeResetSnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, operation destructivereset.Operation, result *runtime.WorkflowContractValidationResult) (*verifyRetainedAdmissionInventory, error) {
+func inspectServeResetSnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, operation destructivereset.Operation, recoveryOnStartup bool, result *runtime.WorkflowContractValidationResult) (*verifyRetainedAdmissionInventory, error) {
 	subject := "reset:" + operation.Request.OperationID
+	var plan destructivereset.Plan
 	if !verifyDeploymentObservation(ctx, result, "pending_reset_admission", "internal/runtime/destructivereset.InspectPendingOperations", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		return inspectServeResetDiscard(ctx, snapshot, operation)
+		var err error
+		plan, err = inspectServeResetDiscard(ctx, snapshot, operation)
+		return err
 	}) {
 		return nil, fmt.Errorf("reset discard population was not established")
 	}
@@ -29,11 +34,26 @@ func inspectServeResetSnapshot(ctx context.Context, snapshot *storeselected.Admi
 	})
 	retained := &verifyRetainedAdmissionInventory{}
 	retained.channels = inspectVerifyRetainedChannels(ctx, snapshot, subject, result, resetSurvivingChannelReader{snapshot})
+	verifyDeploymentObservation(ctx, result, "startup_recovery_admission", "internal/runtime.InspectSurvivingTimerRecoveryAdmission", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
+		var runIDs []string
+		for _, run := range plan.CleanupRuns {
+			runIDs = append(runIDs, run.RunID)
+		}
+		scope, err := timerobligation.AfterReset(runIDs)
+		if err != nil {
+			return err
+		}
+		timers, err := snapshot.ReadTimerObligations(ctx, scope, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		return runtime.InspectSurvivingTimerRecoveryAdmission(ctx, timers, recoveryOnStartup)
+	})
 	// Positive cleanup coverage below, rather than the mere presence of a reset,
 	// makes these pre-reset executable populations inapplicable. Kept source bytes
 	// were independently compiled before reaching this snapshot.
 	for _, check := range bootverify.SelectedStoreDependentAdmissionChecks() {
-		if check.ID == "pending_reset_admission" || check.ID == "startup_process_generation" || check.ID == "retained_channel_admission" {
+		if check.ID == "pending_reset_admission" || check.ID == "startup_process_generation" || check.ID == "retained_channel_admission" || check.ID == "startup_recovery_admission" {
 			continue
 		}
 		result.BootReport.Observations = append(result.BootReport.Observations, bootverify.AdmissionObservation{
@@ -49,17 +69,17 @@ func inspectServeResetSnapshot(ctx context.Context, snapshot *storeselected.Admi
 	return retained, nil
 }
 
-func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, operation destructivereset.Operation) error {
+func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, operation destructivereset.Operation) (destructivereset.Plan, error) {
 	plan, err := (destructivereset.InventoryPlanner{Reader: snapshot}).BuildPlan(ctx, operation.Request)
 	if err != nil {
-		return err
+		return plan, err
 	}
 	current := plan
 	if operation.Plan != nil {
 		plan = operation.Plan.Plan
 	}
 	if !plan.CleanupRunSetKnown || !current.CleanupRunSetKnown {
-		return fmt.Errorf("reset cleanup population is unknown")
+		return plan, fmt.Errorf("reset cleanup population is unknown")
 	}
 	discard := map[string]bool{}
 	for _, run := range plan.CleanupRuns {
@@ -67,7 +87,7 @@ func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.Admis
 	}
 	for _, run := range current.CleanupRuns {
 		if !discard[run.RunID] {
-			return destructivereset.ErrOperationChanged
+			return plan, destructivereset.ErrOperationChanged
 		}
 	}
 	// These are the exact populations whose ordinary execution checks are omitted.
@@ -81,10 +101,10 @@ func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.Admis
 		"channel_onboarding_operations":               destructivereset.CleanupDeleteAll,
 	} {
 		if catalog[table].Classification != action {
-			return fmt.Errorf("reset does not discard the inspected %s population", table)
+			return plan, fmt.Errorf("reset does not discard the inspected %s population", table)
 		}
 	}
-	return nil
+	return plan, nil
 }
 
 // Deployment registrations and teardown journals survive reset; learned runtime
@@ -94,17 +114,7 @@ type resetSurvivingChannelReader struct {
 }
 
 func (r resetSurvivingChannelReader) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
-	operations, err := r.AdmissionSnapshot.ListChannelOnboardingOperations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var surviving []channelonboarding.Operation
-	for _, operation := range operations {
-		if operation.DeploymentRegistration {
-			surviving = append(surviving, operation)
-		}
-	}
-	return surviving, nil
+	return r.AdmissionSnapshot.ListDeploymentChannelOperations(ctx)
 }
 
 func (r resetSurvivingChannelReader) ListCurrentConnectedChannelActivations(ctx context.Context) ([]channelonboarding.ConnectedChannelActivation, error) {
