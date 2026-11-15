@@ -2,12 +2,7 @@
 // tests that need to construct exact historical fork snapshots.
 package runforkrevisionfixture
 
-import (
-	"context"
-	"database/sql"
-
-	private "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-)
+import private "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 
 type Family = private.Family
 
@@ -27,27 +22,3 @@ const (
 )
 
 func AllFamilies() []Family { return private.AllFamilies() }
-
-func Capture(ctx context.Context, tx *sql.Tx, runID string, families ...Family) (int64, error) {
-	effects := private.NewEffects()
-	if err := effects.Add(runID, families...); err != nil {
-		return 0, err
-	}
-	results, err := private.FinalizePostgres(ctx, tx, effects)
-	if err != nil {
-		return 0, err
-	}
-	return results[runID].Revision, nil
-}
-
-func CaptureSQLite(ctx context.Context, tx *sql.Tx, runID string, families ...Family) (int64, error) {
-	effects := private.NewEffects()
-	if err := effects.Add(runID, families...); err != nil {
-		return 0, err
-	}
-	results, err := private.FinalizeSQLite(ctx, tx, effects)
-	if err != nil {
-		return 0, err
-	}
-	return results[runID].Revision, nil
-}

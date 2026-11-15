@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -215,16 +216,34 @@ func (f *issue642ReplyCleanupFixture) replies(t *testing.T) replyContextStoreTes
 func (f *issue642ReplyCleanupFixture) insertPhysical(t *testing.T, record replycontext.Record) {
 	t.Helper()
 	// A physical constraint fixture is not fork projection or publication admission.
-	err := runUnrevisionedEventFixtureTransactionForTest(f.ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
-		inserted, err := replycontextstore.InsertConstraintFixtureForTest(ctx, tx, f.postgres, record)
-		if err != nil {
-			return err
+	err := func() error {
+		fixtureContext := f.ctx
+		fixtureOwner := any(f.store)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			inserted, err := replycontextstore.InsertConstraintFixtureForTest(ctx, tx, f.postgres, record)
+			if err != nil {
+				return err
+			}
+			if !inserted {
+				return errors.New("reply cleanup constraint fixture was not newly inserted")
+			}
+			return nil
 		}
-		if !inserted {
-			return errors.New("reply cleanup constraint fixture was not newly inserted")
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
 		}
-		return nil
-	})
+	}()
 	if err != nil {
 		t.Fatalf("seed reply physical dependency: %v", err)
 	}

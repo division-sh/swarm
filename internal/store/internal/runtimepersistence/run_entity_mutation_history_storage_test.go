@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -124,12 +125,30 @@ func TestRunEntityMutationHistoryStorageRefusesRawInvalidCancelledClosedAndUnava
 }
 
 func renameRunHistoryWitness(ctx context.Context, selected any, restore bool) error {
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		statement := `ALTER TABLE entity_mutations RENAME TO unavailable_run_history_mutations`
-		if restore {
-			statement = `ALTER TABLE unavailable_run_history_mutations RENAME TO entity_mutations`
+	return func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(selected)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			statement := `ALTER TABLE entity_mutations RENAME TO unavailable_run_history_mutations`
+			if restore {
+				statement = `ALTER TABLE unavailable_run_history_mutations RENAME TO entity_mutations`
+			}
+			_, err := tx.ExecContext(ctx, statement)
+			return err
 		}
-		_, err := tx.ExecContext(ctx, statement)
-		return err
-	})
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}()
 }

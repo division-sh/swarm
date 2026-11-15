@@ -125,42 +125,11 @@ func CorruptRegistryVerdictForTest(ctx context.Context, selected any, run, entit
 	if err := requireIssue2564EvidenceOwner(selected); err != nil {
 		return err
 	}
-	apply := func(ctx context.Context, tx *sql.Tx) error {
-		var raw []byte
-		if err := tx.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).Scan(&raw); err != nil {
-			return err
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return err
-		}
-		var original string
-		if err := json.Unmarshal(fields["verdict"], &original); err != nil {
-			return fmt.Errorf("registry fixture requires an assigned text verdict: %w", err)
-		}
-		if original == verdict {
-			return fmt.Errorf("registry fixture must change the existing verdict")
-		}
-		encoded, err := json.Marshal(verdict)
-		if err != nil {
-			return err
-		}
-		fields["verdict"] = encoded
-		raw, err = json.Marshal(fields)
-		if err != nil {
-			return err
-		}
-		result, err := tx.ExecContext(ctx, `UPDATE entity_state SET fields=$1 WHERE run_id=$2 AND entity_id=$3`, string(raw), run, entity)
-		if err != nil {
-			return err
-		}
-		return requireMailboxFixtureRow(result)
-	}
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		return owner.backend.RunTransaction(ctx, apply)
+		return owner.pipelinePostgresOwner.CorruptRegistryVerdictForTest(ctx, run, entity, verdict)
 	case *SQLiteRuntimeStore:
-		return owner.backend.RunTransaction(ctx, "registry verdict corruption fixture", apply)
+		return owner.pipelineSQLiteOwner.CorruptRegistryVerdictForTest(ctx, run, entity, verdict)
 	default:
 		return fmt.Errorf("registry fixture requires the original native owner")
 	}
