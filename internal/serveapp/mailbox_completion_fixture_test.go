@@ -60,6 +60,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 	} else {
 		name = "postgres"
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
 		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {

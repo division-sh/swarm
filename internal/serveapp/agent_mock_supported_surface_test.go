@@ -123,6 +123,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 		opts.StoreMode = "sqlite"
 	case "postgres":
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		location = dsn
 		var runtimePG *store.PostgresStore

@@ -1202,7 +1202,7 @@ llm:
 `,
 		parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
 	path := filepath.Join(t.TempDir(), "swarm-postgres.yaml")
-	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, configText)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, withServeFixtureStateDirectory(t, configText))), 0o644); err != nil {
 		t.Fatalf("write channel onboarding PostgreSQL runtime config: %v", err)
 	}
 	return path
