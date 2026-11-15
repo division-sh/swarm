@@ -13,24 +13,29 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -53,15 +58,23 @@ type liveAwaitProofFixture struct {
 	context   context.Context
 	sessionID string
 	agentID   string
+	config    actors.AgentConfig
+	input     events.Event
+	route     events.RouteIdentity
+	life      events.InstanceLife
 }
 
 // Real native publication transactions, synthetic provider evidence; no live provider or invocation-resume proof.
 func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
-		for _, mode := range []string{"exact", "prefix", "same_run_other_request", "wrong_call", "non_emit", "wrong_frame", "late_reply_conflict", "duplicate_without_progress", "cancelled"} {
+		for _, mode := range []string{"exact", "prefix", "same_run_other_request", "wrong_call", "non_emit", "wrong_frame", "late_reply_conflict", "duplicate_without_progress", "cancelled", "root_exact"} {
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
+				mode := mode
 				selected := backend.open(t).store.(liveAwaitProofStore)
-				fixture := newLiveAwaitProofFixture(t, selected)
+				fixture := newLiveAwaitProofFixture(t, selected, mode == "root_exact")
+				if mode == "root_exact" {
+					mode = "exact"
+				}
 				ctx, handle, payload, messages, output := settledLiveAwaitProof(t, fixture, mode)
 				event := liveAwaitEvent(t, fixture, output.EventID, "await.request", output.CreatedAt)
 				record := liveAwaitRecord(fixture, event)
@@ -244,20 +257,154 @@ func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
 	}
 }
 
-func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore) liveAwaitProofFixture {
+func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root bool) liveAwaitProofFixture {
 	t.Helper()
-	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
-	run, agentID := uuid.NewString(), "await-agent"
-	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: run})
-	identity := mustTestAgentIdentityForRun(run, agentID, "global")
-	if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: withRuntimePersistenceTestIntent(t, actors.AgentConfig{ID: agentID, Identity: identity, Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowID: "global", FlowPath: "global", Memory: agentmemory.Plan{Enabled: true}, ExecutionMode: "live"}), Status: "active", StartedAt: time.Now().UTC()}); err != nil {
+	documents := map[string]string{
+		"schema.yaml":          "stages: []\n",
+		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"review/schema.yaml":   "instance: request_id\nstages:\n  active: {}\ninputs: [review.created, turn.started]\noutputs: [await.request, await.reply]\n",
+		"review/events.yaml":   "review.created:\n  request_id: text\nturn.started:\nawait.request:\nawait.reply:\n",
+		"review/agents.yaml":   "reviewer:\n  model: regular\n  memory: true\n  intent: {inline: Request and retain the reply.}\n  subscriptions: [turn.started]\n",
+	}
+	if root {
+		documents = map[string]string{
+			"schema.yaml": "stages:\n  active: {}\ninputs: [turn.started]\noutputs: [await.request, await.reply]\n",
+			"events.yaml": "turn.started:\nawait.request:\nawait.reply:\n",
+			"agents.yaml": "reviewer:\n  model: regular\n  memory: false\n  intent: {inline: Request and retain the reply.}\n  subscriptions: [turn.started]\n",
+		}
+	}
+	bundle := loadLifecyclePersistenceFixtureForTest(t, documents)
+	source := semanticview.Wrap(bundle)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
 		t.Fatal(err)
 	}
+	run := uuid.NewString()
+	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), run), fact)
+	ctx = originalStoreFixtureContext(t, correlation.WithRootAdmission(ctx, rooted.Admission()), selected)
+	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: run, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(), RootAdmission: rooted.Admission()})
+	storedRoot, err := selected.LoadRunRootedSource(ctx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storedRoot.Validate(); err != nil || !storedRoot.Admission().Equal(rooted.Admission()) {
+		t.Fatalf("original run differs from its complete admitted source/root: %+v %v", storedRoot.Admission().Reference(), err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, sources, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = authoractivity.WithScope(correlation.WithRuntimeInstanceID(ctx, evidence.RuntimeInstanceID), authoractivity.BundleScope(evidence.RuntimeInstanceID, fact.BundleHash()))
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationBus := &sqliteFlowActivationBus{}
+	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(activationBus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact, SemanticSource: source,
+		WorkflowInstances: configureAgentFixtureFlowLifecycle(t, selected, activationBus, bundle), LLMBackend: "anthropic",
+		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
+		PersistenceRoles: runtimemanager.PersistenceRoles{LifecycleState: selected, LifecycleOutcome: selected, AgentRoutes: activationBus, FlowActivation: agentFixtureFlowActivationCommitter{store: selected}},
+	}, selected))
+	admission, err := agenttopology.StaticAdmission(sources.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.InstallStartupTopology(grant, admission, sources); err != nil {
+		t.Fatal(err)
+	}
+	admitReceiverConfigFixtureGrant(t, ctx, grant)
+	request := sqliteFlowActivationRequest(bundle, ".", run, "", run)
+	request.Instance = flowidentity.Stored(source, ".", run, run, run, "")
+	request.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
+	plan, err := manager.PrepareFlowInstanceActivation(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := (agentFixtureFlowActivationCommitter{store: selected}).CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("actual root construction: %+v %v", committed, err)
+	}
+	if !root {
+		if len(committed.Plan.Readiness.Agents) != 0 {
+			t.Fatal("child fixture's constructed root must have no declared agent")
+		}
+		child, err := flowidentity.KeyedChild(source, committed.Plan.Identity, "review", uuid.NewString())
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]string{"request_id": child.InstanceID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Instance, request.ConstructorInput, request.ResolvedKey = child, "review.created", child.InstanceID
+		request.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "review.created", "constructor-fixture", "", payload, 0, run, events.EventEnvelope{}, request.OccurredAt)
+		plan, err = manager.PrepareFlowInstanceActivation(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err = (agentFixtureFlowActivationCommitter{store: selected}).CommitFlowInstanceActivation(ctx, plan)
+	}
+	if err != nil || !committed.Acknowledged || !committed.Created || len(committed.Plan.Readiness.Agents) != 1 {
+		t.Fatalf("actual declared roster construction: %+v %v", committed, err)
+	}
+	identity := committed.Plan.Readiness.Agents[0].Identity
+	declared := semanticview.AgentDeclarations(source)
+	if len(declared) != 1 {
+		t.Fatal("fixture requires exactly one admitted agent declaration")
+	}
+	namePlan, err := semanticview.ScopedAgentNamePlan(source, declared[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := namePlan.Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorRoute, err := committed.Plan.Identity.Route().AgentIdentityRoute()
+	if err != nil || identity.Name != name || identity.Route != actorRoute || identity.RunID != run {
+		t.Fatalf("constructed roster differs from its exact declared name/route: %+v %v", identity, err)
+	}
 	state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
-	if err != nil || !found {
+	if err != nil || !found || state.ConfigRevision != committed.Plan.Readiness.Agents[0].ConfigRevision {
 		t.Fatalf("current actor lifecycle: %+v %t %v", state, found, err)
 	}
-	token := effects.LifecycleToken{RuntimeEpoch: state.RuntimeEpoch, Identity: identity, AgentID: agentID, Generation: state.Generation}
+	started, err := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		DiagnosticOrigin: runfork.LifecycleDiagnosticOrigin{Owner: runfork.LifecycleDiagnosticNormal, Causality: runfork.LifecycleDiagnosticObservation},
+		OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: "await-native-fixture-start", Identity: identity, AgentID: identity.AgentID(), Trigger: "start",
+		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+		TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
+		ConfigRevision: state.ConfigRevision, RunMode: runtimemanager.AgentRunModeStandard, Topology: state.Topology, Now: time.Now().UTC(),
+	})
+	if err != nil || started.Identity != identity || started.Phase != runtimemanager.AgentLifecycleRunning {
+		t.Fatalf("start exact declared actor without launching a backend: %+v %v", started, err)
+	}
+	state, found, err = selected.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || state.Phase != runtimemanager.AgentLifecycleRunning {
+		t.Fatalf("read exact running actor: %+v %t %v", state, found, err)
+	}
+	agents, err := selected.LoadAgents(ctx)
+	if err != nil || len(agents) != 1 || agents[0].Config.Identity != identity || agents[0].Config.ExecutionMode != effects.ExecutionModeLive {
+		t.Fatalf("actual live descriptor disagrees with its admitted roster: %+v %v", agents, err)
+	}
+	config := agents[0].Config
+	if config.Memory.Enabled == root || (identity.FlowInstance() == "") != root {
+		t.Fatal("fixture lost its memory-enabled child or memory-disabled root declaration coordinate")
+	}
+	token := effects.LifecycleToken{RuntimeEpoch: state.RuntimeEpoch, Identity: identity, AgentID: identity.AgentID(), Generation: state.Generation}
 	ctx = effects.WithLifecycleToken(ctx, token)
 	lease, err := selected.Acquire(ctx, identity, "await-worker")
 	if err != nil {
@@ -269,42 +416,72 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore) liveAw
 			t.Errorf("release original session: %+v %v", result, err)
 		}
 	})
-	authority := effects.NormalAgentAuthority(token, lease.LockOwner, time.Now().UTC().Add(time.Minute))
-	authority.ExecutionMode = effects.ExecutionModeLive
-	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: agentID, AgentIdentity: identity, RunID: run, SessionID: lease.SessionID, Memory: agentmemory.Plan{Enabled: true}, FlowInstance: "global"}
-	fixture := liveAwaitProofFixture{store: selected, authority: authority, sessionID: lease.SessionID, agentID: agentID}
-	owner := flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.RouteForInstancePath("global")}
-	header := seedTurnTerminationHeaderForOwner(t, ctx, selected, owner, uuid.NewString(), time.Now().UTC(), contracts.FlowSchemaDocument{}, "")
-	if header.Life != 1 {
-		t.Fatalf("newly admitted original flow header life is not the fixture's retained first life: %d", header.Life)
+	authority := effects.NormalAgentAuthority(token, lease.LockOwner, lease.ExpiresAt)
+	authority.ExecutionMode = config.ExecutionMode
+	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: identity.AgentID(), AgentIdentity: identity, RunID: run, SessionID: lease.SessionID, Memory: config.Memory, FlowInstance: identity.FlowInstance(), EntityID: committed.Plan.Identity.EntityID}
+	fixture := liveAwaitProofFixture{store: selected, authority: authority, sessionID: lease.SessionID, agentID: identity.AgentID(), config: config,
+		route: events.RouteIdentity{FlowID: committed.Plan.Identity.ScopeKey, FlowInstance: committed.Plan.Identity.InstancePath, EntityID: committed.Plan.Identity.EntityID},
+		life:  events.InstanceLife{RunID: run, FlowInstance: committed.Plan.Identity.InstancePath, Life: committed.Plan.Instance.Life}}
+	scope, _, path, err := authority.BusinessTurnCoordinates()
+	if err != nil || scope != fixture.route.FlowID || path != fixture.route.FlowInstance {
+		t.Fatalf("exact admitted declaration target cannot project its committed business-turn coordinate: scope=%q path=%q route=%+v error=%v", scope, path, fixture.route, err)
 	}
-	fixture.authority.Target.EntityID = header.EntityID
-	origin := managedCompletionTestEvent(fixture.authority)
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity, Context: events.DeliveryContext{Life: &events.InstanceLife{RunID: run, FlowInstance: "global", Life: header.Life}}}
+	inputType := events.EventType("turn.started")
+	if !root {
+		inputType = "review/turn.started"
+	}
+	origin := eventtest.ExistingRunRootIngress(uuid.NewString(), inputType, "operator", "", json.RawMessage(`{}`), 0, run, events.EventEnvelope{}, request.OccurredAt)
+	target, err := events.MustExistingEntityTarget(fixture.route).WithLife(fixture.life.Life)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.agentID), AgentIdentity: identity, Target: target, Context: events.DeliveryContext{Life: &fixture.life}}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, origin, []events.DeliveryRoute{route}); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := claimDeliveryFixture(ctx, selected, origin, route)
+	prepared, present, err := selected.LoadPreparedPublishEvent(ctx, origin.ID())
+	if err != nil || !present || prepared.Event.ID() != origin.ID() || prepared.Event.Event().RunID() != run {
+		t.Fatalf("original admitted publication missing before claim: %+v %t %v", prepared, present, err)
+	}
+	if err := prepared.Validate(); err != nil {
+		t.Fatalf("original publication lost its exact admitted routes: %v", err)
+	}
+	fixture.input = prepared.Event.Event()
+	claimed, err := claimDeliveryFixture(ctx, selected, fixture.input, route)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture.origin = claimed.Claim
+	snapshot, err := selected.Snapshot(ctx, claimed.Claim.DeliveryID())
+	if err != nil || snapshot.RunID != run || snapshot.Route.AgentIdentity != identity || snapshot.Route.Target.Route() != fixture.route || snapshot.Route.Target.Life() != fixture.life.Life || !reflect.DeepEqual(snapshot.Route.Context.Life, &fixture.life) {
+		t.Fatalf("claimed original delivery differs from committed construction/actor: %+v %v", snapshot, err)
+	}
 	fixture.context = effects.WithController(effects.WithAuthority(ctx, fixture.authority), newCompletionControllerForTest(selected))
 	fixture.context = effects.WithSessionGrant(fixture.context, effects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
 	fixture.context = deliverylifecycle.WithClaim(fixture.context, fixture.origin)
+	fixture.context = effects.WithTurnInstanceSource(fixture.context, source)
+	fixture.context = correlation.WithInboundEvent(fixture.context, fixture.input)
 	return fixture
 }
 
 func liveAwaitEvent(t *testing.T, f liveAwaitProofFixture, id, eventType string, at time.Time) events.Event {
 	t.Helper()
+	source := eventtest.RootRoutingSource(f.route.EntityID)
+	if f.route.FlowID != "." {
+		source = eventtest.ConcreteTemplateRoutingSource(f.route.FlowID, f.route.FlowInstance, f.route.EntityID)
+		eventType = f.route.FlowID + "/" + eventType
+	}
+	source, err := source.WithLife(f.life.Life)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return eventtest.ChildWithLineageAndRoutingSource(id, events.EventType(eventType), f.agentID, "", json.RawMessage(`{}`), 1,
-		events.LineageFromEvent(managedCompletionTestEvent(f.authority)), events.EventEnvelope{}, eventtest.StaticFlowRoutingSource("global", "global", f.authority.Target.EntityID), at)
+		events.LineageFromEvent(f.input), events.EventEnvelope{}, source, at)
 }
 
 func liveAwaitRecord(f liveAwaitProofFixture, event events.Event) replycontext.Record {
-	route := events.RouteIdentity{FlowID: "global", FlowInstance: "global", EntityID: f.authority.Target.EntityID}
-	return replycontext.Record{ID: replycontext.DeterministicID(event.ID(), "global", "await.request", "await.reply", "global", route), RunID: event.RunID(), SourceRunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(),
-		RequesterFlowID: "global", RequestOutputPin: "await.request", ReplyInputPin: "await.reply", ProviderFlowID: "global", ProviderInputPin: "await.request", ProviderOutputPin: "await.reply", Origin: route, OriginLife: 1, RequestCorrelationID: "same-key", CorrelationKey: "id", State: replycontext.StateOpen, CreatedAt: event.CreatedAt(), UpdatedAt: event.CreatedAt()}
+	return replycontext.Record{ID: replycontext.DeterministicID(event.ID(), f.route.FlowID, "await.request", "await.reply", f.route.FlowID, f.route), RunID: event.RunID(), SourceRunID: event.RunID(), RequestEventID: event.ID(), SourceRequestEventID: event.ID(),
+		RequesterFlowID: f.route.FlowID, RequestOutputPin: "await.request", ReplyInputPin: "await.reply", ProviderFlowID: f.route.FlowID, ProviderInputPin: "await.request", ProviderOutputPin: "await.reply", Origin: f.route, OriginLife: f.life.Life, RequestCorrelationID: "same-key", CorrelationKey: "id", State: replycontext.StateOpen, CreatedAt: event.CreatedAt(), UpdatedAt: event.CreatedAt()}
 }
 
 func liveAwaitCommand(t *testing.T, f liveAwaitProofFixture, ctx context.Context, event events.Event, record *replycontext.Record) (bus.PublicationCommand, context.Context) {
@@ -381,10 +558,26 @@ func settledLiveAwaitProof(t *testing.T, f liveAwaitProofFixture, mode string) (
 	if !ok {
 		t.Fatal("original source admission absent")
 	}
-	frame := managedCompletionTestFrameWithSurface(t, f.authority, managedCompletionTestEvent(f.authority), source.BundleHash(), surface)
+	prompt, err := agentintent.IntentOnlyPrompt(f.config.Intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerPrompt, err := agentintent.AssembleProviderPrompt(f.config.Intent, prompt, agentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := agentframe.Complete(agentframe.SessionSeed{AgentIdentity: f.config.Identity, Role: f.config.Role, FlowID: f.config.FlowID,
+		Intent: f.config.Intent, ProviderPrompt: providerPrompt, RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport, ModelAlias: f.config.Model, Model: f.config.ResolvedModel},
+		agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: f.input}, agentframe.Completion{BundleHash: source.BundleHash(), Surface: surface})
+	if err != nil {
+		t.Fatal(err)
+	}
 	handle, err := effects.BeginManagedCompletion(ctx, adapter, []byte(request), frame, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !handle.Attempt().InstanceOwnership.Equal(events.InstanceOwnership{Life: &f.life}) || handle.Attempt().Origin.Delivery.DeliveryID() != f.origin.DeliveryID() || handle.Attempt().Origin.Delivery.Version() != f.origin.Version() {
+		t.Fatalf("positive native admission lost exact constructed ownership or original claim: %+v", handle.Attempt())
 	}
 	if err := handle.MarkLaunched(ctx); err != nil {
 		t.Fatal(err)
@@ -392,7 +585,7 @@ func settledLiveAwaitProof(t *testing.T, f liveAwaitProofFixture, mode string) (
 	if err := handle.MarkResponseObserved(ctx, map[string]any{"synthetic": true}); err != nil {
 		t.Fatal(err)
 	}
-	settlement := completionSettlementForAuthority(t, handle.Attempt().Authority.Target, f.authority, adapter)
+	settlement := completionSettlementForFrame(t, handle.Attempt().Authority.Target, f.authority, adapter, frame)
 	settlement.AgentTurn.CapabilitySurfaceID = surface.ID
 	settlement.AgentTurn.CapabilitySurface, err = json.Marshal(surface)
 	if err != nil {

@@ -72,13 +72,17 @@ func (s *EffectSQLiteOwner) BindCompletionAwaitTx(ctx context.Context, mutation 
 
 func completionAwaitBinding(ctx context.Context, record replycontext.Record, command runtimeeffects.CompletionAwaitPublication, locked lockedCompletionContinuation) (replycontext.AwaitBinding, error) {
 	attempt := command.Attempt
+	owner, err := businessTurnOwner(attempt.Authority)
+	if err != nil {
+		return replycontext.AwaitBinding{}, err
+	}
 	if record.Await != nil || record.Validate() != nil || record.State != replycontext.StateOpen ||
 		attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent ||
 		attempt.Origin.Validate() != nil || attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery ||
 		attempt.InstanceOwnership.Life == nil || attempt.InstanceOwnership.Validate() != nil ||
 		attempt.InstanceOwnership.Life.RunID != record.RunID || attempt.InstanceOwnership.Life.FlowInstance != record.Origin.FlowInstance || attempt.InstanceOwnership.Life.Life != record.OriginLife ||
 		record.RunID != attempt.Origin.Delivery.RunID() || record.RunID != record.SourceRunID || record.RequestEventID != record.SourceRequestEventID ||
-		record.Origin.FlowInstance != attempt.Authority.Target.FlowInstance || record.Origin.EntityID != attempt.Authority.Target.EntityID ||
+		record.RunID != owner.RunID || record.Origin.FlowID != owner.Route.ScopeKey || record.Origin.FlowInstance != owner.Route.InstancePath || record.Origin.EntityID != attempt.Authority.Target.EntityID ||
 		locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
 		return replycontext.AwaitBinding{}, fmt.Errorf("await requires its current original delivery, source, actor, and unconsumed response")
 	}

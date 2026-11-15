@@ -1758,6 +1758,14 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 
 func completionSettlementForAuthority(t testing.TB, target runtimeeffects.UsageTarget, authority runtimeeffects.Authority, adapter string) runtimeeffects.CompletionSettlement {
 	t.Helper()
+	authority.Target = target
+	settlement := completionSettlementForFrame(t, target, authority, adapter, managedCompletionTestFrame(t, authority, adapter))
+	settlement.AgentTurn.Identity = testAgentMemoryIdentity(t, target.RunID, target.AgentID, target.FlowInstance)
+	return settlement
+}
+
+func completionSettlementForFrame(t testing.TB, target runtimeeffects.UsageTarget, authority runtimeeffects.Authority, adapter string, frame agentframe.Frame) runtimeeffects.CompletionSettlement {
+	t.Helper()
 	input, output := int64(12), int64(4)
 	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"provider_result": true}},
@@ -1767,7 +1775,7 @@ func completionSettlementForAuthority(t testing.TB, target runtimeeffects.UsageT
 		},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
-			RunID: target.RunID, Identity: testAgentMemoryIdentity(t, target.RunID, target.AgentID, target.FlowInstance),
+			RunID: target.RunID, Identity: frame.Session.AgentIdentity,
 			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{
@@ -1779,11 +1787,9 @@ func completionSettlementForAuthority(t testing.TB, target runtimeeffects.UsageT
 		Now: time.Now().UTC(),
 	}
 	authority.Target = target
-	event := managedCompletionTestEvent(authority)
-	settlement.AgentTurn.TriggerEventID = event.ID()
-	settlement.AgentTurn.TriggerEventType = string(event.Type())
+	settlement.AgentTurn.TriggerEventID = frame.Turn.Event.ID
+	settlement.AgentTurn.TriggerEventType = frame.Turn.Event.Type
 	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
-	frame := managedCompletionTestFrame(t, authority, adapter)
 	bound, err := runtimeeffects.BindCompletionRequest(authority, runtimeeffects.AuthorizeRequest{AgentFrame: &frame})
 	if err != nil {
 		t.Fatal(err)
