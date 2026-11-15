@@ -413,6 +413,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	dsn, _, cleanup := testutil.StartPostgres(t)
+	recordServePostgresFixture(t, dsn)
 	t.Cleanup(cleanup)
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
@@ -641,6 +642,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				selectedStore = sqlitePath
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
+				recordServePostgresFixture(t, dsn)
 				t.Cleanup(cleanup)
 				var opened *store.PostgresStore
 				oldBuildStores := buildStoresForServe

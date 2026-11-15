@@ -46,6 +46,56 @@ type Reply struct {
 	TotalTokens  int
 }
 
+// StartupAnswer recognizes only the no-tool boot answer, not an actor turn.
+// Callers opt in explicitly; Server.Requests continues to retain every request.
+func StartupAnswer(request Request) (Reply, bool) {
+	var body struct {
+		Model    string            `json:"model"`
+		Tools    []json.RawMessage `json:"tools"`
+		Messages []struct {
+			Role    string
+			Content json.RawMessage
+		} `json:"messages"`
+		Input []struct {
+			Role    string
+			Content json.RawMessage
+		} `json:"input"`
+	}
+	if json.Unmarshal(request.Body, &body) != nil || len(body.Tools) != 0 {
+		return Reply{}, false
+	}
+	messages := body.Messages
+	if len(messages) == 0 {
+		messages = body.Input
+	}
+	if len(messages) != 1 || messages[0].Role != "user" {
+		return Reply{}, false
+	}
+	var text string
+	if json.Unmarshal(messages[0].Content, &text) != nil {
+		var blocks []struct{ Type, Text string }
+		if json.Unmarshal(messages[0].Content, &blocks) != nil || len(blocks) != 1 || blocks[0].Type != "text" {
+			return Reply{}, false
+		}
+		text = blocks[0].Text
+	}
+	if text != "Startup validation probe. Do not call any tools. Reply with the exact text ok." {
+		return Reply{}, false
+	}
+	return Reply{ID: fmt.Sprintf("boot-%d", request.Number), TextID: "boot-text", Model: body.Model,
+		Text: "ok", InputTokens: 1, OutputTokens: 1, TotalTokens: 2}, true
+}
+
+func ActorRequests(requests []Request) []Request {
+	var actors []Request
+	for _, request := range requests {
+		if _, boot := StartupAnswer(request); !boot {
+			actors = append(actors, request)
+		}
+	}
+	return actors
+}
+
 type Server struct {
 	*httptest.Server
 	mu       sync.Mutex

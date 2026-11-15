@@ -85,8 +85,20 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			})
 
 			var out bytes.Buffer
+			configPath := writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath)
+			if tt.wantBackend == storebackend.BackendPostgres {
+				recordServePostgresFixture(t, testutil.StartEmptyPostgresDSN(t))
+				body, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(configPath, []byte(withInstalledServePostgresConfig(t, string(body), "postgres")), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
-				ConfigPath:    writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath),
+				ConfigPath:    configPath,
+				SourceRoot:    filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
 				StoreMode:     tt.storeMode,
 				StoreModeSet:  tt.storeFlag,
 				APIListenAddr: defaultAPIListenAddr,
@@ -126,6 +138,7 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 	var out bytes.Buffer
 	code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
 		ConfigPath:    configPath,
+		SourceRoot:    filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
 		StoreMode:     storebackend.BackendSQLite.String(),
 		StoreModeSet:  true,
 		APIListenAddr: defaultAPIListenAddr,

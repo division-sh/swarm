@@ -12,6 +12,12 @@ import (
 
 var installedServePostgresFixtures sync.Map
 
+func recordServePostgresFixture(t *testing.T, dsn string) {
+	t.Helper()
+	installedServePostgresFixtures.Store(t.Name(), dsn)
+	t.Cleanup(func() { installedServePostgresFixtures.Delete(t.Name()) })
+}
+
 // The injected constructor and the independent boot reader must inspect the
 // same fixture. This only supplies explicit coordinates to ordinary test config
 // writers; deliberately invalid/password-free config writers do not use it.
@@ -40,13 +46,13 @@ func withInstalledServePostgresConfig(t *testing.T, body, backend string) string
 		t.Fatal(err)
 	}
 	parameters := connection.Parameters()
-	t.Setenv("SWARM_SERVE_FIXTURE_PASSWORD", parameters.Password)
+	t.Setenv("TEST_SERVE_FIXTURE_PASSWORD", parameters.Password)
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(body), &document); err != nil {
 		t.Fatal(err)
 	}
 	document["database"] = map[string]any{"host": parameters.Host, "port": parameters.Port, "name": parameters.Database,
-		"user": parameters.User, "sslmode": parameters.SSLMode, "password_env": "SWARM_SERVE_FIXTURE_PASSWORD", "pool_size": 5}
+		"user": parameters.User, "sslmode": parameters.SSLMode, "password_env": "TEST_SERVE_FIXTURE_PASSWORD", "pool_size": 5}
 	if backend == "" {
 		document["store"] = map[string]any{"backend": "postgres"}
 	}
@@ -57,7 +63,7 @@ func withInstalledServePostgresConfig(t *testing.T, body, backend string) string
 	return string(encoded)
 }
 
-func withServeFixtureStateDirectory(t *testing.T, body string) string {
+func withServeFixtureStateDirectory(t *testing.T, body string, directory ...string) string {
 	t.Helper()
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(body), &document); err != nil {
@@ -67,7 +73,9 @@ func withServeFixtureStateDirectory(t *testing.T, body string) string {
 	if paths == nil {
 		paths = map[string]any{}
 	}
-	if _, explicit := paths["swarm_dir"]; !explicit {
+	if len(directory) != 0 {
+		paths["swarm_dir"] = directory[0]
+	} else if _, explicit := paths["swarm_dir"]; !explicit {
 		paths["swarm_dir"] = t.TempDir()
 	}
 	document["paths"] = paths
