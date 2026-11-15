@@ -894,6 +894,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if failure := checks.Failure(); failure != nil {
 		checks.Write(opts.Output, opts.ErrorOutput)
 		presenter.fail(5, "local_preflight", failure)
+		if runtimestartuprecovery.IsDataIntegrityError(failure) {
+			return serveExitDataIntegrity
+		}
 		return checks.ExitCode()
 	}
 	if opts.DryRun {

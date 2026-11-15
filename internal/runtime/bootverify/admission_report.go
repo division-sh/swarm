@@ -37,6 +37,7 @@ type AdmissionObservation struct {
 	Dependencies []string                   `json:"dependencies,omitempty"`
 	FailureClass failures.Class             `json:"failure_class,omitempty"`
 	NotRunCause  *AdmissionNotRunCause      `json:"not_run_cause,omitempty"`
+	Cause        error                      `json:"-"`
 }
 
 // Startup obligations require production authority and are not observations.

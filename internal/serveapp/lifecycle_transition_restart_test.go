@@ -50,7 +50,9 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 				return nil, err
 			}
 			db = storetest.DatabaseForTest(pg)
-			return openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...), nil
+			owner := openSelectedPostgresOwner(t, dsn, db, cfg, bootCheck...)
+			storetest.BootstrapPostgresRuntimeStore(t, pg)
+			return owner, nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeServeRuntimeTestConfig(t)

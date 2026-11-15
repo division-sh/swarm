@@ -1051,7 +1051,9 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
 		priorBuildStores := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg, bootCheck...), nil
+			owner := openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg, bootCheck...)
+			storetest.BootstrapPostgresRuntimeStore(t, reopened)
+			return owner, nil
 		}
 		t.Cleanup(func() { buildStoresForServe = priorBuildStores })
 		db = storetest.DatabaseForTest(reopened)

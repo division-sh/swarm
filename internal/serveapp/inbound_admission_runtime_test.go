@@ -57,7 +57,9 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 				buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-					return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...), nil
+					owner := openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
+					storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
+					return owner, nil
 				}
 				cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 					return serveRuntimeWorkspaceStub{}, nil
@@ -189,7 +191,9 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...), nil
+			owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(postgresStore), cfg, bootCheck...)
+			storetest.BootstrapPostgresRuntimeStore(t, postgresStore)
+			return owner, nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
