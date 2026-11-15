@@ -2,15 +2,20 @@ package cliapp
 
 import (
 	"context"
+	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/google/uuid"
 )
 
 func serveChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath string, selectedOptions ...ServeOptions) (ServeCheckStageResult, error) {
@@ -113,6 +118,34 @@ func executeServeChecksForTest(t testing.TB, ctx context.Context, repo string, a
 }
 
 func TestServeCheckStageGeneratedBoundaryModePolicy(t *testing.T) {
+	t.Run("reset_selection_currentness", func(t *testing.T) {
+		operation, err := destructivereset.NewOperation(destructivereset.Request{
+			OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "check-stage", RequestedAt: time.Now().UTC(), IncludeSourceArtifactsSet: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := operation
+		reader := serveResetInspectionFixture{operation}
+		if err := matchServeCheckReset(t.Context(), reader, &operation); err != nil || !reflect.DeepEqual(before, operation) {
+			t.Fatalf("exact observation changed or refused: %v", err)
+		}
+		if err := matchServeCheckReset(t.Context(), reader, nil); !errors.Is(err, destructivereset.ErrOperationChanged) {
+			t.Fatalf("new operation after checks was accepted: %v", err)
+		}
+		if err := matchServeCheckReset(t.Context(), serveResetInspectionFixture{}, &operation); !errors.Is(err, destructivereset.ErrOperationChanged) {
+			t.Fatalf("removed operation after checks was accepted: %v", err)
+		}
+		operation.Revision++
+		if err := matchServeCheckReset(t.Context(), reader, &operation); !errors.Is(err, destructivereset.ErrOperationChanged) {
+			t.Fatalf("changed operation after checks was accepted: %v", err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := matchServeCheckReset(ctx, reader, &before); !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled inspection lost cancellation: %v", err)
+		}
+	})
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://stale.invalid/mcp")
 	for _, mode := range []ServeOptions{{}, {Dev: true}, {LocalRun: true}} {
 		result := runtime.WorkflowContractValidationResult{BootReport: bootverify.Report{Purpose: bootverify.ExecutionValidation, SourceArtifactHash: "source"}}
@@ -124,4 +157,10 @@ func TestServeCheckStageGeneratedBoundaryModePolicy(t *testing.T) {
 			t.Fatalf("mode=%+v decision=%+v report=%+v", mode, decision, result.BootReport)
 		}
 	}
+}
+
+type serveResetInspectionFixture []destructivereset.Operation
+
+func (r serveResetInspectionFixture) PendingResetOperations(ctx context.Context) ([]destructivereset.Operation, error) {
+	return append([]destructivereset.Operation(nil), r...), ctx.Err()
 }

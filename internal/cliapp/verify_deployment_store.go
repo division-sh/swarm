@@ -140,7 +140,7 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	if !tailAccounted {
 		blockVerifyStoreTail(result, subject, "selected store schema inspection did not complete")
 	}
-	if retained != nil {
+	if retained != nil && (len(serve) == 0 || serve[0].reset == nil) {
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
 	return retained
@@ -172,6 +172,10 @@ func inspectVerifyAdmissionSnapshot(ctx context.Context, snapshot *storeselected
 	if len(serve) != 0 {
 		if err := matchServeCheckReset(ctx, snapshot, serve[0].reset); err != nil {
 			return nil, false, err
+		}
+		if serve[0].reset != nil {
+			retained, err := inspectServeResetSnapshot(ctx, snapshot, *serve[0].reset, result)
+			return retained, true, err
 		}
 	}
 	return inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, packBases, result), true, nil
@@ -245,18 +249,11 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return startupownership.AdmitAuthorityInspection(inspection)
 	})
 	verifyDeploymentObservation(ctx, result, "pinned_source_admission", "internal/runtime/runbundle.AdmitPinnedSources", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		pending, err := destructivereset.InspectPendingOperations(ctx, snapshot)
-		if err != nil || len(pending) != 0 {
-			return err // Recovery chooses its own admitted sources, not a candidate upgrade.
-		}
-		_, err = PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
+		_, err := PrepareBundleUpgrade(ctx, snapshot, snapshot, repo, source, packBases)
 		return err
 	})
 	inspectVerifyRetainedSources(ctx, snapshot, repo, subject, packBases, result)
 	verifyDeploymentObservation(ctx, result, "startup_recovery_admission", "internal/runtime.InspectStartupRecoveryAdmission", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-		if source == nil {
-			return nil // The reset's explicit empty population has no source obligations.
-		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
 			return err
@@ -312,9 +309,6 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	retained.actorsOK = verifyDeploymentObservation(ctx, result, "retained_actor_admission", "internal/runtime/manager.InspectRetainedActors", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		if source == nil {
-			return nil
-		}
 		fact, err := correlation.NewSourceArtifactFact(hash)
 		if err != nil {
 			return err
@@ -386,9 +380,13 @@ func verifyRetainedSourceLoader(repo string, packBases packartifact.PlatformPack
 	}, nil
 }
 
-func inspectVerifyRetainedChannels(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, subject string, result *runtime.WorkflowContractValidationResult) (retained channelonboarding.RetainedActivationInventory) {
+func inspectVerifyRetainedChannels(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, subject string, result *runtime.WorkflowContractValidationResult, readers ...channelonboarding.RetainedActivationReader) (retained channelonboarding.RetainedActivationInventory) {
 	verifyDeploymentObservation(ctx, result, "retained_channel_admission", "internal/channelonboarding.InspectRetainedActivations", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
-		inventory, err := channelonboarding.InspectRetainedActivations(ctx, snapshot)
+		var reader channelonboarding.RetainedActivationReader = snapshot
+		if len(readers) != 0 {
+			reader = readers[0]
+		}
+		inventory, err := channelonboarding.InspectRetainedActivations(ctx, reader)
 		if err != nil {
 			if errors.Is(err, channelonboarding.ErrConflict) {
 				return fmt.Errorf("%s: %w", err.Error(), failures.Wrap(failures.ClassLifecycleConflict, "retained_channel_ownership_conflict", "verify", "channel-inspection", nil, err))
