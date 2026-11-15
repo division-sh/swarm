@@ -1,4 +1,4 @@
-package runtimepersistence
+package runforkpersistence
 
 import (
 	"encoding/json"
@@ -8,14 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 )
 
-type conversationForkFixtureKind uint8
-
-const (
-	conversationForkServedSource conversationForkFixtureKind = iota
-	conversationForkNativeChat
-	conversationForkDataOnlyChat
-)
-
 type conversationForkFixtureStatement struct {
 	query string
 	args  []any
@@ -23,7 +15,7 @@ type conversationForkFixtureStatement struct {
 
 // These are fixed historical witnesses, not caller-authored history or SQL.
 func conversationForkProjectionStatements(fixture ConversationForkSourceFixture, postgres bool) ([]conversationForkFixtureStatement, error) {
-	kind := fixture.kind
+	kind := fixture.Kind
 	if kind != conversationForkServedSource && kind != conversationForkNativeChat && kind != conversationForkDataOnlyChat {
 		return nil, fmt.Errorf("unknown conversation fixture kind")
 	}

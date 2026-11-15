@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 )
@@ -66,15 +65,4 @@ func SetMailboxNoticeTimeForTest(ctx context.Context, selected any, itemID strin
 	default:
 		return fmt.Errorf("unsupported mailbox fixture store %T", selected)
 	}
-}
-
-func requireMailboxFixtureRow(result sql.Result) error {
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return fmt.Errorf("mailbox fixture requires exactly one row, changed %d", n)
-	}
-	return nil
 }
