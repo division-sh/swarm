@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -58,6 +59,7 @@ type liveAwaitProofFixture struct {
 	context   context.Context
 	config    actors.AgentConfig
 	input     events.Event
+	producer  events.RoutingSource
 	route     events.RouteIdentity
 	life      events.InstanceLife
 }
@@ -403,6 +405,10 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if config.Memory.Enabled == root || (identity.FlowInstance() == "") != root {
 		t.Fatal("fixture lost its memory-enabled child or memory-disabled root declaration coordinate")
 	}
+	producer, err := pinrouting.AdmitAgentExecutionRoutingSource(source, config, config.EffectiveEntityID(), request.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
 	token := effects.LifecycleToken{RuntimeEpoch: state.RuntimeEpoch, Identity: identity, AgentID: identity.AgentID(), Generation: state.Generation}
 	ctx = effects.WithLifecycleToken(ctx, token)
 	sessionID, lockOwner, expiresAt := uuid.NewString(), "await-worker", time.Now().UTC().Add(10*time.Minute)
@@ -422,9 +428,9 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	}
 	authority := effects.NormalAgentAuthority(token, lockOwner, expiresAt)
 	authority.ExecutionMode = config.ExecutionMode
-	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: identity.AgentID(), AgentIdentity: identity, RunID: run, SessionID: sessionID, Memory: config.Memory, FlowInstance: identity.FlowInstance(), EntityID: committed.Plan.Identity.EntityID}
-	fixture := liveAwaitProofFixture{store: selected, authority: authority, config: config,
-		route: events.RouteIdentity{FlowID: committed.Plan.Identity.ScopeKey, FlowInstance: committed.Plan.Identity.InstancePath, EntityID: committed.Plan.Identity.EntityID},
+	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: identity.AgentID(), AgentIdentity: identity, RunID: run, SessionID: sessionID, Memory: config.Memory, FlowInstance: identity.FlowInstance(), EntityID: config.EffectiveEntityID()}
+	fixture := liveAwaitProofFixture{store: selected, authority: authority, config: config, producer: producer,
+		route: producer.Route(),
 		life:  events.InstanceLife{RunID: run, FlowInstance: committed.Plan.Identity.InstancePath, Life: committed.Plan.Instance.Life}}
 	scope, _, path, err := authority.BusinessTurnCoordinates()
 	if err != nil || scope != fixture.route.FlowID || path != fixture.route.FlowInstance {
@@ -463,6 +469,9 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 		t.Fatalf("original publication lost its exact admitted routes: %v", err)
 	}
 	fixture.input = prepared.Event.Event()
+	if fixture.input.EntityID() != authority.Target.EntityID {
+		t.Fatalf("original admitted input contradicts the actor's usage entity: input=%q target=%q", fixture.input.EntityID(), authority.Target.EntityID)
+	}
 	claimed, err := claimDeliveryFixture(ctx, selected, fixture.input, route)
 	if err != nil {
 		t.Fatal(err)
@@ -481,9 +490,8 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 
 func liveAwaitEvent(t *testing.T, f liveAwaitProofFixture, id, eventType string, at time.Time) events.Event {
 	t.Helper()
-	source := eventtest.RootRoutingSource(f.route.EntityID)
+	source := f.producer
 	if f.route.FlowID != "." {
-		source = eventtest.ConcreteTemplateRoutingSource(f.route.FlowID, f.route.FlowInstance, f.route.EntityID)
 		eventType = f.route.FlowID + "/" + eventType
 	}
 	source, err := source.WithLife(f.life.Life)
@@ -629,6 +637,11 @@ func settledLiveAwaitProof(t *testing.T, f liveAwaitProofFixture, mode string) (
 	if result, err := handle.SettleCompletion(ctx, settlement); err != nil || !result.Committed {
 		t.Fatalf("genuine native synthetic completion settlement: %+v %v", result, err)
 	}
+	retained, ok := handle.CompletionContinuation()
+	if !ok {
+		t.Fatal("settlement did not return its exact retained continuation")
+	}
+	payload = retained.Payload
 	if handle.Attempt().InstanceOwnership.Life == nil {
 		t.Fatal("provider admission did not retain actual constructed-flow life")
 	}
