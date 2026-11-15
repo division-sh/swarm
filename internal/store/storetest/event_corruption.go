@@ -39,3 +39,21 @@ func InstallEventDeliveryFailureAfterFlowMaterialization(t testing.TB, ctx conte
 	}
 	t.Cleanup(cleanup)
 }
+
+func InstallReplayScopeFailureAfterDelivery(t testing.TB, ctx context.Context, selected any, claim testsql.EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	cleanup, err := private.InstallReplayScopeFailureAfterDeliveryForTest(ctx, selected, claim.Invariant, claim.Reason, flowTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+}
+
+func InstallAPICompletionFailureAfterPublication(t testing.TB, ctx context.Context, selected any, claim testsql.EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	cleanup, err := private.InstallAPICompletionFailureAfterPublicationForTest(ctx, selected, claim.Invariant, claim.Reason, flowTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+}
