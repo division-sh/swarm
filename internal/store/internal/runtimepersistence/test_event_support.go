@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -404,30 +403,7 @@ func ReadCausalEventStorageSinceForTest(ctx context.Context, selected any, since
 
 // Record-bearing fixture evidence uses the publication fixture's closed codec.
 // Callers receive detached facts, never another record interpreter.
-type SemanticEventFixtureEvidence struct {
-	Record                      eventrecord.Record
-	RecordFound                 bool
-	RevisionCount               int
-	PipelineReceiptCount        int
-	PipelineReceiptOutcome      string
-	PipelineReceiptReason       string
-	PipelineReceiptFailure      *runtimefailures.Envelope
-	CommittedScope              string
-	CommittedScopeFound         bool
-	RunStatus                   string
-	RunEventCount               int
-	SettledDeliveryAttemptCount int
-	DeliveryProjections         map[string][18]string
-	DeliveryStatuses            map[string]string
-	NonPlatformReceiptCount     int
-}
-
-func loadCanonicalFixtureRecordTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (eventrecord.Record, bool, error) {
-	if postgres {
-		return eventrecordpostgres.Load(ctx, tx, eventID)
-	}
-	return eventrecordsqlite.Load(ctx, tx, eventID)
-}
+type SemanticEventFixtureEvidence = eventpersistence.SemanticEventFixtureEvidence
 
 // LoadCanonicalEventRecordForTest requires presence; storage reading and
 // complete decoding belong only to ReadCanonicalEventRecordForTest.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -50,10 +51,28 @@ func TestIssue642OriginalReplyEvidenceAtomicFenceBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					var inserted bool
-					err = runUnrevisionedEventFixtureTransactionForTest(ctx, store, func(ctx context.Context, tx *sql.Tx) (err error) {
-						inserted, err = replycontextstore.InsertConstraintFixtureForTest(ctx, tx, backend.name == "postgres", record)
-						return err
-					})
+					err = func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(store)
+						write := func(ctx context.Context, tx *sql.Tx) (err error) {
+							inserted, err = replycontextstore.InsertConstraintFixtureForTest(ctx, tx, backend.name == "postgres", record)
+							return err
+						}
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+						default:
+							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+						}
+					}()
 					if test.accepted {
 						got, readErr := store.LoadReplyContext(ctx, record.ID)
 						if err != nil || !inserted || readErr != nil || !reflect.DeepEqual(got, record.Normalized()) {
