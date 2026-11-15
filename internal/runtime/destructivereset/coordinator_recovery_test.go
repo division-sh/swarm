@@ -52,6 +52,16 @@ func TestCoordinatorPendingRecoveryUsesOnlyUncommittedPhases(t *testing.T) {
 		if err != nil || len(selected.Sources) != 1 || selected.Sources[0].BundleHash != projection.Cleanup.BundleHash || !reflect.DeepEqual(selected.Agents, saved.Agents) {
 			t.Fatalf("reset reconstruction changed the captured source/agents: %+v, %v", selected, err)
 		}
+		inspected, err := operation.RecoverySourceSet()
+		if err != nil || !reflect.DeepEqual(inspected, selected) {
+			t.Fatalf("inspection differs from the recovery owner: %+v %v", inspected, err)
+		}
+		clear := operation
+		clear.Request.IncludeSourceArtifacts = true
+		empty, err := clear.RecoverySourceSet()
+		if err != nil || len(empty.Sources) != 0 || len(empty.Agents) != 0 {
+			t.Fatalf("clear selected an authored target: %+v %v", empty, err)
+		}
 		after, err := json.Marshal(recovery.operation)
 		if err != nil || string(before) != string(after) {
 			t.Fatalf("reconstruction rewrote immutable reset evidence: %v", err)
