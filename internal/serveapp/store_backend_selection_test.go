@@ -513,6 +513,8 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	configText = withInstalledServePostgresConfig(t, configText, backend)
+	configText = withServeFixtureStateDirectory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
