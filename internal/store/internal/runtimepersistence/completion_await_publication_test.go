@@ -322,7 +322,6 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if err := manager.InstallStartupTopology(grant, admission, sources); err != nil {
 		t.Fatal(err)
 	}
-	admitReceiverConfigFixtureGrant(t, ctx, grant)
 	request := sqliteFlowActivationRequest(bundle, ".", run, "", run)
 	request.Instance = flowidentity.Stored(source, ".", run, run, run, "")
 	request.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
@@ -377,6 +376,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if err := manager.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, flowidentity.RunScopedFlowInstance{RunID: run, Route: committed.Plan.Identity.Route()}); err != nil {
 		t.Fatalf("prepare exact committed agent roster without starting manager: %v", err)
 	}
+	admitReceiverConfigFixtureGrant(t, ctx, grant)
 	state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || state.ConfigRevision != committed.Plan.Readiness.Agents[0].ConfigRevision {
 		t.Fatalf("current actor lifecycle: %+v %t %v", state, found, err)
