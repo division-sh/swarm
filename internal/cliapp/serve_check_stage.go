@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"syscall"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -18,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
@@ -50,6 +52,7 @@ type ServeCheckStageResult struct {
 	ProviderChecks *runtime.ManagedProviderBootChecks
 	channelChecks  []credentials.ValueEvidence
 	storeInput     *storeselected.BootCheckInput
+	reset          *destructivereset.Operation
 	Options        runtime.WorkflowContractValidationOptions
 }
 
@@ -76,17 +79,15 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	if err != nil {
 		return out, err
 	}
-	base, err := in.PackBases.CurrentPlatformPackBase()
+	out.Bundle, out.reset, err = inspectServeCheckSource(ctx, in, out.SourceRoot)
 	if err != nil {
 		return out, err
 	}
-	_, out.Bundle, err = NewSwarmWorkflowModuleWithPackBase(in.Repo, out.SourceRoot, base)
-	if err != nil {
-		return out, err
-	}
-	out.Source, _, err = admitVerifySource(in.Config, out.Bundle)
-	if err != nil {
-		return out, err
+	if out.Bundle != nil {
+		out.Source, _, err = admitVerifySource(in.Config, out.Bundle)
+		if err != nil {
+			return out, err
+		}
 	}
 	var certificates [][][]byte
 	out.APIAuth, certificates, err = serveCheckHostInputs(in)
@@ -101,13 +102,21 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	if err != nil {
 		return out, err
 	}
-	out.Validation, retErr = verifyBundleResultWithOptions(ctx, out.Source, out.Options)
+	if out.Source != nil {
+		out.Validation, retErr = verifyBundleResultWithOptions(ctx, out.Source, out.Options)
+	} else {
+		out.Validation.BootReport.Purpose = bootverify.ExecutionValidation
+		out.Validation.BootReport.Observations = append(out.Validation.BootReport.Observations, bootverify.AdmissionObservation{
+			CheckID: "source_population", Owner: "internal/runtime/destructivereset.Operation.RecoverySourceSet", Subject: "reset:" + out.reset.Request.OperationID,
+			Class: bootverify.AdmissionSourceObservation, Status: bootverify.AdmissionNotApplicable, Reason: "the admitted reset reconstructs an empty source population; there are no authored provider targets",
+		})
+	}
 	inspectServeGeneratedBoundary(ctx, in.Options, &out.Validation, &out.Options)
 	preference, err := ResolveWorkspaceBackend(in.Options.WorkspaceBackend, in.Options.WorkspaceBackendSet, in.Config.Config)
 	if err != nil {
 		return out, errors.Join(retErr, err)
 	}
-	backend, inspection, workspaceOK := inspectVerifySourceAdmission(ctx, in.Config, out.Source, out.Options, &out.Validation, preference)
+	backend, inspection, workspaceOK := inspectServeSourceAdmission(ctx, in, &out, preference)
 	intent := in.Options
 	intent.MCPListenAddr = WorkspaceMCPListenAddr(intent.MCPListenAddr, intent.MCPListenAddrSource, backend)
 	_, enabled, err := ResolveServePublicIngressMode(intent, in.Config.Config.Serve.PublicWebhook)
@@ -127,7 +136,11 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 		retained = inspectVerifySelectedStore(ctx, in.Repo, in.Paths, in.Config,
 			cliSwarmDirOptions{SwarmDir: in.Options.SwarmDir, SwarmDirFlagSet: in.Options.SwarmDirSet},
 			out.Source, out.Options, in.PackBases, inspection, workspaceOK, &out.Validation,
-			serveStoreInspection{selection: in.Selection, dryRun: in.Options.DryRun, input: &out.storeInput})
+			serveStoreInspection{selection: in.Selection, dryRun: in.Options.DryRun, input: &out.storeInput, reset: out.reset})
+	}
+	if out.Source == nil {
+		out.Validation.BootReport.Sort()
+		return out, retErr
 	}
 	if retErr != nil || !serveProviderPrerequisitesReady(out.Validation.BootReport, in.Options.DryRun) {
 		out.Validation.BootReport.Sort()
@@ -220,19 +233,18 @@ func (r ServeCheckStageResult) Revalidate(ctx context.Context, in ServeCheckStag
 	if err != nil {
 		return err
 	}
-	base, err := in.PackBases.CurrentPlatformPackBase()
-	if err != nil {
-		return err
-	}
 	root, err := NormalizeSourceRoot(paths.SourceRoot)
 	if err != nil {
 		return err
 	}
-	_, current, err := NewSwarmWorkflowModuleWithPackBase(in.Repo, root, base)
+	in.Config, in.Paths = cfg, paths
+	current, reset, err := inspectServeCheckSource(ctx, in, root)
 	if err != nil {
 		return err
 	}
-	in.Config, in.Paths = cfg, paths
+	if !reflect.DeepEqual(reset, r.reset) {
+		return destructivereset.ErrOperationChanged
+	}
 	auth, certificates, err := serveCheckHostInputs(in)
 	if err != nil {
 		return err
@@ -256,9 +268,14 @@ func (r ServeCheckStageResult) Revalidate(ctx context.Context, in ServeCheckStag
 }
 
 func serveCheckInputHash(cfg RuntimeConfigLoadResult, paths CLISourcePaths, bundle *contracts.WorkflowContractBundle, auth apiv1.AuthTokenResolution, certificates [][][]byte) (string, error) {
-	rooted, err := bundle.RootedSource()
-	if err != nil {
-		return "", err
+	var reference sourceartifact.RootAdmissionReference
+	var pack string
+	if bundle != nil {
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			return "", err
+		}
+		reference, pack = rooted.Admission().Reference(), bundle.PackInventory.Digest()
 	}
 	input := struct {
 		Config       *config.Config
@@ -268,7 +285,7 @@ func serveCheckInputHash(cfg RuntimeConfigLoadResult, paths CLISourcePaths, bund
 		Pack         string
 		Auth         apiv1.AuthTokenResolution
 		Certificates [][][]byte
-	}{cfg.Config, cfg.cli, paths, rooted.Admission().Reference(), bundle.PackInventory.Digest(), auth, certificates}
+	}{cfg.Config, cfg.cli, paths, reference, pack, auth, certificates}
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return "", err
@@ -362,11 +379,16 @@ func (r ServeCheckStageResult) Failure() (failure error) {
 func (r ServeCheckStageResult) Write(out, errOut io.Writer) {
 	writeVerifyFindings(errOut, r.Validation.BootReport.Errors(), true)
 	writeVerifyFindings(errOut, r.Validation.BootReport.Warnings(), false)
-	if out == nil || r.Bundle == nil {
+	if out == nil {
 		return
 	}
 	decision := r.Decision()
-	view := verifyCommandOutput(decision.FailureClass == "" && !decision.Interrupted, r.SourceRoot, r.Validation, packInventoryReadbackFromInventory(r.Bundle.PackInventory), r.Bundle.SourceArtifact)
+	var artifact *sourceartifact.AdmittedSourceArtifact
+	var inventory packInventoryReadback
+	if r.Bundle != nil {
+		artifact, inventory = r.Bundle.SourceArtifact, packInventoryReadbackFromInventory(r.Bundle.PackInventory)
+	}
+	view := verifyCommandOutput(decision.FailureClass == "" && !decision.Interrupted, r.SourceRoot, r.Validation, inventory, artifact)
 	view.AdmissionComplete = decision.Complete
 	for _, line := range verifyAdmissionTextLines(view) {
 		_, _ = io.WriteString(out, line+"\n")
