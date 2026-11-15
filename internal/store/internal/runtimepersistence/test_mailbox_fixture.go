@@ -78,20 +78,3 @@ func requireMailboxFixtureRow(result sql.Result) error {
 	}
 	return nil
 }
-
-func runMailboxFixtureTransaction(ctx context.Context, selected any, apply func(context.Context, *sql.Tx) error) error {
-	switch store := selected.(type) {
-	case *PostgresStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("postgres fixture store is required")
-		}
-		return store.backend.RunTransaction(ctx, apply)
-	case *SQLiteRuntimeStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("sqlite fixture store is required")
-		}
-		return store.backend.RunTransaction(ctx, "mailbox fixture", apply)
-	default:
-		return fmt.Errorf("unsupported mailbox fixture store %T", selected)
-	}
-}

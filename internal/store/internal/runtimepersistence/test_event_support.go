@@ -569,23 +569,6 @@ func runEventFixtureMutationForTest(ctx context.Context, selected any, write fun
 	}
 }
 
-func runUnrevisionedEventFixtureTransactionForTest(ctx context.Context, selected any, write func(context.Context, *sql.Tx) error) error {
-	switch store := selected.(type) {
-	case *PostgresStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("postgres event fixture store is required")
-		}
-		return store.backend.RunTransaction(ctx, write)
-	case *SQLiteRuntimeStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("sqlite event fixture store is required")
-		}
-		return store.backend.RunTransaction(ctx, "unrevisioned event fixture", write)
-	default:
-		return fmt.Errorf("event fixture store %T is unsupported", selected)
-	}
-}
-
 func commitSelectedSemanticEventFixtureForTest(ctx context.Context, selectedStore any, admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, pipelineDisposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return false, fmt.Errorf("selected-fork replay events require their closed named persistence operation")

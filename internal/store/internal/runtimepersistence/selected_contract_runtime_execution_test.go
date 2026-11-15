@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -641,9 +642,27 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	closed := issued
 	closed.State, closed.FenceGeneration = "closed", uint64(fence)
 	beforeHistory := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
-	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(txctx context.Context, tx *sql.Tx) error {
-		return effectpersistence.RequireClosedSelectedEffectHistoryTx(txctx, tx, closed, fixture.request.Preparation.Coordinates.BundleHash, fixture.sqlite)
-	}); err != nil {
+	if err := func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(fixture.store)
+		write := func(txctx context.Context, tx *sql.Tx) error {
+			return effectpersistence.RequireClosedSelectedEffectHistoryTx(txctx, tx, closed, fixture.request.Preparation.Coordinates.BundleHash, fixture.sqlite)
+		}
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}(); err != nil {
 		t.Fatalf("closed selected provider history rejected original terminal evidence: %v", err)
 	}
 	historicalContextRequireUnchanged(t, beforeHistory, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
