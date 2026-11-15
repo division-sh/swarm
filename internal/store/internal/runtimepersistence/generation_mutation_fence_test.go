@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -77,21 +78,39 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					req := manager.AgentLifecycleTransition{Identity: mustTestAgentIdentityForRun(runID, "fence-owner", "global"), ProcessBinding: binding}
 					rolledBack := errors.New("release generation mutation fence by rollback")
 					retired := make(chan error, 1)
-					err = runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, tx *sql.Tx) error {
-						if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, tx, req, sqlite); err != nil {
-							return err
+					err = func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(mutationStore)
+						write := func(txctx context.Context, tx *sql.Tx) error {
+							if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, tx, req, sqlite); err != nil {
+								return err
+							}
+							// Only the native transaction's completion is held. Selected
+							// execution/run/FK locks and grant authorization are real.
+							waiting, stop := context.WithTimeout(ctx, time.Second)
+							defer stop()
+							go func() { retired <- grant.Retire(waiting) }()
+							<-waiting.Done()
+							if finish == "rollback" {
+								return rolledBack
+							}
+							return nil
 						}
-						// Only the native transaction's completion is held. Selected
-						// execution/run/FK locks and grant authorization are real.
-						waiting, stop := context.WithTimeout(ctx, time.Second)
-						defer stop()
-						go func() { retired <- grant.Retire(waiting) }()
-						<-waiting.Done()
-						if finish == "rollback" {
-							return rolledBack
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+						default:
+							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
 						}
-						return nil
-					})
+					}()
 					if (finish == "commit" && err != nil) || (finish == "rollback" && !errors.Is(err, rolledBack)) {
 						t.Fatalf("exact pooled mutation authorization and %s: %v", finish, err)
 					}
@@ -111,13 +130,31 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					}
 					// Native admission acquires the mutation fence before this
 					// callback; the retained binding must still reject the new head.
-					err = runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, late *sql.Tx) error {
-						if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, late, req, sqlite); err != nil {
-							return err
+					err = func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(mutationStore)
+						write := func(txctx context.Context, late *sql.Tx) error {
+							if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, late, req, sqlite); err != nil {
+								return err
+							}
+							t.Fatal("retained binding authorized retired grant")
+							return nil
 						}
-						t.Fatal("retained binding authorized retired grant")
-						return nil
-					})
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+						default:
+							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+						}
+					}()
 					if err == nil || !strings.Contains(err.Error(), "lifecycle generation grant is retired") {
 						t.Fatalf("retained-binding refusal must use current grant, not a missing ordering scope: %v", err)
 					}

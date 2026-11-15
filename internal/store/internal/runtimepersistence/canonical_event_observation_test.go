@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -61,10 +62,28 @@ func TestCanonicalEventObservationPreservesCompleteRecordAndOriginalReadBothStor
 				t.Helper()
 				updated := record.Clone()
 				updated.RouteSettlement = value
-				if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					writeJointSourceReadRecord(t, ctx, tx, backend.name == "postgres", updated)
-					return nil
-				}); err != nil {
+				if err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						writeJointSourceReadRecord(t, ctx, tx, backend.name == "postgres", updated)
+						return nil
+					}
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}(); err != nil {
 					t.Fatal(err)
 				}
 			}
