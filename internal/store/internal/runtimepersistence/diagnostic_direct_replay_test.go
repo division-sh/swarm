@@ -35,7 +35,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}
 	eventtestsql.RequireEventCorruptionClaim(t, claim)
-	eventtestsql.RequireEventCorruptionResult(t, claim, DeleteCommittedReplayScopeForTest(ctx, store, executableID))
+	eventtestsql.RequireEventCorruptionResult(t, claim, RemoveCommittedReplayScopeEvidenceForTest(ctx, store, executableID))
 
 	presence, err := store.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}
 	eventtestsql.RequireEventCorruptionClaim(t, claim)
-	eventtestsql.RequireEventCorruptionResult(t, claim, DeleteCommittedReplayScopeForTest(ctx, pg, executableID))
+	eventtestsql.RequireEventCorruptionResult(t, claim, RemoveCommittedReplayScopeEvidenceForTest(ctx, pg, executableID))
 
 	presence, err := pg.PipelineObligations().GlobalWorkPresence(ctx)
 	if err != nil {

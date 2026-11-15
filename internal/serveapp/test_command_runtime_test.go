@@ -449,11 +449,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 				Invariant: "public_input.selected_store_atomicity",
 				Reason:    "prove root-connected private template lifecycle and publication facts roll back on late delivery failure",
 			}
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
-			} else {
-				testsql.InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
-			}
+			storetest.InstallEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), rt.Bus.Store(), claim, "telegram-chat")
 
 			idempotencyKey := "public-input-rollback-" + string(backend)
 			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
