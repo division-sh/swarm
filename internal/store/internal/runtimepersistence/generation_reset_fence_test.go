@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -33,24 +34,42 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				}
 				rolledBack := errors.New("release reset mutation fence by rollback")
 				reset := make(chan error, 1)
-				err := runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, tx *sql.Tx) error {
-					if err := generationauthority.FenceMutation(txctx, tx, sqlite); err != nil {
-						return err
+				err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(mutationStore)
+					write := func(txctx context.Context, tx *sql.Tx) error {
+						if err := generationauthority.FenceMutation(txctx, tx, sqlite); err != nil {
+							return err
+						}
+						// Cleanup uses the retained production operation; the independent
+						// native mutation keeps its database fence until settlement.
+						waiting, stop := context.WithTimeout(ctx, time.Second)
+						defer stop()
+						go func() {
+							_, err := process.ApplyDestructiveResetCleanup(waiting, request, nil)
+							reset <- err
+						}()
+						<-waiting.Done()
+						if completion == "rollback" {
+							return rolledBack
+						}
+						return nil
 					}
-					// Cleanup uses the retained production operation; the independent
-					// native mutation keeps its database fence until settlement.
-					waiting, stop := context.WithTimeout(ctx, time.Second)
-					defer stop()
-					go func() {
-						_, err := process.ApplyDestructiveResetCleanup(waiting, request, nil)
-						reset <- err
-					}()
-					<-waiting.Done()
-					if completion == "rollback" {
-						return rolledBack
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
 					}
-					return nil
-				})
+				}()
 				if (completion == "commit" && err != nil) || (completion == "rollback" && !errors.Is(err, rolledBack)) {
 					t.Fatalf("reset mutation fence %s: %v", completion, err)
 				}
