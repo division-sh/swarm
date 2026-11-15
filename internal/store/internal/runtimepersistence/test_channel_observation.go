@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
@@ -26,28 +25,27 @@ func ObserveChannelIntentForTest(ctx context.Context, selected any, demand rende
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return render.IntentObservation{}, false, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var result render.IntentObservation
-	var found bool
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, found, err = channeldelivery.ObserveIntent(ctx, tx, demand, postgres)
-		return err
-	})
-	return result, found, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return channeldelivery.ObserveChannelIntentForTest(ctx, owner.backend, demand, true)
+	case *SQLiteRuntimeStore:
+		return channeldelivery.ObserveChannelIntentForTest(ctx, owner.backend, demand, false)
+	}
+	return render.IntentObservation{}, false, nil
 }
 
 func ObserveChannelDeliveryPlansForTest(ctx context.Context, selected any, cursor string, limit int) ([]render.Candidate, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	_, postgres := selected.(*PostgresStore)
 	var plans []channeldelivery.Plan
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		plans, err = channeldelivery.ListCurrentPlans(ctx, tx, cursor, limit, postgres)
-		return err
-	})
+	var err error
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		plans, err = channeldelivery.ObserveChannelDeliveryPlansForTest(ctx, owner.backend, cursor, limit, true)
+	case *SQLiteRuntimeStore:
+		plans, err = channeldelivery.ObserveChannelDeliveryPlansForTest(ctx, owner.backend, cursor, limit, false)
+	}
 	return projectDeliveryCandidates(plans), err
 }
 
@@ -55,13 +53,11 @@ func ObserveChannelSentReceiptForTest(ctx context.Context, selected any, deliver
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return render.SentReceipt{}, false, err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var result render.SentReceipt
-	var found bool
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, found, err = channeldelivery.ReadCurrentSentReceiptTx(ctx, tx, deliveryID, operationID, postgres)
-		return err
-	})
-	return result, found, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return channeldelivery.ObserveChannelSentReceiptForTest(ctx, owner.backend, deliveryID, operationID, true)
+	case *SQLiteRuntimeStore:
+		return channeldelivery.ObserveChannelSentReceiptForTest(ctx, owner.backend, deliveryID, operationID, false)
+	}
+	return render.SentReceipt{}, false, nil
 }
