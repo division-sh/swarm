@@ -479,7 +479,7 @@ func (g *notifyAllChildrenAgentGate) release(flowInstance string) {
 }
 
 func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends(t *testing.T) {
-	for _, cardinality := range []int{3} {
+	for _, cardinality := range []int{3, 100} {
 		for _, tc := range []struct {
 			name  string
 			setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
@@ -537,7 +537,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 					"portfolio_id": "portfolio-main",
 					"account_ids":  accountIDs,
 				})
-				var held string
+				var held, heldKey string
 				t.Cleanup(func() { gate.release(held) })
 				if cardinality == 100 {
 					instances, err := runtime.pipeline.ListWorkflowInstances(ctx, runID)
@@ -547,6 +547,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 					for _, instance := range instances {
 						if instance.WorkflowName == "account" {
 							held = instance.StorageRef
+							heldKey = instance.InstanceKey
 							break
 						}
 					}
@@ -568,7 +569,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 							break
 						}
 						if !time.Now().Before(deadline) {
-							t.Fatalf("issuance did not reach hundred-item cut: %d", len(issued))
+							t.Fatalf("issuance did not reach hundred-item cut: %d (held_account=%q held_instance=%q expected=%d)", len(issued), heldKey, held, cardinality)
 						}
 						time.Sleep(10 * time.Millisecond)
 					}

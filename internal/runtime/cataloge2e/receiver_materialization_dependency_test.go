@@ -147,6 +147,7 @@ func proveHeldReceiverReadiness(t *testing.T, backend catalogRuntimeBackend) {
 	case <-time.After(catalogRuntimePublishTimeout):
 		t.Fatal("released receiver publication did not finish")
 	}
+	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 	for _, route := range publication.DeliveryRoutes {
 		id, err := deliverylifecycle.DeliveryID(eventID, route)
 		if err != nil {

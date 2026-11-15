@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -180,6 +181,9 @@ func (g *selectedDeploymentClaimGate) ClaimDelivery(ctx context.Context, authori
 // publication-only snapshot is R3a and must not satisfy this proof. The child
 // must preserve the old pending delivery while feeding only the changed pin.
 func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/sixty_of_hundred", func(t *testing.T) { proveSixtyOfHundredSelectedFork(t, backend) })
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, changedPin := range []bool{false, true} {
 			name := backend + "/same_pin"
@@ -395,6 +399,114 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				}
 			})
 		}
+	}
+}
+
+func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
+	t.Helper()
+	gate := &selectedDeploymentClaimGate{entered: make(chan string, 128), allow: func(event events.Event) bool {
+		var payload struct {
+			AccountID string `json:"account_id"`
+		}
+		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
+			return false
+		}
+		return payload.AccountID < "item-060"
+	}}
+	gate.held.Store(true)
+	t.Cleanup(func() { gate.held.Store(false) })
+	f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "root", nil, func(store runtimedelivery.Store) runtimedelivery.Store { gate.Store = store; return gate }, nil)
+	var rows bytes.Buffer
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&rows, "{\"account_id\":\"item-%03d\",\"document\":{\"ordinal\":%d}}\n", i, i)
+	}
+	ref, err := durabledata.ParseDeclarationRef(".", selectedDeploymentEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := createDeploymentResourceFixtureRun(t, f, durabledata.RunCreationDataEnvelope{Imports: []durabledata.FusedImport{{SourceInvocationID: uuid.NewString(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: rows.Bytes()}}})
+	server := f.operatorServer(t)
+	deadline := time.Now().Add(20 * time.Second)
+	var atCut operatorread.OperatorEventListResult
+	for {
+		atCut = selectedDeploymentPublicEvents(t, f.ctx, server, runID)
+		delivered, pending := 0, 0
+		for _, event := range atCut.Events {
+			if len(event.Deliveries) != 1 {
+				continue
+			}
+			switch event.Deliveries[0].Status {
+			case "delivered":
+				delivered++
+			case "pending":
+				pending++
+			}
+		}
+		if len(atCut.Events) == 100 && delivered == 60 && pending == 40 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("real 60/100 cut did not form: issued=%d delivered=%d pending=%d", len(atCut.Events), delivered, pending)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if atCut.NextCursor != "" {
+		t.Fatal("hundred-item cut omitted retained rows")
+	}
+	planner := f.selected.(interface {
+		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	})
+	plan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+		t.Fatal(err)
+	}
+	var owed int
+	for _, obligation := range plan.FanOutObligations {
+		owed += len(obligation.PendingDeployment)
+	}
+	if owed != 40 {
+		t.Fatalf("fixed cut owes %d recipients, want40", owed)
+	}
+	pauseDeploymentFixtureRun(t, f, runID)
+	owner, _ := deploymentForkOwner(t, f)
+	forkServer := deploymentForkServer(t, f, owner)
+	params := map[string]any{"source_run_id": runID, "bundle_hash": f.runtime.sourceArtifactFact.BundleHash(), "idempotency_key": uuid.NewString()}
+	result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+	version := selectedDeploymentVersion(t, f, rows.Bytes())
+	if len(rpcErr) != 0 || result.ForkRunID == "" || result.ForkRevision != plan.ForkPoint.Revision || len(result.DataPins) != 1 || result.DataPins[0].VersionID != version.VersionID {
+		t.Fatalf("60/100 fork lost exact native cut/version: %+v expected_revision=%d expected_version=%s error=%s", result, plan.ForkPoint.Revision, version.VersionID, rpcErr)
+	}
+	gate.held.Store(false)
+	f.runtime.bus.SignalDeliveryContinuations()
+	waitNotifyAllChildrenRuntimeWithin(t, f.runtime, result.ForkRunID, 3*time.Minute)
+	child := selectedDeploymentPublicEvents(t, f.ctx, server, result.ForkRunID)
+	if child.NextCursor != "" || len(child.Events) != 40 {
+		t.Fatalf("60/100 replayed settled prefix or lost suffix: %+v", child)
+	}
+	seen := map[string]bool{}
+	for _, event := range child.Events {
+		key, ok := event.Payload["account_id"].(string)
+		if !ok || key < "item-060" || key > "item-099" || seen[key] || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" || len(event.DeadLetters) != 0 {
+			t.Fatalf("wrong continued suffix row: %+v", event)
+		}
+		seen[key] = true
+	}
+	summary, err := f.selected.(interface {
+		FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error)
+	}).FanOutRunSummary(f.ctx, result.ForkRunID, time.Now().UTC())
+	if err != nil || summary.Cardinality != 100 || summary.Cursor != 100 || summary.Settled != 100 || summary.Unsettled != 0 || summary.Owed != 0 {
+		t.Fatalf("60 retained +40 executed did not settle all100: %+v %v", summary, err)
+	}
+	if after := selectedDeploymentPublicEvents(t, f.ctx, server, runID); !reflect.DeepEqual(atCut, after) {
+		t.Fatal("fork continuation reexecuted or changed its paused source")
+	}
+	before := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID)
+	replay, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+	if len(rpcErr) != 0 || !reflect.DeepEqual(result, replay) || before != selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID) {
+		t.Fatalf("60/100 exact operation replay mutated evidence: %+v %s", replay, rpcErr)
 	}
 }
 
