@@ -1787,9 +1787,9 @@ func completionSettlementForFrame(t testing.TB, target runtimeeffects.UsageTarge
 		Now: time.Now().UTC(),
 	}
 	authority.Target = target
+	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
 	settlement.AgentTurn.TriggerEventID = frame.Turn.Event.ID
 	settlement.AgentTurn.TriggerEventType = frame.Turn.Event.Type
-	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
 	bound, err := runtimeeffects.BindCompletionRequest(authority, runtimeeffects.AuthorizeRequest{AgentFrame: &frame})
 	if err != nil {
 		t.Fatal(err)
