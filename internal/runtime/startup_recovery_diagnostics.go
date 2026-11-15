@@ -300,6 +300,22 @@ func InspectStartupRecoveryAdmission(ctx context.Context, request StartupRecover
 	return decision.detail(), decision.denialError()
 }
 
+// InspectSurvivingTimerRecoveryAdmission applies the existing recovery policy
+// after the reset owner has proved that no run-scoped executable work survives.
+// It reports no invented delivery or manager reads and grants no recovery right.
+func InspectSurvivingTimerRecoveryAdmission(ctx context.Context, obligations runtimetimerobligation.Snapshot, recoveryOnStartup bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if obligations.ObservedAt.IsZero() || len(obligations.Runs) != 0 {
+		return errors.New("reset timer admission requires a complete observation with no surviving runs")
+	}
+	return newStartupRecoveryDecisionReport(startupRecoverySnapshot{
+		RecoveryOnStartup: recoveryOnStartup, TimerObligations: obligations,
+		StartupBlockingTimers: obligations.GlobalTotals().RecoverableCount,
+	}).denialError()
+}
+
 func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedAt time.Time) (startupRecoverySnapshot, error) {
 	if rt == nil || rt.Config == nil {
 		return startupRecoverySnapshot{}, errors.New("startup recovery inspection requires resolved runtime config")
