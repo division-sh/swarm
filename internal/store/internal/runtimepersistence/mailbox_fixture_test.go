@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -89,10 +90,28 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 						values = append(values, sql.NullString{Valid: true})
 					}
 					for _, original := range values {
-						if err := runMailboxFixtureTransaction(ctx, owner, func(ctx context.Context, tx *sql.Tx) error {
-							_, err := tx.ExecContext(ctx, `UPDATE human_task_continuations SET `+coordinate+`=$1 WHERE card_id=$2`, original, card.CardID)
-							return err
-						}); err != nil {
+						if err := func() error {
+							fixtureContext := ctx
+							fixtureOwner := any(owner)
+							write := func(ctx context.Context, tx *sql.Tx) error {
+								_, err := tx.ExecContext(ctx, `UPDATE human_task_continuations SET `+coordinate+`=$1 WHERE card_id=$2`, original, card.CardID)
+								return err
+							}
+							switch owner := fixtureOwner.(type) {
+							case *PostgresStore:
+								if owner == nil || owner.backend == nil {
+									return fmt.Errorf("postgres fixture store is required")
+								}
+								return owner.backend.RunTransaction(fixtureContext, write)
+							case *SQLiteRuntimeStore:
+								if owner == nil || owner.backend == nil {
+									return fmt.Errorf("sqlite fixture store is required")
+								}
+								return owner.backend.RunTransaction(fixtureContext, "mailbox fixture", write)
+							default:
+								return fmt.Errorf("unsupported mailbox fixture store %T", fixtureOwner)
+							}
+						}(); err != nil {
 							t.Fatal(err)
 						}
 						restore, err := CorruptHumanTaskRequesterForTest(ctx, owner, runID, card.CardID, coordinate, uuid.NewString())
@@ -107,10 +126,28 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 							t.Fatalf("nullable %s: got=%+v want=%+v err=%v", coordinate, got, original, err)
 						}
 					}
-					if err := runMailboxFixtureTransaction(ctx, owner, func(ctx context.Context, tx *sql.Tx) error {
-						_, err := tx.ExecContext(ctx, `UPDATE human_task_continuations SET `+coordinate+`=$1 WHERE card_id=$2`, canonical, card.CardID)
-						return err
-					}); err != nil {
+					if err := func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(owner)
+						write := func(ctx context.Context, tx *sql.Tx) error {
+							_, err := tx.ExecContext(ctx, `UPDATE human_task_continuations SET `+coordinate+`=$1 WHERE card_id=$2`, canonical, card.CardID)
+							return err
+						}
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "mailbox fixture", write)
+						default:
+							return fmt.Errorf("unsupported mailbox fixture store %T", fixtureOwner)
+						}
+					}(); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -119,14 +156,32 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 			t.Run("controlled_writer_contention", func(t *testing.T) {
 				locked, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 				go func() {
-					done <- runMailboxFixtureTransaction(ctx, owner, func(ctx context.Context, tx *sql.Tx) error {
-						if _, err := tx.ExecContext(ctx, `UPDATE human_task_continuations SET requester_flow_id=requester_flow_id WHERE card_id=$1`, card.CardID); err != nil {
-							return err
+					done <- func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(owner)
+						write := func(ctx context.Context, tx *sql.Tx) error {
+							if _, err := tx.ExecContext(ctx, `UPDATE human_task_continuations SET requester_flow_id=requester_flow_id WHERE card_id=$1`, card.CardID); err != nil {
+								return err
+							}
+							close(locked)
+							<-release
+							return nil
 						}
-						close(locked)
-						<-release
-						return nil
-					})
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "mailbox fixture", write)
+						default:
+							return fmt.Errorf("unsupported mailbox fixture store %T", fixtureOwner)
+						}
+					}()
 				}()
 				var releaseOnce sync.Once
 				releaseWriter := func() { releaseOnce.Do(func() { close(release) }) }
