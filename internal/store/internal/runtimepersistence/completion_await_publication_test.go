@@ -84,7 +84,11 @@ func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
 					plain := command
 					plain.Commit.CompletionAwait, plain.Commit.ReplyCreations = nil, nil
 					plain.Commit.DeliveryRoutes = nil
-					plain.Commit.RouteSettlement, _ = events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+					noDelivery, settlementErr := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryNoSubscriberByDesign, command.Commit.RouteSettlement.Ledger())
+					if settlementErr != nil {
+						t.Fatal(settlementErr)
+					}
+					plain.Commit.RouteSettlement = noDelivery
 					command.Commit.DeliveryRoutes, command.Commit.RouteSettlement = nil, plain.Commit.RouteSettlement
 					if result, err := selected.CommitPublication(publishCtx, plain); err != nil || !result.Acknowledged {
 						t.Fatalf("ordinary committed publication precondition: %+v %v", result, err)
@@ -246,7 +250,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore) liveAw
 	run, agentID := uuid.NewString(), "await-agent"
 	ctx = requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: run})
 	identity := mustTestAgentIdentityForRun(run, agentID, "global")
-	if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: withRuntimePersistenceTestIntent(t, actors.AgentConfig{ID: agentID, Identity: identity, Role: "worker", Type: "managed", Model: "regular", LLMBackend: "mock", ResolvedLLMBackend: "mock", FlowID: "global", FlowPath: "global", Memory: agentmemory.Plan{Enabled: true}, ExecutionMode: "live"}), Status: "active", StartedAt: time.Now().UTC()}); err != nil {
+	if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: withRuntimePersistenceTestIntent(t, actors.AgentConfig{ID: agentID, Identity: identity, Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowID: "global", FlowPath: "global", Memory: agentmemory.Plan{Enabled: true}, ExecutionMode: "live"}), Status: "active", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
@@ -323,7 +327,11 @@ func liveAwaitCommand(t *testing.T, f liveAwaitProofFixture, ctx context.Context
 			t.Error(err)
 		}
 	})
-	settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryNoSubscriberByDesign, ledger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,10 +347,7 @@ func liveAwaitCommand(t *testing.T, f liveAwaitProofFixture, ctx context.Context
 		command.Commit.DeliveryAuthority = snapshot.Authority
 		command.Commit.ReplyCreations = []replycontext.Record{*record}
 		command.Commit.DeliveryRoutes = []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.authority.Target.AgentIdentity, Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}}}
-		command.Commit.RouteSettlement, err = events.NewDeliverySettlement(events.EventWriteNormalPublication, events.ConnectEvaluationLedger{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		command.Commit.RouteSettlement = testRouteSettlement(event, command.Commit.DeliveryRoutes)
 	}
 	return command, ctx
 }

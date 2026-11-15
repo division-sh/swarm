@@ -46,10 +46,14 @@ func TestAwaitReplyAdmissionKeepsPairedReturnNonexecutable(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		ledger, err := events.NewConnectEvaluationLedger(nil)
+		if err != nil {
+			return err
+		}
 		if len(command.DeliveryRoutes) == 0 {
-			command.RouteSettlement, err = events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+			command.RouteSettlement, err = events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryNoSubscriberByDesign, ledger)
 		} else {
-			command.RouteSettlement, err = events.NewDeliverySettlement(events.EventWriteNormalPublication, events.ConnectEvaluationLedger{})
+			command.RouteSettlement, err = events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
 		}
 		if err != nil {
 			return err
