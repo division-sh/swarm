@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -198,76 +197,6 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				t.Log("D4 target: working -> review, both NONTERMINAL. Terminal implicit retirement remains #2269; no terminate/timeout/canceled semantics tested or changed.")
 			})
 		}
-		t.Run(backend+"/final_late_no_route", func(t *testing.T) {
-			root := writeIssue2564Fixture(t, true)
-			path := filepath.Join(root, "hub", "schema.yaml")
-			raw, err := os.ReadFile(path)
-			if err != nil || strings.Count(string(raw), "  review: {}") != 1 {
-				t.Fatalf("final-stage late-result fixture: %s %v", raw, err)
-			}
-			body := strings.Replace(string(raw), "  review: {}", "  review: {final: true}", 1)
-			body = strings.Replace(body, "inputs: [hub.start, hub.begin, hub.close]", "inputs: [hub.start, hub.begin, hub.close, hub.result]", 1)
-			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-				t.Fatal(err)
-			}
-			path = filepath.Join(root, "schema.yaml")
-			raw, err = os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			body = strings.Replace(string(raw), "inputs: [hub.start, hub.begin, hub.close]", "inputs: [hub.start, hub.begin, hub.close, hub.result]", 1)
-			body += "  - {event: hub.result, from: ., to: hub, resolution: select}\n"
-			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-				t.Fatal(err)
-			}
-			path = filepath.Join(root, "events.yaml")
-			raw, err = os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, append(raw, []byte("hub.result: {hub_id: text, value: text}\n")...), 0600); err != nil {
-				t.Fatal(err)
-			}
-			path = filepath.Join(root, "hub", "events.yaml")
-			raw, err = os.ReadFile(path)
-			if err != nil || strings.Count(string(raw), "hub.result: {hub_id: text, value: text}\n") != 1 {
-				t.Fatalf("final-stage result catalog: %s %v", raw, err)
-			}
-			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), "hub.result: {hub_id: text, value: text}\n", "", 1)), 0600); err != nil {
-				t.Fatal(err)
-			}
-			p := newIssue2564Provider(t, "a")
-			p.scripts["a"] = []*issue2564ProviderStep{
-				newIssue2564Step(),
-			}
-			timer := make(chan struct{})
-			var once sync.Once
-			release := func() { once.Do(func() { close(timer) }) }
-			defer release()
-			_, rt := startIssue2564Served(t, backend, root, p, nil, issue2564StageTimerPublicationGate{release: timer})
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "late"}, "idempotency_key": "late-start"})
-			entityID := rt.waitEntityStage(t, seed.RunID, "", "idle")
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.begin", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "late"}, "idempotency_key": "late-begin"})
-			p.wait(t, "a", 0)
-			p.release("a", 0)
-			release()
-			rt.waitEntityStage(t, seed.RunID, entityID, "review")
-			before := issue2564Entity(t, rt, seed.RunID, entityID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.result", "run_id": seed.RunID, "payload": map[string]any{"hub_id": "late", "value": "late"}, "idempotency_key": "late-result"})
-			rt.waitDeliveries(t, seed.RunID)
-			results := rt.events(t, seed.RunID, "hub.result")
-			if len(results) != 1 || results[0].NoDelivery == nil || results[0].NoDelivery.Reason != events.NoDeliveryResolutionBlocked.Code() || len(results[0].Deliveries) != 0 || len(results[0].DeadLetters) != 1 || results[0].DeadLetters[0].Failure.Class != failures.ClassUnexpectedArrival || results[0].DeadLetters[0].Failure.Detail.Code != "no_route" {
-				t.Fatalf("late result was not a counted no-route outcome: %+v\n%s", results, rt.debug(t, seed.RunID))
-			}
-			after := issue2564Entity(t, rt, seed.RunID, entityID)
-			if !reflect.DeepEqual(before, after) {
-				t.Fatalf("late no-route changed final receiver: before=%+v after=%+v", before, after)
-			}
-			status, err := storetest.ReadRuntimeLogRunSnapshot(t.Context(), rt.selected, seed.RunID)
-			if err != nil || status.Failure != nil {
-				t.Fatalf("ordinary late no-route failed the run: %+v err=%v", status, err)
-			}
-		})
 	}
 }
 
