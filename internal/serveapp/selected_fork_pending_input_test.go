@@ -3,14 +3,18 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -27,6 +31,102 @@ type competingForkContinueReader struct {
 	reads   int
 	outcome runcontrol.StoreTransition
 	err     error
+}
+
+func TestServedForkWaitKeepsPostCutPublicationOnOriginalBothStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputOriginal)
+			rt := startServedLiveFlowProofRuntimeFromSource(t, backend, root)
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "post-cut-seed",
+			})
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
+			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "post-cut-pause"})
+			held, err := rt.Runtime.WorkOccurrence().BeginDispatch(correlation.WithRunID(t.Context(), seed.RunID))
+			if err != nil {
+				t.Fatalf("admit source work before fork wait: %v", err)
+			}
+			released := false
+			defer func() {
+				if !released {
+					_ = held.Done()
+				}
+			}()
+			forkDone := make(chan servedJSONRPCEnvelope, 1)
+			go func() {
+				defer close(forkDone)
+				forkDone <- requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", map[string]any{
+					"source_run_id": seed.RunID, "fork_event_id": seed.EventID, "idempotency_key": "post-cut-fork",
+				}, 15*time.Second)
+			}()
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				probe, err := rt.Runtime.WorkOccurrence().BeginDispatch(correlation.WithRunID(t.Context(), seed.RunID))
+				if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+					break
+				}
+				if err != nil {
+					t.Fatalf("read source fork admission fence: %v", err)
+				}
+				if err := probe.Done(); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case <-forkDone:
+					t.Fatal("fork returned before joining its admitted source work")
+				default:
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("fork never fenced the paused source run")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			point := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "post-cut"}, "idempotency_key": "post-cut-input",
+			})
+			if point.RunID != seed.RunID || point.NewRunCreated || len(point.Deliveries) != 2 {
+				t.Fatalf("post-cut publication did not stay in the paused original: %+v", point)
+			}
+			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+			if err := held.Done(); err != nil {
+				t.Fatal(err)
+			}
+			released = true
+			var response servedJSONRPCEnvelope
+			select {
+			case response = <-forkDone:
+			case <-time.After(10 * time.Second):
+				t.Fatal("fork did not join its source work and return")
+			}
+			if response.Error != nil {
+				t.Fatalf("post-cut fork: %+v", response.Error)
+			}
+			var fork apiv1.RunForkExecutionResult
+			if err := json.Unmarshal(response.Result, &fork); err != nil {
+				t.Fatal(err)
+			}
+			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.SourceRunStatus != "paused" {
+				t.Fatalf("fork lost its paused original: %+v", fork)
+			}
+			var copied, original int
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='work.first'`, fork.ForkRunID).Scan(&copied); err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, seed.RunID, point.EventID).Scan(&original); err != nil {
+				t.Fatal(err)
+			}
+			if copied != 0 || original != 1 {
+				t.Fatalf("fixed child cut copied post-cut input: copied=%d original=%d", copied, original)
+			}
+			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": fork.ForkRunID, "idempotency_key": "post-cut-child-pause"})
+			requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "post-cut-original-continue"})
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
+			requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
+			requirePendingInputPublicStates(t, rt, seed.RunID, 2)
+		})
+	}
 }
 
 func (r *competingForkContinueReader) LoadRunLiveScope(ctx context.Context, runID string) (runlifecycle.LiveRunScope, error) {
