@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -83,10 +84,28 @@ func TestNodeDeliveryDiagnosticsPreserveRowsReceiptsAndDeadLettersBothStores(t *
 			if got, err := ReadNodeDeliveryDiagnosticStorageForTest(ctx, selected, "invalid"); err == nil || !reflect.DeepEqual(got, NodeDeliveryDiagnosticStorage{}) {
 				t.Fatalf("invalid event returned diagnostic: %+v,%v", got, err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `DROP TABLE dead_letters`)
-				return err
-			}); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(selected)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `DROP TABLE dead_letters`)
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			if got, err := ReadNodeDeliveryDiagnosticStorageForTest(ctx, selected, event.ID()); err == nil || !strings.Contains(err.Error(), "dead letter dump") || !reflect.DeepEqual(got, NodeDeliveryDiagnosticStorage{}) {

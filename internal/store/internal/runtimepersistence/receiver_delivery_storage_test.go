@@ -121,13 +121,31 @@ func TestReceiverDeliveryStorageRefusesInvalidCancelledAndPartialEvidenceBothSto
 			if got, err := ReadReceiverDeliveryStorageForTest(cancelled, fixture.store, runID); !errors.Is(err, context.Canceled) || got != nil {
 				t.Fatalf("cancelled receiver read leaked evidence: %#v %v", got, err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				if _, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO retained_receiver_storage`); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					if _, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO retained_receiver_storage`); err != nil {
+						return err
+					}
+					_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW event_deliveries AS SELECT delivery_id,event_id,status,CASE WHEN delivery_id='%s' THEN NULL ELSE delivery_target_route END AS delivery_target_route,run_id FROM retained_receiver_storage`, before[1].DeliveryID))
 					return err
 				}
-				_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW event_deliveries AS SELECT delivery_id,event_id,status,CASE WHEN delivery_id='%s' THEN NULL ELSE delivery_target_route END AS delivery_target_route,run_id FROM retained_receiver_storage`, before[1].DeliveryID))
-				return err
-			}); err != nil {
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			restored := false
@@ -135,13 +153,31 @@ func TestReceiverDeliveryStorageRefusesInvalidCancelledAndPartialEvidenceBothSto
 				if restored {
 					return nil
 				}
-				err := runUnrevisionedEventFixtureTransactionForTest(context.WithoutCancel(ctx), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					if _, err := tx.ExecContext(ctx, `DROP VIEW event_deliveries`); err != nil {
+				err := func() error {
+					fixtureContext := context.WithoutCancel(ctx)
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						if _, err := tx.ExecContext(ctx, `DROP VIEW event_deliveries`); err != nil {
+							return err
+						}
+						_, err := tx.ExecContext(ctx, `ALTER TABLE retained_receiver_storage RENAME TO event_deliveries`)
 						return err
 					}
-					_, err := tx.ExecContext(ctx, `ALTER TABLE retained_receiver_storage RENAME TO event_deliveries`)
-					return err
-				})
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}()
 				if err == nil {
 					restored = true
 				}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -372,12 +373,30 @@ func TestSemanticEventEvidenceRejectsNonPlatformReceiptsBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			for _, kind := range []string{"agent", "node"} {
-				err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, `INSERT INTO event_receipts
+				err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(selected)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(ctx, `INSERT INTO event_receipts
 						(receipt_id,event_id,subscriber_type,subscriber_id,outcome,side_effects,processed_at)
 						VALUES ($1,$2,$3,'fixture-agent','success','{}',$4)`, uuid.NewString(), eventID, kind, time.Now().UTC())
-					return err
-				})
+						return err
+					}
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}()
 				var postgresError interface{ SQLState() string }
 				var sqliteError interface{ Code() int }
 				if err == nil || !((errors.As(err, &postgresError) && postgresError.SQLState() == "23514") || (errors.As(err, &sqliteError) && sqliteError.Code() == 275)) {
