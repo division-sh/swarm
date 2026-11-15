@@ -101,7 +101,7 @@ func inspectServeCheckSource(ctx context.Context, in ServeCheckStageRequest, roo
 	if err != nil {
 		return nil, nil, err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(in.Repo, root, base)
+	_, bundle, err = NewSwarmWorkflowModuleWithPackBase(in.Repo, root, base)
 	return bundle, nil, err
 }
 
