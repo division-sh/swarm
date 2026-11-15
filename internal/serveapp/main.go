@@ -886,16 +886,14 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	}
 	checkInput := cliapp.ServeCheckStageRequest{Repo: repo, Paths: resolvedPaths, Config: cfgResult, Options: opts, Selection: storeSelection, PackBases: platformPackBases}
 	checks, err := cliapp.InspectServeCheckStage(ctx, checkInput)
-	if err != nil {
-		checks.Write(opts.Output, opts.ErrorOutput)
-		presenter.fail(5, "local_preflight", err)
-		return 1
-	}
-	if failure := checks.Failure(); failure != nil {
+	if failure := errors.Join(err, checks.Failure()); failure != nil {
 		checks.Write(opts.Output, opts.ErrorOutput)
 		presenter.fail(5, "local_preflight", failure)
 		if runtimestartuprecovery.IsDataIntegrityError(failure) {
 			return serveExitDataIntegrity
+		}
+		if err != nil {
+			return 1
 		}
 		return checks.ExitCode()
 	}

@@ -74,6 +74,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -92,9 +93,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type servedStartupAnswerObservation struct{}
+type servedStartupAnswerObservation struct{ inspect func(context.Context) error }
 
-func (servedStartupAnswerObservation) ObserveStartupAnswer(ctx context.Context, _ llmselection.Profile, _ llmselection.ResolvedModel) ([]byte, error) {
+func (o servedStartupAnswerObservation) ObserveStartupAnswer(ctx context.Context, _ llmselection.Profile, _ llmselection.ResolvedModel) ([]byte, error) {
+	if o.inspect != nil {
+		return nil, o.inspect(ctx)
+	}
 	return []byte(`{"status":"completed","stop_reason":"end_turn","content":[{"type":"text","text":"ready"}],"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ready"}}],"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}]}]}`), ctx.Err()
 }
 
@@ -6283,6 +6287,32 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 }
 
 func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
+	t.Run("interrupted check retains integrity and independent cleanup", func(t *testing.T) {
+		setDoctorProviderSecrets(t, map[string]string{"ANTHROPIC_API_KEY": "test-startup-key"})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		called, constructed := false, false
+		previous := buildStoresForServe
+		buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config, ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+			constructed = true
+			return nil, errors.New("must not construct after failed checks")
+		}
+		t.Cleanup(func() { buildStoresForServe = previous })
+		var out lockedBuffer
+		code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
+			ConfigPath: writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
+			SourceRoot: writeServeRuntimeAgentSlugFixture(t, "interrupted-check", "api-worker"),
+			StoreMode:  "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Output: &out,
+			TestLLMRuntime: servedNoopLLMRuntime{servedStartupAnswerObservation: servedStartupAnswerObservation{inspect: func(context.Context) error {
+				called = true
+				cancel()
+				return errors.Join(startuprecovery.DataIntegrityError{}, errors.New("independent check cleanup"))
+			}}},
+		})
+		if !called || constructed || code != serveExitDataIntegrity || !strings.Contains(out.String(), "independent check cleanup") || !strings.Contains(out.String(), "context canceled") {
+			t.Fatalf("failed check lost typed/joined cause: called=%v constructed=%v code=%d output=%s", called, constructed, code, out.String())
+		}
+	})
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 	hostRoot := filepath.Join(t.TempDir(), "host-workspaces")
 
@@ -8072,7 +8102,7 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 }
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
-	if _, mocked := opts.TestLLMRuntime.(runtimellm.StartupAnswerObserver); mocked {
+	if _, mocked := opts.TestLLMRuntime.(runtimellm.StartupAnswerObserver); mocked && mockServeCredentialFileOwned(t) {
 		if strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE")) == "" {
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "mock-provider-credentials.json"))
 		}
@@ -8091,6 +8121,21 @@ func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.S
 		}
 	}
 	return startRuntimeTestProcessWithRunner(t, repo, opts, runFrom)
+}
+
+func mockServeCredentialFileOwned(t *testing.T) bool {
+	path := strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE"))
+	if path == "" {
+		return true // The caller creates an explicit t.TempDir file before writing.
+	}
+	// A configured path is not ownership. Only this test's managed temporary
+	// namespace permits fixture seeding; inherited and symlinked files stay read-only.
+	root, rootErr := filepath.EvalSymlinks(filepath.Dir(t.TempDir()))
+	parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
+	relative, err := filepath.Rel(root, parent)
+	info, statErr := os.Lstat(path)
+	return rootErr == nil && parentErr == nil && err == nil && filepath.IsLocal(relative) &&
+		(os.IsNotExist(statErr) || statErr == nil && info.Mode().IsRegular())
 }
 
 func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
