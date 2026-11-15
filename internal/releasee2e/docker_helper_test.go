@@ -74,12 +74,15 @@ func mustReleaseE2EDurableBackingKey(kind, semanticIdentity string) string {
 }
 
 type fakeDockerContainer struct {
-	ID          string            `json:"id"`
-	Running     bool              `json:"running"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	ProviderKey string            `json:"provider_key,omitempty"`
-	WorkerPath  string            `json:"worker_path,omitempty"`
-	ExtraHosts  []string          `json:"extra_hosts,omitempty"`
+	ID              string            `json:"id"`
+	Running         bool              `json:"running"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	ProviderKey     string            `json:"provider_key,omitempty"`
+	WorkerPath      string            `json:"worker_path,omitempty"`
+	ExtraHosts      []string          `json:"extra_hosts,omitempty"`
+	AdmissionKind   string            `json:"admission_kind,omitempty"`
+	AdmissionExited bool              `json:"admission_exited,omitempty"`
+	Workdir         string            `json:"workdir,omitempty"`
 }
 
 type fakeDockerState struct {
@@ -1273,7 +1276,8 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 	for index := 0; index < len(args); {
 		name := args[index]
 		if valueNames[name] {
-			if index+1 >= len(args) || valueFlags[name] != "" {
+			_, duplicate := valueFlags[name]
+			if index+1 >= len(args) || duplicate {
 				return fmt.Errorf("Claude flag %s is missing or repeated", name)
 			}
 			valueFlags[name] = args[index+1]

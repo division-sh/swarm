@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -27,7 +28,12 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			denyProviderJourneyExternalNetwork(t)
 			h := newChannelOnboardingE2EHarness(t, backend, true)
 			prepareProviderRoundReadSource(t, h, "round customer\n")
+			var business atomic.Int32
 			provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "round-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				if reply, boot := llmapi.StartupAnswer(request); boot {
+					return reply, nil
+				}
+				request.Number = int(business.Add(1))
 				return reasoningToolRoundReply(t, request)
 			})
 			configureProviderJourneyLLM(t, h.opts.ConfigPath, "openai_compatible", provider.URL+"/v1")
@@ -56,7 +62,7 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			const reply = "Swarm heard: round customer"
 			waitUncertainCopyDelivery(t, h, 0, reply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			if len(provider.Requests()) != 2 {
+			if len(llmapi.ActorRequests(provider.Requests())) != 2 || len(provider.Requests()) != 3 {
 				t.Fatalf("requests=%d, want one non-emit tool round", len(provider.Requests()))
 			}
 			next := postResponsesChannelUpdate(t, callback, signing, map[string]any{
@@ -71,7 +77,7 @@ func TestChannelOneBotOpenAICompatibleReasoningToolRound(t *testing.T) {
 			const nextReply = "Swarm heard: remembered customer"
 			waitUncertainCopyDelivery(t, h, 1, nextReply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001", nextReply: "2001"})
-			if len(provider.Requests()) != 3 {
+			if len(llmapi.ActorRequests(provider.Requests())) != 3 || len(provider.Requests()) != 4 {
 				t.Fatalf("requests=%d, want completed round plus one new user request", len(provider.Requests()))
 			}
 		})
@@ -114,7 +120,12 @@ func TestChannelOneBotAnthropicToolRound(t *testing.T) {
 			denyProviderJourneyExternalNetwork(t)
 			h := newChannelOnboardingE2EHarness(t, backend, true)
 			prepareProviderRoundReadSource(t, h, "anthropic customer\n")
+			var business atomic.Int32
 			provider := llmapi.New(t, llmapi.Anthropic, "/v1/messages", "anthropic-round-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				if reply, boot := llmapi.StartupAnswer(request); boot {
+					return reply, nil
+				}
+				request.Number = int(business.Add(1))
 				return anthropicToolRoundReply(t, request)
 			})
 			redirectExternalHosts(t, map[string]string{"api.anthropic.com": provider.URL})
@@ -143,7 +154,7 @@ func TestChannelOneBotAnthropicToolRound(t *testing.T) {
 			const reply = "Swarm heard: Anthropic customer"
 			waitUncertainCopyDelivery(t, h, 0, reply)
 			requireReceptionistReplies(t, h, map[string]string{reply: "2001"})
-			if len(provider.Requests()) != 2 {
+			if len(llmapi.ActorRequests(provider.Requests())) != 2 || len(provider.Requests()) != 3 {
 				t.Fatalf("Anthropic requests=%d, want one exact non-emit round", len(provider.Requests()))
 			}
 		})
@@ -155,7 +166,12 @@ func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			denyProviderJourneyExternalNetwork(t)
 			observed := make(chan string, 1)
+			var business atomic.Int32
 			provider := llmapi.New(t, llmapi.Anthropic, "/v1/messages", "human-task-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				if reply, boot := llmapi.StartupAnswer(request); boot {
+					return reply, nil
+				}
+				request.Number = int(business.Add(1))
 				var body struct {
 					Model    string                  `json:"model"`
 					Messages []anthropicRoundMessage `json:"messages"`
@@ -283,8 +299,8 @@ func TestAnthropicHumanTaskObservationBothStores(t *testing.T) {
 			default:
 				t.Fatal("human outcome did not reach the model")
 			}
-			if got := len(provider.Requests()); got != 3 {
-				t.Fatalf("human-task provider requests=%d, want 3", got)
+			if got := len(llmapi.ActorRequests(provider.Requests())); got != 3 || len(provider.Requests()) != 4 {
+				t.Fatalf("human-task provider requests=%d, want 3 business plus one boot answer", got)
 			}
 		})
 	}

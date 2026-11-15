@@ -374,6 +374,38 @@ func TestReleaseContainerMCPAdmissionRejectsRawEndpointMutations(t *testing.T) {
 
 func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 	base := validReleaseEvidence()
+	t.Run("disposable_answer_and_join", func(t *testing.T) {
+		records := []fakeDockerRecord{}
+		for _, id := range []string{"version", "init", "answer"} {
+			records = append(records, fakeDockerRecord{Class: "admission_create", ContainerID: id, Args: []string{"create", "--name", id}})
+		}
+		for _, record := range base {
+			if record.Class == "claude_startup" {
+				record.StartupObservation = true
+			}
+			if record.Class == "claude_live" {
+				records = append(records, fakeDockerRecord{Class: "admission_answer"})
+				for _, id := range []string{"version", "init", "answer"} {
+					records = append(records, fakeDockerRecord{Class: "admission_remove", ContainerID: id})
+				}
+			}
+			records = append(records, record)
+		}
+		if err := validateReleaseDockerEvidence(records, true); err != nil {
+			t.Fatal(err)
+		}
+		for _, omit := range []string{"admission_answer", "admission_remove"} {
+			var partial []fakeDockerRecord
+			for _, record := range records {
+				if record.Class != omit {
+					partial = append(partial, record)
+				}
+			}
+			if err := validateReleaseDockerEvidence(partial, true); err == nil {
+				t.Fatalf("missing %s earned completion evidence", omit)
+			}
+		}
+	})
 	if err := validateReleaseDockerEvidence(base); err != nil {
 		t.Fatalf("valid evidence rejected: %v", err)
 	}
