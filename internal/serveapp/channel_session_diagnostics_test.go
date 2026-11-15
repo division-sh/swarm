@@ -172,9 +172,10 @@ func TestServeRegisteredDiagnosticReadAndHeldWriterBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeStandingCandidateFile(t, opts.ConfigPath, string(config)+"\npaths:\n  swarm_dir: "+opts.SwarmDir+"\n")
+			config = []byte(withServeFixtureStateDirectory(t, string(config), opts.SwarmDir))
+			writeStandingCandidateFile(t, opts.ConfigPath, string(config))
 			op := issue3011RegisterForSend(t, opts, peer)
-			writeStandingCandidateFile(t, opts.ConfigPath, string(config)+"\npaths:\n  swarm_dir: "+opts.SwarmDir+"\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n")
+			writeStandingCandidateFile(t, opts.ConfigPath, string(config)+"\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n")
 			prior := newServeSessionBootstrap
 			owners := make(chan *serveSessionBootstrap, 1)
 			newServeSessionBootstrap = func(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store, credentials operatorchannel.CredentialCurrentness, directory string, invocation *sessionprovider.InvocationState, enabled channelonboarding.TargetEnablementReader) (serveSessionBootstrapOwner, error) {

@@ -156,7 +156,7 @@ func TestWhatsAppPublicSittingPromptCancellationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				writeStandingCandidateFile(t, config, string(content)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n", directory))
+				writeStandingCandidateFile(t, config, withServeFixtureStateDirectory(t, string(content), directory)+"\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n")
 				qr := make(chan channelonboarding.Result, 1)
 				readbacks := make(chan sittingClaimReadback, 16)
 				var registration cliapp.ChannelRegistrationOptions

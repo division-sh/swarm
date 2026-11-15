@@ -78,7 +78,7 @@ func TestRunServeSessionRecoveryRegisteredBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				writeStandingCandidateFile(t, opts.ConfigPath, string(config)+"\npaths:\n  swarm_dir: "+opts.SwarmDir+"\n")
+				writeStandingCandidateFile(t, opts.ConfigPath, withServeFixtureStateDirectory(t, string(config), opts.SwarmDir))
 				op := issue3011RegisterForSend(t, opts, peer)
 				if permanent != "transient" {
 					requireRecoveryPermanentBoot(t, opts, peer, permanent)

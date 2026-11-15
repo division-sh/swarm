@@ -410,6 +410,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 		opts.StoreMode = "sqlite"
 	case "postgres":
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		storeLocation = dsn
 		var runtimePG *store.PostgresStore
