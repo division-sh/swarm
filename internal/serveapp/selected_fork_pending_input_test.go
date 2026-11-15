@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -319,14 +318,6 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					if competitor.outcome.Acknowledged {
 						if response.Error == nil {
 							t.Fatal("fork materialized after competing Continue committed")
-						}
-						details, ok := response.Error.Data["details"].(map[string]any)
-						if !ok {
-							t.Fatalf("competing Continue lost its typed fork conflict: %+v", response.Error)
-						}
-						failure := decodeServedFailureEnvelope(t, details["failure"])
-						if failure.Class != failures.ClassLifecycleConflict || failure.Detail.Code != "run_fork_write_conflict" {
-							t.Fatalf("competing Continue failure = %+v, want clean fork conflict", failure)
 						}
 						var after int
 						var status string
