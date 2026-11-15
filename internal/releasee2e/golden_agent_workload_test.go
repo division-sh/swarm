@@ -21,10 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/runtime/mutationlog"
-	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/tests/support/testpostgres"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -790,44 +786,38 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, completionBudget, len(replayed))
 	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
-	assertGoldenRunHasNoDrift(t, projectRoot, contractsOperand, store, runID)
+	assertGoldenRunHasNoDrift(t, process, projectRoot, contractsOperand, store, runID)
 	if options.publicBoundaryProof {
 		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
 	}
 }
 
-func assertGoldenRunHasNoDrift(t *testing.T, projectRoot, contracts string, selected goldenStoreSelection, runID string) {
+func assertGoldenRunHasNoDrift(t *testing.T, process *releaseServeProcess, projectRoot, contracts string, selected goldenStoreSelection, runID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 	defer cancel()
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(releaseE2ERepoRoot(t), filepath.Join(projectRoot, contracts))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, err := cliapp.StateStoreSchemaPlans(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform)
-	if err != nil {
-		t.Fatal(err)
-	}
-	selection := storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: selected.inspectionSQLitePath}
+	location := selected.inspectionSQLitePath
 	if selected.name == "postgres" {
-		selection.Backend = storebackend.BackendPostgres
+		location = selected.inspectionPostgresDSN
 	}
-	inspection, err := storeselected.OpenAdmissionInspection(ctx, storeselected.AuthorityRequest{Selection: selection, PostgresDSN: selected.inspectionPostgresDSN})
+	source := filepath.Join(projectRoot, contracts)
+	request, err := json.Marshal(struct{ Kind, Backend, Location, RunID, Source string }{"terminal_drift", selected.name, location, runID, source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var report mutationlog.DriftReport
-	_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
-		var err error
-		report, err = snapshot.InspectRunMutationDrift(ctx, runID)
-		return err
-	})
-	if err = errors.Join(err, inspection.Close()); err != nil || report.RunID != runID || report.EntitiesChecked == 0 || len(report.Rows) != 0 {
-		t.Fatalf("terminal mock native exact-run drift proof: report=%+v err=%v", report, err)
+	command := exec.CommandContext(ctx, process.cmd.Path, "-test.run=^TestOwnedMockLifecycleProcessEntry$")
+	command.Dir = process.cmd.Dir
+	command.Env = append(append([]string(nil), process.cmd.Env...), "SWARM_TEST_INTERNAL_GOLDEN_CRASH_OBSERVATION="+string(request))
+	output, childErr := command.Output()
+	var report struct {
+		Backend, Location, RunID, Source string
+		EntitiesChecked                  int
+		Rows                             []json.RawMessage
+	}
+	decodeErr := json.Unmarshal(output, &report)
+	matched := report.Backend == selected.name && report.Location == location && report.RunID == runID && report.Source == source
+	if childErr != nil || decodeErr != nil || !matched || report.EntitiesChecked <= 0 || len(report.Rows) != 0 {
+		t.Fatalf("terminal mock native exact-run drift proof: child=%v decode=%v exact_scope=%t entities=%d mismatches=%d", childErr, decodeErr, matched, report.EntitiesChecked, len(report.Rows))
 	}
 }
 
