@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -59,126 +60,138 @@ func ObserveManagedProviderBootChecks(ctx context.Context, cfg *config.Config, s
 		}
 	}()
 	for _, target := range targets {
-		selection, err := llm.ValidateAgentExecutionDescriptor(options.LLMProfile, target.Actor)
-		if err != nil {
+		if err := checks.observeTarget(ctx, cfg, source, options, target, credentials, discovered, inspection, docker, &projection, bundle, listenAddr, override); err != nil {
 			return nil, err
 		}
-		if selection.Profile.ID == llmselection.BackendMock {
-			continue // Mock admission retains its native, non-provider observation.
-		}
-		if override != nil {
-			if _, err := llm.RequireProviderContractForProfile(selection.Profile, override); err != nil {
-				return nil, err
-			}
-			if _, ok := override.(llm.StartupAnswerObserver); !ok {
-				return nil, fmt.Errorf("injected runtime does not provide a startup answer observer")
-			}
-		}
-		captured, credential, err := credentials.Capture(ctx, selection.Profile)
-		if err != nil {
-			return nil, err
-		}
-		group, err := providerCheckHash([]string{selection.Profile.Provider, credential.Key, credential.Value})
-		if err != nil {
-			return nil, err
-		}
-		model, err := llmselection.ResolveModel(selection.ModelProfile, llmselection.ModelResolution{Model: target.Actor.Model, Models: cfg.LLM.Models})
-		if err != nil {
-			return nil, err
-		}
-		if selection.Profile.ID == llmselection.BackendClaudeCLI && projection == nil && override == nil {
-			if docker == nil {
-				return nil, llm.ErrClaudeWorkspaceRequired
-			}
-			bundle, ok := semanticview.Bundle(source)
-			if !ok || bundle == nil {
-				return nil, fmt.Errorf("managed provider startup requires bundle-backed source")
-			}
-			projection, err = sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
-			if err != nil {
-				return nil, err
-			}
-			checks.image, err = docker.InspectWorkspaceImage(ctx)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if selection.Profile.ID == llmselection.BackendClaudeCLI {
-			contract, err := llm.ProviderContractForProfile(selection.Profile)
-			if err != nil {
-				return nil, err
-			}
-			native := tools.NativeToolAdmissionOptions{ProviderContract: contract, Credentials: options.Credentials, Workspaces: inspection}
-			definitions, capabilities, err := tools.PrepareActorToolAdmission(ctx, source, target.Actor, discovered, native)
-			if err != nil {
-				return nil, err
-			}
-			planned, err := llm.CompileManagedCapabilityAdmission(target.Actor, contract, definitions, capabilities)
-			if err != nil {
-				return nil, err
-			}
-			// Ask the definition producer again; never reconstruct its delivered
-			// catalogue from the already-compiled planned names or hashes.
-			delivered, _, err := tools.PrepareActorToolAdmission(ctx, source, target.Actor, discovered, native)
-			if err != nil {
-				return nil, err
-			}
-			prompt, err := ManagedProviderStartupPrompt(target.Actor)
-			if err != nil {
-				return nil, err
-			}
-			var response *llm.Response
-			if override != nil {
-				response, err = llm.ObserveInjectedStartupPlan(ctx, override, selection.Profile, target.Actor, prompt, planned)
-			} else {
-				response, err = observeManagedProviderBootTarget(ctx, cfg, captured, target, prompt, planned, delivered, docker, projection, checks.image, listenAddr)
-			}
-			if err != nil {
-				return nil, fmt.Errorf("claude cli startup probe failed for agent %s: %w", target.Actor.ID, err)
-			}
-			key, err := providerStartupCheckKey(cfg, credential, checks.source, target, prompt, planned)
-			if err != nil {
-				return nil, err
-			}
-			checks.starts[key], err = json.Marshal(response)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if _, answered := checks.keys[group]; !answered {
-			err := func() (retErr error) {
-				if override != nil {
-					return llm.ObserveInjectedStartupAnswer(ctx, cfg, selection.Profile, model, override)
-				}
-				var resource *workspace.Target
-				if selection.Profile.ID == llmselection.BackendClaudeCLI {
-					resource, retErr = docker.PrepareClaudeStartupObservation(ctx, target.Actor, projection)
-					if retErr != nil {
-						return retErr
-					}
-					defer func() {
-						cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-						defer cancel()
-						retErr = errors.Join(retErr, resource.Release(cleanup))
-					}()
-					if resource.StartupObservationImage() != checks.image {
-						return fmt.Errorf("managed provider startup inputs changed")
-					}
-				}
-				return llm.ObserveProviderStartupAnswer(ctx, cfg, selection.Profile, model, captured, resource)
-			}()
-			if err != nil {
-				return nil, err
-			}
-			checks.keys[group] = selection.Profile
-		}
-		key, err := providerCheckHash(target)
-		if err != nil {
-			return nil, err
-		}
-		checks.targets[key] = struct{}{}
 	}
 	return checks, ctx.Err()
+}
+
+func (checks *ManagedProviderBootChecks) observeTarget(ctx context.Context, cfg *config.Config, source semanticview.Source, options WorkflowContractValidationOptions, target ManagedProviderCheckTarget, credentials llm.ProviderCredentialResolver, discovered map[string]mcp.DiscoveredTool, inspection workspace.Resolver, docker *workspace.DockerManager, projection **sourceartifact.RuntimeProjection, bundle *runtimecontracts.WorkflowContractBundle, listenAddr string, override llm.Runtime) error {
+	selection, err := llm.ValidateAgentExecutionDescriptor(options.LLMProfile, target.Actor)
+	if err != nil {
+		return err
+	}
+	if selection.Profile.ID == llmselection.BackendMock {
+		return nil // Mock admission retains its native, non-provider observation.
+	}
+	if override != nil {
+		if _, err := llm.RequireProviderContractForProfile(selection.Profile, override); err != nil {
+			return err
+		}
+		if _, ok := override.(llm.StartupAnswerObserver); !ok {
+			return fmt.Errorf("injected runtime does not provide a startup answer observer")
+		}
+	}
+	captured, credential, err := credentials.Capture(ctx, selection.Profile)
+	if err != nil {
+		return err
+	}
+	group, err := providerCheckHash([]string{selection.Profile.Provider, credential.Key, credential.Value})
+	if err != nil {
+		return err
+	}
+	model, err := llmselection.ResolveModel(selection.ModelProfile, llmselection.ModelResolution{Model: target.Actor.Model, Models: cfg.LLM.Models})
+	if err != nil {
+		return err
+	}
+	if selection.Profile.ID == llmselection.BackendClaudeCLI && *projection == nil && override == nil {
+		*projection, checks.image, err = prepareManagedProviderProjection(ctx, docker, bundle)
+		if err != nil {
+			return err
+		}
+	}
+	if selection.Profile.ID == llmselection.BackendClaudeCLI {
+		if err := checks.observeStartupPlan(ctx, cfg, source, options, target, selection.Profile, credential, captured, discovered, inspection, docker, *projection, listenAddr, override); err != nil {
+			return err
+		}
+	}
+	if _, answered := checks.keys[group]; !answered {
+		if err := observeManagedProviderAnswer(ctx, cfg, selection.Profile, model, captured, target, docker, *projection, checks.image, override); err != nil {
+			return err
+		}
+		checks.keys[group] = selection.Profile
+	}
+	key, err := providerCheckHash(target)
+	if err != nil {
+		return err
+	}
+	checks.targets[key] = struct{}{}
+	return nil
+}
+
+func prepareManagedProviderProjection(ctx context.Context, docker *workspace.DockerManager, bundle *runtimecontracts.WorkflowContractBundle) (*sourceartifact.RuntimeProjection, string, error) {
+	if docker == nil {
+		return nil, "", llm.ErrClaudeWorkspaceRequired
+	}
+	projection, err := sourceartifact.MaterializeRuntimeProjection(bundle.SourceArtifact)
+	if err != nil {
+		return nil, "", err
+	}
+	image, err := docker.InspectWorkspaceImage(ctx)
+	return projection, image, err
+}
+
+func (checks *ManagedProviderBootChecks) observeStartupPlan(ctx context.Context, cfg *config.Config, source semanticview.Source, options WorkflowContractValidationOptions, target ManagedProviderCheckTarget, profile llmselection.Profile, credential llm.ProviderCredential, captured llm.ProviderCredentialResolver, discovered map[string]mcp.DiscoveredTool, inspection workspace.Resolver, docker *workspace.DockerManager, projection *sourceartifact.RuntimeProjection, listenAddr string, override llm.Runtime) error {
+	contract, err := llm.ProviderContractForProfile(profile)
+	if err != nil {
+		return err
+	}
+	native := tools.NativeToolAdmissionOptions{ProviderContract: contract, Credentials: options.Credentials, Workspaces: inspection}
+	definitions, capabilities, err := tools.PrepareActorToolAdmission(ctx, source, target.Actor, discovered, native)
+	if err != nil {
+		return err
+	}
+	planned, err := llm.CompileManagedCapabilityAdmission(target.Actor, contract, definitions, capabilities)
+	if err != nil {
+		return err
+	}
+	// Re-read the delivered definition producer, not the compiled planned names.
+	delivered, _, err := tools.PrepareActorToolAdmission(ctx, source, target.Actor, discovered, native)
+	if err != nil {
+		return err
+	}
+	prompt, err := ManagedProviderStartupPrompt(target.Actor)
+	if err != nil {
+		return err
+	}
+	var response *llm.Response
+	if override != nil {
+		response, err = llm.ObserveInjectedStartupPlan(ctx, override, profile, target.Actor, prompt, planned)
+	} else {
+		response, err = observeManagedProviderBootTarget(ctx, cfg, captured, target, prompt, planned, delivered, docker, projection, checks.image, listenAddr)
+	}
+	if err != nil {
+		return fmt.Errorf("claude cli startup probe failed for agent %s: %w", target.Actor.ID, err)
+	}
+	key, err := providerStartupCheckKey(cfg, credential, checks.source, target, prompt, planned)
+	if err != nil {
+		return err
+	}
+	checks.starts[key], err = json.Marshal(response)
+	return err
+}
+
+func observeManagedProviderAnswer(ctx context.Context, cfg *config.Config, profile llmselection.Profile, model llmselection.ResolvedModel, captured llm.ProviderCredentialResolver, target ManagedProviderCheckTarget, docker *workspace.DockerManager, projection *sourceartifact.RuntimeProjection, image string, override llm.Runtime) (retErr error) {
+	if override != nil {
+		return llm.ObserveInjectedStartupAnswer(ctx, cfg, profile, model, override)
+	}
+	var resource *workspace.Target
+	if profile.ID == llmselection.BackendClaudeCLI {
+		resource, retErr = docker.PrepareClaudeStartupObservation(ctx, target.Actor, projection)
+		if retErr != nil {
+			return retErr
+		}
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			retErr = errors.Join(retErr, resource.Release(cleanup))
+		}()
+		if resource.StartupObservationImage() != image {
+			return fmt.Errorf("managed provider startup inputs changed")
+		}
+	}
+	return llm.ObserveProviderStartupAnswer(ctx, cfg, profile, model, captured, resource)
 }
 
 func observeManagedProviderBootTarget(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver, target ManagedProviderCheckTarget, prompt string, planned []managedcapabilities.PlannedTool, delivered []llm.ToolDefinition, docker *workspace.DockerManager, projection *sourceartifact.RuntimeProjection, image, listenAddr string) (_ *llm.Response, retErr error) {

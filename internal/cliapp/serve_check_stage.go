@@ -71,35 +71,7 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
-	if in.PackBases == nil {
-		return out, fmt.Errorf("invocation-selected platform pack generation is required for retained inspection")
-	}
-	var err error
-	out.SourceRoot, err = NormalizeSourceRoot(in.Paths.SourceRoot)
-	if err != nil {
-		return out, err
-	}
-	out.Bundle, out.reset, err = inspectServeCheckSource(ctx, in, out.SourceRoot)
-	if err != nil {
-		return out, err
-	}
-	if out.Bundle != nil {
-		out.Source, _, err = admitVerifySource(in.Config, out.Bundle)
-		if err != nil {
-			return out, err
-		}
-	}
-	var certificates [][][]byte
-	out.APIAuth, certificates, err = serveCheckHostInputs(in)
-	if err != nil {
-		return out, err
-	}
-	out.inputHash, err = serveCheckInputHash(in.Config, in.Paths, out.Bundle, out.APIAuth, certificates)
-	if err != nil {
-		return out, err
-	}
-	out.Options, err = verifyDeploymentWorkflowOptions(ctx, in.Config, out.Bundle)
-	if err != nil {
+	if err := out.prepare(ctx, in); err != nil {
 		return out, err
 	}
 	if out.Source != nil {
@@ -192,6 +164,38 @@ func InspectServeCheckStage(ctx context.Context, in ServeCheckStageRequest) (out
 	})
 	out.Validation.BootReport.Sort()
 	return out, ctx.Err()
+}
+
+func (out *ServeCheckStageResult) prepare(ctx context.Context, in ServeCheckStageRequest) error {
+	if in.PackBases == nil {
+		return fmt.Errorf("invocation-selected platform pack generation is required for retained inspection")
+	}
+	var err error
+	out.SourceRoot, err = NormalizeSourceRoot(in.Paths.SourceRoot)
+	if err != nil {
+		return err
+	}
+	out.Bundle, out.reset, err = inspectServeCheckSource(ctx, in, out.SourceRoot)
+	if err != nil {
+		return err
+	}
+	if out.Bundle != nil {
+		out.Source, _, err = admitVerifySource(in.Config, out.Bundle)
+		if err != nil {
+			return err
+		}
+	}
+	var certificates [][][]byte
+	out.APIAuth, certificates, err = serveCheckHostInputs(in)
+	if err != nil {
+		return err
+	}
+	out.inputHash, err = serveCheckInputHash(in.Config, in.Paths, out.Bundle, out.APIAuth, certificates)
+	if err != nil {
+		return err
+	}
+	out.Options, err = verifyDeploymentWorkflowOptions(ctx, in.Config, out.Bundle)
+	return err
 }
 
 func inspectServeScratch(ctx context.Context, in ServeCheckStageRequest, result *runtime.WorkflowContractValidationResult) {
