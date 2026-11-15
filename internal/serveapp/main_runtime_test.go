@@ -6335,7 +6335,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		t.Fatalf("Run code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
 	}
 	output := out.String()
-	for _, want := range []string{"[5/22] startup_ownership_lease", "workspace                  docker · agent \"native-bash-worker\" runs in a container", "Docker is not reachable", missingDocker + " info"} {
+	for _, want := range []string{"docker_daemon_observation", "Docker is not reachable", missingDocker + " info"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("serve output missing %q:\n%s", want, output)
 		}
@@ -7087,13 +7087,17 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		dsn, db, cleanup = testutil.StartEmptyPostgres(t)
 	}
 	t.Cleanup(cleanup)
+	installedServePostgresFixtures.Store(t.Name(), dsn)
+	t.Cleanup(func() { installedServePostgresFixtures.Delete(t.Name()) })
 	runtimePG, err := store.NewPostgresStore(dsn)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() { _ = storetest.DatabaseForTest(runtimePG).Close() })
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...), nil
+		owner := openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg, bootCheck...)
+		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
+		return owner, nil
 	}
 	if workspaceFactory != nil {
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, _ *sourceartifact.RuntimeProjection, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
@@ -7547,10 +7551,10 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 				t.Fatalf("Run code = %d, want 3\noutput:\n%s", code, out.String())
 			}
 			if verbose {
-				if !strings.Contains(out.String(), "http_listener_bind") || !strings.Contains(out.String(), "FAILED") {
+				if !strings.Contains(out.String(), "listener_availability") || !strings.Contains(out.String(), "FAILED") {
 					t.Fatalf("verbose serve output missing bind failure proof:\n%s", out.String())
 				}
-			} else if !strings.Contains(out.String(), "serve failed · http listener bind") {
+			} else if !strings.Contains(out.String(), "serve failed · local preflight") || !strings.Contains(out.String(), "listener_availability") {
 				t.Fatalf("concise serve output missing bind failure proof:\n%s", out.String())
 			}
 			if strings.Contains(out.String(), "ready                      ok") || strings.Contains(out.String(), "\n  ready in ") {
@@ -8069,6 +8073,9 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
 	if _, mocked := opts.TestLLMRuntime.(runtimellm.StartupAnswerObserver); mocked {
+		if strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE")) == "" {
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "mock-provider-credentials.json"))
+		}
 		store, err := cliapp.BuildProviderCredentialStore()
 		if err != nil {
 			t.Fatal(err)
@@ -8266,6 +8273,8 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 	}, "\n") + "\n"
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	configText = withTestProviderTriggerPlatformInventory(t, configText)
+	configText = withInstalledServePostgresConfig(t, configText, "")
+	configText = withServeFixtureStateDirectory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write serve runtime config: %v", err)
 	}
@@ -8468,6 +8477,8 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	configText = withInstalledServePostgresConfig(t, configText, backend)
+	configText = withServeFixtureStateDirectory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}

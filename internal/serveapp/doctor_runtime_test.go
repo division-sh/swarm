@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
 func setDoctorEmptyProviderSecrets(t *testing.T) {
@@ -34,6 +36,13 @@ func setDoctorProviderSecrets(t *testing.T, values map[string]string) {
 }
 
 func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testing.T) {
+	previous := buildStoresForServe
+	constructed := false
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, config *config.Config, checked ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
+		constructed = true
+		return previous(ctx, selection, config, checked...)
+	}
+	t.Cleanup(func() { buildStoresForServe = previous })
 	dockerBin := configureDoctorDockerStub(t)
 	setDoctorEmptyProviderSecrets(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
@@ -61,13 +70,16 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	if code == 0 {
 		t.Fatalf("Run unexpectedly succeeded\noutput:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "claude_cli preflight: failed") || !strings.Contains(out.String(), "missing_backend_credential") {
+	if !strings.Contains(out.String(), "provider_credential_admission") || !strings.Contains(out.String(), "provider_credential_missing") {
 		t.Fatalf("serve output missing shared local preflight failure:\n%s", out.String())
 	}
-	for _, want := range []string{"db_connection", "bundle_load", "workspace backend: docker"} {
+	for _, want := range []string{"admission validation failed", "startup execution not performed", "workspace_image_observation"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve output missing preflight ordering proof %q:\n%s", want, out.String())
 		}
+	}
+	if constructed {
+		t.Fatal("failed checks reached lasting store construction")
 	}
 }
 
