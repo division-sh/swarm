@@ -429,7 +429,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if !root {
 		inputType = "review/turn.started"
 	}
-	origin := eventtest.ExistingRunRootIngress(uuid.NewString(), inputType, "operator", "", json.RawMessage(`{}`), 0, run, events.EventEnvelope{}, request.OccurredAt)
+	origin := eventtest.ExistingRunRootIngress(uuid.NewString(), inputType, "operator", "", json.RawMessage(`{}`), 0, run, events.EnvelopeForTargetRoute(events.EventEnvelope{}, fixture.route), request.OccurredAt)
 	target, err := events.MustExistingEntityTarget(fixture.route).WithLife(fixture.life.Life)
 	if err != nil {
 		t.Fatal(err)
