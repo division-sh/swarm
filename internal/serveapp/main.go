@@ -895,6 +895,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	checks, err := cliapp.InspectServeCheckStage(ctx, checkInput)
 	if failure := errors.Join(err, checks.Failure()); failure != nil {
 		checks.Write(opts.Output, opts.ErrorOutput)
+		if code := presentServeCheckSourceRefusal(presenter, checks); code != 0 {
+			return code
+		}
 		presenter.fail(5, "local_preflight", failure)
 		if runtimestartuprecovery.IsDataIntegrityError(failure) {
 			return serveExitDataIntegrity
@@ -980,6 +983,26 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	scratchAuthority = nil // The common constructor now owns abort-or-joined-close.
 	publicListener = nil   // Listener ownership follows the admitted composition request.
 	return buildRuntimeComposition(ctx, composition)
+}
+
+func presentServeCheckSourceRefusal(presenter *serveLifecyclePresenter, checks cliapp.ServeCheckStageResult) int {
+	for _, check := range []string{"retained_source_integrity", "pinned_source_admission"} {
+		for _, observation := range checks.Validation.BootReport.Observations {
+			if observation.CheckID != check || observation.Cause == nil {
+				continue
+			}
+			name := "pinned_bundle_admission"
+			if check == "retained_source_integrity" {
+				name = "startup_recovery"
+			}
+			presenter.fail(5, name, observation.Cause)
+			if runtimestartuprecovery.IsDataIntegrityError(observation.Cause) {
+				return serveExitDataIntegrity
+			}
+			return 3
+		}
+	}
+	return 0
 }
 
 // runtimeCompositionRequest contains command-admitted construction facts. It is
