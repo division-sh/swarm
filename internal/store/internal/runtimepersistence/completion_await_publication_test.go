@@ -69,7 +69,6 @@ func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		for _, mode := range []string{"exact", "prefix", "same_run_other_request", "wrong_call", "non_emit", "wrong_frame", "late_reply_conflict", "duplicate_without_progress", "cancelled", "root_exact"} {
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
-				mode := mode
 				selected := backend.open(t).store.(liveAwaitProofStore)
 				fixture := newLiveAwaitProofFixture(t, selected, mode == "root_exact")
 				if mode == "root_exact" {
@@ -263,6 +262,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 		"schema.yaml":          "stages: []\n",
 		"review/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"review/schema.yaml":   "instance: request_id\nstages:\n  active: {}\ninputs: [review.created, turn.started]\noutputs: [await.request, await.reply]\n",
+		"review/state.yaml":    "request_id: text\n",
 		"review/events.yaml":   "review.created:\n  request_id: text\nturn.started:\nawait.request:\nawait.reply:\n",
 		"review/agents.yaml":   "reviewer:\n  model: regular\n  memory: true\n  intent: {inline: Request and retain the reply.}\n  subscriptions: [turn.started]\n",
 	}
@@ -270,7 +270,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 		documents = map[string]string{
 			"schema.yaml": "stages:\n  active: {}\ninputs: [turn.started]\noutputs: [await.request, await.reply]\n",
 			"events.yaml": "turn.started:\nawait.request:\nawait.reply:\n",
-			"agents.yaml": "reviewer:\n  model: regular\n  memory: false\n  intent: {inline: Request and retain the reply.}\n  subscriptions: [turn.started]\n",
+			"agents.yaml": "reviewer:\n  model: regular\n  intent: {inline: Request and retain the reply.}\n  subscriptions: [turn.started]\n",
 		}
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, documents)
