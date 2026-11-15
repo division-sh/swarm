@@ -9,12 +9,10 @@ import (
 )
 
 const (
-	flowMaterializationFailureFunction = "test_fail_event_delivery_after_flow_materialization"
-	flowMaterializationFailureTrigger  = "test_event_delivery_after_flow_materialization"
-	replayScopeFailureFunction         = "test_fail_replay_scope_after_delivery"
-	replayScopeFailureTrigger          = "test_replay_scope_after_delivery"
-	apiCompletionFailureFunction       = "test_fail_api_completion_after_publication"
-	apiCompletionFailureTrigger        = "test_api_completion_after_publication"
+	replayScopeFailureFunction   = "test_fail_replay_scope_after_delivery"
+	replayScopeFailureTrigger    = "test_replay_scope_after_delivery"
+	apiCompletionFailureFunction = "test_fail_api_completion_after_publication"
+	apiCompletionFailureTrigger  = "test_api_completion_after_publication"
 )
 
 type EventCorruptionClaim struct {
@@ -60,117 +58,6 @@ func RequireEventStoreCorruptionCategory(
 	default:
 		t.Fatalf("unknown event corruption error category %q", category)
 	}
-}
-
-// InstallPostgresEventDeliveryFailureAfterFlowMaterialization proves that a
-// named publish operation rolls back event, construction, and delivery
-// writes when its final delivery boundary fails. The trigger refuses to inject
-// the requested failure unless all required earlier lifecycle facts are visible
-// in the same transaction.
-func InstallPostgresEventDeliveryFailureAfterFlowMaterialization(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	claim EventCorruptionClaim,
-	flowTemplate string,
-) {
-	t.Helper()
-	if strings.TrimSpace(claim.Invariant) == "" || strings.TrimSpace(claim.Reason) == "" {
-		t.Fatal("event delivery failure injection requires an invariant and reason")
-	}
-	flowTemplate = strings.TrimSpace(flowTemplate)
-	if flowTemplate == "" {
-		t.Fatal("event delivery failure injection requires a flow template")
-	}
-	quotedTemplate := strings.ReplaceAll(flowTemplate, "'", "''")
-	functionSQL := fmt.Sprintf(`
-		CREATE FUNCTION %s() RETURNS trigger AS $$
-		DECLARE lifecycle_run UUID;
-		DECLARE lifecycle_instance TEXT;
-		BEGIN
-			SELECT run_id, instance_path INTO lifecycle_run, lifecycle_instance
-			FROM flow_instances
-			WHERE run_id = NEW.run_id AND flow_template = '%s'
-			ORDER BY created_at DESC, run_id DESC, instance_path DESC
-			LIMIT 1;
-			IF lifecycle_instance IS NULL THEN
-				RAISE EXCEPTION 'event delivery failure injection reached before flow instance materialization';
-			END IF;
-			IF NOT EXISTS (SELECT 1 FROM entity_state WHERE run_id = lifecycle_run AND flow_instance = lifecycle_instance) THEN
-				RAISE EXCEPTION 'event delivery failure injection reached before entity materialization';
-			END IF;
-			IF NOT EXISTS (
-				SELECT 1 FROM flow_instances fi
-				JOIN workflow_instance_initial_materializations m ON m.run_id = fi.run_id AND m.instance_path = fi.instance_path AND m.entity_id = fi.entity_id
-				JOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path
-				WHERE fi.run_id = lifecycle_run AND fi.instance_path = lifecycle_instance
-			) THEN
-				RAISE EXCEPTION 'event delivery failure injection reached before construction evidence';
-			END IF;
-			RAISE EXCEPTION 'injected delivery route persistence failure';
-		END;
-		$$ LANGUAGE plpgsql
-	`, flowMaterializationFailureFunction, quotedTemplate)
-	if _, err := db.ExecContext(ctx, functionSQL); err != nil {
-		t.Fatalf("install event delivery failure function for %s (%s): %v", claim.Invariant, claim.Reason, err)
-	}
-	triggerSQL := fmt.Sprintf(`
-		CREATE TRIGGER %s
-		BEFORE INSERT ON event_deliveries
-		FOR EACH ROW EXECUTE FUNCTION %s()
-	`, flowMaterializationFailureTrigger, flowMaterializationFailureFunction)
-	if _, err := db.ExecContext(ctx, triggerSQL); err != nil {
-		t.Fatalf("install event delivery failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+flowMaterializationFailureTrigger+" ON event_deliveries")
-		_, _ = db.ExecContext(context.Background(), "DROP FUNCTION IF EXISTS "+flowMaterializationFailureFunction+"()")
-	})
-}
-
-// InstallSQLiteEventDeliveryFailureAfterFlowMaterialization is the SQLite
-// counterpart to InstallPostgresEventDeliveryFailureAfterFlowMaterialization.
-func InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	claim EventCorruptionClaim,
-	flowTemplate string,
-) {
-	t.Helper()
-	if strings.TrimSpace(claim.Invariant) == "" || strings.TrimSpace(claim.Reason) == "" {
-		t.Fatal("event delivery failure injection requires an invariant and reason")
-	}
-	flowTemplate = strings.TrimSpace(flowTemplate)
-	if flowTemplate == "" {
-		t.Fatal("event delivery failure injection requires a flow template")
-	}
-	quotedTemplate := strings.ReplaceAll(flowTemplate, "'", "''")
-	triggerSQL := fmt.Sprintf(`
-		CREATE TRIGGER %s
-		BEFORE INSERT ON event_deliveries
-		BEGIN
-			SELECT CASE WHEN NOT EXISTS (
-				SELECT 1 FROM flow_instances WHERE run_id = NEW.run_id AND flow_template = '%s'
-			) THEN RAISE(ABORT, 'event delivery failure injection reached before flow instance materialization') END;
-			SELECT CASE WHEN NOT EXISTS (
-				SELECT 1 FROM entity_state es JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance WHERE fi.run_id = NEW.run_id AND fi.flow_template = '%s'
-			) THEN RAISE(ABORT, 'event delivery failure injection reached before entity materialization') END;
-			SELECT CASE WHEN NOT EXISTS (
-				SELECT 1 FROM flow_instances fi
-				JOIN workflow_instance_initial_materializations m ON m.run_id = fi.run_id AND m.instance_path = fi.instance_path AND m.entity_id = fi.entity_id
-				JOIN flow_instance_runtime_readiness r ON r.run_id = fi.run_id AND r.instance_path = fi.instance_path
-				WHERE fi.run_id = NEW.run_id AND fi.flow_template = '%s'
-			) THEN RAISE(ABORT, 'event delivery failure injection reached before construction evidence') END;
-			SELECT RAISE(ABORT, 'injected delivery route persistence failure');
-		END
-	`, flowMaterializationFailureTrigger, quotedTemplate, quotedTemplate, quotedTemplate)
-	if _, err := db.ExecContext(ctx, triggerSQL); err != nil {
-		t.Fatalf("install SQLite event delivery failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+flowMaterializationFailureTrigger)
-	})
 }
 
 func InstallPostgresReplayScopeFailureAfterDelivery(t testing.TB, ctx context.Context, db *sql.DB, claim EventCorruptionClaim, flowTemplate string) {

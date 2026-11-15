@@ -30,3 +30,12 @@ func RequireEventRowCount(t testing.TB, ctx context.Context, selected any, event
 		t.Fatalf("event fixture rows for %s = %d, want %d", eventID, got, want)
 	}
 }
+
+func InstallEventDeliveryFailureAfterFlowMaterialization(t testing.TB, ctx context.Context, selected any, claim testsql.EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	cleanup, err := private.InstallEventDeliveryFailureAfterFlowMaterializationForTest(ctx, selected, claim.Invariant, claim.Reason, flowTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+}
