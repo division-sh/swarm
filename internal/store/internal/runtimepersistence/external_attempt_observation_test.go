@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
@@ -59,12 +60,30 @@ func TestExternalAttemptStorageUsesOriginalReadOwnerAndFailsClosedBothStores(t *
 }
 
 func renameExternalAttemptObservationTable(ctx context.Context, selected any, restore bool) error {
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		statement := `ALTER TABLE runtime_external_effect_attempts RENAME TO unavailable_external_attempt_observation`
-		if restore {
-			statement = `ALTER TABLE unavailable_external_attempt_observation RENAME TO runtime_external_effect_attempts`
+	return func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(selected)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			statement := `ALTER TABLE runtime_external_effect_attempts RENAME TO unavailable_external_attempt_observation`
+			if restore {
+				statement = `ALTER TABLE unavailable_external_attempt_observation RENAME TO runtime_external_effect_attempts`
+			}
+			_, err := tx.ExecContext(ctx, statement)
+			return err
 		}
-		_, err := tx.ExecContext(ctx, statement)
-		return err
-	})
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}()
 }
