@@ -54,6 +54,15 @@ func decodeRunForkHistoricalReplyRecord(snapshot *runForkRevisionSnapshot, conte
 	if err := decodeRunForkHistoricalReplyOrigin(fields, &record); err != nil {
 		return replycontext.Record{}, err
 	}
+	if binding, exists := fields["await_binding"]; exists && binding.Kind() != semanticvalue.KindNull {
+		raw, err := canonicaljson.Encode(binding)
+		if err != nil {
+			return replycontext.Record{}, err
+		}
+		if err := record.DecodeAwaitBinding(raw); err != nil {
+			return replycontext.Record{}, err
+		}
+	}
 	if err := decodeRunForkHistoricalReplyTimes(fields, &record); err != nil {
 		return replycontext.Record{}, err
 	}
@@ -107,7 +116,7 @@ func decodeRunForkHistoricalReplyStringFields(fields map[string]semanticvalue.Va
 	}
 	for name := range fields {
 		switch name {
-		case "origin_route", "created_at", "updated_at", "terminal_at":
+		case "origin_route", "created_at", "updated_at", "terminal_at", "await_binding":
 		default:
 			if _, known := stringFields[name]; !known {
 				return replycontext.Record{}, fmt.Errorf("undeclared field %q", name)

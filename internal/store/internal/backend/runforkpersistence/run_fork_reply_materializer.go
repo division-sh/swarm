@@ -129,6 +129,9 @@ func validateRunForkReplyProjection(plan runfork.RunForkPlan, childRunID string,
 	if err := validateRunForkReplyCanonicalRecord(source); err != nil {
 		return err
 	}
+	if source.Await != nil {
+		return fmt.Errorf("fork execution cannot transfer an original invocation's await binding")
+	}
 	_, admitted := plan.HistoricalEventIDs(plan.ForkPoint.Revision)
 	if !admitted {
 		return fmt.Errorf("fork reply projection requires admitted fixed-cut history")

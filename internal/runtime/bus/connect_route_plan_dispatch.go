@@ -581,6 +581,12 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		detail["accepted_reply_event_id"] = record.AcceptedReplyEventID
 		return nil, nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil
 	}
+	if record.Await != nil {
+		if claim == nil {
+			return nil, nil, nil, 0, nil, fmt.Errorf("await reply requires its original claim, not fork execution")
+		}
+		return nil, nil, claim, 0, detail, nil
+	}
 	returnEvent := string(plan.ReceiverLocalEvent())
 	routes := make([]runtimepinrouting.ConnectDeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {

@@ -74,14 +74,17 @@ func TestReplyAwaitBindingClosedEncoding(t *testing.T) {
 	}
 	raw := encoded.(string)
 	for name, hostile := range map[string]string{
-		"null":          "null",
-		"unknown":       strings.Replace(raw, `"version":`, `"unknown":1,"version":`, 1),
-		"case":          strings.Replace(raw, `"call_index":`, `"Call_Index":`, 1),
-		"duplicate":     strings.Replace(raw, `"call_index":0`, `"call_index":0,"call_index":0`, 1),
-		"missing_zero":  strings.Replace(raw, `"call_index":0,`, "", 1),
-		"trailing":      raw + `{}`,
-		"prefix_null":   strings.Replace(raw, `"completed_results":"[]"`, `"completed_results":"null"`, 1),
-		"prefix_object": strings.Replace(raw, `"completed_results":"[]"`, `"completed_results":"{}"`, 1),
+		"null":             "null",
+		"unknown":          strings.Replace(raw, `"version":`, `"unknown":1,"version":`, 1),
+		"case":             strings.Replace(raw, `"call_index":`, `"Call_Index":`, 1),
+		"duplicate":        strings.Replace(raw, `"call_index":0`, `"call_index":0,"call_index":0`, 1),
+		"missing_zero":     strings.Replace(raw, `"call_index":0,`, "", 1),
+		"null_index":       strings.Replace(raw, `"call_index":0`, `"call_index":null`, 1),
+		"string_index":     strings.Replace(raw, `"call_index":0`, `"call_index":"0"`, 1),
+		"fractional_index": strings.Replace(raw, `"call_index":0`, `"call_index":0.5`, 1),
+		"trailing":         raw + `{}`,
+		"prefix_null":      strings.Replace(raw, `"completed_results":"[]"`, `"completed_results":"null"`, 1),
+		"prefix_object":    strings.Replace(raw, `"completed_results":"[]"`, `"completed_results":"{}"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := original.Normalized()

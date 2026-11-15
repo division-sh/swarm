@@ -5,17 +5,34 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 )
 
 // CompletionAwaitCall validates a serial prefix against the immutable response;
 // it does not execute a call or interpret an authored reply declaration.
-func CompletionAwaitCall(payload json.RawMessage, adapter string, index int, prefix json.RawMessage) (string, string, error) {
+func CompletionAwaitCall(payload json.RawMessage, adapter string, index int, prefix json.RawMessage, operationID, requestID string, surface managedcapabilities.Surface) (string, string, error) {
 	continuation, err := completionContinuationForPayload(payload, adapter)
 	if err != nil {
 		return "", "", err
 	}
 	if continuation == nil || continuation.Projection.FrameID == "" || index < 0 || index >= len(continuation.Response.ToolCalls) {
 		return "", "", fmt.Errorf("await requires an exact pending completion call and frame")
+	}
+	candidates, err := ReadCompletionOutputCandidates(payload, adapter, operationID, surface)
+	if err != nil {
+		return "", "", err
+	}
+	call := continuation.Response.ToolCalls[index]
+	output, err := continuation.Response.ToolOutputAuthority.eventIdentity(completionToolCallIdentity(continuation.Projection.TurnCount, index, call))
+	if err != nil {
+		return "", "", err
+	}
+	callableEmit := false
+	for _, candidate := range candidates {
+		callableEmit = callableEmit || (candidate.EventID == output.EventID() && candidate.ToolName == call.Name)
+	}
+	if !callableEmit || output.EventID() != requestID {
+		return "", "", fmt.Errorf("await request is not this exact callable emit's output")
 	}
 	if _, err := canonicaljson.Decode(prefix); err != nil {
 		return "", "", err

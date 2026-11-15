@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -328,6 +329,22 @@ func (s *EventPostgresOwner) createReplyContextTx(ctx context.Context, attempt *
 
 func (s *EventSQLiteOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
 	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, attempt, record)
+}
+
+func (s *EventPostgresOwner) completionAwaitReplyTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record, command runtimeeffects.CompletionAwaitPublication, existing bool) error {
+	return s.ReplyPostgresOwner.CompletionAwaitWithinTransaction(ctx, attempt, record, command, existing)
+}
+
+func (s *EventSQLiteOwner) completionAwaitReplyTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record, command runtimeeffects.CompletionAwaitPublication, existing bool) error {
+	return s.ReplySQLiteOwner.CompletionAwaitWithinTransaction(ctx, attempt, record, command, existing)
+}
+
+func (s *EventPostgresOwner) prepareCompletionAwaitTx(ctx context.Context, mutation *mutationprotocol.Attempt, attempt runtimeeffects.Attempt) error {
+	return s.ReplyPostgresOwner.PrepareCompletionAwaitTx(ctx, mutation, attempt)
+}
+
+func (s *EventSQLiteOwner) prepareCompletionAwaitTx(ctx context.Context, mutation *mutationprotocol.Attempt, attempt runtimeeffects.Attempt) error {
+	return s.ReplySQLiteOwner.PrepareCompletionAwaitTx(ctx, mutation, attempt)
 }
 
 func (s *EventPostgresOwner) requireReplyContextContinuationTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
