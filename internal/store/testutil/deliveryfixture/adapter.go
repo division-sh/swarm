@@ -3,13 +3,7 @@
 // consumes the typed deliverylifecycle.Store surface instead.
 package deliveryfixture
 
-import (
-	"context"
-	"database/sql"
-
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-)
+import deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 
 type Adapter struct {
 	*deliveryadapter.Adapter
@@ -28,9 +22,4 @@ func NewAdapter(dialect Dialect) (*Adapter, error) {
 		return nil, err
 	}
 	return &Adapter{Adapter: owner}, nil
-}
-
-// Observation is read-only and can use the caller's transaction directly.
-func (a *Adapter) ObserveContinuationInTransaction(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority, deliveryID string) (runtimedelivery.ContinuationObservation, error) {
-	return a.Adapter.ObserveContinuation(ctx, tx, authority, deliveryID)
 }

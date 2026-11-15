@@ -893,7 +893,7 @@ func publishClaudeAttemptProofEvent(t *testing.T, backend claudeAttemptProofBack
 	if err != nil {
 		t.Fatal(err)
 	}
-	committed := storetest.CommitNativeDeliveryPublication(t, backend.context(), backend.fixture,
+	committed := storetest.CommitNativeDeliveryPublication(t, backend.context(), backend.fixture, backend.fixture.PipelineObligations(),
 		storetest.AdmitNativeDeliveryEvent(t, evt),
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}, authority, nil)
 	if err := eventBus.AcceptCommittedDeliveryHandoffs(committed.DeliveryHandoffs); err != nil {

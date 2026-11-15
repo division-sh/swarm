@@ -8,8 +8,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -24,7 +26,10 @@ type runtimeLogSelectedForTest interface {
 	runlifecycle.OperationOwner
 	runlifecycle.CandidateStore
 	sourceartifactfixture.Writer
-	storetest.DeliveryPublicationFixtureStore
+	storetest.RunFixtureStore
+	runtimepkg.AuthorActivityCatalogRegistrar
+	runtimebus.CommitPublicationOwner
+	PipelineObligations() pipelineobligation.Store
 }
 
 func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartifact.AdmittedSourceArtifact, runtimeIDs ...string) runtimepkg.RuntimeLogNativeFixtureForTest {
@@ -100,7 +105,7 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 			storetest.CommitSemanticEvent(t, ctx, selected, event)
 		},
 		PublishDelivery: func(ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) events.Event {
-			storetest.CommitNativeDeliveryPublication(t, ctx, selected, storetest.AdmitNativeDeliveryEvent(t, event), routes, authority, nil)
+			storetest.CommitNativeDeliveryPublication(t, ctx, selected, selected.PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, event), routes, authority, nil)
 			return storetest.LoadCanonicalEventRecord(t, ctx, selected, event.ID())
 		},
 		Physical: func(ctx context.Context) runtimepkg.RuntimeLogPhysicalForTest {

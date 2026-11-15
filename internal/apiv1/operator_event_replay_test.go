@@ -467,7 +467,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatal(err)
 				}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-				storetest.CommitNativeDeliveryPublication(t, ctx, f.store.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, original), originalRoutes, authority, nil)
+				storetest.CommitNativeDeliveryPublication(t, ctx, f.store, f.store.(apiTestDurableWorkflowRoles).PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, original), originalRoutes, authority, nil)
 				frameStore, ok := f.store.(storetest.ManagedAgentTurnFixtureStore)
 				if !ok {
 					t.Fatalf("%T does not support managed-turn replay proof", f.store)
@@ -678,7 +678,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatal(err)
 			}
 			storetest.CommitSemanticEvent(t, ctx, f.store, parent)
-			storetest.CommitNativeDeliveryPublication(t, ctx, f.store.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, original), routes, authority, nil)
+			storetest.CommitNativeDeliveryPublication(t, ctx, f.store, f.store.(apiTestDurableWorkflowRoles).PipelineObligations(), storetest.AdmitNativeDeliveryEvent(t, original), routes, authority, nil)
 
 			firstClaim, err := storetest.ClaimDelivery(ctx, f.store, original, routes[0])
 			if err != nil {

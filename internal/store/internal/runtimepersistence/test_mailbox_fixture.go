@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 )
+
+type HumanTaskRequesterRestoration = decisionpersistence.HumanTaskRequesterRestoration
 
 // CorruptHumanTaskRequesterForTest captures, installs and witnesses one exact
 // nullable coordinate in the selected writer. Restoration uses the same owner.
-func CorruptHumanTaskRequesterForTest(ctx context.Context, selected any, runID, cardID, coordinate, hostile string) (func(context.Context) error, error) {
+func CorruptHumanTaskRequesterForTest(ctx context.Context, selected any, runID, cardID, coordinate, hostile string) (*HumanTaskRequesterRestoration, error) {
 	switch coordinate {
 	case "requester_flow_id", "requester_flow_instance", "requester_entity_id":
 	default:
