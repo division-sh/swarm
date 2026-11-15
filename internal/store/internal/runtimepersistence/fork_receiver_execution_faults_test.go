@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -41,23 +42,59 @@ func TestForkReceiverHeaderDoneFaultExactAndRollbackBothStores(t *testing.T) {
 				case "multiple":
 					// The admitted schema forbids duplicate headers. A deliberately
 					// unconstrained physical copy tests the writer's own cardinality fence.
-					if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-						if _, err := tx.ExecContext(ctx, `ALTER TABLE flow_instances RENAME TO retained_fault_headers`); err != nil {
+					if err := func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(fixture.store)
+						write := func(ctx context.Context, tx *sql.Tx) error {
+							if _, err := tx.ExecContext(ctx, `ALTER TABLE flow_instances RENAME TO retained_fault_headers`); err != nil {
+								return err
+							}
+							_, err := tx.ExecContext(ctx, `CREATE TABLE flow_instances AS SELECT * FROM retained_fault_headers`)
 							return err
 						}
-						_, err := tx.ExecContext(ctx, `CREATE TABLE flow_instances AS SELECT * FROM retained_fault_headers`)
-						return err
-					}); err != nil {
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+						default:
+							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+						}
+					}(); err != nil {
 						t.Fatal(err)
 					}
 					t.Cleanup(func() {
-						if err := runUnrevisionedEventFixtureTransactionForTest(context.WithoutCancel(ctx), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-							if _, err := tx.ExecContext(ctx, `DROP TABLE flow_instances`); err != nil {
+						if err := func() error {
+							fixtureContext := context.WithoutCancel(ctx)
+							fixtureOwner := any(fixture.store)
+							write := func(ctx context.Context, tx *sql.Tx) error {
+								if _, err := tx.ExecContext(ctx, `DROP TABLE flow_instances`); err != nil {
+									return err
+								}
+								_, err := tx.ExecContext(ctx, `ALTER TABLE retained_fault_headers RENAME TO flow_instances`)
 								return err
 							}
-							_, err := tx.ExecContext(ctx, `ALTER TABLE retained_fault_headers RENAME TO flow_instances`)
-							return err
-						}); err != nil {
+							switch owner := fixtureOwner.(type) {
+							case *PostgresStore:
+								if owner == nil || owner.backend == nil {
+									return fmt.Errorf("postgres event fixture store is required")
+								}
+								return owner.backend.RunTransaction(fixtureContext, write)
+							case *SQLiteRuntimeStore:
+								if owner == nil || owner.backend == nil {
+									return fmt.Errorf("sqlite event fixture store is required")
+								}
+								return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+							default:
+								return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+							}
+						}(); err != nil {
 							t.Error(err)
 						}
 					})
@@ -183,63 +220,135 @@ func prepareExactClaimFaultRefusal(t *testing.T, ctx context.Context, fixture au
 			return err
 		}
 	}
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-		switch name {
-		case "wrong_run":
-			_, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET run_id=$1,event_id=$2 WHERE delivery_id=$3`, sibling.Claim.RunID(), foreignEventID, claimed.Claim.DeliveryID())
-			return err
-		case "wrong_version":
-			if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET claim_version=claim_version+1,current_attempt_version=current_attempt_version+1 WHERE delivery_id=$1`, claimed.Claim.DeliveryID()); err != nil {
+	return func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(fixture.store)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			switch name {
+			case "wrong_run":
+				_, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET run_id=$1,event_id=$2 WHERE delivery_id=$3`, sibling.Claim.RunID(), foreignEventID, claimed.Claim.DeliveryID())
+				return err
+			case "wrong_version":
+				if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET claim_version=claim_version+1,current_attempt_version=current_attempt_version+1 WHERE delivery_id=$1`, claimed.Claim.DeliveryID()); err != nil {
+					return err
+				}
+				_, err := tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET claim_version=claim_version+1 WHERE delivery_id=$1`, claimed.Claim.DeliveryID())
+				return err
+			case "wrong_token":
+				_, err := tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET claim_token=$1 WHERE delivery_id=$2`, uuid.NewString(), claimed.Claim.DeliveryID())
 				return err
 			}
-			_, err := tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET claim_version=claim_version+1 WHERE delivery_id=$1`, claimed.Claim.DeliveryID())
-			return err
-		case "wrong_token":
-			_, err := tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET claim_token=$1 WHERE delivery_id=$2`, uuid.NewString(), claimed.Claim.DeliveryID())
-			return err
+			return errors.New("unknown exact-claim fault control")
 		}
-		return errors.New("unknown exact-claim fault control")
-	})
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}()
 }
 
 func prepareExactClaimSecondStatementFault(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, claim deliverylifecycle.Claim, name string) error {
 	t.Helper()
 	// Retain the constraint-backed ledger intact. This isolated physical copy
 	// challenges the fault writer independently of normal schema admission.
-	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE event_delivery_attempts RENAME TO retained_fault_attempts`); err != nil {
+	if err := func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(fixture.store)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE event_delivery_attempts RENAME TO retained_fault_attempts`); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `CREATE TABLE event_delivery_attempts AS SELECT * FROM retained_fault_attempts`)
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `CREATE TABLE event_delivery_attempts AS SELECT * FROM retained_fault_attempts`)
-		return err
-	}); err != nil {
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}(); err != nil {
 		return err
 	}
 	t.Cleanup(func() {
-		if err := runUnrevisionedEventFixtureTransactionForTest(context.WithoutCancel(ctx), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, `DROP TABLE event_delivery_attempts`); err != nil {
+		if err := func() error {
+			fixtureContext := context.WithoutCancel(ctx)
+			fixtureOwner := any(fixture.store)
+			write := func(ctx context.Context, tx *sql.Tx) error {
+				if _, err := tx.ExecContext(ctx, `DROP TABLE event_delivery_attempts`); err != nil {
+					return err
+				}
+				_, err := tx.ExecContext(ctx, `ALTER TABLE retained_fault_attempts RENAME TO event_delivery_attempts`)
 				return err
 			}
-			_, err := tx.ExecContext(ctx, `ALTER TABLE retained_fault_attempts RENAME TO event_delivery_attempts`)
-			return err
-		}); err != nil {
+			switch owner := fixtureOwner.(type) {
+			case *PostgresStore:
+				if owner == nil || owner.backend == nil {
+					return fmt.Errorf("postgres event fixture store is required")
+				}
+				return owner.backend.RunTransaction(fixtureContext, write)
+			case *SQLiteRuntimeStore:
+				if owner == nil || owner.backend == nil {
+					return fmt.Errorf("sqlite event fixture store is required")
+				}
+				return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+			default:
+				return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+			}
+		}(); err != nil {
 			t.Error(err)
 		}
 	})
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		switch name {
-		case "missing_attempt":
-			_, err = tx.ExecContext(ctx, `DELETE FROM event_delivery_attempts WHERE delivery_id=$1`, claim.DeliveryID())
-		case "closed_second_row":
-			_, err = tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET open_marker=FALSE WHERE delivery_id=$1`, claim.DeliveryID())
-		case "multiple_attempts":
-			_, err = tx.ExecContext(ctx, `INSERT INTO event_delivery_attempts SELECT * FROM retained_fault_attempts WHERE delivery_id=$1`, claim.DeliveryID())
-		case "second_statement_error":
-			_, err = tx.ExecContext(ctx, `ALTER TABLE event_delivery_attempts RENAME COLUMN lease_expires_at TO unavailable_expiry`)
+	return func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(fixture.store)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			switch name {
+			case "missing_attempt":
+				_, err = tx.ExecContext(ctx, `DELETE FROM event_delivery_attempts WHERE delivery_id=$1`, claim.DeliveryID())
+			case "closed_second_row":
+				_, err = tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET open_marker=FALSE WHERE delivery_id=$1`, claim.DeliveryID())
+			case "multiple_attempts":
+				_, err = tx.ExecContext(ctx, `INSERT INTO event_delivery_attempts SELECT * FROM retained_fault_attempts WHERE delivery_id=$1`, claim.DeliveryID())
+			case "second_statement_error":
+				_, err = tx.ExecContext(ctx, `ALTER TABLE event_delivery_attempts RENAME COLUMN lease_expires_at TO unavailable_expiry`)
+			}
+			return err
 		}
-		return err
-	})
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}()
 }
 
 func TestForkReceiverFaultsRefuseInvalidCancelledAndClosedOwnersBothStores(t *testing.T) {

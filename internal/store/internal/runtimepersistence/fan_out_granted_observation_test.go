@@ -104,28 +104,46 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 			// Hold the canonical mutation fence. Runtime inspection, global
 			// readiness and evaluation must remain reads, not wait behind it.
 			rolledBack := errors.New("release held observation fence by rollback")
-			err = runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(txctx context.Context, tx *sql.Tx) error {
-				if err := generationauthority.FenceMutation(txctx, tx, !postgres); err != nil {
-					return err
+			err = func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(selected)
+				write := func(txctx context.Context, tx *sql.Tx) error {
+					if err := generationauthority.FenceMutation(txctx, tx, !postgres); err != nil {
+						return err
+					}
+					assertReason("claim_in_flight", false)
+					readCtx, stop := context.WithTimeout(ctx, time.Second)
+					input, err := turn.owner.LoadFanOutEvaluation(readCtx, claim)
+					stop()
+					if err != nil || len(input.Items) != 32 {
+						t.Fatalf("evaluation acquired mutation fence: items=%d err=%v", len(input.Items), err)
+					}
+					obligations := selected.(interface {
+						PipelineObligations() pipelineobligation.Store
+					}).PipelineObligations()
+					readCtx, stop = context.WithTimeout(ctx, time.Second)
+					_, err = obligations.GlobalWorkPresence(readCtx)
+					stop()
+					if err != nil {
+						t.Fatalf("global work acquired mutation fence: %v", err)
+					}
+					return rolledBack
 				}
-				assertReason("claim_in_flight", false)
-				readCtx, stop := context.WithTimeout(ctx, time.Second)
-				input, err := turn.owner.LoadFanOutEvaluation(readCtx, claim)
-				stop()
-				if err != nil || len(input.Items) != 32 {
-					t.Fatalf("evaluation acquired mutation fence: items=%d err=%v", len(input.Items), err)
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
 				}
-				obligations := selected.(interface {
-					PipelineObligations() pipelineobligation.Store
-				}).PipelineObligations()
-				readCtx, stop = context.WithTimeout(ctx, time.Second)
-				_, err = obligations.GlobalWorkPresence(readCtx)
-				stop()
-				if err != nil {
-					t.Fatalf("global work acquired mutation fence: %v", err)
-				}
-				return rolledBack
-			})
+			}()
 			if !errors.Is(err, rolledBack) {
 				t.Fatalf("observation fence rollback: %v", err)
 			}
@@ -178,32 +196,50 @@ func TestFanOutGrantedSelectorObservationBypassesMutationFenceBothStores(t *test
 			}
 			t.Cleanup(registration.Close)
 			rolledBack := errors.New("release held selector fence by rollback")
-			err = runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(txctx context.Context, tx *sql.Tx) error {
-				if err := generationauthority.FenceMutation(txctx, tx, !postgres); err != nil {
-					return err
-				}
-				scanned := make(chan error, 1)
-				registration.SetTestScanObserver(func(_ startupownership.FanOutCandidate, found bool, err error) {
-					if found {
-						err = fmt.Errorf("closed intent became a serving candidate")
+			err = func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(selected)
+				write := func(txctx context.Context, tx *sql.Tx) error {
+					if err := generationauthority.FenceMutation(txctx, tx, !postgres); err != nil {
+						return err
 					}
+					scanned := make(chan error, 1)
+					registration.SetTestScanObserver(func(_ startupownership.FanOutCandidate, found bool, err error) {
+						if found {
+							err = fmt.Errorf("closed intent became a serving candidate")
+						}
+						select {
+						case scanned <- err:
+						default:
+						}
+					})
+					registration.Wake()
 					select {
-					case scanned <- err:
-					default:
+					case err := <-scanned:
+						if err != nil {
+							t.Fatal(err)
+						}
+					case <-time.After(time.Second):
+						t.Fatal("candidate observation waited behind the mutation fence")
 					}
-				})
-				registration.Wake()
-				select {
-				case err := <-scanned:
-					if err != nil {
-						t.Fatal(err)
-					}
-				case <-time.After(time.Second):
-					t.Fatal("candidate observation waited behind the mutation fence")
+					assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
+					return rolledBack
 				}
-				assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
-				return rolledBack
-			})
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}()
 			if !errors.Is(err, rolledBack) {
 				t.Fatalf("selector fence rollback: %v", err)
 			}
