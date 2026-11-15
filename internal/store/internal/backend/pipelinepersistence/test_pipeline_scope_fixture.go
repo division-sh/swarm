@@ -10,6 +10,16 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
+func (s *PipelinePostgresOwner) RemoveCommittedReplayScopeEvidenceForTest(ctx context.Context, eventID string) error {
+	_, err := s.backend.ExecContext(ctx, `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID)
+	return err
+}
+
+func (s *PipelineSQLiteOwner) RemoveCommittedReplayScopeEvidenceForTest(ctx context.Context, eventID string) error {
+	_, err := s.backend.ExecContext(ctx, `DELETE FROM committed_replay_scopes WHERE event_id = ?`, eventID)
+	return err
+}
+
 func (s *PipelinePostgresOwner) ReadCommittedPipelineScopeForTest(ctx context.Context, eventID string) (runtimepipelineobligation.CommittedScope, error) {
 	var scope runtimepipelineobligation.CommittedScope
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {

@@ -56,3 +56,16 @@ func CountExactEventForTest(ctx context.Context, selected any, eventID string) (
 	}
 	return 0, nil
 }
+
+func InstallEventDeliveryFailureAfterFlowMaterializationForTest(ctx context.Context, selected any, invariant, reason, flowTemplate string) (func(), error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.deliveryPostgresOwner.InstallEventDeliveryFailureAfterFlowMaterializationForTest(ctx, invariant, reason, flowTemplate)
+	case *SQLiteRuntimeStore:
+		return owner.deliverySQLiteOwner.InstallEventDeliveryFailureAfterFlowMaterializationForTest(ctx, invariant, reason, flowTemplate)
+	}
+	return nil, nil
+}

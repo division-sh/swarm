@@ -9,6 +9,19 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
+func RemoveCommittedReplayScopeEvidenceForTest(ctx context.Context, selected any, eventID string) error {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.pipelinePostgresOwner.RemoveCommittedReplayScopeEvidenceForTest(ctx, eventID)
+	case *SQLiteRuntimeStore:
+		return owner.pipelineSQLiteOwner.RemoveCommittedReplayScopeEvidenceForTest(ctx, eventID)
+	}
+	return nil
+}
+
 type ExactPipelineReceiptOutcomeReason = pipelinepersistence.ExactPipelineReceiptOutcomeReason
 
 func ReadExactFanOutBarrierForTest(ctx context.Context, selected any, key fanoutobligation.IntentKey) (fanoutbarrier.Barrier, error) {
