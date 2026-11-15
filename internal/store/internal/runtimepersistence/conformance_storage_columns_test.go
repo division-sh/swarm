@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -64,17 +65,53 @@ func TestConformanceStorageColumnsDetectMissingCanonicalColumnsBothStores(t *tes
 			t.Run(backend.name+"/"+item.table, func(t *testing.T) {
 				fixture, ctx := backend.open(t), context.Background()
 				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
-				if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					_, err := tx.ExecContext(ctx, `ALTER TABLE `+item.table+` RENAME COLUMN `+item.column+` TO unavailable_conformance_column`)
-					return err
-				}); err != nil {
+				if err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(ctx, `ALTER TABLE `+item.table+` RENAME COLUMN `+item.column+` TO unavailable_conformance_column`)
+						return err
+					}
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				defer func() {
-					if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-						_, err := tx.ExecContext(ctx, `ALTER TABLE `+item.table+` RENAME COLUMN unavailable_conformance_column TO `+item.column)
-						return err
-					}); err != nil {
+					if err := func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(fixture.store)
+						write := func(ctx context.Context, tx *sql.Tx) error {
+							_, err := tx.ExecContext(ctx, `ALTER TABLE `+item.table+` RENAME COLUMN unavailable_conformance_column TO `+item.column)
+							return err
+						}
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+						default:
+							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+						}
+					}(); err != nil {
 						t.Error(err)
 					}
 				}()
@@ -98,39 +135,75 @@ func TestConformanceStorageColumnsIgnoreSiblingSchemaBothStores(t *testing.T) {
 				// read pool connection, separate from the retained possession.
 				fixture.db.SetMaxOpenConns(1)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_turns RENAME COLUMN turn_blocks TO unavailable_conformance_blocks`); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_turns RENAME COLUMN turn_blocks TO unavailable_conformance_blocks`); err != nil {
+						return err
+					}
+					if backend.name == "sqlite" {
+						_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE agent_turns(turn_id TEXT, turn_blocks TEXT)`)
+						return err
+					}
+					if _, err := tx.ExecContext(ctx, `CREATE SCHEMA sibling_conformance`); err != nil {
+						return err
+					}
+					_, err := tx.ExecContext(ctx, `CREATE TABLE sibling_conformance.agent_turns(turn_id TEXT, turn_blocks TEXT)`)
 					return err
 				}
-				if backend.name == "sqlite" {
-					_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE agent_turns(turn_id TEXT, turn_blocks TEXT)`)
-					return err
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
 				}
-				if _, err := tx.ExecContext(ctx, `CREATE SCHEMA sibling_conformance`); err != nil {
-					return err
-				}
-				_, err := tx.ExecContext(ctx, `CREATE TABLE sibling_conformance.agent_turns(turn_id TEXT, turn_blocks TEXT)`)
-				return err
-			}); err != nil {
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			defer func() {
-				if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					if backend.name == "sqlite" {
-						if _, err := tx.ExecContext(ctx, `DROP TABLE temp.agent_turns`); err != nil {
-							return err
+				if err := func() error {
+					fixtureContext := ctx
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						if backend.name == "sqlite" {
+							if _, err := tx.ExecContext(ctx, `DROP TABLE temp.agent_turns`); err != nil {
+								return err
+							}
+						} else {
+							if _, err := tx.ExecContext(ctx, `DROP TABLE sibling_conformance.agent_turns`); err != nil {
+								return err
+							}
+							if _, err := tx.ExecContext(ctx, `DROP SCHEMA sibling_conformance`); err != nil {
+								return err
+							}
 						}
-					} else {
-						if _, err := tx.ExecContext(ctx, `DROP TABLE sibling_conformance.agent_turns`); err != nil {
-							return err
-						}
-						if _, err := tx.ExecContext(ctx, `DROP SCHEMA sibling_conformance`); err != nil {
-							return err
-						}
+						_, err := tx.ExecContext(ctx, `ALTER TABLE agent_turns RENAME COLUMN unavailable_conformance_blocks TO turn_blocks`)
+						return err
 					}
-					_, err := tx.ExecContext(ctx, `ALTER TABLE agent_turns RENAME COLUMN unavailable_conformance_blocks TO turn_blocks`)
-					return err
-				}); err != nil {
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}(); err != nil {
 					t.Error(err)
 				}
 			}()

@@ -58,14 +58,32 @@ func TestReceiverJoinedInventoryPreservesExactPhysicalOracleBothStores(t *testin
 			}
 			// Deliberately duplicate one physical header in an independent view.
 			// The reader must preserve the join's multiplicity, not hide it.
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				if _, err := tx.ExecContext(ctx, `ALTER TABLE flow_instances RENAME TO retained_inventory_headers`); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					if _, err := tx.ExecContext(ctx, `ALTER TABLE flow_instances RENAME TO retained_inventory_headers`); err != nil {
+						return err
+					}
+					_, err := tx.ExecContext(ctx, `CREATE VIEW flow_instances AS SELECT * FROM retained_inventory_headers
+					UNION ALL SELECT * FROM retained_inventory_headers WHERE instance_path='inventory/active'`)
 					return err
 				}
-				_, err := tx.ExecContext(ctx, `CREATE VIEW flow_instances AS SELECT * FROM retained_inventory_headers
-					UNION ALL SELECT * FROM retained_inventory_headers WHERE instance_path='inventory/active'`)
-				return err
-			}); err != nil {
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			restored := false
@@ -73,13 +91,31 @@ func TestReceiverJoinedInventoryPreservesExactPhysicalOracleBothStores(t *testin
 				if restored {
 					return nil
 				}
-				err := runUnrevisionedEventFixtureTransactionForTest(context.WithoutCancel(ctx), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					if _, err := tx.ExecContext(ctx, `DROP VIEW flow_instances`); err != nil {
+				err := func() error {
+					fixtureContext := context.WithoutCancel(ctx)
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						if _, err := tx.ExecContext(ctx, `DROP VIEW flow_instances`); err != nil {
+							return err
+						}
+						_, err := tx.ExecContext(ctx, `ALTER TABLE retained_inventory_headers RENAME TO flow_instances`)
 						return err
 					}
-					_, err := tx.ExecContext(ctx, `ALTER TABLE retained_inventory_headers RENAME TO flow_instances`)
-					return err
-				})
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}()
 				if err == nil {
 					restored = true
 				}
@@ -128,15 +164,33 @@ func TestReceiverJoinedInventoryRefusesInvalidCancelledClosedAndPartialEvidenceB
 			if got, err := ReadReceiverJoinedInventoryStorageForTest(cancelled, fixture.store, runID); !errors.Is(err, context.Canceled) || got != nil {
 				t.Fatalf("cancelled inventory leaked evidence: %+v %v", got, err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				if _, err := tx.ExecContext(ctx, `ALTER TABLE entity_state RENAME TO retained_inventory_fields`); err != nil {
-					return err
-				}
-				_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW entity_state AS
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					if _, err := tx.ExecContext(ctx, `ALTER TABLE entity_state RENAME TO retained_inventory_fields`); err != nil {
+						return err
+					}
+					_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW entity_state AS
 					SELECT run_id,entity_id,flow_instance,entity_type,
 					CASE WHEN entity_id='%s' THEN NULL ELSE fields END AS fields FROM retained_inventory_fields`, want[len(want)-1].EntityID))
-				return err
-			}); err != nil {
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			restored := false
@@ -144,13 +198,31 @@ func TestReceiverJoinedInventoryRefusesInvalidCancelledClosedAndPartialEvidenceB
 				if restored {
 					return nil
 				}
-				err := runUnrevisionedEventFixtureTransactionForTest(context.WithoutCancel(ctx), fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-					if _, err := tx.ExecContext(ctx, `DROP VIEW entity_state`); err != nil {
+				err := func() error {
+					fixtureContext := context.WithoutCancel(ctx)
+					fixtureOwner := any(fixture.store)
+					write := func(ctx context.Context, tx *sql.Tx) error {
+						if _, err := tx.ExecContext(ctx, `DROP VIEW entity_state`); err != nil {
+							return err
+						}
+						_, err := tx.ExecContext(ctx, `ALTER TABLE retained_inventory_fields RENAME TO entity_state`)
 						return err
 					}
-					_, err := tx.ExecContext(ctx, `ALTER TABLE retained_inventory_fields RENAME TO entity_state`)
-					return err
-				})
+					switch owner := fixtureOwner.(type) {
+					case *PostgresStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("postgres event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, write)
+					case *SQLiteRuntimeStore:
+						if owner == nil || owner.backend == nil {
+							return fmt.Errorf("sqlite event fixture store is required")
+						}
+						return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+					default:
+						return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+					}
+				}()
 				if err == nil {
 					restored = true
 				}
@@ -220,40 +292,58 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 		{"50000000-1111-4111-8111-111111111111", "inventory/wrong-entity", runID, "51000000-1111-4111-8111-111111111111", "inventory/wrong-entity", "active"},
 		{"70000000-1111-4111-8111-111111111111", "inventory/wrong-run", sibling, "70000000-1111-4111-8111-111111111111", "inventory/wrong-run", "active"},
 	}
-	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-		for _, row := range rows {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state
+	if err := func() error {
+		fixtureContext := ctx
+		fixtureOwner := any(fixture.store)
+		write := func(ctx context.Context, tx *sql.Tx) error {
+			for _, row := range rows {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state
 				(run_id,entity_id,flow_instance,entity_type,fields)
 				VALUES($1,$2,$3,'inventory_entity',$4)`, runID, row.entity, row.entityPath,
-				`{"integer":7,"decimal":7.0,"text":"exact bytes","nested":[null,{"flag":true}]}`); err != nil {
-				return err
-			}
-			status, ended := "active", any(nil)
-			if row.state == "done" {
-				status, ended = "terminated", now
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
+					`{"integer":7,"decimal":7.0,"text":"exact bytes","nested":[null,{"flag":true}]}`); err != nil {
+					return err
+				}
+				status, ended := "active", any(nil)
+				if row.state == "done" {
+					status, ended = "terminated", now
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
 				(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,
 				bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at,terminated_at)
 				VALUES($1,$2,$3,$4,'inventory','static',$5,'{}',TRUE,'{}','{}',1,$6,$6,$6,$7)`,
-				row.headerRun, row.headerEntity, row.headerPath, row.state, status, now, ended); err != nil {
-				return err
+					row.headerRun, row.headerEntity, row.headerPath, row.state, status, now, ended); err != nil {
+					return err
+				}
 			}
-		}
-		entity := "60000000-1111-4111-8111-111111111111"
-		if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state
+			entity := "60000000-1111-4111-8111-111111111111"
+			if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state
 			(run_id,entity_id,flow_instance,entity_type,fields)
 			VALUES($1,$2,'inventory/foreign','inventory_entity','{}')`, sibling, entity); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
 			(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,
 			bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at)
 			VALUES($1,$2,'inventory/foreign','queued','inventory','static','active','{}',TRUE,'{}','{}',1,$3,$3,$3)`, sibling, entity, now); err != nil {
-			return err
+				return err
+			}
+			return nil
 		}
-		return nil
-	}); err != nil {
+		switch owner := fixtureOwner.(type) {
+		case *PostgresStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("postgres event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, write)
+		case *SQLiteRuntimeStore:
+			if owner == nil || owner.backend == nil {
+				return fmt.Errorf("sqlite event fixture store is required")
+			}
+			return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+		default:
+			return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+		}
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	parity := runLifecycleCandidateParityFixture{store: fixture.store.(runLifecycleCandidateParityStore), db: fixture.db, postgres: fixture.dialect == "postgres"}
