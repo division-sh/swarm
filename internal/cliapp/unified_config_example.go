@@ -33,7 +33,7 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("serve.api_listen_addr", `"127.0.0.1:8081"`, "API listener address; defaults to loopback."),
 		e("serve.mcp_listen_addr", `"127.0.0.1:8082"`, "MCP listener address; defaults to loopback."),
 		e("serve.public_webhook.hostname", "hooks.example.com", "Native HTTPS webhook hostname; omit the public_webhook block to keep existing ingress behavior."),
-		e("serve.public_webhook.port", "443", "HTTPS webhook port; defaults to 443. Restart serve to change the port."),
+		e("serve.public_webhook.port", "443", "Default 443. Every port uses HTTPS. Telegram accepts 443, 80, 88 and 8443. An automatic certificate needs public port 443."),
 		e("serve.public_webhook.certificate_file", "/etc/swarm/tls/fullchain.pem", "Supplied certificate path; relative paths resolve from the invocation directory. Omit both certificate paths for automatic certificates."),
 		e("serve.public_webhook.private_key_file", "/etc/swarm/tls/privkey.pem", "Supplied private-key path; relative paths resolve from the invocation directory. Restart serve to replace the supplied pair."),
 		e("serve.public_webhook.email", "ops@example.com", "Optional contact email for automatic public certificates."),

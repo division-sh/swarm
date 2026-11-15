@@ -75,7 +75,7 @@
 #   public_webhook:
 #     email: ops@example.com # Optional contact email for automatic public certificates.
 #     hostname: hooks.example.com # Native HTTPS webhook hostname; omit the public_webhook block to keep existing ingress behavior.
-#     port: 443 # HTTPS webhook port; defaults to 443. Restart serve to change the port.
+#     port: 443 # Default 443. Every port uses HTTPS. Telegram accepts 443, 80, 88 and 8443. An automatic certificate needs public port 443.
 # store:
 #   backend: sqlite # Runtime store backend.
 #   sqlite:

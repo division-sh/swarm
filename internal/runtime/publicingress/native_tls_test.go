@@ -17,7 +17,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -116,8 +115,12 @@ func TestNativeTLSSuppliedCertificateUsesOperatorPathsAndRestartOwned(t *testing
 		err = controller.Start(t.Context())
 		var operation *net.OpError
 		if !errors.Is(err, syscall.EADDRINUSE) || !errors.As(err, &operation) ||
-			!strings.HasPrefix(err.Error(), "bind dedicated public webhook listener:") || readiness.Snapshot(time.Now()).Exposure != nil {
+			readiness.Snapshot(time.Now()).Exposure != nil {
 			t.Fatalf("failed bind lost its native cause or published exposure: %v", err)
+		}
+		want := fmt.Sprintf("Cannot listen for public webhooks on port %d: %s. Choose another port accepted by your webhook provider in serve.public_webhook.port, or ask your administrator to make this port available.", cfg.PortNumber(), operation.Error())
+		if err.Error() != want {
+			t.Fatalf("native bind wording=%q, want %q", err.Error(), want)
 		}
 	})
 	webhookCertificateFixture(t, root, settings.Hostname, time.Now().Add(90*24*time.Hour))

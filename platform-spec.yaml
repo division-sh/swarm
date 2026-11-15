@@ -24164,6 +24164,7 @@ configuration_source_authority:
             api_token_file: secret_reference
             public_webhook:
               hostname: one_configured_dns_hostname
+              port: optional_integer_1_to_65535_omitted_defaults_443
               certificate_file: optional_operator_file_path_paired_with_private_key_file
               private_key_file: optional_operator_secret_file_path_paired_with_certificate_file
               email: optional_acme_contact

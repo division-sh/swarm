@@ -172,6 +172,9 @@ func TestGeneratedUnifiedConfigExampleOmitsSplitUnsupportedAndPlaintextSecrets(t
 
 func TestGeneratedUnifiedConfigExampleUsesPublicVocabulary(t *testing.T) {
 	text := generatedUnifiedConfigExample()
+	if !strings.Contains(text, "port: 443 # Default 443. Every port uses HTTPS. Telegram accepts 443, 80, 88 and 8443. An automatic certificate needs public port 443.") {
+		t.Fatal("generated port setting does not carry the approved settings text")
+	}
 	lower := strings.ToLower(text)
 	for _, forbidden := range []string{
 		"unified",
