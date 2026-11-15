@@ -113,12 +113,24 @@ func TestSharedStartupRecoveryAdmissionPartitionsAndDecides(t *testing.T) {
 				if (err != nil) != (test.denied && !enabled) || !reflect.DeepEqual(detail, decision.detail()) {
 					t.Fatalf("public observation differs from boot decision: %+v, %v", detail, err)
 				}
+				if test.name == "empty" || test.name == "global" {
+					timers := test.reads.timers
+					timers.ObservedAt = request.ObservedAt
+					if err := InspectSurvivingTimerRecoveryAdmission(context.Background(), timers, enabled); (err != nil) != (decision.denialError() != nil) {
+						t.Fatalf("reset survivor policy differs from ordinary recovery: %v", err)
+					}
+				}
 			})
 		}
 	}
 }
 
 func TestSharedStartupRecoveryAdmissionMissingReadsNeverMeanEmpty(t *testing.T) {
+	for _, timers := range []timerobligation.Snapshot{{}, {ObservedAt: time.Now().UTC(), Runs: []timerobligation.RunObligations{{RunID: "unproven-survivor"}}}} {
+		if err := InspectSurvivingTimerRecoveryAdmission(context.Background(), timers, true); err == nil {
+			t.Fatal("reset admission treated incomplete discard or observation as empty")
+		}
+	}
 	for _, test := range []struct {
 		name   string
 		remove func(*StartupRecoveryReadRequest)
@@ -146,6 +158,11 @@ func TestSharedStartupRecoveryAdmissionMissingReadsNeverMeanEmpty(t *testing.T) 
 }
 
 func TestSharedStartupRecoveryAdmissionErrorsAndCancellation(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := InspectSurvivingTimerRecoveryAdmission(cancelled, timerobligation.Snapshot{ObservedAt: time.Now().UTC()}, true); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reset survivor decision lost cancellation: %v", err)
+	}
 	witness := errors.New("read failed")
 	for _, phase := range []string{"delivery", "timers", "standing", "manager", "cancel-before", "cancel-after"} {
 		t.Run(phase, func(t *testing.T) {

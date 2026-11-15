@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/google/uuid"
 )
 
 type Family string
@@ -40,8 +41,27 @@ func AllFamilies() []Family {
 }
 
 type Scope struct {
-	runID string
-	life  events.InstanceLife
+	runID     string
+	life      events.InstanceLife
+	resetRuns []string
+	reset     bool
+}
+
+// AfterReset observes only timer rows the native reset would leave behind.
+func AfterReset(runIDs []string) (Scope, error) {
+	s := Scope{reset: true}
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if _, err := uuid.Parse(runID); err != nil {
+			return Scope{}, fmt.Errorf("reset timer scope requires valid cleanup run IDs: %w", err)
+		}
+		s.resetRuns = append(s.resetRuns, runID)
+	}
+	return s, nil
+}
+
+func (s Scope) ResetRuns() ([]string, bool) {
+	return append([]string(nil), s.resetRuns...), s.reset
 }
 
 func All() Scope {
