@@ -22,6 +22,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 						runRegisteredCLIProcessRestart(t, h, cut)
 						return
 					}
+					observation := openChannelFixtureObservation(t, string(backend), h.storeDSN)
 					t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 					first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 					h.endpoint = first.endpoint(t)
@@ -32,7 +33,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					}
 					standingCard := waitChannelAnchorCard(t, db, standingRun, decisioncard.AnchorKindStageGate, "chat")
 					waitChannelAnchorReceipt(t, db, standingCard)
-					waitChannelDeliverySendsSettled(t, db, backend)
+					waitChannelDeliverySendsSettled(t, db, observation)
 					var arrived <-chan int
 					var release func()
 					seedAdmitted := make(chan struct{})
@@ -231,7 +232,7 @@ func TestChannelDeliverySettlementWaitIncludesPlannedWork(t *testing.T) {
 			go func() {
 				close(started)
 				defer close(done)
-				waitChannelDeliverySendsSettled(t, db, servedparity.BackendDefaultSQLite)
+				waitChannelDeliverySendsSettled(t, db, summaryResponsibilityProjection{db: db})
 			}()
 			<-started
 			select {
@@ -246,48 +247,6 @@ func TestChannelDeliverySettlementWaitIncludesPlannedWork(t *testing.T) {
 			case <-done:
 			case <-time.After(time.Second):
 				t.Fatal("settlement wait did not release after the delivery settled")
-			}
-		})
-	}
-	// These are projection fixtures, not evidence of provider acceptance. The
-	// native effect matrix proves the journal transitions producing these rows.
-	for _, test := range []struct {
-		name, source, status, phase, effect string
-		want                                int
-	}{
-		{"pending", "card", "pending", "planned", "", 1},
-		{"deferred", "card", "pending", "rendered", "", 1},
-		{"superseded", "card", "superseded", "rendered", "", 0},
-		{"decided", "card", "decided", "rendered", "", 0},
-		{"expired", "card", "expired", "rendered", "", 0},
-		{"notice_completed", "notice", "decided", "rendered", "", 0},
-		{"authorized", "card", "superseded", "retired", "authorized", 1},
-		{"launched", "card", "superseded", "retired", "launched", 1},
-		{"observed", "card", "superseded", "retired", "response_observed", 1},
-		{"uncertain", "card", "superseded", "uncertain", "outcome_uncertain", 0},
-		{"terminal_failure", "card", "superseded", "rendered", "terminal_failure", 0},
-		{"summary", "summary", "", "planned", "", 1},
-		{"response", "response", "", "rendered", "", 1},
-	} {
-		t.Run("projection/"+test.name, func(t *testing.T) {
-			db := newChannelResponsibilityProjectionDB(t)
-			statements := []struct {
-				query string
-				args  []any
-			}{
-				{`INSERT INTO channel_delivery_plans VALUES ('delivery',?, 'source',NULL,?)`, []any{test.source, test.phase}},
-				{`INSERT INTO decision_cards VALUES ('source',?)`, []any{test.status}},
-				{`INSERT INTO mailbox VALUES ('source',?)`, []any{test.status}},
-				{`INSERT INTO runtime_external_effect_operations VALUES ('channel_delivery','{"delivery_id":"delivery"}',?)`, []any{test.effect}},
-			}
-			for _, statement := range statements {
-				if _, err := db.Exec(statement.query, statement.args...); err != nil {
-					t.Fatal(err)
-				}
-			}
-			count, err := storetest.CountUnsettledChannelDeliveryResponsibilities(context.Background(), db, false)
-			if err != nil || count != test.want {
-				t.Fatalf("responsibility count=%d want=%d: %v", count, test.want, err)
 			}
 		})
 	}
@@ -319,11 +278,23 @@ func newChannelResponsibilityProjectionDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func waitChannelDeliverySendsSettled(t *testing.T, db *sql.DB, backend servedparity.Backend) {
+// The private projection reader below is used only by the two synthetic summary
+// waiter controls. The full native predicate matrix lives with channeldelivery.
+type summaryResponsibilityProjection struct{ db *sql.DB }
+
+func (o summaryResponsibilityProjection) CountUnsettledResponsibilities(ctx context.Context) (int, error) {
+	var count int
+	err := o.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind='summary' AND state IN ('planned','rendered')`).Scan(&count)
+	return count, err
+}
+
+func waitChannelDeliverySendsSettled(t *testing.T, db *sql.DB, observation interface {
+	CountUnsettledResponsibilities(context.Context) (int, error)
+}) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		count, err := storetest.CountUnsettledChannelDeliveryResponsibilities(context.Background(), db, backend == servedparity.BackendExplicitPostgres)
+		count, err := observation.CountUnsettledResponsibilities(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}

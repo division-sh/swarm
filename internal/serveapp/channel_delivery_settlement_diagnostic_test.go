@@ -212,13 +212,14 @@ func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			h, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
+			observation := openChannelFixtureObservation(t, string(backend), h.storeDSN)
 			var runID string
 			if err := db.QueryRow(`SELECT run_id FROM runs WHERE flow_path='chat' AND landing_run=TRUE`).Scan(&runID); err != nil {
 				t.Fatal(err)
 			}
 			card := waitChannelAnchorCard(t, db, runID, "stage_gate", "chat")
 			waitChannelAnchorReceipt(t, db, card)
-			waitChannelDeliverySendsSettled(t, db, backend)
+			waitChannelDeliverySendsSettled(t, db, observation)
 			var deliveryID string
 			err := db.QueryRow(`SELECT CAST(p.delivery_id AS TEXT) FROM channel_delivery_plans p
 				JOIN channel_delivery_receipts r ON r.delivery_id=p.delivery_id

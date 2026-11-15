@@ -3,10 +3,10 @@
 package eventfixture
 
 import (
-"time"
+	"time"
 
-"github.com/division-sh/swarm/internal/events"
-"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 func eventFacts(
