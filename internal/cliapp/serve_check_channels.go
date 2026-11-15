@@ -24,23 +24,9 @@ func inspectServeChannelIdentities(ctx context.Context, inventory channelonboard
 		if !operation.DeploymentRegistration || operation.Provider != "telegram" || operation.LogoutCompleted || len(operation.CredentialAdmissions) == 0 {
 			continue
 		}
-		var profile packs.CompiledChannelRegistration
-		found := false
-		for _, plan := range plans {
-			identity, err := plan.InterfaceIdentity()
-			if err != nil {
-				return nil, err
-			}
-			candidate, ok := plan.Registration()
-			if ok && candidate.Provider() == operation.Provider && identity == operation.Interface {
-				if found {
-					return nil, channelonboarding.ErrConflict
-				}
-				profile, found = candidate, true
-			}
-		}
-		if !found {
-			return nil, channelonboarding.ErrNotFound
+		profile, err := serveChannelRegistration(plans, operation)
+		if err != nil {
+			return nil, err
 		}
 		read, err := profile.Operation(packs.RegistrationOperationIdentify)
 		if err != nil {
@@ -77,4 +63,26 @@ func inspectServeChannelIdentities(ctx context.Context, inventory channelonboard
 		}
 	}
 	return evidence, nil
+}
+
+func serveChannelRegistration(plans []packs.SatisfactionPlan, operation channelonboarding.Operation) (packs.CompiledChannelRegistration, error) {
+	var profile packs.CompiledChannelRegistration
+	found := false
+	for _, plan := range plans {
+		identity, err := plan.InterfaceIdentity()
+		if err != nil {
+			return profile, err
+		}
+		candidate, ok := plan.Registration()
+		if ok && candidate.Provider() == operation.Provider && identity == operation.Interface {
+			if found {
+				return profile, channelonboarding.ErrConflict
+			}
+			profile, found = candidate, true
+		}
+	}
+	if !found {
+		return profile, channelonboarding.ErrNotFound
+	}
+	return profile, nil
 }
