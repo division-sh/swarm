@@ -21,23 +21,41 @@ func TestNotifyAllChildrenObservationPreservesPhysicalItemMetadataAndDiagnosticS
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, active, 2)
 			seedWorkflowSideEffectStorageRows(t, ctx, fixture, sibling, 1)
 			instance, now := "physical/shared-instance", time.Now().UTC().Truncate(time.Microsecond)
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				// These are private physical readback controls, not a claim of
-				// lawful child issuance; the real public journey proves issuance.
-				if _, err := tx.ExecContext(ctx, `UPDATE events SET event_class='child',produced_by_type='platform',event_name='portfolio/account.notify.requested',source_event_id=$1 WHERE event_id IN (SELECT event_id FROM fan_out_outcomes WHERE run_id=$2)`, active.Snapshot.EventID, active.Claim.RunID()); err != nil {
-					return err
-				}
-				for i, run := range []string{active.Claim.RunID(), sibling.Claim.RunID()} {
-					entity := uuid.NewString()
-					if i == 0 {
-						seedWorkflowHeaderProjectionFixture(t, ctx, tx, run, entity, instance, "physical", "physical", "ready", `{}`, now)
-					}
-					if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at) VALUES($1,$2,$3,'physical',$4,$5,$6)`, run, entity, instance, []string{`{"mark":"earlier", "number":1.0}`, `{"mark":"later", "number":2.0}`}[i], now, now.Add(time.Duration(i)*time.Second)); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					// These are private physical readback controls, not a claim of
+					// lawful child issuance; the real public journey proves issuance.
+					if _, err := tx.ExecContext(ctx, `UPDATE events SET event_class='child',produced_by_type='platform',event_name='portfolio/account.notify.requested',source_event_id=$1 WHERE event_id IN (SELECT event_id FROM fan_out_outcomes WHERE run_id=$2)`, active.Snapshot.EventID, active.Claim.RunID()); err != nil {
 						return err
 					}
+					for i, run := range []string{active.Claim.RunID(), sibling.Claim.RunID()} {
+						entity := uuid.NewString()
+						if i == 0 {
+							seedWorkflowHeaderProjectionFixture(t, ctx, tx, run, entity, instance, "physical", "physical", "ready", `{}`, now)
+						}
+						if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at) VALUES($1,$2,$3,'physical',$4,$5,$6)`, run, entity, instance, []string{`{"mark":"earlier", "number":1.0}`, `{"mark":"later", "number":2.0}`}[i], now, now.Add(time.Duration(i)*time.Second)); err != nil {
+							return err
+						}
+					}
+					return nil
 				}
-				return nil
-			}); err != nil {
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
@@ -199,10 +217,28 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
 			refuse(cancelled)
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE events RENAME TO unavailable_notify_observer_events`)
-				return err
-			}); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `ALTER TABLE events RENAME TO unavailable_notify_observer_events`)
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			sections, err := ReadNotifyAllChildrenDiagnosticStorageForTest(ctx, fixture.store)
@@ -217,16 +253,52 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 			if got, err := ReadNotifyAllChildrenItemStorageForTest(ctx, fixture.store, uuid.NewString(), uuid.NewString()); err == nil || got != nil {
 				t.Fatalf("unavailable items=%v/%v", got, err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_notify_observer_events RENAME TO events`)
-				return err
-			}); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_notify_observer_events RENAME TO events`)
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO unavailable_notify_observer_deliveries`)
-				return err
-			}); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO unavailable_notify_observer_deliveries`)
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			sections, err = ReadNotifyAllChildrenDiagnosticStorageForTest(ctx, fixture.store)
@@ -238,10 +310,28 @@ func TestNotifyAllChildrenObservationRefusesRawCancelledClosedAndFailedSectionsB
 					t.Fatalf("delivery failure poisoned section %d: %+v", i, section)
 				}
 			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_notify_observer_deliveries RENAME TO event_deliveries`)
-				return err
-			}); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_notify_observer_deliveries RENAME TO event_deliveries`)
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {

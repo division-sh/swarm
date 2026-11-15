@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -59,10 +60,28 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 			}
 			// Exact same source coordinates with no history remain empty evidence;
 			// the reconstruction consumer must reject it, not this physical reader.
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id=$1 AND entity_id=$2`, run, entity)
-				return err
-			}); err != nil {
+			if err := func() error {
+				fixtureContext := ctx
+				fixtureOwner := any(fixture.store)
+				write := func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `DELETE FROM entity_mutations WHERE run_id=$1 AND entity_id=$2`, run, entity)
+					return err
+				}
+				switch owner := fixtureOwner.(type) {
+				case *PostgresStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("postgres event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, write)
+				case *SQLiteRuntimeStore:
+					if owner == nil || owner.backend == nil {
+						return fmt.Errorf("sqlite event fixture store is required")
+					}
+					return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+				default:
+					return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+				}
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			if empty, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity); err != nil || len(empty.Mutations) != 0 || empty.CurrentState == nil || *empty.CurrentState != "queued" {
@@ -102,17 +121,53 @@ func TestTrackedMutationProjectionRefusesRawInvalidCancelledClosedAndLateFailure
 						t.Fatal(err)
 					}
 				case "late-unavailable":
-					if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-						_, err := tx.ExecContext(ctx, `ALTER TABLE entity_mutations RENAME TO unavailable_tracked_projection_mutations`)
-						return err
-					}); err != nil {
+					if err := func() error {
+						fixtureContext := ctx
+						fixtureOwner := any(fixture.store)
+						write := func(ctx context.Context, tx *sql.Tx) error {
+							_, err := tx.ExecContext(ctx, `ALTER TABLE entity_mutations RENAME TO unavailable_tracked_projection_mutations`)
+							return err
+						}
+						switch owner := fixtureOwner.(type) {
+						case *PostgresStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("postgres event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, write)
+						case *SQLiteRuntimeStore:
+							if owner == nil || owner.backend == nil {
+								return fmt.Errorf("sqlite event fixture store is required")
+							}
+							return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+						default:
+							return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+						}
+					}(); err != nil {
 						t.Fatal(err)
 					}
 					defer func() {
-						if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-							_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_tracked_projection_mutations RENAME TO entity_mutations`)
-							return err
-						}); err != nil {
+						if err := func() error {
+							fixtureContext := ctx
+							fixtureOwner := any(fixture.store)
+							write := func(ctx context.Context, tx *sql.Tx) error {
+								_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_tracked_projection_mutations RENAME TO entity_mutations`)
+								return err
+							}
+							switch owner := fixtureOwner.(type) {
+							case *PostgresStore:
+								if owner == nil || owner.backend == nil {
+									return fmt.Errorf("postgres event fixture store is required")
+								}
+								return owner.backend.RunTransaction(fixtureContext, write)
+							case *SQLiteRuntimeStore:
+								if owner == nil || owner.backend == nil {
+									return fmt.Errorf("sqlite event fixture store is required")
+								}
+								return owner.backend.RunTransaction(fixtureContext, "unrevisioned event fixture", write)
+							default:
+								return fmt.Errorf("event fixture store %T is unsupported", fixtureOwner)
+							}
+						}(); err != nil {
 							t.Error(err)
 						}
 					}()
