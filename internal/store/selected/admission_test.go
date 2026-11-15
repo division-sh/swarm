@@ -6,10 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecore "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -28,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
 	"github.com/division-sh/swarm/tests/support/testutil/sourceartifactfixture"
+	"github.com/google/uuid"
 )
 
 func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
@@ -128,6 +131,25 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if _, err := writer.EnsureRootedSource(original, rooted); err != nil {
 				t.Fatal(err)
 			}
+			principal, err := bootstrap.(operatorchannel.Store).EnsureOperatorPrincipal(original, request.Origin.CreatedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registrations := bootstrap.(interface {
+				DeploymentChannelOperations() channelonboarding.OperationStore
+			}).DeploymentChannelOperations()
+			registration, err := registrations.ReserveChannelOnboarding(original, channelonboarding.StartRequest{
+				OperationID: uuid.NewString(), RequestKeyHash: "inspection-registration", RequestHash: "inspection-registration",
+				PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "telegram",
+				Interface: operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
+					ChannelPackID: "provider.telegram.hitl_channel", ChannelPackVersion: "0.1.0", ChannelManifestHash: "sha256:manifest", SemanticGeneration: "sha256:plan"}.Normalized(),
+				DeploymentRegistration: true, ExpectedAccount: "12345", Posture: channelonboarding.ActivationWebhookRegistration,
+				Ceremony: channelonboarding.CeremonyAccountLink, SaveProof: true, RequestedAt: request.Origin.CreatedAt,
+				CredentialReservations: []channelonboarding.CredentialReservation{{Role: "bot_token", StoreKey: "telegram_bot_token"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			beforeInspection, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
 			if err != nil {
 				t.Fatal(err)
@@ -185,6 +207,12 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				if inventory, err := channelonboarding.InspectRetainedActivations(ctx, snapshot); err != nil || len(inventory.Operations) != 0 || len(inventory.Activations) != 0 {
 					t.Fatalf("empty connected channel read scope: %+v %v", inventory, err)
 				}
+				if rows, err := snapshot.ListDeploymentChannelOperations(ctx); err != nil || !reflect.DeepEqual(rows, []channelonboarding.Operation{registration}) {
+					t.Fatalf("deployment registration read lost its exact scope or row: %+v %v", rows, err)
+				}
+				if _, ok := any(snapshot).(channelonboarding.OperationStore); ok {
+					t.Fatal("inspection exposed writable channel operations")
+				}
 				if pending, err := channelonboarding.InspectPendingTeardowns(ctx, snapshot); err != nil || len(pending) != 0 {
 					t.Fatalf("empty channel teardown read scope: %+v %v", pending, err)
 				}
@@ -207,6 +235,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				}
 				cancelled, cancel := context.WithCancel(ctx)
 				cancel()
+				if _, err := snapshot.ListDeploymentChannelOperations(cancelled); !errors.Is(err, context.Canceled) {
+					t.Fatalf("registration read lost cancellation: %v", err)
+				}
 				for _, read := range inspectionRootReads(snapshot, rooted.Admission().Reference()) {
 					if got, err := read.load(cancelled); !errors.Is(err, context.Canceled) || got.Validate() == nil {
 						t.Fatalf("canceled rooted inspection %s disclosed source: %v", read.name, err)
@@ -242,6 +273,12 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			}
 			if _, err := channelonboarding.InspectPendingTeardowns(ctx, retained); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to teardown reader: %v", err)
+			}
+			if _, err := retained.ListDeploymentChannelOperations(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expired snapshot escaped to deployment registrations: %v", err)
+			}
+			if current, err := registrations.GetChannelOnboarding(original, registration.OperationID); err != nil || !reflect.DeepEqual(current, registration) {
+				t.Fatalf("inspection changed deployment registration: %+v %v", current, err)
 			}
 			stamp, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
 			if err != nil {

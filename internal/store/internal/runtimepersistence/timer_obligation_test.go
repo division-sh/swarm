@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -63,6 +65,61 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			}
 			assertTimerFamilyObligation(t, completed.Families, runtimetimerobligation.FamilyTimer, 0, 0, 0)
 			assertTimerFamilyObligation(t, snapshot.GlobalFamilies, runtimetimerobligation.FamilyGlobalRecurring, 1, 0, 1)
+			t.Run("reset_survivors", func(t *testing.T) {
+				eventID := uuid.NewString()
+				event := eventtest.PersistedProjectionForProducer(eventID, events.EventType("reset.timer_proof"), eventtest.Producer(events.EventProducerExternal, "timer-proof"), "",
+					[]byte(`{}`), 0, runID, "", events.EventEnvelope{EntityID: uuid.NewString(), FlowInstance: "timer-proof", Scope: events.EventScopeEntity}, observedAt)
+				if err := insertCanonicalEventRecordFixture(ctx, selected, event); err != nil {
+					t.Fatal(err)
+				}
+				for _, column := range []string{"forked_from_run_id", "forked_from_event_id"} {
+					activation := admitGenericScheduleFixture(t, ctx, selected, testGlobalGenericScheduleCommand(uuid.NewString(), runtimegenericschedule.EveryDue(time.Hour)))
+					lineage := runID
+					if column == "forked_from_event_id" {
+						lineage = eventID
+					}
+					if _, err := db.ExecContext(ctx, "UPDATE timers SET "+column+"=$1 WHERE timer_id=$2", lineage, activation.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				all, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, cell := range []struct {
+					runs []string
+					want int
+				}{{nil, len(all.Activations)}, {[]string{uuid.NewString()}, len(all.Activations)}, {[]string{runID, terminalRunID}, 1}} {
+					scope, err := runtimetimerobligation.AfterReset(cell.runs)
+					if err != nil {
+						t.Fatal(err)
+					}
+					survivors, err := reader.ReadTimerObligations(ctx, scope, observedAt)
+					if err != nil || len(survivors.Activations) != cell.want {
+						t.Fatalf("reset survivor projection: %+v %v; want %d", survivors, err, cell.want)
+					}
+					if len(cell.runs) < 2 && !reflect.DeepEqual(survivors, all) {
+						t.Fatal("empty cleanup set or false/NULL deletion predicate discarded a row")
+					}
+					if len(cell.runs) == 2 {
+						if len(survivors.Runs) != 0 || survivors.Activations[0].RunID != "" {
+							t.Fatalf("run or fork lineage survived its deletion predicate: %+v", survivors)
+						}
+						assertTimerFamilyObligation(t, survivors.GlobalFamilies, runtimetimerobligation.FamilyGlobalRecurring, 1, 0, 1)
+					}
+					cancelled, cancel := context.WithCancel(ctx)
+					cancel()
+					if _, err := reader.ReadTimerObligations(cancelled, scope, observedAt); !errors.Is(err, context.Canceled) {
+						t.Fatalf("survivor read lost cancellation: %v", err)
+					}
+				}
+				if _, err := runtimetimerobligation.AfterReset([]string{"not-a-run"}); err == nil {
+					t.Fatal("invalid cleanup run was accepted")
+				}
+				if after, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt); err != nil || !reflect.DeepEqual(after, all) {
+					t.Fatalf("survivor inspection mutated obligations: %+v %v", after, err)
+				}
+			})
 
 			scope, err := runtimetimerobligation.Run(runID)
 			if err != nil {

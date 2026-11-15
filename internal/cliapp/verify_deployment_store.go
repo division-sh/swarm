@@ -180,7 +180,7 @@ func inspectVerifyAdmissionSnapshot(ctx context.Context, snapshot *storeselected
 			return nil, false, err
 		}
 		if serve[0].reset != nil {
-			retained, err := inspectServeResetSnapshot(ctx, snapshot, *serve[0].reset, result)
+			retained, err := inspectServeResetSnapshot(ctx, snapshot, *serve[0].reset, cfg.Config.Runtime.RecoveryOnStartup, result)
 			return retained, true, err
 		}
 	}

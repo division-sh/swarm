@@ -648,7 +648,7 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 	case "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
 		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.fork_event_id AND e.run_id IN %[1]s)"
 	case "timers":
-		predicate = "target.run_id IN %[1]s OR target.forked_from_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.forked_from_event_id AND e.run_id IN %[1]s)"
+		predicate = TimerCleanupPredicate("target", "%[1]s")
 	default:
 		return destructiveResetCleanupStatements{}, fmt.Errorf("destructive reset cleanup table %s is not implemented", table)
 	}
@@ -663,6 +663,12 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 		out.delete = "DELETE FROM " + from
 	}
 	return out, nil
+}
+
+// TimerCleanupPredicate is shared by destructive cleanup and its read-only
+// survivor projection. Callers supply only native aliases and bound run sets.
+func TimerCleanupPredicate(alias, runSet string) string {
+	return fmt.Sprintf("%[1]s.run_id IN %[2]s OR %[1]s.forked_from_run_id IN %[2]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = %[1]s.forked_from_event_id AND e.run_id IN %[2]s)", alias, runSet)
 }
 
 func selectedResetRetainedPredicate(table string) string {
