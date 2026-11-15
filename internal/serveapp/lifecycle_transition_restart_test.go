@@ -55,6 +55,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "lifecycle.sqlite"))
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		if target, ok := lifecycleRestartVerifyDSNTargets.LoadAndDelete(t); ok {
 			*target.(*string) = dsn

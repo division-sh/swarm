@@ -211,6 +211,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p) })
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
+		recordServePostgresFixture(t, dsn)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
 		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {

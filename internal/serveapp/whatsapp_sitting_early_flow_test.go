@@ -106,7 +106,7 @@ func TestWhatsAppPublicSittingEarlyFlowBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeStandingCandidateFile(t, opts.ConfigPath, string(config)+fmt.Sprintf("\npaths:\n  swarm_dir: %q\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n", opts.SwarmDir))
+			writeStandingCandidateFile(t, opts.ConfigPath, withServeFixtureStateDirectory(t, string(config), opts.SwarmDir)+"\nchannels:\n  hitl:\n    provider: whatsapp\n    account: '+15551234567'\n")
 			waits := make(chan sittingWait, 1)
 			qr := make(chan channelonboarding.Result, 1)
 			var native *deploymentChannelSession

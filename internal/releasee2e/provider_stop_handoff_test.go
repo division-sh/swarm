@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -41,8 +42,12 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 				if cut.selected {
 					wantCalls++
 				}
+				var businessCalls atomic.Int32
 				provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "stop-test-key", func(request llmapi.Request) (llmapi.Reply, error) {
-					if request.Number == wantCalls {
+					if reply, boot := llmapi.StartupAnswer(request); boot {
+						return reply, nil
+					}
+					if int(businessCalls.Add(1)) == wantCalls {
 						entered <- struct{}{}
 						<-release
 						if expires {
@@ -303,8 +308,10 @@ func TestProviderGracefulStopAndStandbyHandoffBothStores(t *testing.T) {
 								wantTotal++
 								wantRetry++
 							}
-							if len(provider.Requests()) != wantTotal || delivery.RetryCount != wantRetry {
-								t.Fatalf("unexpected provider replay: calls=%d delivery=%+v", len(provider.Requests()), delivery)
+							requests := provider.Requests()
+							actorCalls := len(llmapi.ActorRequests(requests))
+							if actorCalls != wantTotal || len(requests)-actorCalls != 2 || delivery.RetryCount != wantRetry {
+								t.Fatalf("unexpected provider replay: actor calls=%d boot answers=%d delivery=%+v", actorCalls, len(requests)-actorCalls, delivery)
 							}
 							complete = true
 						}
@@ -363,6 +370,9 @@ func TestProviderCrashStatusMatchesNextServeBothStores(t *testing.T) {
 			var mu sync.Mutex
 			calls := make(map[string]int)
 			provider := llmapi.New(t, llmapi.OpenAICompatible, "/v1/chat/completions", "crash-test-key", func(request llmapi.Request) (llmapi.Reply, error) {
+				if reply, boot := llmapi.StartupAnswer(request); boot {
+					return reply, nil
+				}
 				var input struct {
 					Model string `json:"model"`
 				}
