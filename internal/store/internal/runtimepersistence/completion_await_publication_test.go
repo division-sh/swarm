@@ -429,15 +429,27 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if !root {
 		inputType = "review/turn.started"
 	}
-	origin := eventtest.ExistingRunRootIngress(uuid.NewString(), inputType, "operator", "", json.RawMessage(`{}`), 0, run, events.EnvelopeForTargetRoute(events.EventEnvelope{}, fixture.route), request.OccurredAt)
-	target, err := events.MustExistingEntityTarget(fixture.route).WithLife(fixture.life.Life)
+	receiverRoute := fixture.route
+	receiverRoute.EntityID = config.EntityID
+	origin := eventtest.ExistingRunRootIngress(uuid.NewString(), inputType, "operator", "", json.RawMessage(`{}`), 0, run, events.EnvelopeForTargetRoute(events.EventEnvelope{}, receiverRoute), request.OccurredAt)
+	targetConstructor := events.MustExistingEntityTarget
+	if config.EntityID == "" {
+		targetConstructor = events.MustEntitylessReceiverTarget
+	}
+	target, err := targetConstructor(receiverRoute).WithLife(fixture.life.Life)
 	if err != nil {
 		t.Fatal(err)
 	}
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.authority.Target.AgentID), AgentIdentity: identity, Target: target, Context: events.DeliveryContext{Life: &fixture.life}}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, origin, []events.DeliveryRoute{route}); err != nil {
+	deliveryAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
 		t.Fatal(err)
 	}
+	origin, err = bindSemanticEventFixturePayload(origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitSelectedReceiverClaimEvent(t, ctx, selected, origin, route, deliveryAuthority)
 	prepared, present, err := selected.LoadPreparedPublishEvent(ctx, origin.ID())
 	if err != nil || !present || prepared.Event.ID() != origin.ID() || prepared.Event.Event().RunID() != run {
 		t.Fatalf("original admitted publication missing before claim: %+v %t %v", prepared, present, err)
@@ -452,7 +464,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	}
 	fixture.origin = claimed.Claim
 	snapshot, err := selected.Snapshot(ctx, claimed.Claim.DeliveryID())
-	if err != nil || snapshot.RunID != run || snapshot.Route.AgentIdentity != identity || snapshot.Route.Target.Route() != fixture.route || snapshot.Route.Target.Life() != fixture.life.Life || !reflect.DeepEqual(snapshot.Route.Context.Life, &fixture.life) {
+	if err != nil || snapshot.RunID != run || snapshot.Route.AgentIdentity != identity || snapshot.Route.Target.Route() != receiverRoute || snapshot.Route.Target.Life() != fixture.life.Life || !reflect.DeepEqual(snapshot.Route.Context.Life, &fixture.life) {
 		t.Fatalf("claimed original delivery differs from committed construction/actor: %+v %v", snapshot, err)
 	}
 	fixture.context = effects.WithController(effects.WithAuthority(ctx, fixture.authority), newCompletionControllerForTest(selected))
@@ -485,6 +497,10 @@ func liveAwaitRecord(f liveAwaitProofFixture, event events.Event) replycontext.R
 
 func liveAwaitCommand(t *testing.T, f liveAwaitProofFixture, ctx context.Context, event events.Event, record *replycontext.Record) (bus.PublicationCommand, context.Context) {
 	t.Helper()
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, release, err := semanticEventFixtureContext(ctx, f.store, event)
 	if err != nil {
 		t.Fatal(err)
