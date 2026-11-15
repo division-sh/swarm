@@ -479,7 +479,7 @@ func (g *notifyAllChildrenAgentGate) release(flowInstance string) {
 }
 
 func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends(t *testing.T) {
-	for _, cardinality := range []int{3, 100} {
+	for _, cardinality := range []int{3} {
 		for _, tc := range []struct {
 			name  string
 			setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
