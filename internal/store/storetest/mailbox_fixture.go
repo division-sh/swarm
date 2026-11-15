@@ -7,7 +7,9 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
-func CorruptHumanTaskRequester(ctx context.Context, selected any, runID, cardID, coordinate, hostile string) (func(context.Context) error, error) {
+type HumanTaskRequesterRestoration = private.HumanTaskRequesterRestoration
+
+func CorruptHumanTaskRequester(ctx context.Context, selected any, runID, cardID, coordinate, hostile string) (*HumanTaskRequesterRestoration, error) {
 	return private.CorruptHumanTaskRequesterForTest(ctx, selected, runID, cardID, coordinate, hostile)
 }
 

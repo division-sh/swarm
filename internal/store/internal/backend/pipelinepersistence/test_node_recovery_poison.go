@@ -5,18 +5,46 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
 
-func (s *PipelinePostgresOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) error {
-	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, true, runID, entityID)
-	})
+type NodeRecoveryPoisonCleanup struct {
+	postgres *PipelinePostgresOwner
+	sqlite   *PipelineSQLiteOwner
+	once     sync.Once
+	err      error
 }
 
-func (s *PipelineSQLiteOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) error {
-	return s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
+func (r *NodeRecoveryPoisonCleanup) Remove(ctx context.Context) error {
+	// Repeating an old cleanup must not remove a later installation.
+	r.once.Do(func() {
+		if r.postgres != nil {
+			r.err = r.postgres.RemoveNodeRecoveryPoisonMutationForTest(ctx)
+		} else {
+			r.err = r.sqlite.RemoveNodeRecoveryPoisonMutationForTest(ctx)
+		}
+	})
+	return r.err
+}
+
+func (s *PipelinePostgresOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) (*NodeRecoveryPoisonCleanup, error) {
+	err := s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, true, runID, entityID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &NodeRecoveryPoisonCleanup{postgres: s}, nil
+}
+
+func (s *PipelineSQLiteOwner) InstallNodeRecoveryPoisonMutationForTest(ctx context.Context, runID, entityID string) (*NodeRecoveryPoisonCleanup, error) {
+	err := s.backend.RunTransaction(ctx, "unrevisioned event fixture", func(ctx context.Context, tx *sql.Tx) error {
 		return InstallNodeRecoveryPoisonMutationTx(ctx, tx, false, runID, entityID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &NodeRecoveryPoisonCleanup{sqlite: s}, nil
 }
 
 func (s *PipelinePostgresOwner) RemoveNodeRecoveryPoisonMutationForTest(ctx context.Context) error {

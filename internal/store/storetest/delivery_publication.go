@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -11,21 +12,14 @@ import (
 	"testing"
 )
 
-type DeliveryPublicationFixtureStore interface {
-	RunFixtureStore
-	PipelineObligations() pipelineobligation.Store
-	CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
-	RegisterAuthorActivityEventCatalog(authoractivity.Scope, []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error)
-}
-
 // CommitNativeDeliveryPublication uses the original publication owner and exact
 // authority. Publication finishes before any claim or process-local dispatch.
-func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected DeliveryPublicationFixtureStore, admitted events.AdmittedEvent, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) runtimebus.CommittedPublication {
+func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected any, obligations pipelineobligation.Store, admitted events.AdmittedEvent, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) runtimebus.CommittedPublication {
 	t.Helper()
 	event := admitted.Event()
 	// A real root publication owns run creation and its flow claim atomically.
 	if root == nil || admitted.RunDisposition() != events.AdmittedRunCreateAuthorized {
-		if err := EnsureRunForAdmittedEvent(ctx, selected, admitted, event.CreatedAt()); err != nil {
+		if err := EnsureRunForAdmittedEvent(ctx, selected.(RunFixtureStore), admitted, event.CreatedAt()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,17 +36,17 @@ func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected
 	if err != nil {
 		t.Fatal(err)
 	}
-	publication, err := selected.PipelineObligations().ClaimPublication(ctx, event.ID())
+	publication, err := obligations.ClaimPublication(ctx, event.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := selected.PipelineObligations().Release(context.WithoutCancel(ctx), publication); err != nil {
+		if err := obligations.Release(context.WithoutCancel(ctx), publication); err != nil {
 			t.Error(err)
 		}
 	}()
 	scope := authoractivity.BundleScope(event.ID(), authority.SourceArtifact().BundleHash())
-	catalog, err := selected.RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{{EventType: string(event.Type()), Disposition: authoractivity.StoryDifferent}})
+	catalog, err := selected.(runtimepkg.AuthorActivityCatalogRegistrar).RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{{EventType: string(event.Type()), Disposition: authoractivity.StoryDifferent}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +59,7 @@ func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected
 	if root != nil {
 		command.Activations = []pipeline.FlowInstanceActivationPlan{root.Plan}
 	}
-	committed, err := selected.CommitPublication(ctx, command)
+	committed, err := selected.(runtimebus.CommitPublicationOwner).CommitPublication(ctx, command)
 	if err != nil || !committed.Acknowledged {
 		t.Fatalf("native publication was not acknowledged: %+v,error=%v", committed, err)
 	}
