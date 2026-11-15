@@ -41,16 +41,24 @@ func TestNativeProposedEffectExecutionOwnerKeepsExactPhysicalPredicates(t *testi
 	}
 	old := eventDeliveryDiagnosticSQL(t, strings.ReplaceAll(row.Before, "SELECT\n", "SELECT \n"))
 	owner := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_activity_result_readback.go", "ReadProposedEffectRunExecutionStorageForTest")
-	fresh := eventDeliveryDiagnosticSQL(t, strings.ReplaceAll(owner, "SELECT\n", "SELECT \n"))
 	normalize := func(query string) string {
 		query = regexp.MustCompile(`\s+`).ReplaceAllString(query, "")
 		query = strings.ReplaceAll(query, "run_id=$1::uuid", "CAST(run_idASTEXT)=$1")
 		return strings.ReplaceAll(query, "run_id=?", "CAST(run_idASTEXT)=$1")
 	}
-	if len(old) != 2 || len(fresh) != 1 || normalize(old[0]) != normalize(fresh[0]) || normalize(old[1]) != normalize(fresh[0]) {
-		t.Fatalf("physical run/status/event predicates changed: %v -> %v", old, fresh)
+	for _, receiver := range []string{"ActivityPostgresOwner", "ActivitySQLiteOwner"} {
+		method := selectedCausalObservationBody(t, "internal/store/internal/backend/activityjournal/test_event_observations.go", "ReadProposedEffectRunExecutionStorageForTest", receiver)
+		fresh := eventDeliveryDiagnosticSQL(t, strings.ReplaceAll(method, "SELECT\n", "SELECT \n"))
+		if len(old) != 2 || len(fresh) != 1 || normalize(old[0]) != normalize(fresh[0]) || normalize(old[1]) != normalize(fresh[0]) {
+			t.Fatalf("physical run/status/event predicates changed: %v -> %v", old, fresh)
+		}
+		for _, cut := range []string{"s.backend.RunReadTransaction(ctx,", "Scan(&out.Requests, &out.SuccessfulAttempts)", "return ProposedEffectRunExecutionStorage{}, err"} {
+			if !strings.Contains(method, cut) {
+				t.Fatalf("native execution observation lost cut %q", cut)
+			}
+		}
 	}
-	for _, cut := range []string{"validateChannelObservationOwner(selected)", "validateSelectedForkStorageIdentity(runID)", "readServedDeliveryObservation(ctx, selected,", "Scan(&observed.Requests, &observed.SuccessfulAttempts)", "return ProposedEffectRunExecutionStorage{}, err"} {
+	for _, cut := range []string{"validateChannelObservationOwner(selected)", "validateSelectedForkStorageIdentity(runID)", "owner.activityPostgresOwner.ReadProposedEffectRunExecutionStorageForTest(ctx, runID)", "owner.activitySQLiteOwner.ReadProposedEffectRunExecutionStorageForTest(ctx, runID)"} {
 		if !strings.Contains(owner, cut) {
 			t.Fatalf("native execution observation lost cut %q", cut)
 		}

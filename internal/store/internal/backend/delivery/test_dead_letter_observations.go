@@ -20,9 +20,7 @@ func (s *DeliveryPostgresOwner) CountDeadLettersForOriginalEventForTest(ctx cont
 func (s *DeliverySQLiteOwner) CountDeadLettersForOriginalEventForTest(ctx context.Context, originalEventID string) (int, error) {
 	var out int
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = CountDeadLettersForOriginalEvent(ctx, tx, originalEventID)
-		return err
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id=$1`, originalEventID).Scan(&out)
 	})
 	if err != nil {
 		return 0, err

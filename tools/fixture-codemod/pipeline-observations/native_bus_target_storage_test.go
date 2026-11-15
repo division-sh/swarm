@@ -81,7 +81,8 @@ func TestNativeBusTargetStoragePreservesActualRoutingAndPhysicalQueries(t *testi
 			}
 		}
 	}
-	owner := selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/dead_letter_owner.go", "ReadTargetFailureDeadLetterStorage")
+	owner := selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/test_dead_letter_observations.go", "ReadTargetFailureDeadLetterStorageForTest", "DeliveryPostgresOwner") + "\n" +
+		selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/test_dead_letter_observations.go", "ReadTargetFailureDeadLetterStorageForTest", "DeliverySQLiteOwner")
 	if matched != 2 || len(original) != 2 || !slices.Equal(original, eventDeliveryDiagnosticSQL(t, owner)) {
 		t.Fatal("target dialect queries changed projection, default, event/class/handler predicates or multiplicity")
 	}

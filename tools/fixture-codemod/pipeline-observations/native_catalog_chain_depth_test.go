@@ -5,8 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -105,26 +103,23 @@ func TestNativeCatalogChainDepthOwnersKeepEveryOriginalSQLPredicate(t *testing.T
 	if len(original) != 6 {
 		t.Fatalf("original chain SQL=%d, want all three dialect pairs", len(original))
 	}
-	for i, owner := range []struct{ path, function string }{
-		{"delivery/dead_letter_owner.go", "ReadChainDepthDeadLetterStorage"},
-		{"eventpersistence/test_event_record_observation_queries.go", "countChainDepthDiagnosticStorage"},
-		{"authoractivity/readadapter/read.go", "CountRecordedDeadLetterStorage"},
+	for i, owner := range []struct {
+		path, function string
+		receivers      []string
+	}{
+		{"delivery/test_dead_letter_observations.go", "ReadChainDepthDeadLetterStorageForTest", []string{"DeliveryPostgresOwner", "DeliverySQLiteOwner"}},
+		{"eventpersistence/test_event_record_observation_queries.go", "countChainDepthDiagnosticStorage", nil},
+		{"activityjournal/test_event_observations.go", "CountRecordedDeadLetterStorageForTest", []string{"ActivityPostgresOwner", "ActivitySQLiteOwner"}},
 	} {
-		data, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.path))
-		if err != nil {
-			t.Fatal(err)
+		path := "internal/store/internal/backend/" + owner.path
+		var queries []string
+		if len(owner.receivers) == 0 {
+			queries = chainStorageQueries(t, selectedCausalObservationBody(t, path, owner.function))
+		} else {
+			for _, receiver := range owner.receivers {
+				queries = append(queries, chainStorageQueries(t, selectedCausalObservationBody(t, path, owner.function, receiver))...)
+			}
 		}
-		set := token.NewFileSet()
-		file, err := parser.ParseFile(set, owner.path, data, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fn, err := uniqueFunction(file, owner.function)
-		if err != nil {
-			t.Fatal(err)
-		}
-		function := string(data[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
-		queries := chainStorageQueries(t, function)
 		if len(queries) != 2 || queries[0] != original[2*i] || queries[1] != original[2*i+1] {
 			t.Fatalf("%s changed an original dialect predicate", owner.function)
 		}

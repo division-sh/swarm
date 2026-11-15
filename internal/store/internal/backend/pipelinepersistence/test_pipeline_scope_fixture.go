@@ -7,7 +7,34 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
+
+func (s *PipelinePostgresOwner) ReadCommittedPipelineScopeForTest(ctx context.Context, eventID string) (runtimepipelineobligation.CommittedScope, error) {
+	var scope runtimepipelineobligation.CommittedScope
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		scope, err = LoadCommittedScope(ctx, tx, eventID, true)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return scope, nil
+}
+
+func (s *PipelineSQLiteOwner) ReadCommittedPipelineScopeForTest(ctx context.Context, eventID string) (runtimepipelineobligation.CommittedScope, error) {
+	var scope runtimepipelineobligation.CommittedScope
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		scope, err = LoadCommittedScope(ctx, tx, eventID, false)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return scope, nil
+}
 
 func (s *PipelinePostgresOwner) ReadExactFanOutBarrierForTest(ctx context.Context, key fanoutobligation.IntentKey) (fanoutbarrier.Barrier, error) {
 	var out fanoutbarrier.Barrier

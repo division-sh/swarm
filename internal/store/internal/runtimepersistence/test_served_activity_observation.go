@@ -2,11 +2,9 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	"github.com/google/uuid"
 )
 
@@ -39,12 +37,11 @@ func ReadServedChannelConnectionForTest(ctx context.Context, selected any, opera
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return "", err
 	}
-	_, postgres := selected.(*PostgresStore)
-	var connection string
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		connection, err = channelonboarding.ReadSessionConnectionForTest(ctx, tx, postgres, operationID)
-		return err
-	})
-	return connection, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.channelOnboardingPostgresOwner.ReadSessionConnectionForTest(ctx, operationID)
+	case *SQLiteRuntimeStore:
+		return owner.channelOnboardingSQLiteOwner.ReadSessionConnectionForTest(ctx, operationID)
+	}
+	return "", nil
 }
