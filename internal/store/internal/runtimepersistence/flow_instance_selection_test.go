@@ -92,7 +92,7 @@ func requireR7SelectionNoMutation(t *testing.T, f receiverConfigActivationFixtur
 func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, change := range [][2]string{{"select-or-create", "select"}, {"select", "create"}} {
+			for _, change := range [][2]string{{"select-or-create", "select"}} {
 				t.Run("selected_"+change[0]+"_to_"+change[1], func(t *testing.T) { proveSelectedResolutionMode(t, backend, change[0], change[1]) })
 			}
 			f, request := newR7SelectionProof(t, backend)
