@@ -36,17 +36,9 @@ func (m *DockerManager) PrepareClaudeStartupObservation(ctx context.Context, act
 	if err != nil {
 		return nil, err
 	}
-	image, err := m.InspectWorkspaceImage(ctx)
+	image, err := m.startupObservationImage(ctx)
 	if err != nil {
 		return nil, err
-	}
-	volumes, err := m.runDockerObservation(ctx, "image", "inspect", "--format", "{{json .Config.Volumes}}", image)
-	if err != nil {
-		return nil, err
-	}
-	var declared map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(volumes), &declared); err != nil || len(declared) != 0 {
-		return nil, fmt.Errorf("observed image declares volumes or has an unreadable volume declaration")
 	}
 	id := uuid.NewString()
 	name := "swarm-admission-probe-" + id
@@ -119,6 +111,22 @@ func (m *DockerManager) PrepareClaudeStartupObservation(ctx context.Context, act
 	base.release = cleanup
 	handedOff = true
 	return base, nil
+}
+
+func (m *DockerManager) startupObservationImage(ctx context.Context) (string, error) {
+	image, err := m.InspectWorkspaceImage(ctx)
+	if err != nil {
+		return "", err
+	}
+	volumes, err := m.runDockerObservation(ctx, "image", "inspect", "--format", "{{json .Config.Volumes}}", image)
+	if err != nil {
+		return "", err
+	}
+	var declared map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(volumes), &declared); err != nil || len(declared) != 0 {
+		return "", fmt.Errorf("observed image declares volumes or has an unreadable volume declaration")
+	}
+	return image, nil
 }
 
 type startupObservationClaudeState struct {

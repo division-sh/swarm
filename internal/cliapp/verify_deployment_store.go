@@ -125,34 +125,9 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 	var retained *verifyRetainedAdmissionInventory
 	schemaOK := verifyDeploymentBoundedObservation(ctx, storeBudget, result, "selected_store_schema", "internal/store/selected.AdmissionInspection.Inspect", subject, failures.ClassDependencyUnavailable, func(ctx context.Context) error {
 		inspection, err := selected.Inspect(ctx, schemaRequest, func(snapshot *storeselected.AdmissionSnapshot) error {
-			if len(serve) != 0 && serve[0].input != nil {
-				input, err := snapshot.CaptureBootInput(ctx)
-				if err != nil {
-					return err
-				}
-				*serve[0].input = input
-			}
-			fresh, err := snapshot.RequiresSchemaPreparation()
-			if err != nil {
-				return err
-			}
-			if fresh {
-				accountVerifyStoreTail(result, subject, "canonical schema inspection proves the fresh store has no retained platform state", true)
-				tailAccounted = true
-				result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
-					ID: "store_schema_preparation", Owner: "internal/store.SchemaBootstrapper.BootstrapSchema", Subject: subject,
-					Reason: "fresh store schema must be prepared by boot; verification never creates tables",
-				})
-				return nil
-			}
-			if len(serve) != 0 {
-				if err := matchServeCheckReset(ctx, snapshot, serve[0].reset); err != nil {
-					return err
-				}
-			}
-			retained = inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, packBases, result)
-			tailAccounted = true
-			return nil
+			var err error
+			retained, tailAccounted, err = inspectVerifyAdmissionSnapshot(ctx, snapshot, subject, repo, paths, cfg, source, opts, packBases, result, serve)
+			return err
 		})
 		if err == nil && !inspection.Fresh && len(inspection.MissingDeploymentTables) != 0 {
 			result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
@@ -169,6 +144,37 @@ func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourc
 		inspectVerifyRetainedDependencies(ctx, retained, schemaOK, cfg, source, opts, workspaces, workspaceOK, result)
 	}
 	return retained
+}
+
+func inspectVerifyAdmissionSnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, subject, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult, serve []serveStoreInspection) (*verifyRetainedAdmissionInventory, bool, error) {
+	if len(serve) != 0 && serve[0].input != nil {
+		input, err := snapshot.CaptureBootInput(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		*serve[0].input = input
+	}
+	fresh, err := snapshot.RequiresSchemaPreparation()
+	if err != nil {
+		return nil, false, err
+	}
+	if fresh {
+		if len(serve) != 0 && serve[0].reset != nil {
+			return nil, false, destructivereset.ErrOperationChanged
+		}
+		accountVerifyStoreTail(result, subject, "canonical schema inspection proves the fresh store has no retained platform state", true)
+		result.BootReport.ExecutionObligations = append(result.BootReport.ExecutionObligations, bootverify.AdmissionExecutionObligation{
+			ID: "store_schema_preparation", Owner: "internal/store.SchemaBootstrapper.BootstrapSchema", Subject: subject,
+			Reason: "fresh store schema must be prepared by boot; verification never creates tables",
+		})
+		return nil, true, nil
+	}
+	if len(serve) != 0 {
+		if err := matchServeCheckReset(ctx, snapshot, serve[0].reset); err != nil {
+			return nil, false, err
+		}
+	}
+	return inspectVerifyRecoverySnapshot(ctx, snapshot, repo, paths, cfg, source, opts, packBases, result), true, nil
 }
 
 func accountVerifyStoreAccessFailure(result *runtime.WorkflowContractValidationResult, subject string) {
@@ -284,26 +290,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	})
 	retained.channels = inspectVerifyRetainedChannels(ctx, snapshot, subject, result)
 	verifyDeploymentObservation(ctx, result, "run_mutation_drift", "internal/store/selected.AdmissionSnapshot.InspectRunMutationDrift", subject, failures.ClassSchemaInvalid, func(ctx context.Context) error {
-		runs, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx)
-		if err != nil {
-			return err
-		}
-		var drift []error
-		for _, run := range runs {
-			report, err := snapshot.InspectRunMutationDrift(ctx, run.RunID)
-			if err != nil {
-				drift = append(drift, verifyRunFailure(run.RunID, err))
-				continue
-			}
-			if len(report.Rows) != 0 {
-				var rendered strings.Builder
-				if err := writeVerifyRunResult(&rendered, verifyRunCommandResult{DriftReport: report, Status: "drift", Errors: []failures.Envelope{}}); err != nil {
-					return err
-				}
-				drift = append(drift, verifyRunFailure(run.RunID, errors.New(rendered.String())))
-			}
-		}
-		return errors.Join(drift...)
+		return inspectVerifyRunDrift(ctx, snapshot)
 	})
 	retained.forksOK = verifyDeploymentObservation(ctx, result, "selected_fork_recovery_admission", "internal/runtime/runforkexecution.InspectSelectedForkRecoveries", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
 		loader, err := verifyRetainedSourceLoader(repo, packBases)
@@ -349,6 +336,29 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 		return nil
 	})
 	return retained
+}
+
+func inspectVerifyRunDrift(ctx context.Context, snapshot *storeselected.AdmissionSnapshot) error {
+	runs, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx)
+	if err != nil {
+		return err
+	}
+	var drift []error
+	for _, run := range runs {
+		report, err := snapshot.InspectRunMutationDrift(ctx, run.RunID)
+		if err != nil {
+			drift = append(drift, verifyRunFailure(run.RunID, err))
+			continue
+		}
+		if len(report.Rows) != 0 {
+			var rendered strings.Builder
+			if err := writeVerifyRunResult(&rendered, verifyRunCommandResult{DriftReport: report, Status: "drift", Errors: []failures.Envelope{}}); err != nil {
+				return err
+			}
+			drift = append(drift, verifyRunFailure(run.RunID, errors.New(rendered.String())))
+		}
+	}
+	return errors.Join(drift...)
 }
 
 func PrepareBundleUpgrade(ctx context.Context, reader runbundle.UpgradeReader, artifacts runforkexecution.SourceArtifactSelectedContractSourceStore, repo string, candidate semanticview.Source, packBases packartifact.PlatformPackBaseResolver) (*runbundle.UpgradePlan, error) {
