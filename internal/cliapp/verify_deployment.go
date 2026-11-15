@@ -48,9 +48,12 @@ func verifyDeploymentWorkflowOptions(ctx context.Context, cfg RuntimeConfigLoadR
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, err
 	}
-	packs, err := LoadBundlePackRuntime(ctx, cfg, bundle, credentials, managedCredentials)
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, err
+	var packs BundlePackRuntimeLoad
+	if bundle != nil {
+		packs, err = LoadBundlePackRuntime(ctx, cfg, bundle, credentials, managedCredentials)
+		if err != nil {
+			return runtime.WorkflowContractValidationOptions{}, err
+		}
 	}
 	publication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(packs.Channels.Bindings)
 	if err != nil {
