@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -536,6 +537,7 @@ type CommitPublishRequest struct {
 	ReplyContinuations  []runtimepinrouting.ReplyRequestContinuation
 	ReplyReturns        []runtimepinrouting.ReplyReturnContinuation
 	ReplyClaims         []runtimereplycontext.ClaimCommand
+	CompletionAwait     *runtimeeffects.CompletionAwaitPublication
 	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
 }
 
@@ -557,6 +559,9 @@ type preparedInboundPublication struct {
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {
+	if err := r.validateCompletionAwait(); err != nil {
+		return err
+	}
 	if err := r.validateReplyReturns(); err != nil {
 		return err
 	}
@@ -576,6 +581,47 @@ func (r CommitPublishRequest) ValidatePreparedEvent() error {
 		Settlement:     r.RouteSettlement,
 		DeliveryRoutes: r.DeliveryRoutes,
 	}).Validate()
+}
+
+func (r CommitPublishRequest) validateCompletionAwait() error {
+	if r.CompletionAwait != nil {
+		if len(r.ReplyCreations) != 1 || len(r.ReplyClaims) != 0 || len(r.ReplyContinuations) != 0 || len(r.ReplyReturns) != 0 ||
+			r.ReplyCreations[0].Await != nil || r.ReplyCreations[0].RequestEventID != r.Event.ID() || r.ReplyCreations[0].RunID != r.Event.Event().RunID() {
+			return fmt.Errorf("completion await requires one exact fresh request obligation")
+		}
+		attempt, record := r.CompletionAwait.Attempt, r.ReplyCreations[0]
+		if r.Event.Event().ProducerType() != events.EventProducerAgent || r.Event.Event().SourceAgent() != attempt.Authority.Target.AgentID ||
+			r.Event.Event().SourceRoute() != record.Origin {
+			return fmt.Errorf("completion await publication differs from its concrete actor and source route")
+		}
+	}
+	for _, claim := range r.ReplyClaims {
+		if claim.Expected.Await == nil {
+			continue
+		}
+		pairedPlan := false
+		compiledDeliveries := make([]bool, len(r.DeliveryRoutes))
+		for _, plan := range r.ConnectPlans {
+			paired := runtimepinrouting.ReplyReturnContinuation{Record: claim.Expected, Plan: plan}
+			pairedPlan = pairedPlan || (plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse && plan.MatchesReplyRecord(claim.Expected))
+			for i, route := range r.DeliveryRoutes {
+				if paired.MatchesResponseRecipient(route) {
+					return fmt.Errorf("await reply records readiness without a paired requester delivery")
+				}
+				compiled, err := plan.ClaimForRetainedDelivery(route)
+				compiledDeliveries[i] = compiledDeliveries[i] || (err == nil && compiled.Equal(route.ConnectClaim))
+			}
+		}
+		if !pairedPlan && len(r.DeliveryRoutes) != 0 {
+			return fmt.Errorf("await reply cannot admit deliveries without its exact paired response plan")
+		}
+		for _, compiled := range compiledDeliveries {
+			if !compiled {
+				return fmt.Errorf("await reply delivery lacks its exact compiled connection membership")
+			}
+		}
+	}
+	return nil
 }
 
 func (r CommitPublishRequest) validateReplyReturns() error {

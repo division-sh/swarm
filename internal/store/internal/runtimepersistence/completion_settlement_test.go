@@ -1747,6 +1747,17 @@ func beginObservedCompletionForSettlementTest(t *testing.T, ctx context.Context,
 
 func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget, fixture completionSettlementFixture, adapter, expectedHead, newHead string) runtimeeffects.CompletionSettlement {
 	t.Helper()
+	settlement := completionSettlementForAuthority(t, target, fixture.authority, adapter)
+	settlement.ProviderHead = &runtimeeffects.CompletionProviderHead{
+		Identity:  testAgentMemoryIdentity(t, target.RunID, fixture.agentID, target.FlowInstance),
+		SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID,
+		ExpectedProviderHead: expectedHead, NewProviderHead: newHead,
+	}
+	return settlement
+}
+
+func completionSettlementForAuthority(t testing.TB, target runtimeeffects.UsageTarget, authority runtimeeffects.Authority, adapter string) runtimeeffects.CompletionSettlement {
+	t.Helper()
 	input, output := int64(12), int64(4)
 	settlement := runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"provider_result": true}},
@@ -1765,14 +1776,8 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 			BackendProfile: "test", Provider: "anthropic", Transport: "process", ResolvedModel: "claude-test",
 			CostUSD: 0.25, InvocationType: "agent_turn",
 		},
-		ProviderHead: &runtimeeffects.CompletionProviderHead{
-			Identity:  testAgentMemoryIdentity(t, target.RunID, fixture.agentID, target.FlowInstance),
-			SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID,
-			ExpectedProviderHead: expectedHead, NewProviderHead: newHead,
-		},
 		Now: time.Now().UTC(),
 	}
-	authority := fixture.authority
 	authority.Target = target
 	event := managedCompletionTestEvent(authority)
 	settlement.AgentTurn.TriggerEventID = event.ID()

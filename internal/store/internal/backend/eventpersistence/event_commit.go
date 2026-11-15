@@ -17,6 +17,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -41,6 +42,8 @@ type eventCommitTxStore interface {
 	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
 	createReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	completionAwaitReplyTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record, runtimeeffects.CompletionAwaitPublication, bool) error
+	prepareCompletionAwaitTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.Attempt) error
 	requireReplyContextContinuationTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
 	requireReplyContextReturnTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
 	claimReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
@@ -110,6 +113,9 @@ type sqlPublishCommitter struct {
 }
 
 func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation string, class events.EventAdmissionClass, eventType events.EventType, req runtimebus.CommitPublishRequest) (runtimebus.EventAppendOutcome, error) {
+	if req.CompletionAwait != nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("completion await requires the ordinary publication owner")
+	}
 	if c.attempt == nil || c.store == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s event commit attempt is required", operation)
 	}
@@ -152,7 +158,13 @@ func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context
 		}
 	}
 	for _, record := range req.ReplyCreations {
-		if err := c.store.createReplyContextTx(ctx, c.attempt, record); err != nil {
+		var err error
+		if req.CompletionAwait != nil {
+			err = c.store.completionAwaitReplyTx(ctx, c.attempt, record, *req.CompletionAwait, false)
+		} else {
+			err = c.store.createReplyContextTx(ctx, c.attempt, record)
+		}
+		if err != nil {
 			return nil, fmt.Errorf("commit reply context creation: %w", err)
 		}
 	}
@@ -664,6 +676,11 @@ func commitValidatedPublicationSQL(
 		}
 	}
 	request := command.Commit
+	if request.CompletionAwait != nil {
+		if err := store.prepareCompletionAwaitTx(ctx, attempt, request.CompletionAwait.Attempt); err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
 	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	creationAlreadyCommitted := false
 	var err error
@@ -700,6 +717,11 @@ func commitValidatedPublicationSQL(
 		result.AcceptedStage = &receipt
 	}
 	if outcome == runtimebus.EventAppendExactDuplicate {
+		if request.CompletionAwait != nil {
+			if err := store.completionAwaitReplyTx(ctx, attempt, request.ReplyCreations[0], *request.CompletionAwait, true); err != nil {
+				return runtimebus.CommittedPublication{}, err
+			}
+		}
 		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
 			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
 		}

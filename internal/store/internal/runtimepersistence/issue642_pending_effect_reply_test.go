@@ -61,6 +61,10 @@ func TestIssue642PendingEffectRetainsOwnChildReplyBothStores(t *testing.T) {
 			if err != nil || len(plan.ReplyContexts) != 1 {
 				t.Fatalf("actual captured pending-effect plan: %+v error=%v", plan.ReplyContexts, err)
 			}
+			original, err := fixture.store.(replycontext.Store).LoadReplyContext(ctx, source.ReplyContextID)
+			if err != nil || plan.ReplyContexts[0].Await != nil || !plan.ReplyContexts[0].SameIdentity(original) {
+				t.Fatalf("actual emitted ordinary reply projection failed historical decoding: record=%+v error=%v", plan.ReplyContexts[0], err)
+			}
 			projection, err := projectRunForkEntityOwnership(event.RunID(), child.ForkRunID, source.EntityID, source.FlowInstance)
 			if err != nil {
 				t.Fatal(err)

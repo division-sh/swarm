@@ -548,6 +548,9 @@ func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, att
 			if err != nil {
 				return err
 			}
+			if err := requireNoPendingCompletionAwait(txctx, tx, attempt); err != nil {
+				return err
+			}
 			successorRaw, err := validateCompletionSuccessor(attempt, successor)
 			if err != nil {
 				return err
@@ -585,6 +588,9 @@ func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attem
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
 			if err != nil {
+				return err
+			}
+			if err := requireNoPendingCompletionAwait(txctx, tx, attempt); err != nil {
 				return err
 			}
 			successorRaw, err := validateCompletionSuccessor(attempt, successor)

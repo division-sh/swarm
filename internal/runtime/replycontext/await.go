@@ -80,6 +80,9 @@ func (r *Record) DecodeAwaitBinding(raw []byte) error {
 	if len(fields) != len(allowed) {
 		return fmt.Errorf("reply await binding is missing required evidence")
 	}
+	if index, number := fields["call_index"].Number(); !number || index < 0 || index != float64(int(index)) {
+		return fmt.Errorf("reply await call index requires a nonnegative integer")
+	}
 	for name := range fields {
 		if !allowed[name] {
 			return fmt.Errorf("reply await binding has undeclared field %q", name)
