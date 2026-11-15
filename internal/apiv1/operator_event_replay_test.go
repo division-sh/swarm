@@ -41,7 +41,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runtimebustest "github.com/division-sh/swarm/tests/support/runtime/bus/bustest"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -500,14 +499,10 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, -1); err == nil {
 					t.Fatal("event schema admitted negative chain_depth")
 				}
-				dialect := authoractivityfixture.DialectPostgres
-				if f.sqlite {
-					dialect = authoractivityfixture.DialectSQLite
-				}
-				eventtestsql.CorruptEventStore(t, ctx, f.db, dialect, eventtestsql.EventCorruptionClaim{
+				storetest.CorruptTargetRouteScalar(t, ctx, f.store, eventtestsql.EventCorruptionClaim{
 					Invariant: "store.event_record.canonical_readback",
 					Reason:    "prove operator replay rejects a durable target route that is valid JSON but not a route object",
-				}, `UPDATE events SET target_route = ? WHERE event_id = ?`, `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, originalID)
+				}, originalID)
 				if _, err := f.store.LoadOperatorEvent(ctx, originalID); err == nil || !strings.Contains(err.Error(), "target_route") {
 					t.Fatalf("canonical corrupt read error = %v, want target_route failure", err)
 				}
