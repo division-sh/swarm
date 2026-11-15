@@ -1071,18 +1071,18 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			if err != nil {
 				t.Fatalf("install exact poison fault: %v", err)
 			}
-			if err := cleanupFault(ctx); err != nil {
+			if err := cleanupFault.Remove(ctx); err != nil {
 				t.Fatalf("remove exact poison fault: %v", err)
 			}
 			removeFault, err := storetest.InstallNodeRecoveryPoisonMutation(ctx, selected, templateInstanceDeliveryRunID, poisonEntityID)
 			if err != nil {
 				t.Fatalf("reinstall exact poison fault after cleanup: %v", err)
 			}
-			if err := cleanupFault(ctx); err != nil {
+			if err := cleanupFault.Remove(ctx); err != nil {
 				t.Fatalf("repeat old cleanup must not remove successor fault: %v", err)
 			}
 			t.Cleanup(func() {
-				if err := removeFault(context.WithoutCancel(ctx)); err != nil {
+				if err := removeFault.Remove(context.WithoutCancel(ctx)); err != nil {
 					t.Errorf("remove selected poison fault: %v", err)
 				}
 			})

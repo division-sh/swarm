@@ -17,7 +17,7 @@ func openManagerNativeSelectedDelivery(t *testing.T, backend string) *manager.Ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	execution := selectedtest.OpenSelectedDeliveryExecution(t, fixture.Context, selected, original)
+	execution := selectedtest.OpenSelectedDeliveryExecution(t, fixture.Context, selected, fixture.Store.(managerNativeDeliveryOwner).PipelineObligations(), original)
 	fixture.Authority, fixture.NormalAuthority = execution.Authority, execution.NormalAuthority
 	fixture.SelectedAdmission, fixture.SelectedRoute = execution.SelectedAdmission, execution.SelectedRoute
 	fixture.SelectedEvent, fixture.SemanticSource, fixture.Context = execution.SelectedEvent, execution.SemanticSource, execution.Context
@@ -42,7 +42,7 @@ func TestManagerNativeSelectedDeliveryFixtureUsesRealIssuedClaimBothStores(t *te
 					t.Fatal(err)
 				}
 				t.Run("selected_child", func(t *testing.T) {
-					selectedtest.OpenSelectedDeliveryExecution(t, normal.Context, normal.Store.(selectedtest.SelectedDeliveryFixtureStore), original)
+					selectedtest.OpenSelectedDeliveryExecution(t, normal.Context, normal.Store.(selectedtest.SelectedDeliveryFixtureStore), normal.Store.(managerNativeDeliveryOwner).PipelineObligations(), original)
 				})
 				if after, err := original.Evidence(); err != nil || after != before {
 					t.Fatalf("joined selected child retired or replaced its borrowed original: before=%+v after=%+v error=%v", before, after, err)

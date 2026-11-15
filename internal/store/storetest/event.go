@@ -93,16 +93,11 @@ func CommitDeliveryObligationsForPersistedEvent(
 	}
 }
 
-type DeliveryLifecycleStore interface {
-	ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
-	Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
-}
-
 // ClaimDelivery acquires an exact fixture delivery through the same typed
 // authority boundary as production. It is intentionally unsuitable for tests
 // that need to assert non-acquired dispositions; those should call the store
 // method directly and inspect ClaimResult.
-func ClaimDelivery(ctx context.Context, selected DeliveryLifecycleStore, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
+func ClaimDelivery(ctx context.Context, selected runtimedelivery.Store, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
 	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
 	if err != nil {
 		return runtimedelivery.ClaimedObligation{}, err

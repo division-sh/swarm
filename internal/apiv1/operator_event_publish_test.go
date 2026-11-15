@@ -42,9 +42,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/tests/support/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/tests/support/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/tests/support/testutil"
@@ -75,9 +73,8 @@ type canonicalEventPublishProofStore interface {
 
 func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 	type fixture struct {
-		store   canonicalEventPublishProofStore
-		db      *sql.DB
-		dialect authoractivityfixture.Dialect
+		store canonicalEventPublishProofStore
+		db    *sql.DB
 	}
 	for _, backend := range []struct {
 		name string
@@ -87,14 +84,14 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), dialect: authoractivityfixture.DialectSQLite}
+				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore)}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
 				_, db, _ := testutil.StartPostgres(t)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db, dialect: authoractivityfixture.DialectPostgres}
+				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
 			},
 		},
 	} {
@@ -184,7 +181,10 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 				{"existing-run operator", operatorID, events.EventAdmissionOperatorInjected, "", false},
 				{"referenced operator", referencedID, events.EventAdmissionOperatorInjected, rootID, true},
 			} {
-				persisted, err := eventfixture.Load(ctx, f.db, f.dialect, expected.eventID)
+				persisted, found, err := storetest.ReadCanonicalEventRecord(ctx, f.store, expected.eventID)
+				if err == nil && !found {
+					err = fmt.Errorf("canonical event fixture %s is missing", expected.eventID)
+				}
 				if err != nil {
 					t.Fatalf("canonical readback %s: %v", expected.name, err)
 				}
@@ -2791,7 +2791,10 @@ func seedEventPublishConstructedFlow(t *testing.T, selected *store.PostgresStore
 	opts := runStartTestEventBusOptions(source)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact), runID)
 	ctx = originalAPIFixtureContext(t, ctx, selected)
-	trigger, err := eventfixture.Load(ctx, storetest.DatabaseForTest(selected), authoractivityfixture.DialectPostgres, sourceEventID)
+	trigger, found, err := storetest.ReadCanonicalEventRecord(ctx, selected, sourceEventID)
+	if err == nil && !found {
+		err = fmt.Errorf("canonical event fixture %s is missing", sourceEventID)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

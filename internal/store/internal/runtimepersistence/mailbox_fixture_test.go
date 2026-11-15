@@ -45,7 +45,7 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 					}
 					t.Cleanup(func() {
 						if restore != nil {
-							if err := restore(context.Background()); err != nil {
+							if err := restore.Restore(context.Background()); err != nil {
 								t.Error(err)
 							}
 						}
@@ -53,7 +53,7 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 					if got := read(); got != (sql.NullString{String: hostile, Valid: true}) {
 						t.Fatalf("installation = %+v", got)
 					}
-					if err := restore(ctx); err != nil {
+					if err := restore.Restore(ctx); err != nil {
 						t.Fatal(err)
 					}
 					restore = nil
@@ -118,7 +118,7 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						if err := restore(ctx); err != nil {
+						if err := restore.Restore(ctx); err != nil {
 							t.Fatal(err)
 						}
 						var got sql.NullString
@@ -215,7 +215,7 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := restore(ctx); err != nil {
+			if err := restore.Restore(ctx); err != nil {
 				t.Fatal(err)
 			}
 			cancelled, cancel := context.WithCancel(ctx)

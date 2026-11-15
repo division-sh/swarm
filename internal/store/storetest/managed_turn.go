@@ -36,7 +36,7 @@ type ManagedAgentTurnFixtureStore interface {
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
-	DeliveryLifecycleStore
+	runtimedelivery.Store
 	LoadAgentLifecycleState(context.Context, agentidentity.Identity) (runtimemanager.AgentLifecycleState, bool, error)
 	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 	SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
