@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
@@ -513,20 +512,17 @@ func InsertRevisionedExistingRunRootEventForTest(ctx context.Context, selected a
 	envelope events.EventEnvelope, createdAt time.Time,
 ) (events.Event, error) {
 	var rejected events.Event
-	dialect, err := eventFixtureDialectForTest(selected)
-	if err != nil {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return rejected, err
 	}
-	var event events.Event
-	err = runEventFixtureMutationForTest(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		var err error
-		event, err = eventfixture.ExistingRunRoot(txctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
-		return err
-	})
-	if err != nil {
-		return rejected, err
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.eventPostgresOwner.InsertRevisionedExistingRunRootForTest(ctx, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	case *SQLiteRuntimeStore:
+		return owner.eventSQLiteOwner.InsertRevisionedExistingRunRootForTest(ctx, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	default:
+		return rejected, fmt.Errorf("event fixture store %T is unsupported", selected)
 	}
-	return event, nil
 }
 
 func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, error) {
@@ -547,26 +543,6 @@ func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, er
 		}
 	}
 	return "", fmt.Errorf("event fixture selected store %T is not initialized", selected)
-}
-
-func runEventFixtureMutationForTest(ctx context.Context, selected any, write func(context.Context, *mutationprotocol.Attempt) error) error {
-	apply := func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, write(txctx, attempt)
-	}
-	switch store := selected.(type) {
-	case *PostgresStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("postgres event fixture store is required")
-		}
-		return mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, apply).Err()
-	case *SQLiteRuntimeStore:
-		if store == nil || store.backend == nil {
-			return fmt.Errorf("sqlite event fixture store is required")
-		}
-		return mutationprotocol.RunSQLite(ctx, store.backend, "canonical event fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, apply).Err()
-	default:
-		return fmt.Errorf("event fixture store %T is unsupported", selected)
-	}
 }
 
 func commitSelectedSemanticEventFixtureForTest(ctx context.Context, selectedStore any, admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, pipelineDisposition *runtimepipelineobligation.Disposition, revisioned, captureForkFrontier bool) (bool, error) {
