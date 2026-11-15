@@ -10,6 +10,51 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 )
 
+func TestEventListOnlyOmitsRunForExplicitDeadLetters(t *testing.T) {
+	for _, cell := range []struct {
+		name, params string
+		code         int
+	}{
+		{"dead_letters", `{"filter":{"has_dead_letter":true},"limit":1}`, 0},
+		{"scoped_true", `{"filter":{"run_id":"run-1","has_dead_letter":true},"limit":1}`, 0},
+		{"scoped_false", `{"filter":{"run_id":"run-1","has_dead_letter":false},"limit":1}`, 0},
+		{"missing_filter", `{}`, codeInvalidParams},
+		{"null_filter", `{"filter":null}`, codeInvalidParams},
+		{"blank_filter", `{"filter":" "}`, codeInvalidParams},
+		{"empty_filter", `{"filter":{}}`, -32000},
+		{"false", `{"filter":{"has_dead_letter":false}}`, -32000},
+		{"null_boolean", `{"filter":{"has_dead_letter":null}}`, -32000},
+		{"status_only", `{"filter":{"delivery_status":"dead_letter"}}`, -32000},
+		{"reason_only", `{"filter":{"reason_code":"retry_exhausted"}}`, -32000},
+		{"null_run", `{"filter":{"run_id":null,"has_dead_letter":true}}`, -32000},
+		{"empty_run", `{"filter":{"run_id":"","has_dead_letter":true}}`, -32000},
+		{"blank_run", `{"filter":{"run_id":"  ","has_dead_letter":true}}`, -32000},
+		{"nonstring_run", `{"filter":{"run_id":3,"has_dead_letter":true}}`, codeInvalidParams},
+		{"malformed_run", `{"filter":{"run_id":"bad/run","has_dead_letter":true}}`, codeInvalidParams},
+		{"nonboolean", `{"filter":{"has_dead_letter":"true"}}`, codeInvalidParams},
+		{"unknown", `{"filter":{"has_dead_letter":true,"extra":true}}`, codeInvalidParams},
+		{"bad_limit", `{"filter":{"has_dead_letter":true},"limit":0}`, codeInvalidParams},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			reads := &fakeObservabilityReadStore{lastEventList: operatorread.OperatorEventListOptions{Limit: -1}}
+			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Observability: reads})})
+			response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"scope","method":"event.list","params":`+cell.params+`}`)
+			if cell.code == 0 {
+				if response.Error != nil || reads.lastEventList.Limit != 1 {
+					t.Fatalf("list did not reach its existing owner: %+v opts=%+v", response, reads.lastEventList)
+				}
+				return
+			}
+			if response.Error == nil || response.Error.Code != cell.code || reads.lastEventList.Limit != -1 {
+				t.Fatalf("refusal changed or reached owner: %+v opts=%+v", response, reads.lastEventList)
+			}
+			if cell.code == -32000 && asMap(t, response.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
+				t.Fatalf("missing run lost its semantic refusal: %+v", response.Error)
+			}
+		})
+	}
+}
+
 func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	observability := &fakeObservabilityReadStore{

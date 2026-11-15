@@ -1380,8 +1380,12 @@ func operatorEventListOptionsFromParams(params map[string]any) (operatorread.Ope
 	if err != nil {
 		return operatorread.OperatorEventListOptions{}, err
 	}
-	if err := requireEventListRunScope(filter); err != nil {
-		return operatorread.OperatorEventListOptions{}, err
+	rawFilter, _ := params["filter"].(map[string]any)
+	_, runSupplied := rawFilter["run_id"]
+	if runSupplied || filter.HasDeadLetter == nil || !*filter.HasDeadLetter {
+		if err := requireEventListRunScope(filter); err != nil {
+			return operatorread.OperatorEventListOptions{}, err
+		}
 	}
 	out.Filter = filter
 	limit, err := boundedIntegerParam(params, "limit", 1, 1000)

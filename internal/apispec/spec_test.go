@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -703,6 +704,34 @@ func TestEventListSubscribeFilterParity(t *testing.T) {
 	}
 	if listRef != subscribeRef {
 		t.Fatalf("event.subscribe filter ref = %q, want event.list filter ref %q", subscribeRef, listRef)
+	}
+	filter := normalizeValue(api.Components.Schemas["EventListFilter"]).(map[string]any)
+	want := []any{
+		map[string]any{"required": []any{"run_id"}},
+		map[string]any{"required": []any{"has_dead_letter"}, "properties": map[string]any{"has_dead_letter": map[string]any{"const": true}}, "not": map[string]any{"required": []any{"run_id"}}},
+	}
+	if !reflect.DeepEqual(filter["anyOf"], want) || filter["required"] != nil || filter["additionalProperties"] != false {
+		t.Fatalf("event.list scope contract changed: %+v", filter)
+	}
+	for name, schema := range map[string]any{
+		"missing_scope": map[string]any{"$ref": listRef},
+		"different_ref": map[string]any{"allOf": []any{map[string]any{"$ref": "#/components/schemas/RunDebugTraceFilter"}, map[string]any{"required": []any{"run_id"}}}},
+		"extra_field":   map[string]any{"allOf": []any{map[string]any{"$ref": listRef}, map[string]any{"required": []any{"run_id"}, "properties": map[string]any{"extra": map[string]any{"type": "string"}}}}},
+		"wrong_scope":   map[string]any{"allOf": []any{map[string]any{"$ref": listRef}, map[string]any{"required": []any{"has_dead_letter"}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := loadRepoAPISpec(t)
+			method := changed.MethodCatalog["event.subscribe"]
+			for i := range method.Params {
+				if method.Params[i].Name == "filter" {
+					method.Params[i].Schema = schema
+				}
+			}
+			changed.MethodCatalog["event.subscribe"] = method
+			if problems := validateFilterParity(changed); len(problems) == 0 {
+				t.Fatalf("filter drift admitted: %+v", schema)
+			}
+		})
 	}
 }
 

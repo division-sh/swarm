@@ -33901,8 +33901,13 @@ api_specification:
       EventListFilter:
         type: object
         additionalProperties: false
-        required:
-        - run_id
+        anyOf:
+        - required: [run_id]
+        - required: [has_dead_letter]
+          properties:
+            has_dead_letter: {const: true}
+          not:
+            required: [run_id]
         properties:
           run_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -39558,8 +39563,12 @@ api_specification:
 
         has_dead_letter and reason_code filters; no separate dead_letter.*
 
-        namespace in v1. Multi-bundle-safe reads require explicit filter.run_id;
-        unscoped event firehose reads are not a public v1 surface.
+        namespace in v1. Reads require explicit filter.run_id except when run_id
+        is omitted and has_dead_letter is explicitly true. That exception lists
+        only events with retained dead letters across the selected deployment.
+        Supplied null or blank run_id does not activate the exception. Authentication,
+        EventFull fields, filters and pagination are unchanged; ordinary unscoped
+        event firehose reads are not a public v1 surface.
 
         '
       scope:
@@ -39637,7 +39646,9 @@ api_specification:
       - name: filter
         required: true
         schema:
-          $ref: '#/components/schemas/EventListFilter'
+          allOf:
+          - $ref: '#/components/schemas/EventListFilter'
+          - required: [run_id]
       - name: replay_since
         required: false
         description: Optional catch-up window. If present, delivers events from this time forward, then continues live. Subject
