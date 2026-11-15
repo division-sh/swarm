@@ -89,17 +89,18 @@ type fakeDockerState struct {
 }
 
 type fakeDockerRecord struct {
-	ContainerID string   `json:"container_id,omitempty"`
-	Class       string   `json:"class"`
-	Args        []string `json:"args,omitempty"`
-	SessionID   string   `json:"session_id,omitempty"`
-	ToolName    string   `json:"tool_name,omitempty"`
-	ToolStatus  string   `json:"tool_status,omitempty"`
-	MailboxID   string   `json:"mailbox_id,omitempty"`
-	RawMCPURL   string   `json:"raw_mcp_url,omitempty"`
-	MCPURL      string   `json:"mcp_url,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
-	WorkerMode  string   `json:"worker_mode,omitempty"`
+	ContainerID        string   `json:"container_id,omitempty"`
+	Class              string   `json:"class"`
+	Args               []string `json:"args,omitempty"`
+	SessionID          string   `json:"session_id,omitempty"`
+	ToolName           string   `json:"tool_name,omitempty"`
+	ToolStatus         string   `json:"tool_status,omitempty"`
+	MailboxID          string   `json:"mailbox_id,omitempty"`
+	RawMCPURL          string   `json:"raw_mcp_url,omitempty"`
+	MCPURL             string   `json:"mcp_url,omitempty"`
+	Reason             string   `json:"reason,omitempty"`
+	WorkerMode         string   `json:"worker_mode,omitempty"`
+	StartupObservation bool     `json:"startup_observation,omitempty"`
 }
 
 type fakeClaudeInvocation struct {
@@ -244,6 +245,9 @@ func runFakeDocker(args []string) int {
 	defer endActivity()
 	if len(args) == 0 {
 		return fakeDockerUnexpected(root, args, "missing command")
+	}
+	if handled, code := fakeAdmissionDocker(root, args); handled {
+		return code
 	}
 	if args[0] != "exec" {
 		if err := validateReleaseDockerCommand(root, args); err != nil {
@@ -1332,7 +1336,7 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 	return nil
 }
 
-func validateReleaseMCPConfig(raw string) (string, string, map[string]string, error) {
+func validateReleaseMCPConfig(raw string, observation ...bool) (string, string, map[string]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", "", nil, fmt.Errorf("Claude invocation omitted --mcp-config")
 	}
@@ -1367,7 +1371,7 @@ func validateReleaseMCPConfig(raw string) (string, string, map[string]string, er
 	if !strings.HasPrefix(authorization, "Bearer ") || strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")) == "" || contextToken == "" {
 		return "", "", nil, fmt.Errorf("runtime-tools MCP authorization/context headers are incomplete")
 	}
-	hostURL, err := hostReachableMCPURL(rawURL)
+	hostURL, err := hostReachableMCPURL(rawURL, observation...)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -1455,7 +1459,7 @@ func fakeDockerWorker(root string, args []string) int {
 		return fakeDockerUnexpected(root, args, "invalid native worker gateway")
 	}
 	if gateway.URL != "" {
-		endpoint, err := hostReachableMCPURL(gateway.URL)
+		endpoint, err := hostReachableMCPURL(gateway.URL, container.Labels["sh.swarm.admission-probe"] != "")
 		if err != nil {
 			return fakeDockerUnexpected(root, args, err.Error())
 		}
@@ -1761,7 +1765,7 @@ func listedToolNames(tools []any) []string {
 	return names
 }
 
-func hostReachableMCPURL(raw string) (string, error) {
+func hostReachableMCPURL(raw string, observation ...bool) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return "", err
@@ -1770,7 +1774,7 @@ func hostReachableMCPURL(raw string) (string, error) {
 	if parsed.Scheme != "http" ||
 		parsed.Hostname() != "host.docker.internal" ||
 		portErr != nil || port < 1 || port > 65535 ||
-		(port != 8082 && os.Getenv(releaseResourceReadEnv) != "1") ||
+		(port != 8082 && os.Getenv(releaseResourceReadEnv) != "1" && !(len(observation) != 0 && observation[0])) ||
 		parsed.Path != "/mcp" ||
 		parsed.RawQuery != "" ||
 		parsed.Fragment != "" ||
