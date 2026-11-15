@@ -56,8 +56,6 @@ type liveAwaitProofFixture struct {
 	authority effects.Authority
 	origin    deliverylifecycle.Claim
 	context   context.Context
-	sessionID string
-	agentID   string
 	config    actors.AgentConfig
 	input     events.Event
 	route     events.RouteIdentity
@@ -71,9 +69,7 @@ func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
 				selected := backend.open(t).store.(liveAwaitProofStore)
 				fixture := newLiveAwaitProofFixture(t, selected, mode == "root_exact")
-				if mode == "root_exact" {
-					mode = "exact"
-				}
+				mode = strings.TrimPrefix(mode, "root_")
 				ctx, handle, payload, messages, output := settledLiveAwaitProof(t, fixture, mode)
 				event := liveAwaitEvent(t, fixture, output.EventID, "await.request", output.CreatedAt)
 				record := liveAwaitRecord(fixture, event)
@@ -216,7 +212,7 @@ func TestLiveCompletionAwaitPublicationAtomicReadyOnlyBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := handle.ProjectCompletionConversation(ctx, effects.CompletionConversationProjection{Payload: payload, SessionID: fixture.sessionID, Identity: fixture.authority.Target.AgentIdentity, Memory: fixture.authority.Target.Memory, TurnCount: 1, Messages: projection}); err != nil {
+				if err := handle.ProjectCompletionConversation(ctx, effects.CompletionConversationProjection{Payload: payload, SessionID: fixture.authority.Target.SessionID, Identity: fixture.authority.Target.AgentIdentity, Memory: fixture.authority.Target.Memory, TurnCount: 1, Messages: projection}); err != nil {
 					t.Fatal(err)
 				}
 				if err := handle.ConsumeCompletionResponse(ctx, nil, nil); err == nil || !strings.Contains(err.Error(), "pending invocation-bound reply work") {
@@ -378,6 +374,9 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if err != nil || identity.Name != name || identity.Route != actorRoute || identity.RunID != run {
 		t.Fatalf("constructed roster differs from its exact declared name/route: %+v %v", identity, err)
 	}
+	if err := manager.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, flowidentity.RunScopedFlowInstance{RunID: run, Route: committed.Plan.Identity.Route()}); err != nil {
+		t.Fatalf("prepare exact committed agent roster without starting manager: %v", err)
+	}
 	state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
 	if err != nil || !found || state.ConfigRevision != committed.Plan.Readiness.Agents[0].ConfigRevision {
 		t.Fatalf("current actor lifecycle: %+v %t %v", state, found, err)
@@ -419,7 +418,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	authority := effects.NormalAgentAuthority(token, lease.LockOwner, lease.ExpiresAt)
 	authority.ExecutionMode = config.ExecutionMode
 	authority.Target = effects.UsageTarget{Kind: effects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: identity.AgentID(), AgentIdentity: identity, RunID: run, SessionID: lease.SessionID, Memory: config.Memory, FlowInstance: identity.FlowInstance(), EntityID: committed.Plan.Identity.EntityID}
-	fixture := liveAwaitProofFixture{store: selected, authority: authority, sessionID: lease.SessionID, agentID: identity.AgentID(), config: config,
+	fixture := liveAwaitProofFixture{store: selected, authority: authority, config: config,
 		route: events.RouteIdentity{FlowID: committed.Plan.Identity.ScopeKey, FlowInstance: committed.Plan.Identity.InstancePath, EntityID: committed.Plan.Identity.EntityID},
 		life:  events.InstanceLife{RunID: run, FlowInstance: committed.Plan.Identity.InstancePath, Life: committed.Plan.Instance.Life}}
 	scope, _, path, err := authority.BusinessTurnCoordinates()
@@ -435,7 +434,7 @@ func newLiveAwaitProofFixture(t *testing.T, selected liveAwaitProofStore, root b
 	if err != nil {
 		t.Fatal(err)
 	}
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.agentID), AgentIdentity: identity, Target: target, Context: events.DeliveryContext{Life: &fixture.life}}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.authority.Target.AgentID), AgentIdentity: identity, Target: target, Context: events.DeliveryContext{Life: &fixture.life}}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, origin, []events.DeliveryRoute{route}); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +474,7 @@ func liveAwaitEvent(t *testing.T, f liveAwaitProofFixture, id, eventType string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	return eventtest.ChildWithLineageAndRoutingSource(id, events.EventType(eventType), f.agentID, "", json.RawMessage(`{}`), 1,
+	return eventtest.ChildWithLineageAndRoutingSource(id, events.EventType(eventType), f.authority.Target.AgentID, "", json.RawMessage(`{}`), 1,
 		events.LineageFromEvent(f.input), events.EventEnvelope{}, source, at)
 }
 
@@ -523,7 +522,7 @@ func liveAwaitCommand(t *testing.T, f liveAwaitProofFixture, ctx context.Context
 		}
 		command.Commit.DeliveryAuthority = snapshot.Authority
 		command.Commit.ReplyCreations = []replycontext.Record{*record}
-		command.Commit.DeliveryRoutes = []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.authority.Target.AgentIdentity, Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}}}
+		command.Commit.DeliveryRoutes = []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(f.authority.Target.AgentID), AgentIdentity: f.authority.Target.AgentIdentity, Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}}}
 		command.Commit.RouteSettlement = testRouteSettlement(event, command.Commit.DeliveryRoutes)
 	}
 	return command, ctx
@@ -599,7 +598,7 @@ func settledLiveAwaitProof(t *testing.T, f liveAwaitProofFixture, mode string) (
 		frameID = "agent-frame:v1:" + uuid.NewString()
 	}
 	document := map[string]any{"version": "provider-response-continuation.v1", "adapter": adapter, "response": response, "usage": settlement.Usage,
-		"projection": map[string]any{"session_id": f.sessionID, "expected_turn_count": 0, "turn_count": 1, "messages": messages, "identity": f.authority.Target.AgentIdentity, "memory": f.authority.Target.Memory, "frame_id": frameID}}
+		"projection": map[string]any{"session_id": f.authority.Target.SessionID, "expected_turn_count": 0, "turn_count": 1, "messages": messages, "identity": f.authority.Target.AgentIdentity, "memory": f.authority.Target.Memory, "frame_id": frameID}}
 	payload, err := json.Marshal(document)
 	if err != nil {
 		t.Fatal(err)
