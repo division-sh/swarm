@@ -2,12 +2,10 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 )
 
 func SeedHistoricalActivityForkAttemptForTest(ctx context.Context, selected any, record pipeline.ActivityAttemptRecord) error {
@@ -28,8 +26,12 @@ func SeedHistoricalActivityForkAttemptForTest(ctx context.Context, selected any,
 	if record.StartedAt.IsZero() || record.CompletedAt == nil || !record.StartedAt.Equal(*record.CompletedAt) || !record.StartedAt.Equal(record.UpdatedAt) {
 		return fmt.Errorf("historical activity fork requires its identical start, completion and update clock")
 	}
-	_, postgres := selected.(*PostgresStore)
-	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return activityjournal.InsertHistoricalActivityForkAttemptTx(ctx, tx, postgres, record)
-	})
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		return owner.activityPostgresOwner.SeedHistoricalActivityForkAttemptForTest(ctx, record)
+	case *SQLiteRuntimeStore:
+		return owner.activitySQLiteOwner.SeedHistoricalActivityForkAttemptForTest(ctx, record)
+	default:
+		return fmt.Errorf("event fixture store %T is unsupported", selected)
+	}
 }
