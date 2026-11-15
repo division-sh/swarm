@@ -30,10 +30,13 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/devscratch"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -120,9 +123,15 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 // Only run-scoped identity/state/timing evidence crosses back; the child never
 // admits a runtime.
 func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retErr error) {
-	var request struct{ Backend, Location, RunID string }
+	var request struct{ Kind, Backend, Location, RunID, Source string }
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
 		return err
+	}
+	if request.Kind == "terminal_drift" {
+		return observeGoldenTerminalDrift(ctx, request.Backend, request.Location, request.RunID, request.Source, out)
+	}
+	if request.Kind != "" {
+		return errors.New("unknown golden native observation kind")
 	}
 	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(request.Backend, request.Location)
 	if err != nil {
@@ -144,6 +153,48 @@ func observeGoldenCrashCut(ctx context.Context, raw string, out io.Writer) (retE
 		ObservedAt       time.Time
 		Storage          storetest.ManagedTurnEffectStorage
 	}{observed.ActiveProviderAttempts, observed.LaunchedCandidateWorkAttempts, observedAt, observed})
+}
+
+func observeGoldenTerminalDrift(ctx context.Context, backend, location, runID, source string, out io.Writer) (retErr error) {
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), source)
+	if err != nil {
+		return err
+	}
+	plans, err := cliapp.StateStoreSchemaPlans(bundle)
+	if err != nil {
+		return err
+	}
+	schema, err := cliapp.SchemaBootstrapRequest(bundle.Platform, plans.Platform)
+	if err != nil {
+		return err
+	}
+	selection := storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: location}
+	if backend == "postgres" {
+		selection.Backend = storebackend.BackendPostgres
+	} else if backend != "sqlite" {
+		return errors.New("unsupported golden native inspection backend")
+	}
+	inspection, err := storeselected.OpenAdmissionInspection(ctx, storeselected.AuthorityRequest{Selection: selection, PostgresDSN: location})
+	if err != nil {
+		return err
+	}
+	var report mutationlog.DriftReport
+	_, err = inspection.Inspect(ctx, schema, func(snapshot *storeselected.AdmissionSnapshot) error {
+		var err error
+		report, err = snapshot.InspectRunMutationDrift(ctx, runID)
+		return err
+	})
+	if err := errors.Join(err, inspection.Close()); err != nil {
+		return err
+	}
+	if report.RunID != runID || report.EntitiesChecked <= 0 || len(report.Rows) != 0 {
+		return errors.New("terminal golden store has mismatched scope or native mutation drift")
+	}
+	return json.NewEncoder(out).Encode(struct {
+		Backend, Location, RunID, Source string
+		EntitiesChecked                  int
+		Rows                             []mutationlog.DriftRow
+	}{backend, location, report.RunID, source, report.EntitiesChecked, report.Rows})
 }
 
 // The test caller owns source selection and explicit execution posture. Retained
