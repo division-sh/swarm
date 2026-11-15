@@ -12,14 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	"github.com/google/uuid"
 )
 
-type ConversationForkConstruction struct {
-	Parent        *pipeline.FlowInstanceActivationPlan
-	Child         pipeline.FlowInstanceActivationPlan
-	CreatingEvent events.Event
-}
+type ConversationForkConstruction = runforkpersistence.ConversationForkConstruction
 
 // PrepareConversationForkConstructionForTest derives, rather than fabricates,
 // the fixed fixture's complete construction through its actual admitted manager.
