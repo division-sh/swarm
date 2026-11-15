@@ -590,50 +590,58 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	returnEvent := string(plan.ReceiverLocalEvent())
 	routes := make([]runtimepinrouting.ConnectDeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, connectInstanceSelection{}, false)
+		route, err := r.materializeReplyResponseRoute(ctx, subscriber, target, &life, returnEvent, record)
 		if err != nil {
 			return nil, nil, nil, 0, nil, err
 		}
-		plan := agentidentity.Plan{}
-		if subscriber.Recipient.IsAgent() {
-			plan, err = identity.Plan()
-			if err != nil {
-				return nil, nil, nil, 0, nil, fmt.Errorf("project reply agent plan: %w", err)
-			}
-		}
-		deliveryContext := events.DeliveryContext{Life: &life}
-		if record.EnclosingReplyContextID != "" {
-			deliveryContext.Reply = &events.ReplyContextRef{ID: record.EnclosingReplyContextID}
-		}
-		if node, isNode := subscriber.Recipient.Node(); isNode {
-			for _, receipt := range record.ReturnJoins {
-				if receipt.Ref.Node().Equal(node) {
-					deliveryContext.Joins = append(deliveryContext.Joins, receipt)
-				}
-			}
-			for _, joinPlan := range runtimepipeline.WorkflowJoinAdmissionPlans(r.lifecycle.source, node, returnEvent) {
-				declaration, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage)
-				if err != nil {
-					return nil, nil, nil, 0, nil, err
-				}
-				if _, present := deliveryContext.JoinAdmission(declaration); !present {
-					return nil, nil, nil, 0, nil, fmt.Errorf("reply context %s is missing its retained join return admission", record.ID)
-				}
-			}
-		}
-		routes = append(routes, runtimepinrouting.ConnectDeliveryRoute{
-			Recipient: subscriber.Recipient,
-			AgentPlan: plan,
-			Target:    target,
-			Handler:   subscriber.connectHandler,
-			Context:   deliveryContext,
-		})
+		routes = append(routes, route)
 	}
 	detail["reply_context_id"] = contextID
 	detail["request_event_id"] = record.RequestEventID
 	detail["request_correlation_id"] = record.RequestCorrelationID
 	detail["reply_claim_outcome"] = outcome
 	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), dedupeSubscribers(subscribers), claim, 0, detail, nil
+}
+
+func (r connectRoutePlanResolver) materializeReplyResponseRoute(ctx context.Context, subscriber Subscriber, target events.RouteIdentity, life *events.InstanceLife, returnEvent string, record runtimereplycontext.Record) (runtimepinrouting.ConnectDeliveryRoute, error) {
+	identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, connectInstanceSelection{}, false)
+	if err != nil {
+		return runtimepinrouting.ConnectDeliveryRoute{}, err
+	}
+	plan := agentidentity.Plan{}
+	if subscriber.Recipient.IsAgent() {
+		plan, err = identity.Plan()
+		if err != nil {
+			return runtimepinrouting.ConnectDeliveryRoute{}, fmt.Errorf("project reply agent plan: %w", err)
+		}
+	}
+	deliveryContext := events.DeliveryContext{Life: life}
+	if record.EnclosingReplyContextID != "" {
+		deliveryContext.Reply = &events.ReplyContextRef{ID: record.EnclosingReplyContextID}
+	}
+	if node, isNode := subscriber.Recipient.Node(); isNode {
+		for _, receipt := range record.ReturnJoins {
+			if receipt.Ref.Node().Equal(node) {
+				deliveryContext.Joins = append(deliveryContext.Joins, receipt)
+			}
+		}
+		for _, joinPlan := range runtimepipeline.WorkflowJoinAdmissionPlans(r.lifecycle.source, node, returnEvent) {
+			declaration, err := timeridentity.NewJoinRef(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage)
+			if err != nil {
+				return runtimepinrouting.ConnectDeliveryRoute{}, err
+			}
+			if _, present := deliveryContext.JoinAdmission(declaration); !present {
+				return runtimepinrouting.ConnectDeliveryRoute{}, fmt.Errorf("reply context %s is missing its retained join return admission", record.ID)
+			}
+		}
+	}
+	return runtimepinrouting.ConnectDeliveryRoute{
+		Recipient: subscriber.Recipient,
+		AgentPlan: plan,
+		Target:    target,
+		Handler:   subscriber.connectHandler,
+		Context:   deliveryContext,
+	}, nil
 }
 
 func replyResponseClaim(ctx context.Context, event events.Event, record runtimereplycontext.Record) (*runtimereplycontext.ClaimCommand, runtimereplycontext.ClaimOutcome, error) {
