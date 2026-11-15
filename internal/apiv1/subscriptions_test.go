@@ -411,6 +411,14 @@ func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 	if details := asMap(t, asMap(t, subMissingRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
 		t.Fatalf("event.subscribe missing run scope details = %#v", details)
 	}
+	writeWSRequest(t, conn, map[string]any{
+		"jsonrpc": "2.0", "id": "sub-dead-letters", "method": "event.subscribe",
+		"params": map[string]any{"filter": map[string]any{"has_dead_letter": true}},
+	})
+	deadLetters := readWSResponse(t, conn)
+	if deadLetters.Error == nil || asMap(t, deadLetters.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
+		t.Fatalf("runless dead-letter subscription was admitted: %+v", deadLetters)
+	}
 }
 
 func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {

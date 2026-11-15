@@ -37,6 +37,91 @@ func withNativeObservabilityStores(t *testing.T, proof func(*testing.T, context.
 	}
 }
 
+func TestEventListDeploymentDeadLettersBothStores(t *testing.T) {
+	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore) {
+		ctx = apiTestOriginalProcessContext(t, ctx, selected)
+		runs := []string{uuid.NewString(), uuid.NewString()}
+		wanted := map[string]operatorread.OperatorEventFull{}
+		at := time.Now().UTC().Truncate(time.Second)
+		for _, runID := range runs {
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "deadletter.list", "runtime", "", []byte(`{"unchanged":true}`), 0, runID, events.EventEnvelope{}, at)
+			var routes []events.DeliveryRoute
+			for _, agent := range []string{"failed-a", "failed-b", "pending"} {
+				routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent), AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, agent, "dead-letter-list")})
+			}
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimepipelineobligation.ScopeSubscribed)
+			for _, route := range routes[:2] {
+				claimed, err := storetest.ClaimDelivery(ctx, selected, event, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "list_dead_letter", Failure: testFailure("list_dead_letter"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			full, err := selected.LoadOperatorEvent(ctx, event.ID())
+			if err != nil || len(full.DeadLetters) != 2 || len(full.Deliveries) != 3 {
+				t.Fatalf("native fixture: %+v err=%v", full, err)
+			}
+			wanted[event.ID()] = full
+			plain := eventtest.ExistingRunRootIngress(uuid.NewString(), "plain.list", "runtime", "", nil, 0, runID, events.EventEnvelope{}, at)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, plain, nil, runtimepipelineobligation.ScopeSubscribed)
+		}
+		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(t, testOperatorCapabilities{Observability: selected})})
+		cursor, seen, deadLetters := "", map[string]bool{}, map[string]bool{}
+		for {
+			response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"list","method":"event.list","params":{"filter":{"has_dead_letter":true},"limit":1,"cursor":%q}}`, cursor))
+			if response.Error != nil {
+				t.Fatalf("public list: %+v", response.Error)
+			}
+			raw, err := json.Marshal(response.Result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var page operatorread.OperatorEventListResult
+			if err := json.Unmarshal(raw, &page); err != nil || len(page.Events) != 1 {
+				t.Fatalf("public page: %s err=%v", raw, err)
+			}
+			for _, full := range page.Events {
+				if seen[full.EventID] || !jsonValueEqual(full, wanted[full.EventID]) {
+					t.Fatalf("projection, membership or pagination changed: %+v", full)
+				}
+				seen[full.EventID] = true
+				for _, row := range full.DeadLetters {
+					deadLetters[row.DeadLetterID] = true
+				}
+			}
+			cursor = page.NextCursor
+			if cursor == "" {
+				break
+			}
+		}
+		if len(seen) != 2 || len(deadLetters) != 4 {
+			t.Fatalf("deployment counts: events=%d dead-letters=%d", len(seen), len(deadLetters))
+		}
+		for _, cell := range []struct {
+			filter string
+			count  int
+		}{
+			{fmt.Sprintf(`{"run_id":%q,"has_dead_letter":true}`, runs[0]), 1},
+			{`{"event_name":"plain.list","has_dead_letter":true}`, 0},
+		} {
+			response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"filtered","method":"event.list","params":{"filter":`+cell.filter+`}}`)
+			if response.Error != nil {
+				t.Fatalf("filtered read: %+v", response.Error)
+			}
+			if rows, _ := asMap(t, response.Result)["events"].([]any); len(rows) != cell.count {
+				t.Fatalf("filter=%s rows=%+v want=%d", cell.filter, rows, cell.count)
+			}
+		}
+		invalid := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"cursor","method":"event.list","params":{"filter":{"has_dead_letter":true},"cursor":"invalid"}}`)
+		if invalid.Error == nil || invalid.Error.Code != codeInvalidParams {
+			t.Fatalf("invalid native cursor accepted: %+v", invalid)
+		}
+	})
+}
+
 func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing.T) {
 	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore) {
 		runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()

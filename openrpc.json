@@ -6204,7 +6204,7 @@
     },
     {
       "name": "event.list",
-      "description": "Canonical event store query. Folds dead-letter inspection in via the\nhas_dead_letter and reason_code filters; no separate dead_letter.*\nnamespace in v1. Multi-bundle-safe reads require explicit filter.run_id; unscoped event firehose reads are not a public v1 surface.\n",
+      "description": "Canonical event store query. Folds dead-letter inspection in via the\nhas_dead_letter and reason_code filters; no separate dead_letter.*\nnamespace in v1. Reads require explicit filter.run_id except when run_id is omitted and has_dead_letter is explicitly true. That exception lists only events with retained dead letters across the selected deployment. Supplied null or blank run_id does not activate the exception. Authentication, EventFull fields, filters and pagination are unchanged; ordinary unscoped event firehose reads are not a public v1 surface.\n",
       "params": [
         {
           "name": "filter",
@@ -7985,7 +7985,16 @@
           "name": "filter",
           "required": true,
           "schema": {
-            "$ref": "#/components/schemas/EventListFilter"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EventListFilter"
+              },
+              {
+                "required": [
+                  "run_id"
+                ]
+              }
+            ]
           }
         },
         {
@@ -19975,6 +19984,28 @@
       },
       "EventListFilter": {
         "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "run_id"
+            ]
+          },
+          {
+            "not": {
+              "required": [
+                "run_id"
+              ]
+            },
+            "properties": {
+              "has_dead_letter": {
+                "const": true
+              }
+            },
+            "required": [
+              "has_dead_letter"
+            ]
+          }
+        ],
         "properties": {
           "delivery_status": {
             "$ref": "#/components/schemas/DeliveryStatus"
@@ -20001,9 +20032,6 @@
             "$ref": "#/components/schemas/SubscriberType"
           }
         },
-        "required": [
-          "run_id"
-        ],
         "type": "object"
       },
       "EventNoDelivery": {
