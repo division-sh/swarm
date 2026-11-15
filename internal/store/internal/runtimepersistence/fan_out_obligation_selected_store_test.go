@@ -1394,6 +1394,40 @@ func TestFanOutClaimIsScopedToExactAdmittedBundleOnBothStores(t *testing.T) {
 func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			t.Run("same_version_cardinality_contradiction", func(t *testing.T) {
+				owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				ctx, source := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 3, time.Now().UTC().Truncate(time.Microsecond))
+				rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, source.runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Keep the source artifact, captured item bytes and declaration
+				// version fixed; contradict only its persisted cardinality.
+				if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cardinality=4 WHERE run_id=$1`, source.runID); err != nil {
+					t.Fatal(err)
+				}
+				captureFanOutBarrierForkRevision(t, ctx, db, source.runID, postgres)
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rooted.Admission().BundleHash()}
+				prepared, refusal := prepareSelectedStoreForkForTest(t, ctx, owner, source.runID, source.eventID, selection, rooted.Admission().BundleHash())
+				if refusal == nil {
+					request, err := prepared.MaterializationRequest()
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, refusal = owner.(runforkexecution.SelectedContractForkLifecycle).MaterializeRunForkForSelectedContractExecution(ctx, request)
+				}
+				if refusal == nil || !strings.Contains(refusal.Error(), "cardinality") {
+					t.Fatalf("same-version cardinality contradiction not refused: %v", refusal)
+				}
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, owner)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("cardinality refusal created or changed native application state: %v", err)
+				}
+			})
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			pg := owner.(interface {
 				selectedFanOutOwner
