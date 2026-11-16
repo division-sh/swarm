@@ -187,12 +187,13 @@ type connectExecutionClaimEndpointCodec struct {
 }
 
 type connectExecutionClaimInstanceCodec struct {
-	Mode         runtimecontracts.FlowInputResolutionMode `json:"mode"`
-	Field        string                                   `json:"field"`
-	SourceKind   uint8                                    `json:"source_kind"`
-	SourcePath   string                                   `json:"source_path"`
-	SourceType   string                                   `json:"source_type"`
-	ReceiverType string                                   `json:"receiver_type"`
+	Mode          runtimecontracts.FlowInputResolutionMode `json:"mode"`
+	Field         string                                   `json:"field"`
+	SourceKind    uint8                                    `json:"source_kind"`
+	SourcePath    string                                   `json:"source_path"`
+	SourceType    string                                   `json:"source_type"`
+	ReceiverType  string                                   `json:"receiver_type"`
+	SelectionFlow string                                   `json:"selection_flow,omitempty"`
 }
 
 type connectExecutionClaimReplyCodec struct {
@@ -264,6 +265,7 @@ func connectPlanIdentityCodec(plan ConnectRoutePlan) connectPlanIdentityWire {
 			Mode: plan.instanceKey.mode, Field: plan.instanceKey.field.Path(),
 			SourceKind: uint8(plan.instanceKey.source.kind), SourcePath: plan.instanceKey.source.path.value,
 			SourceType: plan.instanceKey.sourceType, ReceiverType: plan.instanceKey.receiverType,
+			SelectionFlow: plan.instanceKey.selectionFlow,
 		}
 	}
 	if plan.producerEvent != nil {
@@ -801,7 +803,7 @@ func (p ConnectRoutePlan) ReceiverKeyDigest(keyMaterial []runtimecontracts.Templ
 	canonical, _ := json.Marshal(struct {
 		FlowID string     `json:"flow_id"`
 		Keys   []keyValue `json:"keys"`
-	}{FlowID: p.receiver.flowID.value, Keys: values})
+	}{FlowID: p.SelectionFlowID(), Keys: values})
 	digest := sha256.Sum256(canonical)
 	return hex.EncodeToString(digest[:])
 }
@@ -901,11 +903,19 @@ func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, sourceEvent
 }
 
 type ConnectRoutePlanInstanceKey struct {
-	mode         runtimecontracts.FlowInputResolutionMode
-	field        runtimecontracts.TemplateInstanceField
-	source       connectInstanceSource
-	sourceType   string
-	receiverType string
+	mode          runtimecontracts.FlowInputResolutionMode
+	field         runtimecontracts.TemplateInstanceField
+	source        connectInstanceSource
+	sourceType    string
+	receiverType  string
+	selectionFlow string
+}
+
+func (p ConnectRoutePlan) SelectionFlowID() string {
+	if p.instanceKey != nil && p.instanceKey.selectionFlow != "" {
+		return p.instanceKey.selectionFlow
+	}
+	return p.receiver.flowID.value
 }
 
 type connectInstanceSourceKind uint8
@@ -2324,7 +2334,13 @@ func resolveAuthoredCompositionConnect(source semanticview.Source, connect runti
 		if owner != requiredOwner {
 			detail := fmt.Sprintf("connect belongs in %s/schema.yaml, the exact lowest common ancestor of %q and %q", flowSchemaPrefix(lca), connect.From, connect.To)
 			if reselecting {
-				detail = fmt.Sprintf("connect belongs in %s/schema.yaml, the lowest owner that can select keyed receiver %q", flowSchemaPrefix(requiredOwner), to.FlowID)
+				input, _, _ := source.ConnectionInputs().Input(connect)
+				selectionFlow := input.SelectionFlowID()
+				if selectionFlow == to.FlowID {
+					detail = fmt.Sprintf("connect belongs in %s/schema.yaml, the lowest owner that can select keyed receiver %q", flowSchemaPrefix(requiredOwner), to.FlowID)
+				} else {
+					detail = fmt.Sprintf("connect belongs in %s/schema.yaml, the lowest owner that can select keyed ancestor %q for receiver %q", flowSchemaPrefix(requiredOwner), selectionFlow, to.FlowID)
+				}
 			}
 			return resolvedCompositionConnect{}, ConnectRoutePlanIssue{
 				Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid,
@@ -2336,22 +2352,26 @@ func resolveAuthoredCompositionConnect(source semanticview.Source, connect runti
 }
 
 func keyedAncestorConnectOwner(source semanticview.Source, connect runtimecontracts.FlowConnect, from, to compositionConnectPinRef) (string, bool) {
-	if to.Root || to.Local || !strings.HasPrefix(from.FlowID, to.FlowID+"/") {
-		return "", false
-	}
-	schema, found := source.FlowSchemaByID(to.FlowID)
-	if !found || schema.Instance.Empty() {
+	if to.Root || to.Local {
 		return "", false
 	}
 	input, found, err := source.ConnectionInputs().Input(connect)
-	if err != nil || !found || input.SourceEvidence().Field.Path() != schema.Instance.Path() {
+	if err != nil || !found {
+		return "", false
+	}
+	selectionFlow := input.SelectionFlowID()
+	schema, found := source.FlowSchemaByID(selectionFlow)
+	if !found || schema.Instance.Empty() || input.SourceEvidence().Field.Path() != schema.Instance.Path() {
+		return "", false
+	}
+	if from.FlowID != to.FlowID && !strings.HasPrefix(from.FlowID, selectionFlow+"/") {
 		return "", false
 	}
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle == nil {
 		return "", false
 	}
-	receiver, found := bundle.FlowViewByID(to.FlowID)
+	receiver, found := bundle.FlowViewByID(selectionFlow)
 	if !found || receiver.Parent == nil {
 		return "", false
 	}
@@ -2599,7 +2619,7 @@ func bindConnectReceiverPolicy(source semanticview.Source, connect runtimecontra
 	}
 	spec.instanceKey = instanceKey
 	spec.resolutionKind = connectResolutionKind(scope, instanceKey)
-	if !receiverRequiresRuntimeResolution(scope) && (spec.replyResolution == nil || spec.replyResolution.role != ConnectReplyRoleResponse) {
+	if instanceKey == nil && !receiverRequiresRuntimeResolution(scope) && (spec.replyResolution == nil || spec.replyResolution.role != ConnectReplyRoleResponse) {
 		spec.target = staticConnectRoute(source, to.FlowID)
 	}
 	return ConnectRoutePlanIssue{}
@@ -2817,9 +2837,14 @@ func connectInstanceKey(source semanticview.Source, connect runtimecontracts.Flo
 		return nil, ConnectRoutePlanIssue{}
 	}
 	evidence := input.SourceEvidence()
+	selectionFlow := input.SelectionFlowID()
+	if selectionFlow == receiverFlowID {
+		selectionFlow = ""
+	}
 	return &ConnectRoutePlanInstanceKey{
 		mode: input.Mode(), field: evidence.Field, source: newConnectInstanceSource(evidence.Source),
 		sourceType: evidence.SourceType.Type, receiverType: evidence.ReceiverType.Type,
+		selectionFlow: selectionFlow,
 	}, ConnectRoutePlanIssue{}
 }
 
@@ -2950,11 +2975,11 @@ func resolvedCompositionConnects(source semanticview.Source, flowID, pinName str
 }
 
 func connectResolutionKind(scope semanticview.FlowScope, instanceKey *ConnectRoutePlanInstanceKey) ConnectRoutePlanResolutionKind {
-	if !receiverRequiresRuntimeResolution(scope) {
-		return ConnectResolutionStatic
-	}
 	if instanceKey != nil {
 		return ConnectResolutionInstanceKey
+	}
+	if !receiverRequiresRuntimeResolution(scope) {
+		return ConnectResolutionStatic
 	}
 	return 0
 }

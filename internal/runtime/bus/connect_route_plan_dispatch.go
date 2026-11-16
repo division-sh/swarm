@@ -325,7 +325,7 @@ func (r connectRoutePlanResolver) matchConnectPlan(ctx context.Context, evt even
 		out.ExtraDetail["connect_route_plan_failure"] = materialized.Failure.Code()
 		out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
 		out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
-		for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values) {
+		for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values, decision.boundarySelected) {
 			out.ExtraDetail[key] = value
 		}
 		if decision.unavailableReceiverError != nil {
@@ -1181,7 +1181,7 @@ func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFai
 	return runtimepinrouting.TargetFailureFromConnect(failure)
 }
 
-func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string) map[string]any {
+func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string, boundarySelected bool) map[string]any {
 	if plan.InstanceKey() == nil {
 		return nil
 	}
@@ -1196,13 +1196,15 @@ func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, fail
 	out := map[string]any{
 		"connect_route_plan_resolution_mode":     runtimecontracts.FlowInputResolutionModeCode(mode),
 		"connect_route_plan_receiver_flow":       plan.ReceiverEndpoint().Readback().FlowID,
-		"connect_route_plan_instance_key_field":  keyField,
-		"connect_route_plan_failure_remediation": connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode),
+		"connect_route_plan_failure_remediation": connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode, boundarySelected),
+	}
+	if plan.SelectionFlowID() == plan.ReceiverEndpoint().Readback().FlowID {
+		out["connect_route_plan_instance_key_field"] = keyField
 	}
 	material, materialFailure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(values))
 	if !materialFailure.Empty() {
 		if failure == runtimepinrouting.ConnectFailureInstanceSourceValueMissing {
-			out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode)
+			out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode, boundarySelected)
 		}
 		return out
 	}
@@ -1213,14 +1215,14 @@ func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, fail
 			break
 		}
 	}
-	if keyValue != "" {
+	if keyValue != "" && plan.SelectionFlowID() == plan.ReceiverEndpoint().Readback().FlowID {
 		out["connect_route_plan_instance_key_value"] = keyValue
 	}
-	out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, keyValue, mode)
+	out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, keyValue, mode, boundarySelected)
 	return out
 }
 
-func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, keyField, keyValue string, mode runtimecontracts.FlowInputResolutionMode) string {
+func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, keyField, keyValue string, mode runtimecontracts.FlowInputResolutionMode, boundarySelected bool) string {
 	receiverFlow := plan.ReceiverEndpoint().Readback().FlowID
 	if receiverFlow == "" {
 		receiverFlow = "receiver flow"
@@ -1239,6 +1241,18 @@ func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.Connec
 	}
 	if sourcePath == "" {
 		sourcePath = "the authored instance-key source"
+	}
+	if selectionFlow := plan.SelectionFlowID(); selectionFlow != receiverFlow {
+		if failure == runtimepinrouting.ConnectFailureInstanceSourceValueMissing {
+			return fmt.Sprintf("Provide %s before selecting %s for receiver %s; resolution mode select requires a carried key value.", sourcePath, selectionFlow, receiverFlow)
+		}
+		if boundarySelected {
+			return fmt.Sprintf("Ensure %s exists and is available under the selected %s instance before publishing; resolution mode select creates neither instance.", receiverFlow, selectionFlow)
+		}
+		if failure == runtimepinrouting.ConnectFailureTargetAmbiguous {
+			return fmt.Sprintf("Ensure exactly one active %s instance has %s%s before publishing to %s; resolution mode select cannot choose between multiple matches.", selectionFlow, keyLabel, valueText, receiverFlow)
+		}
+		return fmt.Sprintf("Create or connect exactly one active %s instance with %s%s before publishing to %s; resolution mode select never creates a missing instance.", selectionFlow, keyLabel, valueText, receiverFlow)
 	}
 	switch failure {
 	case runtimepinrouting.ConnectFailureInstanceSourceValueMissing:
