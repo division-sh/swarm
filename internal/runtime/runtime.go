@@ -2342,6 +2342,12 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 			return err
 		}
 	}
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
+	defer cancelDrain()
+	return rt.finishStopLocked(drainCtx, rt.drainStopLocked(drainCtx, grace))
+}
+
+func (rt *Runtime) drainStopLocked(drainCtx context.Context, grace time.Duration) error {
 	rt.shutdownGate.Close()
 	if rt.workOccurrence != nil {
 		_ = rt.workOccurrence.Fence()
@@ -2351,8 +2357,6 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	if rt.Scheduler != nil {
 		rt.Scheduler.CloseDispatch()
 	}
-	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
-	defer cancelDrain()
 	shutdownErr := rt.drainAdmittedIngress(drainCtx, grace)
 	drainErr, continuationErr := rt.drainAndJoinDeliveryContinuations(drainCtx, grace)
 	shutdownErr = errors.Join(shutdownErr, drainErr)
@@ -2374,6 +2378,10 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	if continuationErr != nil && !errors.Is(dependencyErr, continuationErr) {
 		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", continuationErr))
 	}
+	return shutdownErr
+}
+
+func (rt *Runtime) finishStopLocked(drainCtx context.Context, shutdownErr error) error {
 	if rt.ToolExecutor != nil {
 		if err := rt.ToolExecutor.Close(drainCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("external MCP shutdown: %w", err), rt.ToolExecutor.Close(context.Background()))
@@ -2443,12 +2451,12 @@ func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 		rt.runLifecycleRegistration = nil
 	}
 	if grant != nil {
-		grantRetireCtx, cancelGrantRetire := context.WithTimeout(context.Background(), grace)
-		retireErr := grant.Retire(grantRetireCtx)
+		// All producers and entered publications have joined; this is cleanup,
+		// not a fresh execution budget or another attempt at accepted work.
+		retireErr := grant.Retire(context.WithoutCancel(drainCtx))
 		if retireErr != nil {
 			shutdownErr = errors.Join(shutdownErr, retireErr)
 		}
-		cancelGrantRetire()
 		rt.lifecycleMu.Lock()
 		// A failed durable transition still needs an owned retry. Losing this
 		// handle can leave an admitted generation stranded after local shutdown.

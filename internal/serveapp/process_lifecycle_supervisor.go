@@ -36,6 +36,8 @@ type processLifecycleSupervisor struct {
 	execution                   map[string]apiv1.MethodHandler
 	resetting                   bool
 	stopping                    bool
+	inboundStopCtx              context.Context
+	inboundStopCancel           context.CancelFunc
 	apiReady                    bool
 	resetContexts               []serveRuntimeBundleContext
 	resetContextsManaged        bool
