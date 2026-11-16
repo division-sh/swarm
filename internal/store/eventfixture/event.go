@@ -38,6 +38,16 @@ func eventFacts(
 	}, nil
 }
 
+// ExistingRunRoot prepares immutable fixture input; the selected native owner
+// retains payload admission and persistence.
+func ExistingRunRoot(eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, createdAt time.Time) (event events.Event, err error) {
+	facts, err := eventFacts(eventID, eventType, producer, payload, envelope, createdAt)
+	if err != nil {
+		return event, err
+	}
+	return events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID})
+}
+
 // BindPayload attaches explicit schema-less fixture admission evidence. It is
 // shared by store fixtures that intentionally bypass runtime publication.
 func BindPayload(event events.Event) (events.Event, error) {

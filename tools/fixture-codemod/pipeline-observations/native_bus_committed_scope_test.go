@@ -65,7 +65,8 @@ func TestNativeBusCommittedScopePreservesFullPostCommitCuts(t *testing.T) {
 	owner := selectedCausalObservationBody(t, "internal/store/internal/runtimepersistence/test_event_readback.go", "ReadCommittedPipelineScopeForTest")
 	for _, required := range []string{
 		"validateSelectedForkStorageIdentity(eventID)", "validateChannelObservationOwner(selected)",
-		"readServedDeliveryObservation(ctx, selected,", "pipelinepersistence.LoadCommittedScope(ctx, tx, eventID, postgres)",
+		"owner.pipelinePostgresOwner.ReadCommittedPipelineScopeForTest(ctx, eventID)",
+		"owner.pipelineSQLiteOwner.ReadCommittedPipelineScopeForTest(ctx, eventID)",
 		`return "", err`,
 	} {
 		if !strings.Contains(owner, required) {
@@ -74,5 +75,19 @@ func TestNativeBusCommittedScopePreservesFullPostCommitCuts(t *testing.T) {
 	}
 	if strings.Contains(owner, "SELECT ") || strings.Contains(owner, "ParseCommittedScope(") {
 		t.Fatal("parallel SQL/scope interpreter introduced outside existing pipeline owner")
+	}
+	for _, native := range []struct{ receiver, dialect string }{{"PipelinePostgresOwner", "true"}, {"PipelineSQLiteOwner", "false"}} {
+		body := selectedCausalObservationBody(t, "internal/store/internal/backend/pipelinepersistence/test_pipeline_scope_fixture.go", "ReadCommittedPipelineScopeForTest", native.receiver)
+		for _, required := range []string{
+			"s.backend.RunReadTransaction(ctx,", "LoadCommittedScope(ctx, tx, eventID, " + native.dialect + ")",
+			`return "", err`, "return scope, nil",
+		} {
+			if !strings.Contains(body, required) {
+				t.Fatalf("%s lost exact read owner/context/dialect/error: %s", native.receiver, required)
+			}
+		}
+		if strings.Contains(body, "SELECT ") || strings.Contains(body, "ParseCommittedScope(") {
+			t.Fatal("parallel SQL/scope interpreter introduced outside existing pipeline owner")
+		}
 	}
 }
