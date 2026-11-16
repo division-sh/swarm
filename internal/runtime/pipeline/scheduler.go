@@ -212,7 +212,7 @@ func (s *Scheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup ru
 	if err != nil {
 		return err
 	}
-	return s.registerProjection(ctx, projection, owner == runtimegenericschedule.OwnerInstance)
+	return s.registerProjection(ctx, projection, true)
 }
 
 func (s *Scheduler) registerProjection(ctx context.Context, projection scheduledProjection, standing bool) error {

@@ -81,31 +81,35 @@ func TestStopGenericScheduleWakeupsJoinsAndPreventsPostStopCallback(t *testing.T
 	}
 }
 
-func TestIdleInstanceClockDoesNotHoldRunTransition(t *testing.T) {
-	owner := pipelineTestWorkOwner(t)
-	scheduler := NewSchedulerWithWorkOwner(owner)
-	if err := scheduler.BindGenericScheduleLifecycle(func(context.Context, runtimegenericschedule.Wakeup) {}); err != nil {
-		t.Fatal(err)
+func TestIdleRunScopedClockDoesNotHoldRunTransition(t *testing.T) {
+	for _, kind := range []runtimegenericschedule.OwnerKind{runtimegenericschedule.OwnerInstance, runtimegenericschedule.OwnerAgent, runtimegenericschedule.OwnerSystem} {
+		t.Run(string(kind), func(t *testing.T) {
+			owner := pipelineTestWorkOwner(t)
+			scheduler := NewSchedulerWithWorkOwner(owner)
+			if err := scheduler.BindGenericScheduleLifecycle(func(context.Context, runtimegenericschedule.Wakeup) {}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				scheduler.Stop()
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := scheduler.Wait(ctx); err != nil {
+					t.Error(err)
+				}
+			})
+			runID := uuid.NewString()
+			ctx := correlation.WithRunID(t.Context(), runID)
+			wakeup := genericSchedulerProofWakeup(t, time.Now().Add(time.Hour))
+			if err := scheduler.RegisterGenericScheduleWakeup(ctx, wakeup, kind); err != nil {
+				t.Fatal(err)
+			}
+			wait, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			release, err := owner.BeginRunTransition(wait, runID)
+			if err != nil {
+				t.Fatalf("idle %s clock held fork source transition: %v", kind, err)
+			}
+			release()
+		})
 	}
-	t.Cleanup(func() {
-		scheduler.Stop()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := scheduler.Wait(ctx); err != nil {
-			t.Error(err)
-		}
-	})
-	runID := uuid.NewString()
-	ctx := correlation.WithRunID(t.Context(), runID)
-	wakeup := genericSchedulerProofWakeup(t, time.Now().Add(time.Hour))
-	if err := scheduler.RegisterGenericScheduleWakeup(ctx, wakeup, runtimegenericschedule.OwnerInstance); err != nil {
-		t.Fatal(err)
-	}
-	wait, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	release, err := owner.BeginRunTransition(wait, runID)
-	if err != nil {
-		t.Fatalf("idle instance clock held run transition: %v", err)
-	}
-	release()
 }

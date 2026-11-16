@@ -447,11 +447,11 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	if !prepare {
 		return CommitResult{Outcome: CommitTerminal}, nil
 	}
-	if activation.Command.OwnerKind == OwnerInstance {
-		lease, err := instanceExecutionLease(ctx, activation.Command)
-		if err != nil {
-			return CommitResult{Outcome: CommitRetry}, err
-		}
+	lease, err := firingExecutionLease(ctx, activation.Command)
+	if err != nil {
+		return CommitResult{Outcome: CommitRetry}, err
+	}
+	if lease != nil {
 		ctx = lease.Context()
 		defer func() { outcomeErr = errors.Join(outcomeErr, lease.Done()) }()
 	}
