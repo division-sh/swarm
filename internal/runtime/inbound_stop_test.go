@@ -4,11 +4,67 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
+
+func TestStoredInboundPreparationWaitCancelsBeforeRecoveryJoin(t *testing.T) {
+	catalog, source := runtimeAdmissionTestCatalog(t, "stop-wait", "inbound")
+	definition := runtimeAdmissionTestContext(t, source, catalog, eventtest.UUID(t.Name()))
+	definition.Runtime.Bus = &runtimebus.EventBus{}
+	manager, err := newTestRuntimeContextManager(t, nil, definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := definition.Runtime.Bus.BeginPipelineParentTransition(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	barrier := &startupClaimBarrierContext{Context: t.Context(), entered: make(chan struct{}), release: make(chan struct{})}
+	sealed := make(chan error, 1)
+	go func() { sealed <- manager.SealInboundExecution(barrier) }()
+	defer func() {
+		close(barrier.release)
+		selected.Done()
+		if err := <-sealed; err != nil {
+			t.Errorf("join recovery seal: %v", err)
+		}
+	}()
+	select {
+	case <-barrier.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("seal did not reach the existing recovery owner")
+	}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	publication := make(chan error, 1)
+	go func() {
+		target := definition.StandingTargets[0]
+		use, _, err := manager.AcquireInboundPublication(canceled, target.Alias, target.Provider)
+		if use != nil {
+			err = errors.Join(err, use.Done(), errors.New("canceled preparation minted publication custody"))
+		}
+		publication <- err
+	}()
+	select {
+	case err := <-publication:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled preparation result: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("publication cancellation waited for the recovery join")
+	}
+	select {
+	case err := <-sealed:
+		sealed <- err
+		t.Fatal("seal completed before the held recovery owner joined")
+	default:
+	}
+}
 
 func TestStoredInboundCustodyDoesNotMintExecutionAndJoinsEnteredRequests(t *testing.T) {
 	catalog, source := runtimeAdmissionTestCatalog(t, "stop", "inbound")
