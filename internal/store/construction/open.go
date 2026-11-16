@@ -8,8 +8,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/netip"
+	"strconv"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
@@ -44,7 +47,7 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 	return store, db, nil
 }
 
-func OpenPostgresRuntime(ctx context.Context, dsn string) (*private.PostgresStore, *sql.DB, error) {
+func OpenPostgresRuntime(ctx context.Context, dsn string, checks ...bootverify.ConstructionChecks) (*private.PostgresStore, *sql.DB, error) {
 	selected, handle, err := OpenPostgres(dsn)
 	if err != nil {
 		return nil, nil, err
@@ -52,7 +55,33 @@ func OpenPostgresRuntime(ctx context.Context, dsn string) (*private.PostgresStor
 	if err := selected.RetainConstructionPossession(ctx); err != nil {
 		return nil, nil, errors.Join(err, selected.Close())
 	}
+	if len(checks) != 0 && checks[0] != nil {
+		target, err := PostgresCheckTarget(dsn)
+		if err == nil {
+			_, err = checks[0].InspectConstruction(ctx, target)
+		}
+		if err != nil {
+			return nil, nil, errors.Join(err, selected.Close())
+		}
+	}
 	return selected, handle, nil
+}
+
+// PostgresCheckTarget seals the native connection identity, not DSN spelling.
+// Pool/runtime parameters do not identify the application database or login.
+func PostgresCheckTarget(dsn string) (bootverify.ConstructionTarget, error) {
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		return bootverify.ConstructionTarget{}, err
+	}
+	address := cfg.Hostaddr.String()
+	hostAddress, _ := netip.ParseAddr(cfg.Host)
+	if !cfg.Hostaddr.IsValid() || hostAddress.IsValid() && hostAddress == cfg.Hostaddr {
+		address = ""
+	}
+	return bootverify.PostgresConstructionTarget(fmt.Sprintf("%q", []string{
+		cfg.Host, address, strconv.Itoa(int(cfg.Port)), cfg.Database, cfg.User, cfg.Password, string(cfg.SSLMode),
+	})), nil
 }
 
 func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
@@ -69,9 +98,25 @@ func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error
 }
 
 func OpenSQLiteRuntimeForServing(ctx context.Context, path string, input ...*SQLiteInspectionInput) (*private.SQLiteRuntimeStore, *sql.DB, error) {
-	constructionGuard, err := storestartupownership.WaitSQLiteConstructionGuard(ctx, path, input...)
+	return OpenSQLiteRuntimeWithChecks(ctx, path, nil, input...)
+}
+
+func OpenSQLiteRuntimeWithChecks(ctx context.Context, path string, checks bootverify.ConstructionChecks, input ...*SQLiteInspectionInput) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+	constructionGuard, err := storestartupownership.WaitSQLitePrewriteGuard(ctx, path, input...)
 	if err != nil {
 		return nil, nil, err
+	}
+	if checks != nil {
+		target, err := bootverify.SQLiteConstructionTarget(path)
+		if err == nil {
+			_, err = checks.InspectConstruction(ctx, target)
+		}
+		if err != nil {
+			return nil, nil, errors.Join(err, constructionGuard.Release())
+		}
+	}
+	if err := constructionGuard.PrepareDatabase(ctx); err != nil {
+		return nil, nil, errors.Join(err, constructionGuard.Release())
 	}
 	return openSQLiteUnderPossession(ctx, path, constructionGuard)
 }

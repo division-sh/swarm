@@ -70,6 +70,9 @@ func inspectServeResetSnapshot(ctx context.Context, snapshot *storeselected.Admi
 }
 
 func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, operation destructivereset.Operation) (destructivereset.Plan, error) {
+	if err := operation.Validate(); err != nil {
+		return destructivereset.Plan{}, err
+	}
 	plan, err := (destructivereset.InventoryPlanner{Reader: snapshot}).BuildPlan(ctx, operation.Request)
 	if err != nil {
 		return plan, err
@@ -80,6 +83,12 @@ func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.Admis
 	}
 	if !plan.CleanupRunSetKnown || !current.CleanupRunSetKnown {
 		return plan, fmt.Errorf("reset cleanup population is unknown")
+	}
+	if operation.Cleanup != nil {
+		// Cleanup is committed and will not run again. Every current row is a
+		// survivor, even when its ID also appeared in the original plan.
+		plan.CleanupRuns = nil
+		return plan, nil
 	}
 	discard := map[string]bool{}
 	for _, run := range plan.CleanupRuns {
@@ -105,6 +114,31 @@ func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.Admis
 		}
 	}
 	return plan, nil
+}
+
+func inspectServeEmptySourcePopulation(ctx context.Context, snapshot *storeselected.AdmissionSnapshot) error {
+	inventory, err := snapshot.ReadResetInventory(ctx)
+	if err != nil {
+		return err
+	}
+	if !inventory.CleanupRunSetKnown || len(inventory.CleanupRuns) != 0 || len(inventory.ActiveDeliveries) != 0 {
+		return fmt.Errorf("the empty reset source selection has surviving runs or deliveries")
+	}
+	agents, err := snapshot.LoadAgents(ctx)
+	if err != nil {
+		return err
+	}
+	if len(agents) != 0 {
+		return fmt.Errorf("the empty reset source selection has surviving agents")
+	}
+	forks, err := snapshot.ListSelectedForkRecoveryEntries(ctx)
+	if err != nil {
+		return err
+	}
+	if len(forks) != 0 {
+		return fmt.Errorf("the empty reset source selection has surviving selected forks")
+	}
+	return nil
 }
 
 // Deployment registrations and teardown journals survive reset; learned runtime

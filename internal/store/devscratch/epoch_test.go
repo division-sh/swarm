@@ -55,6 +55,23 @@ func TestDevScratchEpochHelperProcess(t *testing.T) {
 
 func TestDevScratchEpochDefaultContextOwnsCanonicalCoordinate(t *testing.T) {
 	coordinate := scratchCoordinate(t)
+	checking, err := devscratch.RetainForChecks(coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checking.AbortBeforeStoreOpen()
+	if metadata, err := os.ReadFile(coordinate.AuthorityPath); err != nil || len(metadata) != 0 {
+		t.Fatalf("check exclusion rewrote epoch diagnostic: %q, %v", metadata, err)
+	}
+	if _, err := os.Stat(coordinate.DatabasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("check exclusion changed scratch database: %v", err)
+	}
+	if _, err := checking.RegistrationGrant(); err == nil {
+		t.Fatal("check exclusion granted descriptor registration before checks")
+	}
+	if err := checking.AbortBeforeStoreOpen(); err != nil {
+		t.Fatal(err)
+	}
 	first := acquirePrepared(t, coordinate)
 	defer first.AbortBeforeStoreOpen()
 	if _, err := devscratch.Acquire(coordinate); err == nil || !strings.Contains(err.Error(), "owns this canonical project") {

@@ -5,7 +5,18 @@ package startupownership
 import (
 	"context"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"os"
 )
+
+func captureSQLiteInspectionCoordinate(string) (os.FileInfo, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
+}
+
+func prepareSQLiteConstructionDatabase(context.Context, sqlitePossession) error {
+	_, err := acquireSQLiteFilePossession("")
+	return err
+}
 
 func CaptureSQLiteInspectionIdentity(string) (*SQLiteBackendIdentity, error) {
 	_, err := acquireSQLiteFilePossession("")
@@ -44,6 +55,11 @@ func waitSQLiteFilePossession(context.Context, string) (sqlitePossession, error)
 }
 
 func waitSQLiteConstructionPossession(context.Context, string, ...*SQLiteInspectionInput) (sqlitePossession, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
+}
+
+func waitSQLitePrewritePossession(context.Context, string, ...*SQLiteInspectionInput) (sqlitePossession, error) {
 	_, err := acquireSQLiteFilePossession("")
 	return nil, err
 }

@@ -97,7 +97,13 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			var bootInput *BootCheckInput
 			fresh, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
+				var err error
+				bootInput, err = snapshot.CaptureBootInput(ctx)
+				if err != nil {
+					return err
+				}
 				for _, read := range inspectionRootReads(snapshot, rooted.Admission().Reference()) {
 					if got, err := read.load(ctx); err == nil || got.Validate() == nil {
 						t.Fatalf("fresh inspection admitted %s source: %v", read.name, err)
@@ -114,8 +120,20 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if err != nil || !fresh.Fresh {
 				t.Fatalf("fresh inspection: %+v, %v", fresh, err)
 			}
+			nativeRequest := RuntimeRequest{Selection: selection.Selection, PostgresDSN: selection.PostgresDSN, BootCheckInput: bootInput}
+			checked, err := OpenRuntime(ctx, nativeRequest)
+			if err != nil {
+				t.Fatalf("unchanged inspected state refused under native exclusion: %v", err)
+			}
+			if err := checked.CloseUnactivated(); err != nil {
+				t.Fatal(err)
+			}
 			if err := bootstrap.BootstrapSchema(ctx, request); err != nil {
 				t.Fatal(err)
+			}
+			if stale, err := OpenRuntime(ctx, nativeRequest); err == nil {
+				_ = stale.CloseUnactivated()
+				t.Fatal("changed schema reused the pre-bootstrap inspection")
 			}
 			freshStamp, err := generationauthority.ReadProcessGeneration(ctx, db, backend == storebackend.BackendSQLite)
 			if err != nil || freshStamp.Generation != 0 {

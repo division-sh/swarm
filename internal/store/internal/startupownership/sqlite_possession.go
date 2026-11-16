@@ -33,14 +33,18 @@ type SQLiteBackendIdentity struct {
 }
 
 func AcquireSQLiteConstructionGuard(selectedPath string) (*SQLiteConstructionGuard, error) {
-	return sqliteConstructionGuard(context.Background(), selectedPath, false)
+	return sqliteConstructionGuard(context.Background(), selectedPath, false, false)
 }
 
 func WaitSQLiteConstructionGuard(ctx context.Context, selectedPath string, input ...*SQLiteInspectionInput) (*SQLiteConstructionGuard, error) {
-	return sqliteConstructionGuard(ctx, selectedPath, true, input...)
+	return sqliteConstructionGuard(ctx, selectedPath, true, false, input...)
 }
 
-func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait bool, input ...*SQLiteInspectionInput) (*SQLiteConstructionGuard, error) {
+func WaitSQLitePrewriteGuard(ctx context.Context, selectedPath string, input ...*SQLiteInspectionInput) (*SQLiteConstructionGuard, error) {
+	return sqliteConstructionGuard(ctx, selectedPath, true, true, input...)
+}
+
+func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait, deferDatabase bool, input ...*SQLiteInspectionInput) (*SQLiteConstructionGuard, error) {
 	if ctx == nil {
 		return nil, errors.New("SQLite construction requires a context")
 	}
@@ -59,7 +63,9 @@ func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait bool
 		return nil, fmt.Errorf("create SQLite selected-store parent: %w", err)
 	}
 	var possession sqlitePossession
-	if wait {
+	if deferDatabase {
+		possession, err = waitSQLitePrewritePossession(ctx, abs, input...)
+	} else if wait {
 		possession, err = waitSQLiteConstructionPossession(ctx, abs, input...)
 	} else {
 		possession, err = acquireSQLiteConstructionPossession(abs)
@@ -85,6 +91,16 @@ func (g *SQLiteConstructionGuard) BackendIdentity(ctx context.Context) (*SQLiteB
 	possession := g.possession
 	g.possession = nil
 	return &SQLiteBackendIdentity{reference: possession, initial: possession}, nil
+}
+
+// PrepareDatabase is called only after the fixed construction checks return.
+func (g *SQLiteConstructionGuard) PrepareDatabase(ctx context.Context) error {
+	if g == nil {
+		return errors.New("SQLite construction guard is required")
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return prepareSQLiteConstructionDatabase(ctx, g.possession)
 }
 
 func (g *SQLiteConstructionGuard) Release() error {
