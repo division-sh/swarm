@@ -375,11 +375,18 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				finishOrchestration, err := owner.beginSelectedOrchestration(prepared)
+				if err != nil {
+					t.Fatal(errors.Join(err, owner.completePreparation(prepared)))
+				}
+				finishOrchestration = sync.OnceFunc(finishOrchestration)
+				defer finishOrchestration()
 				probe.prepared = &prepared
 				if err := admitSelectedDeploymentRevisionFrontier(prepared.plan, prepared.frontier); err != nil {
-					t.Fatal(err)
+					t.Fatal(errors.Join(err, owner.completePreparation(prepared)))
 				}
 				result, returned := executePreparedLiveFork(ctx, request, &prepared)
+				finishOrchestration()
 				read := context.WithoutCancel(ctx)
 				snapshot := probe.snapshot()
 				for _, executionID := range snapshot.committedCloses {
