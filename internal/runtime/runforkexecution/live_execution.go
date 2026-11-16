@@ -72,6 +72,9 @@ func executePreparedLiveFork(ctx context.Context, req SelectedContractExecutionR
 				return out, err
 			}
 			defer cutTransition.Done()
+			point := current.plan.ForkPoint
+			req.fixedPoint = &point
+			req.ForkOperation = current.forkOperation
 			finishPreparation()
 			if err := req.Owner.completePreparation(current); err != nil {
 				return out, err

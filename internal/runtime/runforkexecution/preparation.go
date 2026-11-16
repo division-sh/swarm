@@ -266,6 +266,8 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	}
 	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil {
 		planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
+	} else if req.fixedPoint != nil {
+		planRequest.ResolvedPoint = req.fixedPoint
 	}
 	originalPlanContext := runtimecorrelation.WithRootAdmission(
 		runtimecorrelation.WithSourceArtifactFact(ctx, owned.originalSource.SourceArtifactFact),

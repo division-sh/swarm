@@ -41,6 +41,7 @@ type SelectedContractExecutionRequest struct {
 	LiveRuns                runlifecycle.LiveRunReader
 	liveSelectionHeld       bool
 	requirePausedSource     bool
+	fixedPoint              *runfork.RunForkPoint
 	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
