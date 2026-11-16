@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -35,9 +37,15 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 	opts := &cliapp.ServeOptions{SourceRoot: root, SwarmDir: t.TempDir(), SwarmDirSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	var db *sql.DB
 	var receiverReader receiverProofStateReader
+	var gateReadback lifecycleGateRestartReadback
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 		db, _, _ = selectedRuntimeStoreForTest(t, p)
 		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+		var ok bool
+		gateReadback, ok = p.deps.EventStore.(lifecycleGateRestartReadback)
+		if !ok {
+			t.Fatal("restart proof requires the original card and timer read owners")
+		}
 	})
 	if backend == "sqlite" {
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "lifecycle.sqlite"))
@@ -87,7 +95,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			}
 		}
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader, Runtime: runtime}
+		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader, GateRestartReadback: gateReadback, Runtime: runtime}
 	}
 }
 
@@ -122,7 +130,27 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			configureStandingLifecycleCredentials(t)
 			sourceA := canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateSharedEvent)
 			sourceB := canonicalrouting.CopyLifecycleChangedGate(t)
+			for _, root := range []string{sourceA, sourceB} {
+				for _, edit := range []struct{ file, from, to string }{
+					{"schema.yaml", "  review:\n", "  review:\n    timers:\n      - {after: 1h, advances_to: done}\n"},
+					{"events.yaml", "work.requested:\n", "work.prepared:\n  seed: boolean\nwork.requested:\n"},
+					{"nodes.yaml", "    advances_to: review\n", "    advances_to: waiting\n    emit: {event: work.prepared, fields: {seed: true}}\npreparer:\n  work.prepared:\n    advances_to: review\n"},
+				} {
+					path := filepath.Join(root, edit.file)
+					body, err := os.ReadFile(path)
+					if err != nil || strings.Count(string(body), edit.from) != 1 {
+						t.Fatalf("unique admitted fixture edit %s: body=%s err=%v", path, body, err)
+					}
+					if err := os.WriteFile(path, []byte(strings.Replace(string(body), edit.from, edit.to, 1)), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 			opts, start := lifecycleRestartHarness(t, backend, sourceA)
+			tokenFile := filepath.Join(t.TempDir(), "api-token")
+			if err := os.WriteFile(tokenFile, []byte(apiv1.DefaultLoopbackAPIToken), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			first, rt := start()
 			seedParams := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "frozen-start"}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
@@ -130,13 +158,25 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			originalEvidence := readLifecycleGateRestartEvidence(t, rt, seed.RunID)
+			prefix := originalEvidence.Instance.TransitionHistory
+			if len(originalEvidence.Cards) != 1 || len(originalEvidence.Timers) != 1 || originalEvidence.Timers[0].Status != "active" || len(prefix) != 1 || prefix[0].From != "waiting" || prefix[0].To != "review" {
+				t.Fatalf("positive pending card, active timer and completed transition setup: %+v", originalEvidence)
+			}
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first stop=%d", code)
 			}
-			opts.SourceRoot = sourceB
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
-			captured := captureSelectedResetSupervisor(t)
 			second, rt := start()
+			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != before {
+				t.Fatalf("same-source pending restart changed whole snapshot: before=%s after=%s", before, got)
+			}
+			if code := second.stop(); code != 0 {
+				t.Fatalf("same-source pending stop=%d", code)
+			}
+			opts.SourceRoot = sourceB
+			captured := captureSelectedResetSupervisor(t)
+			second, rt = start()
 			supervisor := <-captured
 			supervisor.mu.Lock()
 			original := supervisor.execution["mailbox.decide"]
@@ -156,35 +196,50 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 				return result, err
 			}
 			supervisor.mu.Unlock()
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
-				t.Fatal("restart mutated pending lifecycle")
+			changed := requireLifecycleGateRestartReplacement(t, rt, seed.RunID, originalEvidence)
+			withdrawn := originalEvidence.Cards[params["card_id"].(string)]
+			out, errOut := &lockedBuffer{}, &lockedBuffer{}
+			if code := executeCLI(t.Context(), []string{"--config", opts.ConfigPath, "mailbox", "view", withdrawn.CardID, "--api-server", strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "--api-token-file", tokenFile}, out, errOut, nil); code != 0 || !strings.Contains(out.String(), "\nReplaced by a new card after an update. No action was taken.\n") {
+				t.Fatalf("withdrawn card renderer: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
+			changedSnapshot := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			missingPin := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params)
 			supervisor.mu.Lock()
 			supervisor.execution["mailbox.decide"] = original
 			supervisor.mu.Unlock()
-			if missingPin.Data["code"] != "BUNDLE_UNAVAILABLE" {
+			if missingPin.Data["code"] != "MAILBOX_CARD_SUPERSEDED" {
 				t.Fatalf("missing pin=%#v", missingPin)
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
-				t.Fatal("unavailable pin mutated gate")
+			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != changedSnapshot {
+				t.Fatalf("withdrawn action mutated replacement: before=%s after=%s", changedSnapshot, got)
 			}
+			requireLifecycleGateRestartMembers(t, "withdrawn action no-write", changed, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
 			if code := second.stop(); code != 0 {
 				t.Fatalf("unpinned stop=%d", code)
 			}
-			// Returning to the exact source tree restores executable authority;
-			// the intervening B boot must not rewrite A's frozen decision.
+			// A return is another replacement, never revival of a withdrawn action.
 			opts.SourceRoot = sourceA
 			second, rt = start()
-			if got := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve"); got["card_id"] != params["card_id"] || got["observed_content_hash"] != params["observed_content_hash"] {
-				t.Fatalf("restart reminted frozen card: %#v / %#v", params, got)
+			returned := requireLifecycleGateRestartReplacement(t, rt, seed.RunID, changed)
+			pending := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			if returned.Cards[pending["card_id"].(string)].CardID == "" || pending["card_id"] == params["card_id"] {
+				t.Fatalf("A-B-A lost distinct third identity: original=%v pending=%v cards=%+v", params, pending, returned.Cards)
 			}
+			before = lifecycleStoredSnapshot(t, rt, seed.RunID)
+			params["idempotency_key"] = "withdrawn-after-return"
+			if refused := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params); refused.Data["code"] != "MAILBOX_CARD_SUPERSEDED" {
+				t.Fatalf("original action revived: error=%+v", refused)
+			}
+			requireLifecycleGateRestartMembers(t, "old A after return no-write", returned, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
+			params = pending
+			params["idempotency_key"] = "replacement-decision"
 			var decided map[string]any
 			stale := map[string]any{"card_id": params["card_id"], "verdict": "approve", "observed_content_hash": strings.Repeat("0", len(params["observed_content_hash"].(string))), "idempotency_key": "stale-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", stale)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
-				t.Fatal("stale hash mutated pending gate")
+			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != before {
+				t.Fatalf("stale/withdrawn refusal changed pending gate: before=%s after=%s", before, got)
 			}
+			requireLifecycleGateRestartMembers(t, "current pending stale-hash no-write", returned, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decided)
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -197,6 +252,8 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 				t.Fatalf("frozen transition history=%#v", history)
 			}
+			retainedPrefix := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, prefix[0].TriggerEventID)
+			requireLifecycleGateRestartMembers(t, "completed pre-upgrade transition at its fixed cut", prefix[0], retainedPrefix)
 			gateRecord := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, history[0].TriggerEventID)
 			if gateRecord.From != "review" || gateRecord.To != "approved" || gateRecord.Evidence.FlowID() != "." {
 				t.Fatalf("frozen historical gate transition=%#v", gateRecord)
@@ -208,11 +265,13 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
 			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			settledEvidence := readLifecycleGateRestartEvidence(t, rt, seed.RunID)
 			conflict := map[string]any{"card_id": params["card_id"], "verdict": "reject", "observed_content_hash": params["observed_content_hash"], "idempotency_key": "contradictory-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflict)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
-				t.Fatal("contradictory verdict mutated routed gate")
+			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != settled {
+				t.Fatalf("contradictory verdict changed answered successor: before=%s after=%s", settled, got)
 			}
+			requireLifecycleGateRestartMembers(t, "answered successor contradiction no-write", settledEvidence, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
 			if code := second.stop(); code != 0 {
 				t.Fatalf("second stop=%d", code)
 			}
@@ -222,9 +281,10 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if duplicate.EventID != seed.EventID {
 				t.Fatal("restart reminted ingress")
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
-				t.Fatal("terminal restart/replay changed evidence")
+			if got := lifecycleStoredSnapshot(t, rt, seed.RunID); got != settled {
+				t.Fatalf("terminal restart/replay changed evidence: before=%s after=%s", settled, got)
 			}
+			requireLifecycleGateRestartMembers(t, "answered successor replay no-write", settledEvidence, readLifecycleGateRestartEvidence(t, rt, seed.RunID))
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
 			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
 			if code := third.stop(); code != 0 {

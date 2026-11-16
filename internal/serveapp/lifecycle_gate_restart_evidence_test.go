@@ -1,0 +1,172 @@
+package serveapp
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+)
+
+type lifecycleGateRestartReadback interface {
+	GetDecisionCard(context.Context, string) (decisioncard.Card, error)
+	ListDecisionCards(context.Context, decisioncard.ListOptions) ([]decisioncard.ListItem, string, error)
+	ListWorkflowTimerActivations(context.Context, string, string, bool) ([]pipeline.WorkflowTimerActivation, error)
+}
+
+type lifecycleGateRestartEvidence struct {
+	Instance pipeline.WorkflowInstance
+	Cards    map[string]decisioncard.Card
+	Timers   []pipeline.WorkflowTimerActivation
+}
+
+func readLifecycleGateRestartEvidence(t *testing.T, rt servedControlProofRuntime, run string) lifecycleGateRestartEvidence {
+	t.Helper()
+	if rt.GateRestartReadback == nil {
+		t.Fatal("restart evidence requires the original selected card/timer readers")
+	}
+	instances, err := rt.ReceiverStateReader.ListWorkflowInstances(t.Context(), run)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("restart instance inventory: got=%+v err=%v", instances, err)
+	}
+	rows, next, err := rt.GateRestartReadback.ListDecisionCards(t.Context(), decisioncard.ListOptions{RunID: run, Limit: 100})
+	if err != nil || next != "" {
+		t.Fatalf("restart complete bounded card inventory: got=%+v next=%q err=%v", rows, next, err)
+	}
+	evidence := lifecycleGateRestartEvidence{Instance: instances[0], Cards: map[string]decisioncard.Card{}}
+	for _, row := range rows {
+		card, err := rt.GateRestartReadback.GetDecisionCard(t.Context(), row.CardID)
+		if err != nil || card.RunID != run || evidence.Cards[row.CardID].CardID != "" {
+			t.Fatalf("restart exact native card: row=%+v card=%+v err=%v", row, card, err)
+		}
+		evidence.Cards[card.CardID] = card
+	}
+	evidence.Timers, err = rt.GateRestartReadback.ListWorkflowTimerActivations(t.Context(), run, instances[0].EntityID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evidence
+}
+
+func requireLifecycleGateRestartReplacement(t *testing.T, rt servedControlProofRuntime, run string, before lifecycleGateRestartEvidence) lifecycleGateRestartEvidence {
+	t.Helper()
+	after := readLifecycleGateRestartEvidence(t, rt, run)
+	priorHistory, err := json.Marshal(before.Instance.TransitionHistory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentHistory, err := json.Marshal(after.Instance.TransitionHistory)
+	if err != nil || string(priorHistory) != string(currentHistory) {
+		t.Fatalf("completed transition evidence bytes changed: before=%s after=%s err=%v", priorHistory, currentHistory, err)
+	}
+	var old, successor decisioncard.Card
+	for id, card := range before.Cards {
+		if card.Status == decisioncard.StatusPending {
+			if old.CardID != "" {
+				t.Fatalf("multiple predecessor waits: first=%+v next=%+v", old, card)
+			}
+			old = card
+		}
+		if after.Cards[id].CardID == "" {
+			t.Fatalf("replacement lost immutable predecessor %s: got=%+v", id, after.Cards)
+		}
+	}
+	for id, card := range after.Cards {
+		if before.Cards[id].CardID == "" {
+			successor = card
+		}
+	}
+	if len(after.Cards) != len(before.Cards)+1 || old.CardID == "" || successor.CardID == "" || successor.Status != decisioncard.StatusPending || successor.BundleHash != rt.BundleHash || successor.Fields.Len() != 0 || successor.Verdict != "" || successor.DecisionEventID != "" || successor.DecidedBy != "" || !successor.DecidedAt.IsZero() || !successor.DeferredUntil.IsZero() || !successor.CreatedAt.After(old.CreatedAt) {
+		t.Fatalf("replacement must have one new empty current card: before=%+v after=%+v successor=%+v", before.Cards, after.Cards, successor)
+	}
+	for id, card := range before.Cards {
+		actual := after.Cards[id]
+		issuedBefore, err := decisioncard.SnapshotJSON(card)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issuedAfter, err := decisioncard.SnapshotJSON(actual)
+		if err != nil || string(issuedBefore) != string(issuedAfter) {
+			t.Fatalf("%s.issued_offer: before=%s after=%s err=%v", id, issuedBefore, issuedAfter, err)
+		}
+		if id == old.CardID {
+			card.Status, card.SupersededReason, card.UpdatedAt = decisioncard.StatusSuperseded, decisioncard.SupersededByUpdate, successor.CreatedAt
+		}
+		requireLifecycleGateRestartMembers(t, "card "+id, card, actual)
+	}
+	anchor, err := old.Anchor.StageGate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := rt.Runtime.Options.WorkflowModule.SemanticSource()
+	offer, err := decisioncard.CompileGateOffer(source, anchor.FlowID, anchor.Stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := offer.RoutesJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found := source.WorkflowGateForStage(anchor.FlowID, anchor.Stage)
+	if !found {
+		t.Fatal("current admitted source lost its exact gate")
+	}
+	activations, err := gateruntime.List(before.Instance.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var predecessor gateruntime.Activation
+	for _, activation := range activations {
+		if activation.CardID == old.CardID {
+			predecessor = activation
+		}
+	}
+	replacement, err := gateruntime.Replacement(predecessor, plan.Decision, rt.BundleHash, routes, successor.CreatedAt)
+	if err != nil || replacement.CardID != successor.CardID {
+		t.Fatalf("independent successor identity: expected=%+v actual=%+v err=%v", replacement, successor, err)
+	}
+	issued, err := decisioncard.IssuedGateOffer(successor, replacement)
+	if err != nil || !issued.Equal(offer) {
+		t.Fatalf("successor differs from current admitted full offer: card=%+v err=%v", successor, err)
+	}
+	expected := before.Instance
+	cloned, err := canonicaljson.CloneRuntimeValue(expected.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected.StateBuckets = cloned.(map[string]any)
+	if !predecessor.Supersede(decisioncard.SupersededByUpdate, successor.CreatedAt) {
+		t.Fatal("expected predecessor was not an open wait")
+	}
+	for _, activation := range []gateruntime.Activation{predecessor, replacement} {
+		if err := gateruntime.Store(expected.StateBuckets, activation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expected.Revision++
+	expected.UpdatedAt = successor.CreatedAt
+	requireLifecycleGateRestartMembers(t, "instance", expected, after.Instance)
+	if !reflect.DeepEqual(before.Timers, after.Timers) {
+		t.Fatalf("stage timers changed: before=%+v after=%+v", before.Timers, after.Timers)
+	}
+	return after
+}
+
+func requireLifecycleGateRestartMembers(t *testing.T, label string, expected, actual any) {
+	t.Helper()
+	want, got := reflect.ValueOf(expected), reflect.ValueOf(actual)
+	different := false
+	for i := 0; i < want.NumField(); i++ {
+		if !reflect.DeepEqual(want.Field(i).Interface(), got.Field(i).Interface()) {
+			t.Errorf("%s.%s: expected=%#v actual=%#v", label, want.Type().Field(i).Name, want.Field(i).Interface(), got.Field(i).Interface())
+			different = true
+		}
+	}
+	if different {
+		t.FailNow()
+	}
+}

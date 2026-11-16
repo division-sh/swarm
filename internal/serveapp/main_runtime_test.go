@@ -1180,6 +1180,7 @@ type servedControlProofRuntime struct {
 	SQLite              *store.SQLiteRuntimeStore
 	ForkRuntime         selectedForkRuntimeProofOptions
 	ReceiverStateReader receiverProofStateReader
+	GateRestartReadback lifecycleGateRestartReadback
 	ReadRunDeliveries   servedRunDeliveryReader
 	WaitReceiverOrigin  func(*testing.T, servedEventPublishRPCResult)
 	joinAndAssertExit   func()
