@@ -264,15 +264,26 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 		return requireCurrentNormalAgentTx(ctx, tx, authority, false)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
-		res, err = tx.ExecContext(ctx, `
-			UPDATE run_fork_selected_contract_runtime_executions SET updated_at=updated_at
+		// A provider-turn origin may already hold this row FOR SHARE in this transaction.
+		// Keep the fence through commit without upgrading concurrent handlers to a writer lock.
+		var matched int
+		err = tx.QueryRowContext(ctx, `
+			SELECT 1 FROM run_fork_selected_contract_runtime_executions
 			WHERE execution_id=$1::uuid AND fork_run_id=$2::uuid AND generation=$3
 			  AND state='running' AND execution_owner=$4 AND fence_generation=$5
 			  AND admission_fingerprint=$6 AND container_plan_fingerprint=$7
 			  AND actor_census_fingerprint=$8 AND effective_config_fingerprint=$9
 			  AND lease_expires_at>clock_timestamp()
+			FOR SHARE
 		`, selected.ExecutionID, selected.ForkRunID, selected.Generation, authority.ExecutionOwner, authority.FenceGeneration,
-			selected.AdmissionFingerprint, selected.ContainerPlanFingerprint, selected.ActorCensusFingerprint, selected.EffectiveConfigFingerprint)
+			selected.AdmissionFingerprint, selected.ContainerPlanFingerprint, selected.ActorCensusFingerprint, selected.EffectiveConfigFingerprint).Scan(&matched)
+		if errors.Is(err, sql.ErrNoRows) {
+			return invalidExternalAuthority(authority, "stale")
+		}
+		if err != nil {
+			return fmt.Errorf("lock current external effect authority: %w", err)
+		}
+		return nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		forkchat := authority.ForkChat
 		res, err = tx.ExecContext(ctx, `
