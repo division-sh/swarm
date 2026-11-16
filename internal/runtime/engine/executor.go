@@ -116,6 +116,7 @@ type executionFrame struct {
 	joinLoopGeneration        attemptgeneration.Generation
 	entityMutations           *entityruntime.MutationPlan
 	discarded                 bool
+	exactJoinDuplicate        bool
 }
 
 type handlerRuleSource string
@@ -517,7 +518,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 					SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
 					return err
 				}
-				if frame.discarded {
+				if frame.discarded || frame.exactJoinDuplicate {
 					// The exact claim settles through the coordinator's no-op path.
 					// No earlier join/loop candidate may commit on a discarded arrival.
 					result = frame.result
@@ -894,6 +895,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			return false, err
 		}
 		frame.result.Status = OutcomeWaiting
+		frame.exactJoinDuplicate = true
 		return true, nil
 	case joinruntime.AddAccepted:
 	default:
