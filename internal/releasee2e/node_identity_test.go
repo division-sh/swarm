@@ -103,8 +103,8 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 					}
 					// Default admission observes the real boot-created store and released
 					// process coordinate; the following startup must acquire them again.
-					assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary,
-						"verify", root, "--config", config, "--json"))
+					assertReleaseDryRunAdmission(t, runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary,
+						"serve", root, "--config", config, "--dry-run", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0"))
 					process = start()
 					if goldenServedBundleHash(t, process.rpc, "live") != hash {
 						t.Fatal("restart changed selected artifact")

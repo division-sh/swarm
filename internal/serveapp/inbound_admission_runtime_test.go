@@ -594,7 +594,7 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 	return canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
 }
 
-func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string) string {
+func writeInboundAdmissionRuntimeConfig(t *testing.T, backend, sqlitePath string) string {
 	t.Helper()
 	lines := []string{"runtime:", "  recovery_on_startup: true"}
 	if backend == "sqlite" {
@@ -602,7 +602,8 @@ func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string
 	}
 	lines = append(lines, "llm:", "  backend: anthropic")
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+	body := withInstalledServePostgresConfig(t, strings.Join(lines, "\n")+"\n", backend)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path

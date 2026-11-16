@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -82,12 +83,17 @@ func (serveCheckAnswerRuntime) ObserveStartupAnswer(ctx context.Context, _ llmse
 func renderServeChecksForTest(t testing.TB, ctx context.Context, repo, source, configPath, format string, out, diagnostic io.Writer, selectedOptions ...ServeOptions) int {
 	t.Helper()
 	stage, err := serveChecksForTest(t, ctx, repo, source, configPath, selectedOptions...)
-	if err != nil && stage.Bundle == nil {
+	if err != nil && stage.Bundle == nil && format != "json" {
 		_, _ = io.WriteString(diagnostic, FormatCLIAPIError(err)+"\n")
 		return CLIExitValidation
 	}
 	decision := stage.Decision()
-	view := verifyCommandOutput(decision.FailureClass == "" && !decision.Interrupted, stage.SourceRoot, stage.Validation, packInventoryReadbackFromInventory(stage.Bundle.PackInventory), stage.Bundle.SourceArtifact)
+	var inventory packInventoryReadback
+	var artifact *sourceartifact.AdmittedSourceArtifact
+	if stage.Bundle != nil {
+		inventory, artifact = packInventoryReadbackFromInventory(stage.Bundle.PackInventory), stage.Bundle.SourceArtifact
+	}
+	view := verifyCommandOutput(err == nil && decision.FailureClass == "" && !decision.Interrupted, stage.SourceRoot, stage.Validation, inventory, artifact)
 	view.AdmissionComplete = decision.Complete
 	opts := defaultVerifyCommandOptions()
 	opts.output.asJSON, opts.output.quiet = format == "json", format == "quiet"

@@ -43,7 +43,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			storeMode:   storebackend.ActiveDefaultBackend().String(),
 			wantBackend: storebackend.BackendSQLite,
 			wantSource:  storebackend.SourceRolloutDefault,
-			wantPathSrc: storebackend.SourceProjectDefault,
+			wantPathSrc: storebackend.SourceSwarmDirDefault,
 		},
 		{
 			name:        "flag postgres reaches store construction",

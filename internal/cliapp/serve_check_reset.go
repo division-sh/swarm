@@ -69,11 +69,11 @@ func inspectServeResetSnapshot(ctx context.Context, snapshot *storeselected.Admi
 	return retained, nil
 }
 
-func inspectServeResetDiscard(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, operation destructivereset.Operation) (destructivereset.Plan, error) {
+func inspectServeResetDiscard(ctx context.Context, reader destructivereset.InventoryReader, operation destructivereset.Operation) (destructivereset.Plan, error) {
 	if err := operation.Validate(); err != nil {
 		return destructivereset.Plan{}, err
 	}
-	plan, err := (destructivereset.InventoryPlanner{Reader: snapshot}).BuildPlan(ctx, operation.Request)
+	plan, err := (destructivereset.InventoryPlanner{Reader: reader}).BuildPlan(ctx, operation.Request)
 	if err != nil {
 		return plan, err
 	}

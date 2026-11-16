@@ -266,20 +266,11 @@ func runCanonicalTelegramAgentLiveSelection(t *testing.T, backend string) {
 
 	var verifyOut, verifyErr bytes.Buffer
 	if code := executeCLIFrom(context.Background(), sourceRoot, []string{
-		"verify", sourceRoot, "--config", configPath, "--json",
+		"serve", sourceRoot, "--config", configPath, "--dry-run", "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:0",
 	}, &verifyOut, &verifyErr, Run); code != 0 {
 		t.Fatalf("explicit live graduation verify exit=%d\nstdout:\n%s\nstderr:\n%s", code, verifyOut.String(), verifyErr.String())
 	}
-	var admission struct {
-		OK                bool   `json:"ok"`
-		AdmissionComplete bool   `json:"admission_complete"`
-		ValidationScope   string `json:"validation_scope"`
-		LiveReadiness     string `json:"live_readiness"`
-	}
-	if err := json.Unmarshal(verifyOut.Bytes(), &admission); err != nil {
-		t.Fatal(err)
-	}
-	if !admission.OK || !admission.AdmissionComplete || admission.ValidationScope != "deployment" || admission.LiveReadiness != "not_evaluated" {
+	if !strings.Contains(verifyOut.String(), "admission checks passed; startup execution not performed") || strings.Contains(verifyOut.String(), "admission incomplete") {
 		t.Fatalf("live graduation did not complete admission without claiming execution: %s", &verifyOut)
 	}
 

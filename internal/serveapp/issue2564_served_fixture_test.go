@@ -80,6 +80,10 @@ func issue2564LiveServeHarness(t *testing.T, backend, root, location string) (*c
 			if json.Unmarshal(message.Content, &text) != nil {
 				continue
 			}
+			if len(turn.Messages) == 1 && len(turn.Tools) == 0 && text == "Startup validation probe. Do not call any tools. Reply with the exact text ok." {
+				_, _ = w.Write([]byte(`{"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"ok"}]}`))
+				return
+			}
 			if text == "ok" {
 				_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"Work finished."}]}`))
 				return
@@ -145,6 +149,7 @@ func issue2564ServeHarnessWithPosture(t *testing.T, backend, root string, mock b
 		if dsn == "" {
 			dsn = storetest.PostgresFixtureLocation(t)
 		}
+		recordServePostgresFixture(t, dsn)
 		original := buildStoresForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config, bootCheck ...*selectedStoreBootCheck) (*selectedStoreOwner, error) {
 			owner, err := storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg), BootCheckInput: firstBootCheckInput(bootCheck)})

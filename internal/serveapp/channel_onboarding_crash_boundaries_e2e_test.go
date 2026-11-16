@@ -64,6 +64,11 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			harness.start(t)
 
 			if boundary == channelonboarding.TestAfterAuthorityRetirementBeforeCleanup {
+				if mockServeCredentialFileOwned(t) {
+					for _, key := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+						bootCredentials[key] = "mocked-startup-credential"
+					}
+				}
 				runChannelOnboardingDestructiveCrashBoundary(t, backend, harness, barrier, uncheckpointedBarrier, bootCredentials)
 				return
 			}

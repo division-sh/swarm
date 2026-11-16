@@ -167,6 +167,13 @@ func prepareLiveTargetRequest(ctx context.Context, request serveRuntimeBundleCon
 	if err != nil {
 		return request, err
 	}
+	if request.Loaded.bundle == nil || request.Loaded.bundle.SourceArtifact == nil ||
+		request.Loaded.bundle.SourceArtifact.BundleHash() != loaded.bundle.SourceArtifact.BundleHash() {
+		// Boot observations belong to their exact source. A later source switch
+		// uses the existing target runtime's own preparation, never another
+		// source's cached startup response or target census.
+		request.ProviderBootChecks = nil
+	}
 	request.Loaded, request.StateStoreSummary = loaded, ""
 	request.ChannelPlans, request.ChannelBindings = packs.Channels.Plans, packs.Channels.Bindings
 	request.BootStartedAt, request.BootProgress = time.Now().UTC(), nil
