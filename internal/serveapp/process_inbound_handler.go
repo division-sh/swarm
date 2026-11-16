@@ -20,6 +20,13 @@ type runtimeProcessInboundHandler struct {
 }
 
 func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, finish, admitted := h.contexts.BeginInboundRequest(r.Context())
+	if !admitted {
+		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer finish()
+	r = r.WithContext(ctx)
 	alias, provider, ok := parseProcessWebhookPath(r.URL.Path)
 	if !ok {
 		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
@@ -43,7 +50,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 				return
 			}
 		}
-		use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, provider)
+		use, lookup, acquireErr := h.contexts.AcquireInboundPublication(r.Context(), alias, provider)
 		if use != nil {
 			defer func() { _ = use.Done() }()
 		}
@@ -66,7 +73,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	forward.ServeHTTP(w, r)
 }
 
-func (h runtimeProcessInboundHandler) serveAcquiredIngress(w http.ResponseWriter, r *http.Request, use *runtime.RuntimeContextUse, lookup runtime.RuntimeIngressContextLookup, acquireErr error, alias, provider string) {
+func (h runtimeProcessInboundHandler) serveAcquiredIngress(w http.ResponseWriter, r *http.Request, use *runtime.InboundPublicationUse, lookup runtime.RuntimeIngressContextLookup, acquireErr error, alias, provider string) {
 	if !lookup.Found {
 		if lookup.AliasFound {
 			http.Error(w, fmt.Sprintf("ingress target %q does not declare provider %q; add that provider binding to the standing singleton flow", alias, provider), http.StatusNotFound)
@@ -81,7 +88,7 @@ func (h runtimeProcessInboundHandler) serveAcquiredIngress(w http.ResponseWriter
 		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().InboundGateway == nil {
+	if !lookup.Loaded() || use == nil {
 		diaglog.ProcessLog(diaglog.LevelWarn, "serve-ingress", "runtime target unavailable",
 			"alias", alias, "provider", provider, "state", lookup.State, "cause", lookup.Cause)
 		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
@@ -114,7 +121,7 @@ func (h runtimeProcessInboundHandler) serveAcquiredIngress(w http.ResponseWriter
 	forward.ServeHTTP(w, r)
 }
 
-func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *runtime.RuntimeContextUse, target runtime.StandingTarget, inbound runtime.InboundTarget, alias, provider string) {
+func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *runtime.InboundPublicationUse, target runtime.StandingTarget, inbound runtime.InboundTarget, alias, provider string) {
 	if registrationTarget, managed := runtimepublicingress.CurrentRegistrationTarget(r.Context()); managed {
 		if !sameRuntimeRegistrationTarget(registrationTarget, target) {
 			http.Error(w, fmt.Sprintf("ingress target %q provider %q contradicts the current provider registration", alias, provider), http.StatusServiceUnavailable)
@@ -123,8 +130,7 @@ func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *ru
 		inbound.SigningSecret = registrationTarget.SigningCredentialKey
 		inbound.RegisteredOperationID = registrationTarget.RegisteredOperationID
 	}
-	selectedRuntime := use.Runtime()
-	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), inbound, use.Context.Source)
+	use.HandleResolvedWebhook(w, r, inbound)
 }
 
 func sameRuntimeRegistrationTarget(registration runtimepublicingress.RegistrationTarget, target runtime.StandingTarget) bool {
