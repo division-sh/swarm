@@ -61,9 +61,12 @@ func TestMailboxGateReplayProjectionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			leaseSettled := false
 			t.Cleanup(func() {
-				if err := lease.Done(); err != nil {
-					t.Error(err)
+				if !leaseSettled {
+					if err := lease.Done(); err != nil {
+						t.Error(err)
+					}
 				}
 			})
 			probeCtx, err := startupownership.WithProcessMutationAuthority(worklifetime.WithProcess(lease.Context(), process), capability)
@@ -318,6 +321,7 @@ func TestMailboxGateReplayProjectionBothStores(t *testing.T) {
 			if err := lease.Done(); err != nil {
 				t.Fatal(err)
 			}
+			leaseSettled = true
 			retireStoreTestWorkFixture(t)
 			if err := capability.Release(context.Background()); err != nil {
 				t.Fatal(err)
