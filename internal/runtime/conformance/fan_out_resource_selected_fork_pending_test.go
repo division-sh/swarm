@@ -3,9 +3,12 @@ package conformance
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -463,9 +466,10 @@ func proveSixtyOfHundredSelectedFork(t *testing.T, backend string) {
 	}
 	owner, _ := deploymentForkOwner(t, f)
 	forkServer := deploymentForkServer(t, f, owner)
+	waitSelectedDeploymentPausedPipeline(t, f, runID, pausePlan.ForkPoint.Revision)
 	// The snapshot precedes the final plan read. A revision that lands between
 	// them has no classified facts and fails closed rather than moving the cut.
-	standing := selectedDeploymentPauseRevisionFacts(t, f, runID)
+	standing := selectedDeploymentPauseRevisionFacts(t, f.ctx, f.selected, runID)
 	plan, err := planner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID})
 	if err != nil {
 		t.Fatal(err)
@@ -526,9 +530,112 @@ type selectedDeploymentRevisionFact struct {
 	value       map[string]any
 }
 
-func selectedDeploymentPauseRevisionFacts(t *testing.T, f *deploymentResourceFixture, runID string) map[int64][]selectedDeploymentRevisionFact {
+func selectedDeploymentEventCreatingRevisions(facts map[int64][]selectedDeploymentRevisionFact) (map[string]int64, error) {
+	created := make(map[string]int64)
+	first := make(map[string]selectedDeploymentRevisionFact)
+	for revision, recorded := range facts {
+		for _, fact := range recorded {
+			if fact.family != "events" {
+				continue
+			}
+			if previous, found := created[fact.key]; !found || revision < previous {
+				created[fact.key], first[fact.key] = revision, fact
+			}
+		}
+	}
+	for eventID, fact := range first {
+		if created[eventID] < 1 || eventID == "" || !fact.present || fact.value["event_id"] != eventID {
+			return nil, fmt.Errorf("event %q has invalid creating revision %d: %+v", eventID, created[eventID], fact)
+		}
+	}
+	return created, nil
+}
+
+// Recovery claiming checks busy ownership before paused eligibility. It can
+// transiently acquire authority, so an ineligible result must not hide cleanup.
+func selectedDeploymentOnlyProbeError(err, want error) bool {
+	if err == want {
+		return true
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !selectedDeploymentOnlyProbeError(child, want) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return selectedDeploymentOnlyProbeError(wrapped.Unwrap(), want)
+	default:
+		return false
+	}
+}
+
+func waitSelectedDeploymentPausedPipeline(t *testing.T, f *deploymentResourceFixture, runID string, paused int64) {
 	t.Helper()
-	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected)
+	ctx, cancel := context.WithTimeout(f.ctx, 30*time.Second)
+	defer cancel()
+	created, err := selectedDeploymentEventCreatingRevisions(selectedDeploymentPauseRevisionFacts(t, ctx, f.selected, runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for eventID, revision := range created {
+		if revision > paused {
+			delete(created, eventID)
+		}
+	}
+	if len(created) == 0 {
+		t.Fatal("paused source has no revisioned events to observe")
+	}
+	owner := f.selected.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	}).PipelineObligations()
+	for {
+		state, err := storetest.ReadRunStopStorage(ctx, f.selected, runID)
+		if err != nil || state.Status != "paused" || state.Control != "paused" {
+			t.Fatalf("pipeline wait requires the exact paused source/control: %+v error=%v", state, err)
+		}
+		var busy []string
+		for eventID := range created {
+			_, err := storetest.ReadExactPipelineReceiptOutcomeReason(ctx, f.selected, eventID)
+			if err == nil {
+				continue
+			}
+			if !selectedDeploymentOnlyProbeError(err, sql.ErrNoRows) {
+				t.Fatalf("read paused event %s pipeline receipt: %v", eventID, err)
+			}
+			work, err := owner.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
+			switch {
+			case err == nil:
+				releaseErr := owner.Release(context.WithoutCancel(ctx), work.Claim)
+				t.Fatalf("paused event %s unexpectedly admitted pipeline work; release=%v", eventID, releaseErr)
+			case selectedDeploymentOnlyProbeError(err, runtimepipelineobligation.ErrBusy):
+				busy = append(busy, eventID)
+			case selectedDeploymentOnlyProbeError(err, runtimepipelineobligation.ErrIneligible):
+				// Pause-held, unclaimed work stays pending; do not dispatch it.
+			default:
+				t.Fatalf("observe paused event %s pipeline claim: %v", eventID, err)
+			}
+		}
+		if len(busy) == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("paused source pipeline work did not settle or park: busy=%v error=%v", busy, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func selectedDeploymentPauseRevisionFacts(t *testing.T, ctx context.Context, selected any, runID string) map[int64][]selectedDeploymentRevisionFact {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,6 +730,10 @@ func selectedDeploymentPauseRevisionProvenance(facts map[int64][]selectedDeploym
 	if planned < paused {
 		return fmt.Errorf("paused source revision regressed: pause=%d plan=%d", paused, planned)
 	}
+	created, err := selectedDeploymentEventCreatingRevisions(facts)
+	if err != nil {
+		return err
+	}
 	eventsAtCut := make(map[string]operatorread.OperatorEventFull, len(cut.Events))
 	deliveriesAtCut := make(map[string]string, len(cut.Events))
 	for _, event := range cut.Events {
@@ -667,9 +778,14 @@ func selectedDeploymentPauseRevisionProvenance(facts map[int64][]selectedDeploym
 						(status == atCut.Deliveries[0].Status || atCut.Deliveries[0].StartedAt != nil && status == "delivered")
 				case "event_receipts":
 					eventID, _ := fact.value["event_id"].(string)
-					atCut, issued := eventsAtCut[eventID]
-					allowed = issued && (atCut.Deliveries[0].Status == "delivered" || atCut.Deliveries[0].StartedAt != nil) &&
-						fact.value["subscriber_type"] == "platform" && fact.value["subscriber_id"] == "pipeline" && fact.value["outcome"] == "success"
+					ownReceipt := fact.value["subscriber_type"] == "platform" && fact.value["subscriber_id"] == "pipeline" && fact.value["outcome"] == "success"
+					if ownReceipt {
+						creating, found := created[eventID]
+						if !found || creating > paused {
+							return fmt.Errorf("paused source pipeline receipt revision=%d event=%s event_created=%d creating_evidence=%t pause=%d", revision, eventID, creating, found, paused)
+						}
+						allowed = true
+					}
 				case "fan_out_obligations":
 					prior, known := priorFacts[fact.family+"|"+fact.key]
 					switch kind {
@@ -714,20 +830,71 @@ func TestSixtyOfHundredPauseRevisionProvenance(t *testing.T) {
 		"fact_kind": "outcome", "origin_kind": "deployment", "deployment_feed_id": "original-feed",
 		"event_id": "issued-event", "outcome_source_event_id": nil, "ordinal": float64(0), "outcome_kind": "committed",
 	}}
+	event := selectedDeploymentRevisionFact{family: "events", key: "issued-event", present: true, value: map[string]any{"event_id": "issued-event"}}
+	receipt := selectedDeploymentRevisionFact{family: "event_receipts", key: "receipt", present: true, value: map[string]any{
+		"event_id": "issued-event", "subscriber_type": "platform", "subscriber_id": "pipeline", "outcome": "success",
+	}}
+	pending := cut
+	pending.Events = append([]operatorread.OperatorEventFull(nil), cut.Events...)
+	pending.Events[0].Deliveries = []operatorread.OperatorEventDelivery{{DeliveryID: "issued-delivery", Status: "pending"}}
+	t.Run("pending original event pipeline receipt", func(t *testing.T) {
+		if err := selectedDeploymentPauseRevisionProvenance(map[int64][]selectedDeploymentRevisionFact{1: {event}, 2: {receipt}}, 1, 2, pending); err != nil {
+			t.Fatal(err)
+		}
+	})
 	for _, test := range []struct {
 		name      string
 		facts     map[int64][]selectedDeploymentRevisionFact
 		wantError bool
 	}{
-		{"same committed original outcome recaptured", map[int64][]selectedDeploymentRevisionFact{1: {intent, outcome}, 2: {outcome}}, false},
-		{"new outcome after pause", map[int64][]selectedDeploymentRevisionFact{1: {intent}, 2: {outcome}}, true},
-		{"new event after pause", map[int64][]selectedDeploymentRevisionFact{1: {intent, outcome}, 2: {{family: "events", key: "new-event", present: true, value: map[string]any{"event_id": "new-event"}}}}, true},
-		{"unreadable successor", map[int64][]selectedDeploymentRevisionFact{1: {intent, outcome}}, true},
+		{"same committed original outcome recaptured", map[int64][]selectedDeploymentRevisionFact{1: {event, intent, outcome}, 2: {outcome}}, false},
+		{"new outcome after pause", map[int64][]selectedDeploymentRevisionFact{1: {event, intent}, 2: {outcome}}, true},
+		{"new event after pause", map[int64][]selectedDeploymentRevisionFact{1: {event, intent, outcome}, 2: {{family: "events", key: "new-event", present: true, value: map[string]any{"event_id": "new-event"}}}}, true},
+		{"unreadable successor", map[int64][]selectedDeploymentRevisionFact{1: {event, intent, outcome}}, true},
+		{"receipt without creating evidence", map[int64][]selectedDeploymentRevisionFact{2: {receipt}}, true},
+		{"absent first event fact", map[int64][]selectedDeploymentRevisionFact{1: {{family: "events", key: event.key}}, 2: {event, receipt}}, true},
+		{"wrong first event identity", map[int64][]selectedDeploymentRevisionFact{1: {{family: "events", key: event.key, present: true, value: map[string]any{"event_id": "other"}}}, 2: {receipt}}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := selectedDeploymentPauseRevisionProvenance(test.facts, 1, 2, cut)
 			if (err != nil) != test.wantError {
 				t.Fatalf("revision classification error=%v, wantError=%t", err, test.wantError)
+			}
+		})
+	}
+	t.Run("receipt for post-pause event", func(t *testing.T) {
+		err := selectedDeploymentPauseRevisionProvenance(map[int64][]selectedDeploymentRevisionFact{2: {receipt, event}}, 1, 2, cut)
+		if err == nil || !strings.Contains(err.Error(), "revision=2") || !strings.Contains(err.Error(), "event_created=2") {
+			t.Fatalf("post-pause event receipt must print both revisions: %v", err)
+		}
+	})
+	for _, field := range []string{"subscriber_type", "subscriber_id", "outcome"} {
+		t.Run("other receipt "+field, func(t *testing.T) {
+			other := receipt
+			other.value = make(map[string]any, len(receipt.value))
+			for key, value := range receipt.value {
+				other.value[key] = value
+			}
+			other.value[field] = "other"
+			if err := selectedDeploymentPauseRevisionProvenance(map[int64][]selectedDeploymentRevisionFact{1: {event}, 2: {other}}, 1, 2, cut); err == nil {
+				t.Fatal("unrelated receipt was admitted")
+			}
+		})
+	}
+	for _, test := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"sentinel", runtimepipelineobligation.ErrIneligible, true},
+		{"joined sentinel", errors.Join(runtimepipelineobligation.ErrIneligible), true},
+		{"wrapped sentinel", fmt.Errorf("probe: %w", runtimepipelineobligation.ErrIneligible), true},
+		{"cleanup failure", errors.Join(runtimepipelineobligation.ErrIneligible, errors.New("cleanup")), false},
+		{"cancellation", errors.Join(runtimepipelineobligation.ErrIneligible, context.Canceled), false},
+	} {
+		t.Run("claim probe "+test.name, func(t *testing.T) {
+			if got := selectedDeploymentOnlyProbeError(test.err, runtimepipelineobligation.ErrIneligible); got != test.want {
+				t.Fatalf("probe error accepted=%t, want%t: %v", got, test.want, test.err)
 			}
 		})
 	}
