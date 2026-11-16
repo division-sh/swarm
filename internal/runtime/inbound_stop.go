@@ -15,6 +15,7 @@ func (m *RuntimeContextManager) PrepareInboundStop() {
 	defer m.inboundPhaseMu.Unlock()
 	if !m.inboundStopping {
 		m.inboundStopping = true
+		m.inboundSelections.Close()
 		if !m.inboundRequests.Closed() {
 			m.inboundReady = make(chan struct{})
 		}
@@ -48,10 +49,12 @@ func (m *RuntimeContextManager) SealInboundExecution(ctx context.Context) error 
 		}
 	}
 	m.mu.RUnlock()
-	var result error
+	result := m.inboundSelections.Wait(ctx)
+	result = errors.Join(result, m.inboundSelections.Wait(context.Background()))
 	for _, rt := range runtimes {
 		result = errors.Join(result, rt.Bus.SealPipelineRecovery(ctx))
 	}
+	result = errors.Join(result, ctx.Err())
 	m.inboundPhaseMu.Lock()
 	m.inboundSealErr = result
 	close(m.inboundSealDone)
@@ -87,6 +90,12 @@ func (m *RuntimeContextManager) closeInboundReadyLocked() {
 
 func (m *RuntimeContextManager) BeginInboundRequest(ctx context.Context) (context.Context, func(), bool) {
 	return m.inboundRequests.BeginContext(ctx)
+}
+
+// BeginPendingChannelInputSelection counts a selected pass, not execution or
+// native publication authority. Stop joins it before exposing stored inputs.
+func (m *RuntimeContextManager) BeginPendingChannelInputSelection(ctx context.Context) (context.Context, func(), bool) {
+	return m.inboundSelections.BeginContext(ctx)
 }
 
 func (m *RuntimeContextManager) lockInboundPhase(ctx context.Context) error {

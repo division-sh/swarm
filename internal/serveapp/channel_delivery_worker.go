@@ -175,6 +175,14 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 	if d == nil || d.store == nil || d.cards == nil {
 		return fmt.Errorf("channel action owners are unavailable")
 	}
+	if d.manager != nil {
+		selectedCtx, finish, selected := d.manager.BeginPendingChannelInputSelection(ctx)
+		if !selected {
+			return nil
+		}
+		defer finish()
+		ctx = selectedCtx
+	}
 	cursor := ""
 	var failures error
 	for {
@@ -339,6 +347,14 @@ func (d *serveChannelDeliveryDispatcher) processDraftChoice(ctx context.Context,
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context.Context) error {
 	if d == nil || d.store == nil || d.cards == nil || d.mailbox == nil || d.proposedEffects == nil {
 		return fmt.Errorf("channel inbox response owners are unavailable")
+	}
+	if d.manager != nil {
+		selectedCtx, finish, selected := d.manager.BeginPendingChannelInputSelection(ctx)
+		if !selected {
+			return nil
+		}
+		defer finish()
+		ctx = selectedCtx
 	}
 	cursor := ""
 	var failures error
