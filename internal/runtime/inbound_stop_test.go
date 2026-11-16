@@ -15,11 +15,13 @@ import (
 func TestStoredInboundPreparationWaitCancelsBeforeRecoveryJoin(t *testing.T) {
 	catalog, source := runtimeAdmissionTestCatalog(t, "stop-wait", "inbound")
 	definition := runtimeAdmissionTestContext(t, source, catalog, eventtest.UUID(t.Name()))
-	definition.Runtime.Bus = &runtimebus.EventBus{}
 	manager, err := newTestRuntimeContextManager(t, nil, definition)
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalBus := definition.Runtime.Bus
+	definition.Runtime.Bus = &runtimebus.EventBus{}
+	t.Cleanup(func() { definition.Runtime.Bus = originalBus })
 	selected, err := definition.Runtime.Bus.BeginPipelineParentTransition(t.Context())
 	if err != nil {
 		t.Fatal(err)
