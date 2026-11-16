@@ -1175,6 +1175,7 @@ typed-process-local	callback-type	typed	internal/runtime/runforkexecution/fixtur
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/live_execution.go	joinSelectedSourceWork	result:#1	func() error
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/live_execution.go	pauseLiveSourceAndAcquire	param:acquire	func(context.Context, github.com/division-sh/swarm/internal/sourceartifact.RootAdmissionReference) (*github.com/division-sh/swarm/internal/runtime.RuntimeContextUse, error)
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/live_execution.go	pauseLiveSourceAndAcquire	param:release	func() error
+typed-process-local	callback-type	typed	internal/runtime/runforkexecution/live_execution.go	selectLiveForkSource	result:#3	func()
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/operation_lifetime.go	selectedContractOperation	field:cancel	context.CancelCauseFunc
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/operation_lifetime.go	selectedContractOperation	field:cancelOwned	context.CancelCauseFunc
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/operation_lifetime.go	selectedContractOperation	field:stop	func()
