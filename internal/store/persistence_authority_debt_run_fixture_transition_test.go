@@ -33,7 +33,7 @@ const debtPortableAgentFixtureCollectorTo = "90e301f3d5080732c31703c1a9cfa7377cc
 const debtW2DeliveryEvidenceCollectorTo = "0f8b0b73cf2634a5d0d3780795bd73a8e059731621746baa1a852402552c251d"
 const debtChannelCrashPreparationCollectorTo = "3acef74e89c4bf99f03cc63649c398e3706fb3b833240ecbfe21b40655dbb041"
 const debtChannelObservationCollectorTo = "f9aa468bcdd8931e796550d7787c0398b66da97bdafb78f4580cb3965fb1e385"
-const debtR130ProviderBindingCollectorTo = "abec20ed31a3e295b7d1841046f9d00cc30016e74e0b76b5a85fe1a255801d57"
+const debtR130ProviderBindingCollectorTo = "77af1085d66d7794983ed029395407b7d1c47e462b94a13ddffdd041f9fd4dd2"
 const debtR52LiveFixtureCollectorTo = "a2ec4884aba6f3258d74e3cfe0bd68bf6ccc907828fac40d18d1775ce7d4d878"
 
 const debtS2OriginalContextCollectorTo = "97c60588009aa53ed5506745a2497fae2f37aed2c3a14c734effda0053643c70"
@@ -827,7 +827,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 			{debtPortableAgentFixtureCollectorTo, debtW2DeliveryEvidenceCollectorTo},
 			{debtW2DeliveryEvidenceCollectorTo, debtChannelCrashPreparationCollectorTo},
 			{debtR241CollectorTo, debtChannelObservationCollectorTo},
-			{debtChannelCrashPreparationCollectorTo, debtR130ProviderBindingCollectorTo},
+			{debtR241CollectorTo, debtR130ProviderBindingCollectorTo},
 		} {
 			t.Run(edge[0], func(t *testing.T) {
 				for _, mutation := range []string{"exact", "foreign-base", "trusted-collector", "foreign-current", "head-collector", "unreviewed", "foreign-review", "reverse", "bootstrap", "remove-site", "add-site", "multiplicity", "replace-site"} {
