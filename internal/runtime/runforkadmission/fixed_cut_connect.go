@@ -68,77 +68,12 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 		// Minted/event-sourced key projection is a separate admitted occurrence.
 		return nil, true, nil
 	}
-	parent, err := fixedCutConnectParent(source, cut, constructors, selected, event, receiver)
-	if err != nil {
-		return nil, false, err
-	}
-	var payload map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
-		return nil, false, err
-	}
-	resolved, err := receiver.ResolvedInstanceKey(payload, event.ID())
+	keyed, err := fixedCutSelectedConnectConstructor(source, cut, constructors, selected, eventID, event, admission, receiver)
 	if err != nil {
 		return nil, false, err
 	}
 	bundle, _ := semanticview.Bundle(source)
 	selectionFlow := receiver.SelectionFlowID()
-	var contract contracts.TemplateInstanceContract
-	if selectionFlow == readback.Receiver.FlowID {
-		contract, err = receiver.ReceiverTemplate(bundle)
-	} else {
-		contract, err = bundle.ResolveFlowTemplateInstance(selectionFlow)
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	keys, err := pipeline.AdmitFlowInstanceKeyMaterial(source, contract.FlowID, resolved)
-	if err != nil {
-		return nil, false, err
-	}
-	hash, err := contracts.BundleHash(bundle)
-	if err != nil {
-		return nil, false, err
-	}
-	fact, err := correlation.NewSourceArtifactFact(hash)
-	if err != nil {
-		return nil, false, err
-	}
-	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, cut.SourceRunID, selectionFlow, parent, keys)
-	if err != nil {
-		return nil, false, err
-	}
-	parentRoute := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
-	var matches []flowidentity.Instance
-	for _, constructor := range constructors.byFlow[selectionFlow] {
-		instance, evidence := constructor.instance, constructor.evidence
-		if instance.ParentRoute != parentRoute {
-			continue
-		}
-		if evidence.InstanceKey == lookup.InstanceKey() {
-			if evidence.Original.BundleHash != admission.Binding().BundleHash() {
-				return nil, false, fmt.Errorf("fixed constructor and selector have foreign source bundles")
-			}
-			if receiver.InstanceKey().Mode() == contracts.FlowInputResolutionModeCreate {
-				creating, found, err := evidence.creatingSelector(cut)
-				if err != nil {
-					return nil, false, err
-				}
-				if !found || creating.ID() != eventID {
-					return nil, false, fmt.Errorf("historical create selector does not own the captured constructor")
-				}
-			}
-			matches = append(matches, instance)
-		}
-	}
-	if len(matches) != 1 {
-		return nil, false, fmt.Errorf("selected captured receiver requires one exact key/parent match; got %d", len(matches))
-	}
-	switch receiver.InstanceKey().Mode() {
-	case contracts.FlowInputResolutionModeCreate, contracts.FlowInputResolutionModeSelect, contracts.FlowInputResolutionModeSelectOrCreate:
-	default:
-		return nil, false, fmt.Errorf("selected captured receiver has unsupported key resolution mode")
-	}
-	keyed := matches[0]
 	instance := keyed
 	if selectionFlow != readback.Receiver.FlowID {
 		view, found := bundle.FlowViewByID(readback.Receiver.FlowID)
@@ -204,6 +139,80 @@ func (s fixedCutConnectSelection) constructionChild(source semanticview.Source, 
 		return s.keyedChild(parent, flowID)
 	}
 	return flowidentity.KeylessChild(source, parent, flowID)
+}
+
+func fixedCutSelectedConnectConstructor(source semanticview.Source, cut runfork.RunForkPlan, constructors fixedCutConstructionIndex, selected fixedCutConnectSelection, eventID string, event events.Event, admission events.PayloadAdmission, receiver pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
+	parent, err := fixedCutConnectParent(source, cut, constructors, selected, event, receiver)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
+		return flowidentity.Instance{}, err
+	}
+	resolved, err := receiver.ResolvedInstanceKey(payload, event.ID())
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	bundle, _ := semanticview.Bundle(source)
+	selectionFlow := receiver.SelectionFlowID()
+	var contract contracts.TemplateInstanceContract
+	if selectionFlow == receiver.Readback().Receiver.FlowID {
+		contract, err = receiver.ReceiverTemplate(bundle)
+	} else {
+		contract, err = bundle.ResolveFlowTemplateInstance(selectionFlow)
+	}
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	keys, err := pipeline.AdmitFlowInstanceKeyMaterial(source, contract.FlowID, resolved)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	hash, err := contracts.BundleHash(bundle)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	fact, err := correlation.NewSourceArtifactFact(hash)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, cut.SourceRunID, selectionFlow, parent, keys)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	parentRoute := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
+	var matches []flowidentity.Instance
+	for _, constructor := range constructors.byFlow[selectionFlow] {
+		instance, evidence := constructor.instance, constructor.evidence
+		if instance.ParentRoute != parentRoute {
+			continue
+		}
+		if evidence.InstanceKey == lookup.InstanceKey() {
+			if evidence.Original.BundleHash != admission.Binding().BundleHash() {
+				return flowidentity.Instance{}, fmt.Errorf("fixed constructor and selector have foreign source bundles")
+			}
+			if receiver.InstanceKey().Mode() == contracts.FlowInputResolutionModeCreate {
+				creating, found, err := evidence.creatingSelector(cut)
+				if err != nil {
+					return flowidentity.Instance{}, err
+				}
+				if !found || creating.ID() != eventID {
+					return flowidentity.Instance{}, fmt.Errorf("historical create selector does not own the captured constructor")
+				}
+			}
+			matches = append(matches, instance)
+		}
+	}
+	if len(matches) != 1 {
+		return flowidentity.Instance{}, fmt.Errorf("selected captured receiver requires one exact key/parent match; got %d", len(matches))
+	}
+	switch receiver.InstanceKey().Mode() {
+	case contracts.FlowInputResolutionModeCreate, contracts.FlowInputResolutionModeSelect, contracts.FlowInputResolutionModeSelectOrCreate:
+	default:
+		return flowidentity.Instance{}, fmt.Errorf("selected captured receiver has unsupported key resolution mode")
+	}
+	return matches[0], nil
 }
 
 // Walk captured ancestry and children proved by this exact occurrence.
